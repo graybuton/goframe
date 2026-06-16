@@ -6,12 +6,14 @@ demonstrates:
 - controlled input state through `OnInput` and `gf.InputEvent`;
 - form submission through `OnSubmit` and `gf.Event.PreventDefault`;
 - add, toggle, remove, and keyed reorder actions;
-- `gf.If`, `gf.IfElse`, and `gf.For`;
+- GOX render expressions: `{condition && <Node />}` and
+  `{condition ? <A /> : <B />}`;
+- list rendering through `gf.Map` with GOX markup inside callback returns;
 - component composition and children;
-- keyed component and DOM identity through `gf.Key`;
+- keyed component and DOM identity through `Key={...}`;
 - todo state scoped to `TodoApp` and input state scoped to `TodoForm`;
 - dirty component updates followed by a mounted-tree DOM patch;
-- `gf.UseMount` and `gf.UseEffect` for localStorage persistence.
+- `gf.UseEffect` for localStorage persistence.
 
 Install `goxc`, package with TinyGo, and serve the result:
 
@@ -38,8 +40,9 @@ both update paths.
 
 Todo persistence intentionally lives in the example, not in the core runtime.
 It uses a compact string encoding instead of `encoding/json` so the runtime and
-TinyGo bundle stay small. `UseMount` loads localStorage after the first DOM
-mount, and `UseEffect` writes only when the encoded todo list changes.
+TinyGo bundle stay small. `UseEffect(fn)` loads localStorage after the first
+DOM mount, and `UseEffect(fn, gf.Deps(encodedTodos))` writes only when the
+encoded todo list changes.
 
 Build an instrumented regression bundle, serve it on port `18080`, and run the
 dependency-free browser identity probe:

@@ -50,15 +50,15 @@ type TodoFormProps struct {
 }
 
 func TodoForm(props TodoFormProps) gf.Node {
-	text := gf.UseState("")
+	text, setText := gf.UseState("")
 
 	addTodo := func() {
-		value := strings.TrimSpace(text.Get())
+		value := strings.TrimSpace(text)
 		if value == "" {
 			return
 		}
 		props.OnAdd(value)
-		text.Set("")
+		setText("")
 	}
 
 	return (
@@ -69,10 +69,10 @@ func TodoForm(props TodoFormProps) gf.Node {
 			<input
 				ID="todo-input"
 				Type="text"
-				Value={text.Get()}
+				Value={text}
 				Placeholder="What needs to be done?"
 				OnInput={func(event gf.InputEvent) {
-					text.Set(event.Value())
+					setText(event.Value())
 				}}
 			/>
 			<Button Label="Add task" Type="submit" />
@@ -137,12 +137,13 @@ type TodoListProps struct {
 func TodoList(props TodoListProps) gf.Node {
 	return (
 		<ul ID="todo-list" class="todo-list">
-			{gf.For(props.Items, func(todo Todo) gf.Node {
-				return gf.Key(gf.ToString(todo.ID), gf.Component("TodoItem", TodoItemProps{
-					Todo:     todo,
-					OnToggle: props.OnToggle,
-					OnRemove: props.OnRemove,
-				}, TodoItem))
+			{gf.Map(props.Items, func(todo Todo) gf.Node {
+				return <TodoItem
+					Key={todo.ID}
+					Todo={todo}
+					OnToggle={props.OnToggle}
+					OnRemove={props.OnRemove}
+				/>
 			})}
 		</ul>
 	)
@@ -151,20 +152,20 @@ func TodoList(props TodoListProps) gf.Node {
 type TodoAppProps struct{}
 
 func TodoApp(props TodoAppProps) gf.Node {
-	todos := gf.UseState([]Todo{})
-	nextID := gf.UseState(1)
+	todos, setTodos := gf.UseState([]Todo{})
+	nextID, setNextID := gf.UseState(1)
 
-	gf.UseMount(func() gf.Cleanup {
+	gf.UseEffect(func() gf.Cleanup {
 		if raw, ok := localStorageGet(todoStorageKey); ok {
 			stored := decodeTodos(raw)
 			todoSkipNextPersist = true
-			todos.Set(stored)
-			nextID.Set(nextTodoID(stored))
+			setTodos(stored)
+			setNextID(nextTodoID(stored))
 		}
 		return nil
 	})
 
-	encodedTodos := encodeTodos(todos.Get())
+	encodedTodos := encodeTodos(todos)
 	gf.UseEffect(func() gf.Cleanup {
 		if todoSkipNextPersist {
 			todoSkipNextPersist = false
@@ -172,46 +173,43 @@ func TodoApp(props TodoAppProps) gf.Node {
 		}
 		localStorageSet(todoStorageKey, encodedTodos)
 		return nil
-	}, gf.DepsOf(gf.DepString(encodedTodos)))
+	}, gf.Deps(encodedTodos))
 
 	addTodo := func(value string) {
-		next := append([]Todo(nil), todos.Get()...)
-		next = append(next, Todo{ID: nextID.Get(), Text: value})
-		todos.Set(next)
-		nextID.Set(nextID.Get() + 1)
+		next := append([]Todo(nil), todos...)
+		next = append(next, Todo{ID: nextID, Text: value})
+		setTodos(next)
+		setNextID(nextID + 1)
 	}
 
 	toggleTodo := func(id int) {
-		current := todos.Get()
-		next := make([]Todo, len(current))
-		copy(next, current)
+		next := make([]Todo, len(todos))
+		copy(next, todos)
 		for index := range next {
 			if next[index].ID == id {
 				next[index].Done = !next[index].Done
 				break
 			}
 		}
-		todos.Set(next)
+		setTodos(next)
 	}
 
 	removeTodo := func(id int) {
-		current := todos.Get()
-		next := make([]Todo, 0, len(current))
-		for _, todo := range current {
+		next := make([]Todo, 0, len(todos))
+		for _, todo := range todos {
 			if todo.ID != id {
 				next = append(next, todo)
 			}
 		}
-		todos.Set(next)
+		setTodos(next)
 	}
 
 	reverseTodos := func() {
-		current := todos.Get()
-		next := make([]Todo, len(current))
-		for index := range current {
-			next[len(current)-1-index] = current[index]
+		next := make([]Todo, len(todos))
+		for index := range todos {
+			next[len(todos)-1-index] = todos[index]
 		}
-		todos.Set(next)
+		setTodos(next)
 	}
 
 	return (
@@ -221,22 +219,24 @@ func TodoApp(props TodoAppProps) gf.Node {
 			</Card>
 
 			<Card Title="Tasks">
-				{gf.If(len(todos.Get()) > 0, gf.El("p", gf.Props{
-					"class": "summary",
-				}, gf.Text(gf.ToString(len(todos.Get()))+" task(s)")))}
-				{gf.If(len(todos.Get()) > 1, gf.Component("Button", ButtonProps{
-					Label:   "Reverse tasks",
-					Type:    "button",
-					OnClick: reverseTodos,
-				}, Button))}
-				{gf.IfElse(
-					len(todos.Get()) == 0,
-					gf.Component("EmptyState", EmptyStateProps{}, EmptyState),
-					gf.Component("TodoList", TodoListProps{
-						Items:    todos.Get(),
-						OnToggle: toggleTodo,
-						OnRemove: removeTodo,
-					}, TodoList),
+				{(len(todos) > 0) && (
+					<p class="summary">{len(todos)} task(s)</p>
+				)}
+				{(len(todos) > 1) && (
+					<Button
+						Label="Reverse tasks"
+						Type="button"
+						OnClick={reverseTodos}
+					/>
+				)}
+				{(len(todos) == 0) ? (
+					<EmptyState />
+				) : (
+					<TodoList
+						Items={todos}
+						OnToggle={toggleTodo}
+						OnRemove={removeTodo}
+					/>
 				)}
 			</Card>
 		</main>

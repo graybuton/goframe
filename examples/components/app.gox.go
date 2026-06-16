@@ -57,7 +57,7 @@ func Card(props CardProps) gf.Node {
 }
 
 func App() gf.Node {
-	count := gf.UseState(0)
+	count, setCount := gf.UseState(0)
 
 	return gf.Fragment(
 		gf.Component("Header", HeaderProps{
@@ -71,12 +71,12 @@ func App() gf.Node {
 				Children: []gf.Node{
 					gf.El("p", nil,
 						gf.Text("Current value: "),
-						gf.Child(count.Get()),
+						gf.Child(count),
 					),
 					gf.Component("Button", ButtonProps{
 						Label: "Increment",
 						OnClick: func() {
-							count.Set(count.Get() + 1)
+							setCount(count + 1)
 						},
 					}, Button),
 				},
