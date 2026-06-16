@@ -47,6 +47,8 @@ jobs:
           goxc package ./examples/components --compiler=tinygo
           goxc generate ./examples/todo
           goxc package ./examples/todo --compiler=tinygo
+          goxc generate ./examples/dashboard
+          goxc package ./examples/dashboard --compiler=tinygo
 
       - name: Size budgets
         run: scripts/size-budget.sh | tee size-report.txt
