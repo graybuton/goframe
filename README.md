@@ -500,6 +500,14 @@ npm install
 npm run compile
 ```
 
+## CI and regression gates
+
+GitHub Actions run core Go/GOX checks, TinyGo WASM size budgets, browser smoke,
+and VS Code extension compile checks. Local source gates also verify that build
+artifacts are not tracked and that the module path remains canonical.
+
+See [CI and regression gates](docs/ci.md) and [release hygiene](docs/release.md).
+
 ## License
 
 goframe is licensed under the Apache License, Version 2.0.
