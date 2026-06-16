@@ -8,6 +8,7 @@ CHROME_BIN="${CHROME:-google-chrome}"
 
 TODO_SMOKE_URL_BASE="${GOFRAME_TODO_SMOKE_URL:-http://127.0.0.1}"
 DUPLICATE_SMOKE_URL_BASE="${GOFRAME_DUPLICATE_KEY_SMOKE_URL:-http://127.0.0.1}"
+DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 
 cd "$ROOT_DIR"
 export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
@@ -70,6 +71,11 @@ build_smoke_url() {
 build_duplicate_smoke_url() {
 	local port="$1"
 	echo "${DUPLICATE_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_dashboard_smoke_url() {
+	local port="$1"
+	echo "${DASHBOARD_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 stop_server() {
@@ -163,7 +169,20 @@ run_with_server ./scripts/fixtures/duplicate-keys "$DUPLICATE_PORT" "$DUPLICATE_
 	node --experimental-websocket scripts/duplicate-key-smoke.mjs
 
 echo
+echo "== Dashboard debug browser smoke =="
+"$GOXC" package ./examples/dashboard --compiler=tinygo
+tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+	-o ./examples/dashboard/dist/main.wasm ./examples/dashboard
+
+DASHBOARD_PORT="$(resolve_port "${GOFRAME_DASHBOARD_SMOKE_PORT:-}")"
+export GOFRAME_DASHBOARD_CHROME_DEBUG_PORT="${GOFRAME_DASHBOARD_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+DASHBOARD_URL="$(build_dashboard_smoke_url "$DASHBOARD_PORT")"
+run_with_server ./examples/dashboard "$DASHBOARD_PORT" "$DASHBOARD_URL" \
+	node --experimental-websocket scripts/dashboard-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
+"$GOXC" package ./examples/dashboard --compiler=tinygo
 
 echo "browser smoke: ok"
