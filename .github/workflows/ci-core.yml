@@ -1,0 +1,48 @@
+name: Core
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  go:
+    name: Go and GOX checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Artifact gate
+        run: scripts/artifact-check.sh
+
+      - name: Module path gate
+        run: scripts/module-path-check.sh
+
+      - name: Format
+        run: |
+          go fmt ./...
+          git diff --exit-code
+
+      - name: Test
+        run: go test ./...
+
+      - name: Race test
+        run: go test -race ./pkg/... ./cmd/...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Debug-tag test
+        run: go test -tags=goframe_debug ./...
+
+      - name: GOX golden tests
+        run: go test ./pkg/gox -run 'TestGolden|TestErrorGolden'
