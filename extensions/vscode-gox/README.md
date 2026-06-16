@@ -9,6 +9,8 @@ This extension provides the first editor experience for GoFrame `.gox` files.
   components, attributes, fragments, and embedded Go expressions;
 - comment, bracket, surrounding-pair, and indentation configuration;
 - snippets for applications, components, state, buttons, cards, and fragments;
+- lightweight highlighting for GOX render expressions such as
+  `{condition && <Node />}` and `{condition ? <A /> : <B />}`;
 - command-palette actions that run the installed `goxc` toolchain in an
   integrated terminal.
 
@@ -60,7 +62,10 @@ Marketplace publishing is intentionally outside the current MVP.
 |---|---|
 | `goxapp` | Minimal GOX application |
 | `component` | Typed function component |
-| `state` | `gf.UseState` declaration |
+| `state` | tuple-style `gf.UseState` declaration |
+| `map` | `gf.Map` list rendering with GOX markup |
+| `ifnode` | GOX `condition && <Node />` render expression |
+| `ternary` | GOX ternary render expression |
 | `button` | Button component call |
 | `card` | Card component with children |
 | `fragment` | GOX fragment |

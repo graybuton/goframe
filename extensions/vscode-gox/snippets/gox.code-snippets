@@ -37,7 +37,36 @@
     "prefix": "state",
     "description": "Create a goframe state slot",
     "body": [
-      "${1:count} := gf.UseState(${2:0})"
+      "${1:count}, ${2:setCount} := gf.UseState(${3:0})"
+    ]
+  },
+  "GOX Map": {
+    "prefix": "map",
+    "description": "Render a list with gf.Map and GOX markup",
+    "body": [
+      "{gf.Map(${1:items}, func(${2:item} ${3:Item}) gf.Node {",
+      "\treturn <${4:ItemRow} Key={${2:item}.ID} Item={${2:item}} />",
+      "})}"
+    ]
+  },
+  "GOX Conditional Render": {
+    "prefix": "ifnode",
+    "description": "Render a GOX node when a condition is true",
+    "body": [
+      "{(${1:condition}) && (",
+      "\t<${2:Node} />",
+      ")}"
+    ]
+  },
+  "GOX Ternary Render": {
+    "prefix": "ternary",
+    "description": "Render one of two GOX nodes",
+    "body": [
+      "{(${1:condition}) ? (",
+      "\t<${2:ThenNode} />",
+      ") : (",
+      "\t<${3:ElseNode} />",
+      ")}"
     ]
   },
   "GOX Button Component": {
