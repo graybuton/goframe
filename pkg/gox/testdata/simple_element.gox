@@ -1,0 +1,13 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return (
+		<main class="page">
+			<input type="text" />
+			<br />
+			<p>Hello {42}</p>
+		</main>
+	)
+}

@@ -1,0 +1,2 @@
+testdata/errors/mismatched.gox:7:16: expected closing tag </p>, got </main>
+  <p>Broken</main>

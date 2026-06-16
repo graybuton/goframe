@@ -1,0 +1,16 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type ButtonProps struct {
+	Label   string
+	OnClick func()
+}
+
+func Button(props ButtonProps) gf.Node {
+	return <button onClick={props.OnClick}>{props.Label}</button>
+}
+
+func View() gf.Node {
+	return <Button Label="Increment" OnClick={func() {}} />
+}

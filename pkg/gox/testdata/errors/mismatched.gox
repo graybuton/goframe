@@ -1,0 +1,11 @@
+package demo
+
+func View() any {
+	return (
+		<main>
+			<section>
+				<p>Broken</main>
+			</section>
+		</main>
+	)
+}

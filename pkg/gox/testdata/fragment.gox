@@ -1,0 +1,12 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return (
+		<>
+			<h1>Hello</h1>
+			<p>World</p>
+		</>
+	)
+}

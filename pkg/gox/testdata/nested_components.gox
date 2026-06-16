@@ -1,0 +1,27 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type CardProps struct {
+	Children []gf.Node
+}
+
+func Card(props CardProps) gf.Node {
+	return <section>{props.Children}</section>
+}
+
+type ButtonProps struct {
+	Label string
+}
+
+func Button(props ButtonProps) gf.Node {
+	return <button>{props.Label}</button>
+}
+
+func View() gf.Node {
+	return (
+		<Card>
+			<Button Label="Nested" />
+		</Card>
+	)
+}

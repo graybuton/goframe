@@ -1,0 +1,2 @@
+testdata/errors/namespace.gox:4:10: namespace component tags are not supported yet: <ui.Button>
+  <ui.Button />

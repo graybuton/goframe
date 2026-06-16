@@ -1,0 +1,25 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type CardProps struct {
+	Title    string
+	Children []gf.Node
+}
+
+func Card(props CardProps) gf.Node {
+	return (
+		<section>
+			<h2>{props.Title}</h2>
+			<div>{props.Children}</div>
+		</section>
+	)
+}
+
+func View() gf.Node {
+	return (
+		<Card Title="Stats">
+			<p>Counter: {1}</p>
+		</Card>
+	)
+}

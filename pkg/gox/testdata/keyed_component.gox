@@ -1,0 +1,15 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type ItemProps struct {
+	Label string
+}
+
+func Item(props ItemProps) gf.Node {
+	return <li>{props.Label}</li>
+}
+
+func View() gf.Node {
+	return gf.Key("item-1", <Item Label="One" />)
+}
