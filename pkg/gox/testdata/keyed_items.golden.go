@@ -2,7 +2,7 @@
 
 package demo
 
-import gf "github.com/jin-wu/goframe/pkg/goframe"
+import gf "github.com/graybuton/goframe/pkg/goframe"
 
 func View(items []string) gf.Node {
 	return gf.El("ul", nil,

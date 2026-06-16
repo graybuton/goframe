@@ -25,7 +25,7 @@ GoFrame Player     possible future host for portable .gfapp bundles
 Install the latest published toolchain:
 
 ```bash
-go install github.com/jin-wu/goframe/cmd/goxc@latest
+go install github.com/graybuton/goframe/cmd/goxc@latest
 ```
 
 Make sure `$(go env GOPATH)/bin` is in `PATH`, then verify the installation:

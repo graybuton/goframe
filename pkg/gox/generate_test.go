@@ -10,7 +10,7 @@ import (
 func TestGenerateCounter(t *testing.T) {
 	source := []byte(`package main
 
-import gf "github.com/jin-wu/goframe/pkg/goframe"
+import gf "github.com/graybuton/goframe/pkg/goframe"
 
 func App() gf.Node {
 	count, setCount := gf.UseState(0)
@@ -53,7 +53,7 @@ func App() gf.Node {
 func TestGenerateIgnoresGoComparison(t *testing.T) {
 	source := []byte(`package main
 
-import gf "github.com/jin-wu/goframe/pkg/goframe"
+import gf "github.com/graybuton/goframe/pkg/goframe"
 
 func App() gf.Node {
 	count, max := 1, 2

@@ -2,7 +2,7 @@
 
 package main
 
-import gf "github.com/jin-wu/goframe/pkg/goframe"
+import gf "github.com/graybuton/goframe/pkg/goframe"
 
 type HeaderProps struct {
 	Title string

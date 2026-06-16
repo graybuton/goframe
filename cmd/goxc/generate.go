@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jin-wu/goframe/pkg/gox"
+	"github.com/graybuton/goframe/pkg/gox"
 )
 
 func generateCommand(args []string) error {

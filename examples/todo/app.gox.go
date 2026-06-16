@@ -5,7 +5,7 @@ package main
 import (
 	"strings"
 
-	gf "github.com/jin-wu/goframe/pkg/goframe"
+	gf "github.com/graybuton/goframe/pkg/goframe"
 )
 
 type Todo struct {

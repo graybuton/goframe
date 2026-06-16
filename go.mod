@@ -1,3 +1,3 @@
-module github.com/jin-wu/goframe
+module github.com/graybuton/goframe
 
 go 1.22

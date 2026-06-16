@@ -1,6 +1,6 @@
 package main
 
-import gf "github.com/jin-wu/goframe/pkg/goframe"
+import gf "github.com/graybuton/goframe/pkg/goframe"
 
 func View(show bool, ready bool, active bool) gf.Node {
 	return (
