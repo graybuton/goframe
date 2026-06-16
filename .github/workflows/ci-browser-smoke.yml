@@ -12,7 +12,7 @@ env:
 
 jobs:
   browser-smoke:
-    name: Todo browser smoke
+    name: Browser smoke
     runs-on: ubuntu-latest
 
     steps:

@@ -48,6 +48,8 @@ echo "== Package examples with TinyGo =="
 "$GOXC" package ./examples/components --compiler=tinygo
 "$GOXC" generate ./examples/todo
 "$GOXC" package ./examples/todo --compiler=tinygo
+"$GOXC" generate ./examples/dashboard
+"$GOXC" package ./examples/dashboard --compiler=tinygo
 
 echo "== Size budgets =="
 scripts/size-budget.sh

@@ -27,7 +27,7 @@ It checks:
 and manually through `workflow_dispatch`.
 
 It installs Go, TinyGo `0.41.1`, brotli, and zstd. Then it packages the
-counter, components, and todo examples with TinyGo and runs:
+counter, components, todo, and dashboard examples with TinyGo and runs:
 
 ```bash
 scripts/size-budget.sh
@@ -49,7 +49,8 @@ scripts/browser-smoke.sh
 
 The smoke script chooses dynamic ports, verifies the expected app origin before
 storage cleanup, checks WASM MIME type, and separates harness failures from app
-failures.
+failures. It currently covers Todo reconciliation, duplicate-key debug
+diagnostics, and dashboard-sized filtering/sorting/selection behavior.
 
 ### VS Code Extension
 
@@ -143,7 +144,8 @@ Treat smoke failures as either harness failures or app failures.
 Harness failures include server bind errors, wrong CDP target, wrong origin,
 missing Chrome, unavailable storage, or stale server state. App failures include
 DOM identity loss, render counter regressions, localStorage persistence issues,
-duplicate key diagnostics failures, or listener churn regressions.
+duplicate key diagnostics failures, dashboard filter/sort regressions, or
+listener churn regressions.
 
 The smoke script must not continue against an unknown server or `about:blank`.
 

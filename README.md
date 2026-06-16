@@ -96,6 +96,17 @@ goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```
 
+The dashboard example is a larger pressure test for the same runtime and GOX
+surface. It renders 300 deterministic issue rows, filters and sorts keyed table
+rows, updates metric cards, and exercises a detail panel:
+
+```bash
+goxc generate ./examples/dashboard
+goxc package ./examples/dashboard --compiler=tinygo
+goxc size ./examples/dashboard
+goxc serve ./examples/dashboard --port=8080
+```
+
 ## GOX component model
 
 Lowercase tags create HTML elements:
@@ -411,6 +422,9 @@ Measured on June 16, 2026 with Go 1.24.4 and TinyGo 0.41.1:
 | Todo demo, TinyGo `main.wasm` | 109,483 | 106.9 KiB |
 | Todo demo, TinyGo `main.wasm.br` | 34,885 | 34.1 KiB |
 | Todo demo, TinyGo `main.wasm.gz` | 42,003 | 41.0 KiB |
+| Dashboard pressure test, TinyGo `main.wasm` | 146,832 | 143.4 KiB |
+| Dashboard pressure test, TinyGo `main.wasm.br` | 44,317 | 43.3 KiB |
+| Dashboard pressure test, TinyGo `main.wasm.gz` | 54,673 | 53.4 KiB |
 | Go `wasm_exec.js` | 16,992 | 16.6 KiB |
 | TinyGo `wasm_exec.js` | 16,715 | 16.3 KiB |
 
@@ -419,6 +433,8 @@ runtime. MVP 9 adds lifecycle/effect hooks. MVP 10 keeps the runtime
 size-conscious while improving GOX expression ergonomics and adds compressed
 delivery budgets. Counter remains an integration probe rather than a
 representative application benchmark.
+MVP 12 adds a dashboard-sized example and browser smoke coverage for a more
+realistic 300-row interactive app.
 
 ## Legacy CLI
 
@@ -477,6 +493,7 @@ required.
 - [Counter example](examples/counter/README.md)
 - [Components example](examples/components/README.md)
 - [Todo example](examples/todo/README.md)
+- [Dashboard pressure-test example](examples/dashboard/README.md)
 
 ## Development
 

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Dashboard-sized pressure-test example with 300 deterministic issue rows,
+  filters, keyed table sorting, detail panel updates, and smoke coverage.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

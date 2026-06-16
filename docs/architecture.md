@@ -143,6 +143,7 @@ surface but dramatically reduces the counter:
 counter main.wasm     77,890 bytes
 components main.wasm  83,159 bytes
 todo main.wasm        109,483 bytes
+dashboard main.wasm   146,832 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -152,7 +153,8 @@ GOX expression ergonomics without meaningful raw WASM growth. Todo is larger
 than Counter because it also demonstrates compact localStorage persistence.
 
 The repository includes `scripts/size-budget.sh` as a regression gate for raw,
-gzip, brotli, and optional zstd packaged TinyGo examples.
+gzip, brotli, and optional zstd packaged TinyGo examples, including the
+dashboard-sized pressure-test example.
 `scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
 budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
 regression probes.
@@ -167,9 +169,16 @@ Counter is valuable as an integration test: it proves GOX generation, state,
 events, browser startup, compilation, packaging, and serving. It is not a good
 measure of platform value because it contains almost no application behavior.
 
-Dashboard- and editor-sized experiments should measure startup, update time,
-memory, compressed transfer size, and development ergonomics before broader
-conclusions are drawn.
+`examples/dashboard` is the first dashboard-sized pressure test. It keeps all
+components in one Go package because GOX does not yet support component
+namespaces, but splits layout, metrics, filters, table, and detail components
+across multiple GOX files. It renders 300 deterministic rows and exercises
+search, filters, sorting, keyed row identity, selection, metric updates, and a
+small document-title effect.
+
+Future editor-sized experiments should measure startup, update time, memory,
+compressed transfer size, and development ergonomics before broader conclusions
+are drawn.
 
 ## Runtime model
 

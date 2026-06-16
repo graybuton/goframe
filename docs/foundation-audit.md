@@ -193,6 +193,7 @@ TinyGo size budgets:
 | Counter | 95 KiB |
 | Components | 105 KiB |
 | Todo | 120 KiB |
+| Dashboard | 150 KiB |
 
 Run:
 
@@ -210,14 +211,18 @@ Measured during the foundation audit:
 | Counter | 77,890 B |
 | Components | 83,159 B |
 | Todo | 109,483 B |
+| Dashboard pressure test | 146,832 B |
 
 Counter and Components show the approximate runtime cost of MVP 9 lifecycle
 hooks. Todo includes example-level localStorage persistence and compact string
-encoding, so its increase is not purely runtime overhead.
+encoding, so its increase is not purely runtime overhead. Dashboard is a
+larger example-level pressure test with 300 rows and sorting/filtering logic.
 
 ## Performance Review
 
-The primary browser smoke target is `examples/todo`. The debug build verifies:
+The primary browser smoke target remains `examples/todo`, with
+`examples/dashboard` added as a dashboard-sized pressure test. The Todo debug
+build verifies:
 
 - typing rerenders `TodoForm` only;
 - `App`, `Header`, `TodoList`, and `TodoItem` render deltas remain zero during

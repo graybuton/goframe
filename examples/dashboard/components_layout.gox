@@ -1,0 +1,65 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type HeaderProps struct {
+	Title    string
+	Subtitle string
+}
+
+func Header(props HeaderProps) gf.Node {
+	return (
+		<header class="site-header" data-testid="dashboard-header">
+			<p class="eyebrow">GoFrame pressure test</p>
+			<h1>{props.Title}</h1>
+			<p>{props.Subtitle}</p>
+		</header>
+	)
+}
+
+type DashboardShellProps struct {
+	Children []gf.Node
+}
+
+func DashboardShell(props DashboardShellProps) gf.Node {
+	return (
+		<main class="dashboard-shell" data-testid="dashboard-shell">
+			{props.Children}
+		</main>
+	)
+}
+
+type CardProps struct {
+	Title    string
+	TestID   string
+	Children []gf.Node
+}
+
+func Card(props CardProps) gf.Node {
+	return (
+		<section class="card" data-testid={props.TestID}>
+			<h2>{props.Title}</h2>
+			<div class="card-body">
+				{props.Children}
+			</div>
+		</section>
+	)
+}
+
+type ButtonProps struct {
+	Label   string
+	Kind    string
+	OnClick func()
+}
+
+func Button(props ButtonProps) gf.Node {
+	className := "button"
+	if props.Kind != "" {
+		className += " button-" + props.Kind
+	}
+	return (
+		<button class={className} Type="button" OnClick={props.OnClick}>
+			{props.Label}
+		</button>
+	)
+}

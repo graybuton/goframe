@@ -1,0 +1,132 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type IssueWorkspaceProps struct {
+	Items    []Issue
+	AllItems []Issue
+	Query    string
+	OnToggle func(id int)
+}
+
+func IssueWorkspace(props IssueWorkspaceProps) gf.Node {
+	selectedID, setSelectedID := gf.UseState(0)
+	selectedIssue, selectedFound := findIssue(props.AllItems, selectedID)
+
+	return (
+		<div class="content-grid" data-testid="issue-workspace">
+			<Card Title="Issues" TestID="issues-card">
+				<p class="summary" data-testid="visible-summary">
+					{summaryText(len(props.Items), len(props.AllItems))}
+				</p>
+				{len(props.Items) == 0 ? (
+					<EmptyState Query={props.Query} />
+				) : (
+					<IssueTable
+						Items={props.Items}
+						SelectedID={selectedID}
+						OnSelect={setSelectedID}
+						OnToggle={props.OnToggle}
+					/>
+				)}
+			</Card>
+
+			<DetailPanel
+				Issue={selectedIssue}
+				Found={selectedFound}
+				OnToggle={props.OnToggle}
+			/>
+		</div>
+	)
+}
+
+type IssueTableProps struct {
+	Items      []Issue
+	SelectedID int
+	OnSelect   func(id int)
+	OnToggle   func(id int)
+}
+
+func IssueTable(props IssueTableProps) gf.Node {
+	return (
+		<table class="issue-table" data-testid="issue-table">
+			<thead>
+				<tr>
+					<th>Issue</th>
+					<th>Status</th>
+					<th>Priority</th>
+					<th>Owner</th>
+					<th>Service</th>
+					<th>Events</th>
+					<th>Action</th>
+				</tr>
+			</thead>
+			<tbody>
+				{gf.Map(props.Items, func(issue Issue) gf.Node {
+					return <IssueRow
+						Key={issue.ID}
+						Issue={issue}
+						Selected={issue.ID == props.SelectedID}
+						OnSelect={props.OnSelect}
+						OnToggle={props.OnToggle}
+					/>
+				})}
+			</tbody>
+		</table>
+	)
+}
+
+type IssueRowProps struct {
+	Issue    Issue
+	Selected bool
+	OnSelect  func(id int)
+	OnToggle  func(id int)
+}
+
+func IssueRow(props IssueRowProps) gf.Node {
+	className := "issue-row"
+	if props.Selected {
+		className += " issue-row-selected"
+	}
+	return (
+		<tr
+			ID={"issue-row-"+gf.ToString(props.Issue.ID)}
+			class={className}
+			data-testid={"issue-row-"+gf.ToString(props.Issue.ID)}
+		>
+			<td>
+				<button class="row-link" Type="button" OnClick={func() {
+					props.OnSelect(props.Issue.ID)
+				}}>
+					<span class="issue-id">#{props.Issue.ID}</span>
+					<span>{props.Issue.Title}</span>
+				</button>
+			</td>
+			<td><span class={statusClass(props.Issue.Status)}>{statusLabel(props.Issue.Status)}</span></td>
+			<td><span class={priorityClass(props.Issue.Priority)}>{priorityLabel(props.Issue.Priority)}</span></td>
+			<td>{props.Issue.Owner}</td>
+			<td>{props.Issue.Service}</td>
+			<td>{props.Issue.Events}</td>
+			<td>
+				<Button Label="Toggle" Kind="tiny" OnClick={func() {
+					props.OnToggle(props.Issue.ID)
+				}} />
+			</td>
+		</tr>
+	)
+}
+
+type EmptyStateProps struct {
+	Query string
+}
+
+func EmptyState(props EmptyStateProps) gf.Node {
+	return (
+		<div class="empty-state" data-testid="dashboard-empty">
+			<strong>No issues match the current filters.</strong>
+			{(props.Query != "") && (
+				<span>Try clearing search for "{props.Query}".</span>
+			)}
+		</div>
+	)
+}
