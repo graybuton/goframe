@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GOXC="${GOXC:-goxc}"
+BIN_DIR="${GOFRAME_SMOKE_BIN:-/tmp/goframe-smoke-bin}"
+GOXC="${GOXC:-}"
 CHROME_BIN="${CHROME:-google-chrome}"
 TODO_PORT="${GOFRAME_TODO_SMOKE_PORT:-18080}"
 DUPLICATE_PORT="${GOFRAME_DUPLICATE_KEY_SMOKE_PORT:-18081}"
@@ -10,7 +11,7 @@ DUPLICATE_PORT="${GOFRAME_DUPLICATE_KEY_SMOKE_PORT:-18081}"
 cd "$ROOT_DIR"
 export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/goframe-tinygo-cache}"
-mkdir -p "$GOCACHE" "$XDG_CACHE_HOME"
+mkdir -p "$GOCACHE" "$XDG_CACHE_HOME" "$BIN_DIR"
 
 require_command() {
 	local command="$1"
@@ -43,6 +44,11 @@ run_with_server() {
 	stop_server "$server_pid"
 	trap - RETURN
 }
+
+if [[ -z "$GOXC" ]]; then
+	GOBIN="$BIN_DIR" go install ./cmd/goxc
+	GOXC="$BIN_DIR/goxc"
+fi
 
 require_command "$GOXC" "Install it with: go install ./cmd/goxc"
 require_command tinygo "Install TinyGo or skip browser smoke."

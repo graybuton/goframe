@@ -31,6 +31,7 @@ try {
     const page = await waitForPage(debugPort);
     const client = await connect(page.webSocketDebuggerUrl);
     await client.call("Runtime.enable");
+    await client.call("Page.enable");
     await wait(800);
 
     assertDeepEqual(
@@ -199,6 +200,24 @@ try {
             headerRenders: 1,
         },
         "keyed removal and text patch preserve survivors",
+    );
+
+    const persisted = await client.evaluate(`localStorage.getItem("goframe.todo.items")`);
+    if (typeof persisted !== "string" || !persisted.includes("B")) {
+        throw new Error(`todo persistence: got ${JSON.stringify(persisted)}, want stored todo text`);
+    }
+    console.log("todo persistence write: ok");
+
+    await client.call("Page.reload", { ignoreCache: true });
+    await wait(800);
+    assertDeepEqual(
+        await client.evaluate(`({
+            order: [...document.querySelectorAll(".todo-item")].map((node) => node.id),
+            text: document.querySelector("#todo-2 .todo-text")?.textContent,
+            headerRenders: window.goframeComponentRenderCounts.Header,
+        })`),
+        { order: ["todo-2"], text: "B", headerRenders: 1 },
+        "todo persistence reload",
     );
 
     client.close();
