@@ -1,0 +1,7 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(show bool) gf.Node {
+	return <main>{show ? "yes" : <p>No</p>}</main>
+}

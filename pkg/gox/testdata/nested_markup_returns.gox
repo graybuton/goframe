@@ -1,0 +1,32 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type Item struct {
+	ID     int
+	Label  string
+	Hidden bool
+}
+
+type ItemRowProps struct {
+	Item Item
+}
+
+func ItemRow(props ItemRowProps) gf.Node {
+	return <li>{props.Item.Label}</li>
+}
+
+func View(items []Item) gf.Node {
+	return (
+		<ul>
+			{gf.Map(items, func(item Item) gf.Node {
+				if item.Hidden {
+					return <></>
+				}
+				return (
+					<ItemRow Key={item.ID} Item={item} />
+				)
+			})}
+		</ul>
+	)
+}

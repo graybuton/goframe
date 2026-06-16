@@ -1,0 +1,17 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(show bool, ready bool, active bool) gf.Node {
+	return (
+		<main>
+			{show && <p>Shown</p>}
+			{(ready && active) && (
+				<>
+					<span>Ready</span>
+				</>
+			)}
+			{ready && active}
+		</main>
+	)
+}

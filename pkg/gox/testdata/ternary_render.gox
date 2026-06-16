@@ -1,0 +1,29 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type EmptyProps struct{}
+
+func Empty(props EmptyProps) gf.Node {
+	return <p>Empty</p>
+}
+
+type ListProps struct {
+	Items []string
+}
+
+func List(props ListProps) gf.Node {
+	return <ul></ul>
+}
+
+func View(items []string) gf.Node {
+	return (
+		<section>
+			{len(items) == 0 ? (
+				<Empty />
+			) : (
+				<List Items={items} />
+			)}
+		</section>
+	)
+}

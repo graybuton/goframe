@@ -1,0 +1,13 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(items []int) gf.Node {
+	return (
+		<main>
+			{(len(items) > 0) && (
+				<p class="summary">{len(items)} item(s)</p>
+			)}
+		</main>
+	)
+}
