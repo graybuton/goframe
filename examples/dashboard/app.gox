@@ -1,0 +1,100 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type DashboardAppProps struct{}
+
+func DashboardApp(props DashboardAppProps) gf.Node {
+	issues, setIssues := gf.UseState(resetDemoIssues())
+	query, setQuery := gf.UseState("")
+	statusFilter, setStatusFilter := gf.UseState(StatusAll)
+	priorityFilter, setPriorityFilter := gf.UseState(PriorityAll)
+	sortMode, setSortMode := gf.UseState(SortByUpdated)
+	selectedID, setSelectedID := gf.UseState(0)
+
+	filters := FilterState{
+		Query:    query,
+		Status:   statusFilter,
+		Priority: priorityFilter,
+		Sort:     sortMode,
+	}
+	visible := visibleIssues(issues, filters)
+	metrics := dashboardMetrics(issues, len(visible))
+	selectedIssue, selectedFound := findIssue(issues, selectedID)
+
+	gf.UseEffect(func() gf.Cleanup {
+		setDocumentTitle("GoFrame Dashboard · " + gf.ToString(len(visible)) + " visible")
+		return nil
+	}, gf.Deps(len(visible)))
+
+	reset := func() {
+		setIssues(resetDemoIssues())
+		setQuery("")
+		setStatusFilter(StatusAll)
+		setPriorityFilter(PriorityAll)
+		setSortMode(SortByUpdated)
+		setSelectedID(0)
+	}
+
+	toggleIssue := func(id int) {
+		setIssues(toggleIssueStatus(issues, id))
+	}
+
+	simulateUpdate := func() {
+		setIssues(simulateIssueUpdate(issues))
+	}
+
+	return (
+		<DashboardShell>
+			<MetricsGrid Metrics={metrics} />
+
+			<Card Title="Filters" TestID="filters-card">
+				<FilterBar
+					Filters={filters}
+					OnQuery={setQuery}
+					OnStatus={setStatusFilter}
+					OnPriority={setPriorityFilter}
+					OnSort={setSortMode}
+					OnReset={reset}
+					OnSimulate={simulateUpdate}
+				/>
+			</Card>
+
+			<div class="content-grid">
+				<Card Title="Issues" TestID="issues-card">
+					<p class="summary" data-testid="visible-summary">
+						{summaryText(len(visible), len(issues))}
+					</p>
+					{len(visible) == 0 ? (
+						<EmptyState Query={query} />
+					) : (
+						<IssueTable
+							Items={visible}
+							SelectedID={selectedID}
+							OnSelect={setSelectedID}
+							OnToggle={toggleIssue}
+						/>
+					)}
+				</Card>
+
+				<DetailPanel
+					Issue={selectedIssue}
+					Found={selectedFound}
+					OnToggle={toggleIssue}
+				/>
+			</div>
+		</DashboardShell>
+	)
+}
+
+func App() gf.Node {
+	return (
+		<>
+			<Header
+				Title="Operations Dashboard"
+				Subtitle="A dashboard-sized GOX pressure test with filters, keyed rows, and derived views."
+			/>
+			<DashboardApp />
+		</>
+	)
+}

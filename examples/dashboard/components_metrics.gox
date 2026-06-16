@@ -1,0 +1,39 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type MetricCardProps struct {
+	Label string
+	Value int
+	Tone  string
+}
+
+func MetricCard(props MetricCardProps) gf.Node {
+	className := "metric-card"
+	if props.Tone != "" {
+		className += " metric-" + props.Tone
+	}
+	return (
+		<div class={className}>
+			<span>{props.Label}</span>
+			<strong>{props.Value}</strong>
+		</div>
+	)
+}
+
+type MetricsGridProps struct {
+	Metrics Metrics
+}
+
+func MetricsGrid(props MetricsGridProps) gf.Node {
+	return (
+		<div class="metrics-grid" data-testid="metrics-grid">
+			<MetricCard Label="Total" Value={props.Metrics.Total} Tone="neutral" />
+			<MetricCard Label="Visible" Value={props.Metrics.Visible} Tone="active" />
+			<MetricCard Label="Open" Value={props.Metrics.Open} Tone="open" />
+			<MetricCard Label="Blocked" Value={props.Metrics.Blocked} Tone="blocked" />
+			<MetricCard Label="Critical" Value={props.Metrics.Critical} Tone="critical" />
+			<MetricCard Label="Events" Value={props.Metrics.EventCount} Tone="events" />
+		</div>
+	)
+}

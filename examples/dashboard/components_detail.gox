@@ -1,0 +1,47 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type DetailPanelProps struct {
+	Issue   Issue
+	Found   bool
+	OnToggle func(id int)
+}
+
+func DetailPanel(props DetailPanelProps) gf.Node {
+	return (
+		<aside class="detail-panel" data-testid="detail-panel">
+			{props.Found ? (
+				<div>
+					<p class="eyebrow">Selected issue</p>
+					<h2>{props.Issue.Title}</h2>
+					<dl class="detail-list">
+						<div><dt>ID</dt><dd>#{props.Issue.ID}</dd></div>
+						<div><dt>Status</dt><dd>{statusLabel(props.Issue.Status)}</dd></div>
+						<div><dt>Priority</dt><dd>{priorityLabel(props.Issue.Priority)}</dd></div>
+						<div><dt>Owner</dt><dd>{props.Issue.Owner}</dd></div>
+						<div><dt>Service</dt><dd>{props.Issue.Service}</dd></div>
+						<div><dt>Events</dt><dd>{props.Issue.Events}</dd></div>
+					</dl>
+					<Button Label="Toggle resolved" Kind="secondary" OnClick={func() {
+						props.OnToggle(props.Issue.ID)
+					}} />
+				</div>
+			) : (
+				<EmptyDetail />
+			)}
+		</aside>
+	)
+}
+
+type EmptyDetailProps struct{}
+
+func EmptyDetail(props EmptyDetailProps) gf.Node {
+	return (
+		<div class="empty-detail">
+			<p class="eyebrow">Selected issue</p>
+			<h2>No issue selected</h2>
+			<p>Select a row to inspect current status, owner, service, and event volume.</p>
+		</div>
+	)
+}

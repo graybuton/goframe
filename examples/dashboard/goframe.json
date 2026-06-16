@@ -1,0 +1,11 @@
+{
+  "name": "dashboard",
+  "entry": ".",
+  "output": "dist",
+  "compiler": "tinygo",
+  "wasm": "main.wasm",
+  "assets": [
+    "index.html",
+    "styles.css"
+  ]
+}

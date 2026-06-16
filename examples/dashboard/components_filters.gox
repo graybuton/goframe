@@ -1,0 +1,86 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type SearchBoxProps struct {
+	Query    string
+	OnChange func(value string)
+}
+
+func SearchBox(props SearchBoxProps) gf.Node {
+	return (
+		<label class="field search-field">
+			<span>Search</span>
+			<input
+				ID="dashboard-search"
+				Type="search"
+				Value={props.Query}
+				Placeholder="Search title, owner, or service"
+				OnInput={func(event gf.InputEvent) {
+					props.OnChange(event.Value())
+				}}
+			/>
+		</label>
+	)
+}
+
+type FilterBarProps struct {
+	Filters    FilterState
+	OnQuery    func(value string)
+	OnStatus   func(value Status)
+	OnPriority func(value Priority)
+	OnSort     func(value SortMode)
+	OnReset    func()
+	OnSimulate func()
+}
+
+func FilterBar(props FilterBarProps) gf.Node {
+	return (
+		<div class="filter-bar" data-testid="filter-bar">
+			<SearchBox Query={props.Filters.Query} OnChange={props.OnQuery} />
+
+			<label class="field">
+				<span>Status</span>
+				<select ID="status-filter" Value={props.Filters.Status} OnChange={func(event gf.InputEvent) {
+					props.OnStatus(Status(event.Value()))
+				}}>
+					<option Value={StatusAll}>{statusLabel(StatusAll)}</option>
+					<option Value={StatusOpen}>{statusLabel(StatusOpen)}</option>
+					<option Value={StatusInProgress}>{statusLabel(StatusInProgress)}</option>
+					<option Value={StatusBlocked}>{statusLabel(StatusBlocked)}</option>
+					<option Value={StatusResolved}>{statusLabel(StatusResolved)}</option>
+				</select>
+			</label>
+
+			<label class="field">
+				<span>Priority</span>
+				<select ID="priority-filter" Value={props.Filters.Priority} OnChange={func(event gf.InputEvent) {
+					props.OnPriority(Priority(event.Value()))
+				}}>
+					<option Value={PriorityAll}>{priorityLabel(PriorityAll)}</option>
+					<option Value={PriorityLow}>{priorityLabel(PriorityLow)}</option>
+					<option Value={PriorityMedium}>{priorityLabel(PriorityMedium)}</option>
+					<option Value={PriorityHigh}>{priorityLabel(PriorityHigh)}</option>
+					<option Value={PriorityCritical}>{priorityLabel(PriorityCritical)}</option>
+				</select>
+			</label>
+
+			<label class="field">
+				<span>Sort</span>
+				<select ID="sort-mode" Value={props.Filters.Sort} OnChange={func(event gf.InputEvent) {
+					props.OnSort(SortMode(event.Value()))
+				}}>
+					<option Value={SortByUpdated}>{sortLabel(SortByUpdated)}</option>
+					<option Value={SortByPriority}>{sortLabel(SortByPriority)}</option>
+					<option Value={SortByEvents}>{sortLabel(SortByEvents)}</option>
+					<option Value={SortByOwner}>{sortLabel(SortByOwner)}</option>
+				</select>
+			</label>
+
+			<div class="filter-actions">
+				<Button Label="Simulate update" Kind="secondary" OnClick={props.OnSimulate} />
+				<Button Label="Reset" Kind="ghost" OnClick={props.OnReset} />
+			</div>
+		</div>
+	)
+}
