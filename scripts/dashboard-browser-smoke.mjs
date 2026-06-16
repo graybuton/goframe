@@ -230,6 +230,18 @@ try {
     await clickButtonByText(client, "Reset");
     await wait(120);
     const resetBeforeSimulateReport = await finishScenario(client, "reset-before-simulate");
+
+    await startScenario(client, "row-toggle");
+    const toggleBefore = await firstRowStatus(client);
+    await client.evaluate(`document.querySelector(".issue-row .button").click()`);
+    await wait(120);
+    const toggleReport = await finishScenario(client, "row-toggle");
+    const toggleAfter = await firstRowStatus(client);
+    if (toggleBefore === toggleAfter) {
+        throw new Error(`APP FAILURE: row toggle did not change first row status: ${toggleBefore}`);
+    }
+    console.log("dashboard row toggle changes status: ok");
+
     const beforeEvents = await metricValue(client, "Events");
     await startScenario(client, "simulate-update");
     await clickButtonByText(client, "Simulate update");
@@ -273,6 +285,7 @@ try {
         sortReport,
         statusReport,
         resetBeforeSimulateReport,
+        toggleReport,
         simulateReport,
         resetReport,
     ])}`);
@@ -350,6 +363,10 @@ async function metricValue(client, label) {
         }
         return -1;
     })()`);
+}
+
+async function firstRowStatus(client) {
+    return await client.evaluate(`document.querySelector(".issue-row .status")?.textContent || ""`);
 }
 
 async function startScenario(client, label) {
