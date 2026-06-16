@@ -522,6 +522,7 @@ npm run compile
 GitHub Actions run core Go/GOX checks, TinyGo WASM size budgets, browser smoke,
 and VS Code extension compile checks. Local source gates also verify that build
 artifacts are not tracked and that the module path remains canonical.
+Dependabot is configured for weekly dependency update PRs.
 
 See [CI and regression gates](docs/ci.md) and [release hygiene](docs/release.md).
 
