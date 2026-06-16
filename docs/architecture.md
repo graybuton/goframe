@@ -1,0 +1,214 @@
+# Architecture
+
+## Platform boundaries
+
+goframe is not intended to be a tiny replacement for React on static websites.
+goframe is an experimental Go-first application platform for interactive apps.
+
+The project now separates four concepts:
+
+```text
+GOX language
+   declarative UI syntax, function components, typed props, and fragments
+
+goframe runtime
+   application state, nodes, browser DOM mounting, and events
+
+goxc toolchain
+   source generation, compilation, packaging, inspection, and local serving
+
+VS Code GOX extension
+   syntax highlighting, snippets, language configuration, and goxc commands
+
+GoFrame Player / Engine
+   a possible future host for portable application bundles
+```
+
+`goframe` is the library imported by applications. `goxc` is the installed
+developer tool. This distinction avoids treating the runtime package as a CLI
+product.
+
+The VS Code extension is deliberately a thin developer-experience layer over
+GOX and `goxc`. TextMate scopes provide heuristic highlighting, while terminal
+commands invoke the same installed CLI used outside the editor. Semantic
+analysis, formatting, and diagnostics remain future LSP responsibilities.
+
+## Toolchain responsibilities
+
+### Generate
+
+```text
+.gox source -> generated .gox.go
+```
+
+Generation is deterministic source transformation. Generated files remain next
+to their `.gox` sources so normal Go and TinyGo compilers can consume them.
+
+The MVP component model deliberately delegates type checking to Go:
+
+- lowercase tags generate `gf.El`;
+- capitalized tags generate `gf.Component` boundaries using `<Name>Props`;
+- component children populate `Children []gf.Node`;
+- fragments generate `gf.Fragment`;
+- child expressions generate `gf.Child`.
+
+Component bodies remain ordinary typed Go functions. The generated boundary
+lets the runtime defer their call, preserve component identity, own state
+slots, and update a dirty component subtree independently.
+
+### Build
+
+```text
+generated Go source -> raw build/main.wasm
+```
+
+Build only compiles. It does not copy HTML, create a distribution, or generate
+gzip/brotli files. Both Go and TinyGo targets use the same raw output contract.
+
+### Package
+
+```text
+application + selected compiler -> runnable dist/ bundle
+```
+
+Packaging compiles the selected target and combines `main.wasm`, the matching
+runtime shim, declared static assets, and generated `manifest.json`.
+Compiler-specific runtime names are normalized to `main.wasm` and
+`wasm_exec.js`.
+
+Packaging prepares artifacts in a staging directory before publishing them to
+`dist/`. This keeps failed compile/copy/compression steps from immediately
+damaging the currently published bundle.
+
+Precompression is optional packaging assistance, never default compiler
+behavior:
+
+```bash
+goxc package ./app --compress=gzip,br
+```
+
+Compression and content negotiation primarily belong to deployment
+infrastructure: web servers, CDNs, and reverse proxies.
+
+### Serve
+
+`goxc serve` is a small development server for a packaged directory. It serves
+WASM with `application/wasm`, but intentionally does not attempt to be a
+production deployment system.
+
+## Project manifest
+
+An optional `goframe.json` describes application defaults:
+
+- application name;
+- Go package entry;
+- package output directory;
+- preferred compiler;
+- normalized WASM filename;
+- static assets copied by packaging.
+
+CLI flags override manifest defaults. Paths in the manifest must remain inside
+the application directory. Unknown manifest fields are rejected so typos fail
+early instead of silently falling back to defaults.
+
+## Build targets
+
+### Standard Go compatibility mode
+
+The standard Go compiler supports the broadest language and standard-library
+surface. Its runtime includes garbage collection, scheduling, stack
+management, panic machinery, and type metadata, producing a comparatively
+large counter binary.
+
+Recorded Go 1.24.4 output on June 16, 2026:
+
+```text
+counter main.wasm     1,928,333 bytes
+components main.wasm  1,942,473 bytes
+todo main.wasm        2,007,086 bytes
+```
+
+### TinyGo lightweight mode
+
+TinyGo is the preferred lightweight experiment. It supports a smaller runtime
+surface but dramatically reduces the counter:
+
+```text
+counter main.wasm     76,767 bytes
+components main.wasm  82,066 bytes
+todo main.wasm        101,752 bytes
+```
+
+MVP 8.1 removes reflective props comparison and compiles browser instrumentation
+only under the `goframe_debug` build tag. This restores lightweight production
+bundles while keeping strict regression probes available.
+
+The repository includes `scripts/size-budget.sh` as a regression gate for
+packaged TinyGo examples. `scripts/perf-report.sh` runs pure runtime
+benchmarks plus the same size budgets, and `scripts/browser-smoke.sh` runs the
+optional headless Chrome regression probes.
+
+The current target keeps TinyGo's scheduler enabled because the example and
+browser event runtime keep `main` alive. A scheduler-free profile requires a
+different lifetime model.
+
+## Why counter remains a poor benchmark
+
+Counter is valuable as an integration test: it proves GOX generation, state,
+events, browser startup, compilation, packaging, and serving. It is not a good
+measure of platform value because it contains almost no application behavior.
+
+Dashboard- and editor-sized experiments should measure startup, update time,
+memory, compressed transfer size, and development ergonomics before broader
+conclusions are drawn.
+
+## Runtime model
+
+The MVP runtime currently has:
+
+- one mounted application;
+- one browser thread;
+- explicit `ComponentNode` boundaries generated by GOX capitalized tags;
+- component instances identified by name, key, and sibling position;
+- component-scoped positional state slots, including the root `App`;
+- dirty component updates coalesced into one animation-frame flush;
+- direct dirty-owner subtree updates without root traversal;
+- dirty queue ancestor pruning when parent and child are dirty in the same
+  flush;
+- fragment nodes rendered through DOM `DocumentFragment`;
+- empty, conditional, list, and keyed node primitives;
+- expression children accepting primitives, `Node`, or `[]Node`;
+- a retained mounted tree and minimal DOM patch layer;
+- text and element prop patching;
+- positional unkeyed children and key-based child reuse/movement;
+- typed event facades for input and form interaction;
+- stable event listeners with replaceable current callbacks;
+- optional browser probes compiled only with `goframe_debug`;
+- debug-only duplicate key warnings compiled only with `goframe_debug`.
+
+Direct function calls remain possible but do not create a component boundary.
+The single-thread assumption must be revisited before worker-driven updates.
+See [component identity](component-identity.md) for the current name/key/position
+strategy and the generated-token migration option.
+
+## Limitations
+
+- Minimal reconciliation only; no Fiber, concurrent rendering, or priorities.
+- Component state slots are positional and require stable call order.
+- No lifecycle, effects, context, or error-boundary model.
+- No automatic props memoization; descendants rerender with their parent.
+- Duplicate key diagnostics are debug-only.
+- No GOX-specific loops or inline conditionals; use Go-native helpers.
+- No spread props or component namespaces.
+- No routing, SSR, hydration, or accessibility abstraction.
+- TinyGo compatibility is experimental and feature-dependent.
+- `goxc serve` is a development server without compression negotiation.
+- Debug-tag performance probes are observations, not rigorous benchmarks.
+
+## Roadmap
+
+1. Add reproducible dashboard-sized size and startup benchmarks.
+2. Define lifecycle and effect semantics without hiding Go ownership.
+3. Add debug duplicate-key source locations and CI browser smoke wiring.
+4. Evolve `goframe.json` and generated package manifests.
+5. Explore a portable `.gfapp` contract before implementing a custom player.

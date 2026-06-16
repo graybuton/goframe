@@ -1,0 +1,276 @@
+# GOX language
+
+GOX is a small JSX-like syntax embedded in otherwise normal Go source. `goxc
+generate` converts markup roots into calls to the `goframe` runtime and
+explicit component boundaries.
+
+GOX deliberately keeps Go as the language for state, functions, types, and
+control flow. It is not a separate scripting language.
+
+## HTML elements
+
+Tags beginning with a lowercase letter are rendered as HTML elements:
+
+```gox
+<main class="page">
+    <input type="text" />
+    <p>Hello</p>
+</main>
+```
+
+Generated shape:
+
+```go
+gf.El("main", gf.Props{
+    "class": "page",
+},
+    gf.El("input", gf.Props{"type": "text"}),
+    gf.El("p", nil, gf.Text("Hello")),
+)
+```
+
+HTML attributes become keys in `gf.Props`. Event props such as `onClick` are
+handled by the browser runtime.
+
+## Function components
+
+Tags beginning with an uppercase letter create a component boundary around a
+Go component function:
+
+```gox
+<Button Label="Increment" OnClick={increment} />
+```
+
+GOX uses the convention `<ComponentName>Props`:
+
+```go
+type ButtonProps struct {
+    Label   string
+    OnClick func()
+}
+
+func Button(props ButtonProps) gf.Node {
+    return (
+        <button onClick={props.OnClick}>{props.Label}</button>
+    )
+}
+```
+
+Generated component node:
+
+```go
+gf.Component("Button", ButtonProps{
+    Label:   "Increment",
+    OnClick: increment,
+}, Button)
+```
+
+Every capitalized tag uses the props struct convention, including components
+without attributes:
+
+```gox
+<Status />
+```
+
+```go
+gf.Component("Status", StatusProps{}, Status)
+```
+
+Component prop names must be valid Go field names. Go's type checker reports
+unknown fields and incompatible prop values after generation.
+
+The boundary gives the runtime a component instance, scoped state slots, and a
+mounted subtree that can be updated independently of ancestors and siblings. Calling
+`Button(ButtonProps{...})` directly is still valid Go, but it is an ordinary
+function call without separate component identity.
+
+## Children
+
+A component receives nested markup through a `Children []gf.Node` field:
+
+```go
+type CardProps struct {
+    Title    string
+    Children []gf.Node
+}
+```
+
+```gox
+<Card Title="Stats">
+    <p>Counter: {count.Get()}</p>
+</Card>
+```
+
+Generated shape:
+
+```go
+gf.Component("Card", CardProps{
+    Title: "Stats",
+    Children: []gf.Node{
+        gf.El("p", nil,
+            gf.Text("Counter: "),
+            gf.Child(count.Get()),
+        ),
+    },
+}, Card)
+```
+
+Render component children inside another component with an expression:
+
+```gox
+<div class="card-body">
+    {props.Children}
+</div>
+```
+
+`gf.Child` accepts a primitive value, one `gf.Node`, or `[]gf.Node`.
+`[]gf.Node` becomes a fragment, so no wrapper element is added.
+
+This makes Go-native list helpers usable directly in children:
+
+```gox
+<ul>
+    {gf.For(items, func(item Item) gf.Node {
+        return gf.Component("ItemRow", ItemRowProps{Item: item}, ItemRow)
+    })}
+</ul>
+```
+
+## Fragments
+
+Fragments group sibling nodes without creating an HTML wrapper:
+
+```gox
+<>
+    <h1>Hello</h1>
+    <p>World</p>
+</>
+```
+
+Generated shape:
+
+```go
+gf.Fragment(
+    gf.El("h1", nil, gf.Text("Hello")),
+    gf.El("p", nil, gf.Text("World")),
+)
+```
+
+The browser renderer uses a DOM `DocumentFragment`.
+
+## Expressions
+
+Child expressions use braces:
+
+```gox
+<p>Current value: {count.Get()}</p>
+```
+
+They generate `gf.Child(expression)`. Supported runtime values are:
+
+- `gf.Node`;
+- `[]gf.Node`;
+- strings, numbers, and booleans supported by `gf.ToString`.
+
+Attribute and component prop expressions are inserted as normal Go
+expressions:
+
+```gox
+<Button OnClick={func() {
+    count.Set(count.Get() + 1)
+}} />
+```
+
+## Conditional and list rendering
+
+GOX intentionally does not define template-specific `if` or `for` syntax.
+Use the runtime helpers inside normal expressions:
+
+```gox
+<main>
+    {gf.If(ready, ReadyView())}
+    {gf.IfElse(len(items) == 0, EmptyView(), ItemsView())}
+    {gf.For(items, func(item Item) gf.Node {
+        return gf.Key(item.ID,
+            gf.Component("ItemRow", ItemRowProps{Item: item}, ItemRow),
+        )
+    })}
+</main>
+```
+
+Available helpers:
+
+- `gf.Empty()` returns a renderable empty result;
+- `gf.If` and `gf.IfElse` select nodes;
+- `gf.For` and `gf.ForIndexed` return `[]gf.Node`;
+- `gf.Key` and `gf.WithKey` retain stable identity metadata.
+
+Keys provide stable sibling identity to the minimal DOM patch and component
+layers. A key around a `gf.Component` preserves that component instance,
+scoped state, and compatible mounted DOM range across removal and reorder.
+
+## Events and controlled inputs
+
+Common DOM props and event names support lowercase and exported-style forms:
+
+```gox
+<input
+    Type="text"
+    Value={text.Get()}
+    Placeholder="New task"
+    OnInput={func(event gf.InputEvent) {
+        text.Set(event.Value())
+    }}
+/>
+```
+
+Handlers may be `func()`, `func(gf.Event)`, or `func(gf.InputEvent)`.
+`gf.Event` exposes `PreventDefault` and `StopPropagation`.
+
+Controlled inputs retain their DOM node while their value is patched. A stable
+`ID` remains useful as a focus-restoration fallback when a node must be
+replaced.
+
+## Self-closing tags
+
+Both HTML elements and components may be self-closing:
+
+```gox
+<input />
+<br />
+<img src="logo.png" />
+<Button Label="OK" />
+```
+
+## Diagnostics
+
+Parser errors include filename, global line, column, description, and the
+relevant source line:
+
+```text
+examples/app.gox:12:18: expected closing tag </div>, got </main>
+  <div>Broken</main>
+```
+
+GOX also reports focused diagnostics for unclosed tags, invalid component
+names, spread props, and namespace tags.
+
+Go type errors, such as a missing props struct or invalid field type, are
+reported by the selected Go or TinyGo compiler after generation.
+
+## Current limitations
+
+GOX does not currently support:
+
+- dedicated loop or `if` statements inside markup; use `gf.For` and `gf.If`;
+- spread props;
+- component namespaces or dotted tags;
+- style objects;
+- advanced reconciliation, lifecycle, or effects;
+- async components;
+- routing;
+- SSR or hydration;
+- compile-time validation that a component function or props struct exists.
+
+Use normal Go before the return expression to prepare values and choose what a
+component receives.
