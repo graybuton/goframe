@@ -10,11 +10,23 @@ export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/goframe-tinygo-cache}"
 mkdir -p "$GOCACHE" "$XDG_CACHE_HOME"
 
+echo "== Artifact gate =="
+scripts/artifact-check.sh
+
+echo "== Module path gate =="
+scripts/module-path-check.sh
+
 echo "== Go formatting =="
 go fmt ./...
 
 echo "== Go tests =="
 go test ./...
+
+echo "== Debug-tag tests =="
+go test -tags=goframe_debug ./...
+
+echo "== GOX golden tests =="
+go test ./pkg/gox -run 'TestGolden|TestErrorGolden'
 
 echo "== Race tests =="
 go test -race ./pkg/... ./cmd/...

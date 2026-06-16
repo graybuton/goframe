@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jin-wu/goframe/pkg/gox"
+	"github.com/graybuton/goframe/pkg/gox"
 )
 
 type cleanOptions struct {

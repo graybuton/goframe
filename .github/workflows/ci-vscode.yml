@@ -1,0 +1,40 @@
+name: VS Code Extension
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  extension:
+    name: Compile GOX extension
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: extensions/vscode-gox
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: extensions/vscode-gox/package-lock.json
+
+      - name: Validate JSON
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('syntaxes/gox.tmLanguage.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('snippets/gox.code-snippets','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('language-configuration.json','utf8'))"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile

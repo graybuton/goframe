@@ -25,7 +25,7 @@ GoFrame Player     possible future host for portable .gfapp bundles
 Install the latest published toolchain:
 
 ```bash
-go install github.com/jin-wu/goframe/cmd/goxc@latest
+go install github.com/graybuton/goframe/cmd/goxc@latest
 ```
 
 Make sure `$(go env GOPATH)/bin` is in `PATH`, then verify the installation:
@@ -499,6 +499,14 @@ cd extensions/vscode-gox
 npm install
 npm run compile
 ```
+
+## CI and regression gates
+
+GitHub Actions run core Go/GOX checks, TinyGo WASM size budgets, browser smoke,
+and VS Code extension compile checks. Local source gates also verify that build
+artifacts are not tracked and that the module path remains canonical.
+
+See [CI and regression gates](docs/ci.md) and [release hygiene](docs/release.md).
 
 ## License
 
