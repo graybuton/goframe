@@ -1,0 +1,54 @@
+name: Browser Smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  TINYGO_VERSION: 0.41.1
+
+jobs:
+  browser-smoke:
+    name: Todo browser smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y brotli zstd curl
+
+      - name: Install TinyGo
+        run: |
+          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"
+          sudo apt-get install -y /tmp/tinygo.deb
+          tinygo version
+
+      - name: Install goxc
+        run: go install ./cmd/goxc
+
+      - name: Browser smoke
+        env:
+          CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: scripts/browser-smoke.sh
