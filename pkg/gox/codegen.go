@@ -36,11 +36,11 @@ func writeNode(output *bytes.Buffer, node Node, depth int) error {
 		fmt.Fprintf(output, "gf.Text(%s)", strconv.Quote(html.UnescapeString(value)))
 		return nil
 	case *Expression:
-		if strings.TrimSpace(node.Code) == "" {
+		code := strings.TrimSpace(node.Code)
+		if code == "" {
 			return fmt.Errorf("gox: empty child expression")
 		}
-		fmt.Fprintf(output, "gf.Child(%s)", node.Code)
-		return nil
+		return writeChildExpression(output, code, depth)
 	default:
 		return fmt.Errorf("gox: unsupported AST node %T", node)
 	}
@@ -50,62 +50,74 @@ func writeComponent(output *bytes.Buffer, component *Element, depth int) error {
 	if !validGoIdentifier(component.Tag) {
 		return fmt.Errorf("gox: invalid component name %q", component.Tag)
 	}
+	key, attributes, err := splitKeyAttribute(component.Attributes)
+	if err != nil {
+		return err
+	}
 
-	fmt.Fprintf(output, "gf.Component(%q, %sProps{\n", component.Tag, component.Tag)
-	for _, attribute := range component.Attributes {
+	var body bytes.Buffer
+
+	fmt.Fprintf(&body, "gf.Component(%q, %sProps{\n", component.Tag, component.Tag)
+	for _, attribute := range attributes {
 		if !validGoIdentifier(attribute.Name) {
 			return fmt.Errorf("gox: component prop %q must be a Go field name", attribute.Name)
 		}
-		writeIndent(output, depth+1)
-		fmt.Fprintf(output, "%s: ", attribute.Name)
-		if err := writeAttributeValue(output, attribute); err != nil {
+		writeIndent(&body, depth+1)
+		fmt.Fprintf(&body, "%s: ", attribute.Name)
+		if err := writeAttributeValue(&body, attribute); err != nil {
 			return err
 		}
-		output.WriteString(",\n")
+		body.WriteString(",\n")
 	}
 	if hasRenderableChildren(component.Children) {
-		writeIndent(output, depth+1)
-		output.WriteString("Children: []gf.Node{\n")
-		if err := writeChildren(output, component.Children, depth+2); err != nil {
+		writeIndent(&body, depth+1)
+		body.WriteString("Children: []gf.Node{\n")
+		if err := writeChildren(&body, component.Children, depth+2); err != nil {
 			return err
 		}
-		writeIndent(output, depth+1)
-		output.WriteString("},\n")
+		writeIndent(&body, depth+1)
+		body.WriteString("},\n")
 	}
-	writeIndent(output, depth)
-	fmt.Fprintf(output, "}, %s)", component.Tag)
-	return nil
+	writeIndent(&body, depth)
+	fmt.Fprintf(&body, "}, %s)", component.Tag)
+	return writeKeyed(output, key, body.Bytes(), depth)
 }
 
 func writeElement(output *bytes.Buffer, element *Element, depth int) error {
-	fmt.Fprintf(output, "gf.El(%q, ", element.Tag)
-	if len(element.Attributes) == 0 {
-		output.WriteString("nil")
+	key, attributes, err := splitKeyAttribute(element.Attributes)
+	if err != nil {
+		return err
+	}
+
+	var body bytes.Buffer
+	fmt.Fprintf(&body, "gf.El(%q, ", element.Tag)
+	if len(attributes) == 0 {
+		body.WriteString("nil")
 	} else {
-		output.WriteString("gf.Props{\n")
-		for _, attribute := range element.Attributes {
-			writeIndent(output, depth+1)
-			fmt.Fprintf(output, "%q: ", attribute.Name)
-			if err := writeAttributeValue(output, attribute); err != nil {
+		body.WriteString("gf.Props{\n")
+		for _, attribute := range attributes {
+			writeIndent(&body, depth+1)
+			fmt.Fprintf(&body, "%q: ", attribute.Name)
+			if err := writeAttributeValue(&body, attribute); err != nil {
 				return err
 			}
-			output.WriteString(",\n")
+			body.WriteString(",\n")
 		}
-		writeIndent(output, depth)
-		output.WriteString("}")
+		writeIndent(&body, depth)
+		body.WriteString("}")
 	}
 
 	if hasRenderableChildren(element.Children) {
-		output.WriteString(",\n")
-		if err := writeChildren(output, element.Children, depth+1); err != nil {
+		body.WriteString(",\n")
+		if err := writeChildren(&body, element.Children, depth+1); err != nil {
 			return err
 		}
 	} else {
-		output.WriteString(",\n")
+		body.WriteString(",\n")
 	}
-	writeIndent(output, depth)
-	output.WriteString(")")
-	return nil
+	writeIndent(&body, depth)
+	body.WriteString(")")
+	return writeKeyed(output, key, body.Bytes(), depth)
 }
 
 func writeFragment(output *bytes.Buffer, children []Node, depth int) error {
@@ -151,6 +163,161 @@ func writeAttributeValue(output *bytes.Buffer, attribute Attribute) error {
 	default:
 		return fmt.Errorf("gox: unsupported value for attribute %q", attribute.Name)
 	}
+	return nil
+}
+
+func writeChildExpression(output *bytes.Buffer, code string, depth int) error {
+	if rendered, ok, err := lowerRenderExpression(code, depth); err != nil {
+		return err
+	} else if ok {
+		output.WriteString(rendered)
+		return nil
+	}
+
+	rewritten, err := rewriteMarkupInGo(code)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(output, "gf.Child(%s)", rewritten)
+	return nil
+}
+
+func lowerRenderExpression(code string, depth int) (string, bool, error) {
+	if condition, thenCode, elseCode, ok, err := splitTernaryExpression(code); err != nil {
+		return "", false, err
+	} else if ok {
+		thenNode, thenOK, err := codegenNodeExpression(thenCode, depth)
+		if err != nil {
+			return "", false, err
+		}
+		elseNode, elseOK, err := codegenNodeExpression(elseCode, depth)
+		if err != nil {
+			return "", false, err
+		}
+		if !thenOK || !elseOK {
+			return "", false, fmt.Errorf("gox: ternary render branches must be GOX nodes")
+		}
+		return "gf.IfElse(" + strings.TrimSpace(condition) + ", " + thenNode + ", " + elseNode + ")", true, nil
+	}
+
+	if condition, nodeCode, ok := splitRenderAndExpression(code); ok {
+		node, nodeOK, err := codegenNodeExpression(nodeCode, depth)
+		if err != nil {
+			return "", false, err
+		}
+		if nodeOK {
+			return "gf.If(" + strings.TrimSpace(condition) + ", " + node + ")", true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func codegenNodeExpression(code string, depth int) (string, bool, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return "", false, nil
+	}
+	if inner, ok := unwrapOuterParens(code); ok {
+		return codegenNodeExpression(inner, depth)
+	}
+	if code[0] != '<' {
+		return "", false, nil
+	}
+
+	node, consumed, err := ParseElement(code)
+	if err != nil {
+		return "", false, err
+	}
+	if strings.TrimSpace(code[consumed:]) != "" {
+		return "", false, fmt.Errorf("gox: unexpected text after GOX node expression")
+	}
+	var output bytes.Buffer
+	if err := writeNode(&output, node, depth); err != nil {
+		return "", false, err
+	}
+	return output.String(), true, nil
+}
+
+func rewriteMarkupInGo(code string) (string, error) {
+	var output bytes.Buffer
+	cursor := 0
+	searchFrom := 0
+	replaced := false
+	for {
+		start := findMarkupStart(code, searchFrom)
+		if start < 0 {
+			break
+		}
+		node, consumed, err := ParseElement(code[start:])
+		if err != nil {
+			return "", err
+		}
+		generated, err := Codegen(node)
+		if err != nil {
+			return "", err
+		}
+		replaceStart, replaceEnd := unwrapReturnParentheses(code, start, start+consumed)
+		output.WriteString(code[cursor:replaceStart])
+		output.WriteString(generated)
+		cursor = replaceEnd
+		searchFrom = cursor
+		replaced = true
+	}
+	if !replaced {
+		return code, nil
+	}
+	output.WriteString(code[cursor:])
+	return output.String(), nil
+}
+
+func splitKeyAttribute(attributes []Attribute) (string, []Attribute, error) {
+	filtered := make([]Attribute, 0, len(attributes))
+	key := ""
+	for _, attribute := range attributes {
+		if attribute.Name != "Key" {
+			filtered = append(filtered, attribute)
+			continue
+		}
+		if key != "" {
+			return "", nil, fmt.Errorf("gox: duplicate Key prop")
+		}
+		keyCode, err := keyCode(attribute.Value)
+		if err != nil {
+			return "", nil, err
+		}
+		key = keyCode
+	}
+	return key, filtered, nil
+}
+
+func keyCode(value AttributeValue) (string, error) {
+	switch value := value.(type) {
+	case StringValue:
+		return strconv.Quote(html.UnescapeString(value.Value)), nil
+	case ExpressionValue:
+		code := strings.TrimSpace(value.Code)
+		if code == "" {
+			return "", fmt.Errorf("gox: Key requires a value")
+		}
+		return "gf.ToString(" + code + ")", nil
+	case BoolValue:
+		return "", fmt.Errorf("gox: Key requires a value")
+	default:
+		return "", fmt.Errorf("gox: unsupported Key value")
+	}
+}
+
+func writeKeyed(output *bytes.Buffer, key string, body []byte, depth int) error {
+	if key == "" {
+		output.Write(body)
+		return nil
+	}
+	fmt.Fprintf(output, "gf.Key(%s,\n", key)
+	writeIndent(output, depth+1)
+	output.Write(body)
+	output.WriteString(",\n")
+	writeIndent(output, depth)
+	output.WriteString(")")
 	return nil
 }
 

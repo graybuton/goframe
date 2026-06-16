@@ -1,0 +1,15 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(condition bool, count int) gf.Node {
+	return (
+		<section>
+			{condition ? (
+				<p>{count} item(s)</p>
+			) : (
+				<p>empty</p>
+			)}
+		</section>
+	)
+}

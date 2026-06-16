@@ -1,0 +1,20 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type RowProps struct {
+	Label string
+}
+
+func Row(props RowProps) gf.Node {
+	return <li>{props.Label}</li>
+}
+
+func View(id int, label string) gf.Node {
+	return (
+		<ul>
+			<li Key={id}>{label}</li>
+			<Row Key="static-row" Label={label} />
+		</ul>
+	)
+}

@@ -89,6 +89,42 @@ func TestMatchChildIndices(t *testing.T) {
 	}
 }
 
+func TestConditionalSiblingPatchDecisionsPreserveStableNodes(t *testing.T) {
+	oldNodes := []Node{
+		If(true, El("p", Props{"class": "summary"}, Child(2), Text(" task(s)"))),
+		If(true, Component("Button", struct{}{}, func(struct{}) Node { return El("button", nil) })),
+		Component("TodoList", struct{}{}, func(struct{}) Node { return El("ul", nil) }),
+	}
+	newNodes := []Node{
+		If(true, El("p", Props{"class": "summary"}, Child(1), Text(" task(s)"))),
+		If(false, Component("Button", struct{}{}, func(struct{}) Node { return El("button", nil) })),
+		Component("TodoList", struct{}{}, func(struct{}) Node { return El("ul", nil) }),
+	}
+
+	oldKeys := make([]string, len(oldNodes))
+	for index, node := range oldNodes {
+		oldKeys[index], oldNodes[index] = unwrapNode(node)
+	}
+	newKeys := make([]string, len(newNodes))
+	for index, node := range newNodes {
+		newKeys[index], newNodes[index] = unwrapNode(node)
+	}
+
+	matches := matchChildIndices(oldKeys, newKeys)
+	if !reflect.DeepEqual(matches, []int{0, 1, 2}) {
+		t.Fatalf("matches = %v, want [0 1 2]", matches)
+	}
+	if !sameNodeIdentity(oldNodes[matches[0]], newNodes[0]) {
+		t.Fatal("summary true->true should patch the existing <p>")
+	}
+	if sameNodeIdentity(oldNodes[matches[1]], newNodes[1]) {
+		t.Fatal("reverse button true->false should replace with empty placeholder")
+	}
+	if !sameNodeIdentity(oldNodes[matches[2]], newNodes[2]) {
+		t.Fatal("TodoList true->true should patch the existing component")
+	}
+}
+
 func TestSplitPropsNormalizesDOMAndEvents(t *testing.T) {
 	dom, events := splitProps(Props{
 		"ClassName":   "primary",

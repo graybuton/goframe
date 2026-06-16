@@ -26,7 +26,7 @@ func Button(props ButtonProps) gf.Node {
 }
 
 func App() gf.Node {
-	count := gf.UseState(0)
+	count, setCount := gf.UseState(0)
 
 	return (
 		<>
@@ -35,9 +35,11 @@ func App() gf.Node {
 			</header>
 			<main>
 				<Card Title="Counter">
-					<p>Current value: {count.Get()}</p>
+					{(count > 0) && (
+						<p>Current value: {count}</p>
+					)}
 					<Button Label="Increment" OnClick={func() {
-						count.Set(count.Get() + 1)
+						setCount(count + 1)
 					}} />
 				</Card>
 			</main>

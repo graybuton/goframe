@@ -13,12 +13,12 @@ func TestGenerateCounter(t *testing.T) {
 import gf "github.com/jin-wu/goframe/pkg/goframe"
 
 func App() gf.Node {
-	count := gf.UseState(0)
+	count, setCount := gf.UseState(0)
 	return (
 		<div class="app">
-			<h1>Counter: {count.Get()}</h1>
+			<h1>Counter: {count}</h1>
 			<button onClick={func() {
-				count.Set(count.Get() + 1)
+				setCount(count + 1)
 			}}>Increment</button>
 		</div>
 	)
@@ -37,7 +37,7 @@ func App() gf.Node {
 	for _, want := range []string{
 		`gf.El("div", gf.Props{`,
 		`"class": "app"`,
-		`gf.Child(count.Get())`,
+		`gf.Child(count)`,
 		`"onClick": func()`,
 		`gf.Text("Increment")`,
 	} {

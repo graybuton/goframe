@@ -51,6 +51,12 @@ The MVP component model deliberately delegates type checking to Go:
 - component children populate `Children []gf.Node`;
 - fragments generate `gf.Fragment`;
 - child expressions generate `gf.Child`.
+- GOX render expressions such as `condition && <Node />` and
+  `condition ? <A /> : <B />` lower to runtime conditional primitives.
+- `Key={...}` is a pseudo-prop that lowers to `gf.Key` instead of entering
+  component props or DOM attributes.
+- nested GOX markup in callback `return` expressions is rewritten before the
+  generated Go is formatted.
 
 Component bodies remain ordinary typed Go functions. The generated boundary
 lets the runtime defer their call, preserve component identity, own state
@@ -134,20 +140,22 @@ TinyGo is the preferred lightweight experiment. It supports a smaller runtime
 surface but dramatically reduces the counter:
 
 ```text
-counter main.wasm     77,606 bytes
-components main.wasm  82,907 bytes
-todo main.wasm        109,836 bytes
+counter main.wasm     77,890 bytes
+components main.wasm  83,159 bytes
+todo main.wasm        109,483 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
 instrumentation only under the `goframe_debug` build tag. MVP 9 adds lifecycle
-hooks with about 1 KiB of runtime growth on the smaller examples. Todo is
-larger because it also demonstrates compact localStorage persistence.
+hooks with about 1 KiB of runtime growth on the smaller examples. MVP 10 adds
+GOX expression ergonomics without meaningful raw WASM growth. Todo is larger
+than Counter because it also demonstrates compact localStorage persistence.
 
-The repository includes `scripts/size-budget.sh` as a regression gate for
-packaged TinyGo examples. `scripts/perf-report.sh` runs pure runtime
-benchmarks plus the same size budgets, and `scripts/browser-smoke.sh` runs the
-optional headless Chrome regression probes.
+The repository includes `scripts/size-budget.sh` as a regression gate for raw,
+gzip, brotli, and optional zstd packaged TinyGo examples.
+`scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
+budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
+regression probes.
 
 The current target keeps TinyGo's scheduler enabled because the example and
 browser event runtime keep `main` alive. A scheduler-free profile requires a
@@ -204,7 +212,8 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
   error-boundary model.
 - No automatic props memoization; descendants rerender with their parent.
 - Duplicate key diagnostics are debug-only.
-- No GOX-specific loops or inline conditionals; use Go-native helpers.
+- GOX has expression-oriented conditional rendering, but no template-block
+  loops/conditionals, spread props, or component namespaces.
 - No spread props or component namespaces.
 - No routing, SSR, hydration, or accessibility abstraction.
 - TinyGo compatibility is experimental and feature-dependent.

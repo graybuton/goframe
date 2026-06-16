@@ -254,7 +254,29 @@
           "include": "#go-braces"
         },
         {
+          "include": "#gox-render-operators"
+        },
+        {
+          "include": "#markup"
+        },
+        {
           "include": "source.go"
+        }
+      ]
+    },
+    "gox-render-operators": {
+      "patterns": [
+        {
+          "match": "&&",
+          "name": "keyword.operator.logical.gox"
+        },
+        {
+          "match": "\\?",
+          "name": "keyword.operator.ternary.gox"
+        },
+        {
+          "match": ":",
+          "name": "keyword.operator.ternary.gox"
         }
       ]
     },
@@ -265,6 +287,12 @@
       "patterns": [
         {
           "include": "#go-braces"
+        },
+        {
+          "include": "#gox-render-operators"
+        },
+        {
+          "include": "#markup"
         },
         {
           "include": "source.go"

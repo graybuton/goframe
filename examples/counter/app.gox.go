@@ -5,18 +5,18 @@ package main
 import gf "github.com/jin-wu/goframe/pkg/goframe"
 
 func App() gf.Node {
-	count := gf.UseState(0)
+	count, setCount := gf.UseState(0)
 
 	return gf.El("div", gf.Props{
 		"class": "app",
 	},
 		gf.El("h1", nil,
 			gf.Text("Counter: "),
-			gf.Child(count.Get()),
+			gf.Child(count),
 		),
 		gf.El("button", gf.Props{
 			"onClick": func() {
-				count.Set(count.Get() + 1)
+				setCount(count + 1)
 			},
 		},
 			gf.Text("Increment"),

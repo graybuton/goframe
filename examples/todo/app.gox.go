@@ -64,15 +64,15 @@ type TodoFormProps struct {
 }
 
 func TodoForm(props TodoFormProps) gf.Node {
-	text := gf.UseState("")
+	text, setText := gf.UseState("")
 
 	addTodo := func() {
-		value := strings.TrimSpace(text.Get())
+		value := strings.TrimSpace(text)
 		if value == "" {
 			return
 		}
 		props.OnAdd(value)
-		text.Set("")
+		setText("")
 	}
 
 	return gf.El("form", gf.Props{
@@ -85,10 +85,10 @@ func TodoForm(props TodoFormProps) gf.Node {
 		gf.El("input", gf.Props{
 			"ID":          "todo-input",
 			"Type":        "text",
-			"Value":       text.Get(),
+			"Value":       text,
 			"Placeholder": "What needs to be done?",
 			"OnInput": func(event gf.InputEvent) {
-				text.Set(event.Value())
+				setText(event.Value())
 			},
 		},
 		),
@@ -177,12 +177,14 @@ func TodoList(props TodoListProps) gf.Node {
 		"ID":    "todo-list",
 		"class": "todo-list",
 	},
-		gf.Child(gf.For(props.Items, func(todo Todo) gf.Node {
-			return gf.Key(gf.ToString(todo.ID), gf.Component("TodoItem", TodoItemProps{
-				Todo:     todo,
-				OnToggle: props.OnToggle,
-				OnRemove: props.OnRemove,
-			}, TodoItem))
+		gf.Child(gf.Map(props.Items, func(todo Todo) gf.Node {
+			return gf.Key(gf.ToString(todo.ID),
+				gf.Component("TodoItem", TodoItemProps{
+					Todo:     todo,
+					OnToggle: props.OnToggle,
+					OnRemove: props.OnRemove,
+				}, TodoItem),
+			)
 		})),
 	)
 }
@@ -190,20 +192,20 @@ func TodoList(props TodoListProps) gf.Node {
 type TodoAppProps struct{}
 
 func TodoApp(props TodoAppProps) gf.Node {
-	todos := gf.UseState([]Todo{})
-	nextID := gf.UseState(1)
+	todos, setTodos := gf.UseState([]Todo{})
+	nextID, setNextID := gf.UseState(1)
 
-	gf.UseMount(func() gf.Cleanup {
+	gf.UseEffect(func() gf.Cleanup {
 		if raw, ok := localStorageGet(todoStorageKey); ok {
 			stored := decodeTodos(raw)
 			todoSkipNextPersist = true
-			todos.Set(stored)
-			nextID.Set(nextTodoID(stored))
+			setTodos(stored)
+			setNextID(nextTodoID(stored))
 		}
 		return nil
 	})
 
-	encodedTodos := encodeTodos(todos.Get())
+	encodedTodos := encodeTodos(todos)
 	gf.UseEffect(func() gf.Cleanup {
 		if todoSkipNextPersist {
 			todoSkipNextPersist = false
@@ -211,46 +213,43 @@ func TodoApp(props TodoAppProps) gf.Node {
 		}
 		localStorageSet(todoStorageKey, encodedTodos)
 		return nil
-	}, gf.DepsOf(gf.DepString(encodedTodos)))
+	}, gf.Deps(encodedTodos))
 
 	addTodo := func(value string) {
-		next := append([]Todo(nil), todos.Get()...)
-		next = append(next, Todo{ID: nextID.Get(), Text: value})
-		todos.Set(next)
-		nextID.Set(nextID.Get() + 1)
+		next := append([]Todo(nil), todos...)
+		next = append(next, Todo{ID: nextID, Text: value})
+		setTodos(next)
+		setNextID(nextID + 1)
 	}
 
 	toggleTodo := func(id int) {
-		current := todos.Get()
-		next := make([]Todo, len(current))
-		copy(next, current)
+		next := make([]Todo, len(todos))
+		copy(next, todos)
 		for index := range next {
 			if next[index].ID == id {
 				next[index].Done = !next[index].Done
 				break
 			}
 		}
-		todos.Set(next)
+		setTodos(next)
 	}
 
 	removeTodo := func(id int) {
-		current := todos.Get()
-		next := make([]Todo, 0, len(current))
-		for _, todo := range current {
+		next := make([]Todo, 0, len(todos))
+		for _, todo := range todos {
 			if todo.ID != id {
 				next = append(next, todo)
 			}
 		}
-		todos.Set(next)
+		setTodos(next)
 	}
 
 	reverseTodos := func() {
-		current := todos.Get()
-		next := make([]Todo, len(current))
-		for index := range current {
-			next[len(current)-1-index] = current[index]
+		next := make([]Todo, len(todos))
+		for index := range todos {
+			next[len(todos)-1-index] = todos[index]
 		}
-		todos.Set(next)
+		setTodos(next)
 	}
 
 	return gf.El("main", gf.Props{
@@ -267,23 +266,22 @@ func TodoApp(props TodoAppProps) gf.Node {
 		gf.Component("Card", CardProps{
 			Title: "Tasks",
 			Children: []gf.Node{
-				gf.Child(gf.If(len(todos.Get()) > 0, gf.El("p", gf.Props{
+				gf.If((len(todos) > 0), gf.El("p", gf.Props{
 					"class": "summary",
-				}, gf.Text(gf.ToString(len(todos.Get()))+" task(s)")))),
-				gf.Child(gf.If(len(todos.Get()) > 1, gf.Component("Button", ButtonProps{
+				},
+					gf.Child(len(todos)),
+					gf.Text(" task(s)"),
+				)),
+				gf.If((len(todos) > 1), gf.Component("Button", ButtonProps{
 					Label:   "Reverse tasks",
 					Type:    "button",
 					OnClick: reverseTodos,
-				}, Button))),
-				gf.Child(gf.IfElse(
-					len(todos.Get()) == 0,
-					gf.Component("EmptyState", EmptyStateProps{}, EmptyState),
-					gf.Component("TodoList", TodoListProps{
-						Items:    todos.Get(),
-						OnToggle: toggleTodo,
-						OnRemove: removeTodo,
-					}, TodoList),
-				)),
+				}, Button)),
+				gf.IfElse((len(todos) == 0), gf.Component("EmptyState", EmptyStateProps{}, EmptyState), gf.Component("TodoList", TodoListProps{
+					Items:    todos,
+					OnToggle: toggleTodo,
+					OnRemove: removeTodo,
+				}, TodoList)),
 			},
 		}, Card),
 	)

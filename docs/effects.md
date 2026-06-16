@@ -14,38 +14,39 @@ browser update instead of mutating the tree during render.
 ```go
 type Cleanup func()
 
-func UseMount(effect func() Cleanup)
 func UseUnmount(cleanup Cleanup)
-func UseEffect(effect func() Cleanup, deps Deps)
+func UseEffect(effect func() Cleanup, deps ...EffectDeps)
+
+type EffectDeps struct {
+    // internal lightweight representation
+}
 ```
 
-Dependencies are explicit comparable values:
+`UseEffect(fn)` runs once after mount. Dependencies are explicit primitive
+values:
 
 ```go
-func NoDeps() Deps
-func AlwaysDeps() Deps
-func DepsOf(values ...Dep) Deps
-
-func DepString(value string) Dep
-func DepBool(value bool) Dep
-func DepInt(value int) Dep
-func DepInt64(value int64) Dep
-func DepUint(value uint) Dep
-func DepUint64(value uint64) Dep
-func DepFloat64(value float64) Dep
+func Deps(values ...any) EffectDeps
+func Once() EffectDeps
+func EveryRender() EffectDeps
 ```
 
-The runtime intentionally does not accept `[]any` dependencies and does not use
-reflection or deep equality. Complex values should be reduced to explicit
-strings, counters, IDs, or other primitive dependency values by the
-application.
+`Deps` accepts strings, booleans, signed and unsigned integer types, floats,
+and nil. Unsupported dependency types panic during render with a focused
+message. The runtime intentionally does not use reflection or deep equality.
+Complex values should be reduced to strings, counters, IDs, versions, or other
+primitive dependency values by the application.
 
-## UseMount
+Deprecated compatibility helpers (`UseMount`, `NoDeps`, `AlwaysDeps`,
+`DepsOf`, and `Dep*`) may remain during the experimental cleanup period, but
+new code should use the API above.
 
-`UseMount` runs once after the component instance is first mounted:
+## Run Once After Mount
+
+Call `UseEffect` without dependencies:
 
 ```go
-gf.UseMount(func() gf.Cleanup {
+gf.UseEffect(func() gf.Cleanup {
     println("mounted")
     return func() {
         println("unmounted")
@@ -68,24 +69,30 @@ gf.UseUnmount(func() {
 
 The latest cleanup registered at that hook position runs on unmount.
 
-## UseEffect
+## Dependency Effects
 
 `UseEffect` runs after mount and after explicit dependency changes:
 
 ```go
-value := text.Get()
+value := text
 
 gf.UseEffect(func() gf.Cleanup {
     documentTitleSet("Todo: " + value)
     return nil
-}, gf.DepsOf(gf.DepString(value)))
+}, gf.Deps(value))
 ```
 
 When dependencies change, the previous cleanup runs before the next effect
 body. The latest cleanup also runs on unmount.
 
-`NoDeps()` means run once after mount. `AlwaysDeps()` means run after every
-component render.
+`gf.EveryRender()` means run after every component render:
+
+```go
+gf.UseEffect(func() gf.Cleanup {
+    println("rendered")
+    return nil
+}, gf.EveryRender())
+```
 
 ## Cleanup Timing
 
@@ -129,7 +136,7 @@ priority scheduler.
 
 The Todo example uses effects to persist tasks:
 
-- `UseMount` loads compact localStorage state after first mount;
+- `UseEffect(fn)` loads compact localStorage state after first mount;
 - `UseEffect` writes localStorage only when the encoded todo list changes;
 - encoding lives in the example, not in `pkg/goframe`, so the runtime does not
   import `encoding/json`.

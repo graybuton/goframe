@@ -5,8 +5,7 @@ type stateSlot struct {
 	owner *componentInstance
 }
 
-// State is a handle to one persistent component-owned state slot.
-type State[T any] struct {
+type stateHandle[T any] struct {
 	slot *stateSlot
 }
 
@@ -29,9 +28,15 @@ func (batch *updateBatch) reset() {
 	batch.pending = false
 }
 
-// UseState returns the state slot at the current component render position.
-// Calls to UseState must stay in the same order between component renders.
-func UseState[T any](initial T) *State[T] {
+// UseState returns the state value at the current component render position
+// and a setter that marks the owning component dirty. Calls to UseState must
+// stay in the same order between component renders.
+func UseState[T any](initial T) (T, func(T)) {
+	state := useState(initial)
+	return state.get(), state.set
+}
+
+func useState[T any](initial T) stateHandle[T] {
 	instance := currentComponent
 	if instance == nil {
 		panic("goframe: UseState must be called during component render")
@@ -49,11 +54,10 @@ func UseState[T any](initial T) *State[T] {
 	if _, ok := slotValue[T](slot); !ok {
 		panic("goframe: UseState type changed between component renders")
 	}
-	return &State[T]{slot: slot}
+	return stateHandle[T]{slot: slot}
 }
 
-// Get returns the current state value.
-func (state *State[T]) Get() T {
+func (state stateHandle[T]) get() T {
 	value, ok := slotValue[T](state.slot)
 	if !ok {
 		panic("goframe: state contains an unexpected value type")
@@ -61,9 +65,7 @@ func (state *State[T]) Get() T {
 	return value
 }
 
-// Set updates the state, marks its owner component dirty, and requests a
-// batched patch of that component subtree.
-func (state *State[T]) Set(value T) {
+func (state stateHandle[T]) set(value T) {
 	owner := state.slot.owner
 	if owner == nil || !owner.active {
 		reportStateSetAfterUnmount(ownerDebugName(owner))

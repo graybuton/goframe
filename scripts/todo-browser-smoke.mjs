@@ -7,24 +7,29 @@ if (typeof WebSocket === "undefined") {
     throw new Error("WebSocket is unavailable; run Node with --experimental-websocket");
 }
 
-const appURL = process.argv[2] ?? "http://127.0.0.1:18080/";
+const appURL = process.argv[2] ?? process.env.GOFRAME_TODO_SMOKE_URL ?? "http://127.0.0.1:18080/";
 const debugPort = Number(process.env.GOFRAME_CHROME_DEBUG_PORT ?? "19222");
 const chrome = process.env.CHROME ?? "google-chrome";
 const profile = await mkdtemp(join(tmpdir(), "goframe-todo-smoke-"));
+const expectedApp = new URL(appURL);
 const browser = spawn(chrome, [
     "--headless",
     "--no-sandbox",
     "--disable-gpu",
     `--remote-debugging-port=${debugPort}`,
     `--user-data-dir=${profile}`,
-    appURL,
+    "about:blank",
 ], {
     stdio: ["ignore", "ignore", "pipe"],
 });
 
 let browserError = "";
+let browserExit = null;
 browser.stderr.on("data", (chunk) => {
     browserError += chunk;
+});
+browser.on("exit", (code, signal) => {
+    browserExit = { code, signal };
 });
 
 try {
@@ -32,7 +37,12 @@ try {
     const client = await connect(page.webSocketDebuggerUrl);
     await client.call("Runtime.enable");
     await client.call("Page.enable");
-    await wait(800);
+
+    await navigateToApp(client, withSmokeParam(appURL, "initial"));
+    await waitForAppPage(client, expectedApp, "initial navigation");
+    await clearClientStorage(client, expectedApp);
+    await navigateToApp(client, withSmokeParam(appURL, "clean"));
+    await waitForAppPage(client, expectedApp, "post-clean navigation");
 
     assertDeepEqual(
         await client.evaluate(`(() => {
@@ -119,13 +129,13 @@ try {
         await client.evaluate(`(() => {
             window.__todo1 = document.querySelector("#todo-1");
             window.__todo2 = document.querySelector("#todo-2");
-            window.__summaryText = document.querySelector(".summary").firstChild;
+            window.__summaryNode = document.querySelector(".summary");
             return {
                 inputSame: window.__input === document.querySelector("#todo-input"),
                 headerSame: window.__header === document.querySelector(".site-header"),
                 text: document.querySelector("#todo-1 .todo-text")?.textContent,
                 order: [...document.querySelectorAll(".todo-item")].map((node) => node.id),
-                summary: window.__summaryText.nodeValue,
+                summary: window.__summaryNode?.textContent,
                 headerRenders: window.goframeComponentRenderCounts.Header,
             };
         })()`),
@@ -184,7 +194,7 @@ try {
         await client.evaluate(`({
             order: [...document.querySelectorAll(".todo-item")].map((node) => node.id),
             todo2Same: window.__todo2 === document.querySelector("#todo-2"),
-            summaryNodeSame: window.__summaryText === document.querySelector(".summary").firstChild,
+            summaryNodeSame: window.__summaryNode === document.querySelector(".summary"),
             summary: document.querySelector(".summary").textContent,
             inputSame: window.__input === document.querySelector("#todo-input"),
             headerSame: window.__header === document.querySelector(".site-header"),
@@ -204,7 +214,7 @@ try {
 
     const persisted = await client.evaluate(`localStorage.getItem("goframe.todo.items")`);
     if (typeof persisted !== "string" || !persisted.includes("B")) {
-        throw new Error(`todo persistence: got ${JSON.stringify(persisted)}, want stored todo text`);
+        throw new Error(`APP FAILURE: todo persistence: got ${JSON.stringify(persisted)}, want stored todo text`);
     }
     console.log("todo persistence write: ok");
 
@@ -227,6 +237,39 @@ try {
     browser.kill("SIGTERM");
     await Promise.race([exited, wait(2000)]);
     await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+async function clearClientStorage(client) {
+    await ensureAppPage(client, expectedApp, "before storage cleanup");
+    const result = await client.evaluate(`(async () => {
+        const result = {
+            href: window.location.href,
+            origin: window.location.origin,
+            protocol: window.location.protocol,
+            ok: false,
+            error: "",
+        };
+        try {
+            window.localStorage.clear();
+            window.sessionStorage.clear();
+            if (window.caches) {
+                const keys = await window.caches.keys();
+                await Promise.all(keys.map((key) => window.caches.delete(key)));
+            }
+            if (window.navigator?.serviceWorker?.getRegistrations) {
+                const registrations = await window.navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map((registration) => registration.unregister()));
+            }
+            result.ok = true;
+            return result;
+        } catch (error) {
+            result.error = error.name + ": " + error.message;
+            return result;
+        }
+    })()`);
+    if (!result.ok) {
+        throw await harnessFailure(client, "storage cleanup failed", result);
+    }
 }
 
 async function addTodo(client, text) {
@@ -258,9 +301,12 @@ async function submitTodo(client) {
 async function waitForPage(port) {
     let lastError;
     for (let attempt = 0; attempt < 50; attempt++) {
+        if (browserExit) {
+            throw new Error(`HARNESS FAILURE: Chrome exited before CDP page was available: ${JSON.stringify(browserExit)}\n${browserError}`);
+        }
         try {
-            const pages = await fetch(`http://127.0.0.1:${port}/json`).then((response) => response.json());
-            const page = pages.find((entry) => entry.type === "page");
+            const pages = await fetchTargets(port);
+            const page = pages.find((entry) => entry.type === "page" && entry.webSocketDebuggerUrl);
             if (page) {
                 return page;
             }
@@ -269,7 +315,112 @@ async function waitForPage(port) {
         }
         await wait(100);
     }
-    throw new Error(`Chrome DevTools did not become ready: ${lastError ?? browserError}`);
+    throw new Error(`HARNESS FAILURE: Chrome DevTools did not become ready: ${lastError ?? browserError}`);
+}
+
+async function fetchTargets(port) {
+    const response = await fetch(`http://127.0.0.1:${port}/json`);
+    if (!response.ok) {
+        throw new Error(`CDP /json returned HTTP ${response.status}`);
+    }
+    return await response.json();
+}
+
+async function navigateToApp(client, url) {
+    await client.call("Page.navigate", { url });
+}
+
+async function waitForAppPage(client, expected, label) {
+    let lastState = null;
+    for (let attempt = 0; attempt < 80; attempt++) {
+        lastState = await pageState(client);
+        if (lastState.href.startsWith("chrome-error://")) {
+            throw await harnessFailure(client, `${label}: Chrome loaded an error document`, lastState);
+        }
+        if (isExpectedAppState(lastState, expected) && lastState.root && lastState.appReady && lastState.storage === "available") {
+            return lastState;
+        }
+        await wait(100);
+    }
+    throw await harnessFailure(client, `${label}: app page did not become ready`, lastState);
+}
+
+async function ensureAppPage(client, expected, label) {
+    const state = await pageState(client);
+    if (!isExpectedAppState(state, expected) || !state.root || !state.appReady || state.storage !== "available") {
+        throw await harnessFailure(client, `${label}: wrong page or unavailable origin storage`, state);
+    }
+}
+
+async function pageState(client) {
+    return await client.evaluate(`(() => {
+        let storage = "available";
+        try {
+            window.localStorage.length;
+        } catch (error) {
+            storage = error.name + ": " + error.message;
+        }
+        return {
+            href: window.location.href,
+            origin: window.location.origin,
+            protocol: window.location.protocol,
+            readyState: document.readyState,
+            root: Boolean(document.querySelector("#root")),
+            appReady: Boolean(document.querySelector("#todo-input") && window.goframeComponentRenderCounts?.App),
+            storage,
+        };
+    })()`);
+}
+
+function isExpectedAppState(state, expected) {
+    if (!state || (state.protocol !== "http:" && state.protocol !== "https:")) {
+        return false;
+    }
+    try {
+        const actual = new URL(state.href);
+        return actual.origin === expected.origin && actual.pathname === expected.pathname;
+    } catch {
+        return false;
+    }
+}
+
+async function harnessFailure(client, message, detail) {
+    const diagnostics = await collectDiagnostics(client);
+    return new Error(`HARNESS FAILURE: ${message}\n${JSON.stringify({ appURL, debugPort, detail, diagnostics }, null, 2)}`);
+}
+
+async function collectDiagnostics(client) {
+    const diagnostics = { targets: [], page: null };
+    try {
+        diagnostics.targets = (await fetchTargets(debugPort)).map((target) => ({
+            id: target.id,
+            type: target.type,
+            url: target.url,
+            title: target.title,
+        }));
+    } catch (error) {
+        diagnostics.targetsError = error.message;
+    }
+    if (client) {
+        try {
+            diagnostics.page = await pageState(client);
+        } catch (error) {
+            diagnostics.pageError = error.message;
+        }
+    }
+    if (browserExit) {
+        diagnostics.browserExit = browserExit;
+    }
+    if (browserError) {
+        diagnostics.browserStderr = browserError.slice(-4000);
+    }
+    return diagnostics;
+}
+
+function withSmokeParam(url, label) {
+    const next = new URL(url);
+    next.searchParams.set("smoke", `${Date.now()}-${label}`);
+    return next.toString();
 }
 
 async function connect(url) {
@@ -321,7 +472,7 @@ async function connect(url) {
 
 function assertDeepEqual(actual, expected, label) {
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-        throw new Error(`${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+        throw new Error(`APP FAILURE: ${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
     }
     console.log(`${label}: ok`);
 }

@@ -1,0 +1,7 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(id int) gf.Node {
+	return <p Key={id} Key="again">Broken</p>
+}

@@ -1,0 +1,7 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(count int) gf.Node {
+	return <p>{count} item(s)</p>
+}
