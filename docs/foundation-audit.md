@@ -39,11 +39,17 @@ Foundation Hardening II then closed two runtime risks:
 
 MVP 9 closes the next lifecycle foundation gap:
 
-- component-scoped `UseMount`, `UseUnmount`, and `UseEffect`;
+- component-scoped `UseEffect` and `UseUnmount`, with `UseMount` retained as a
+  deprecated compatibility alias;
 - explicit primitive dependency helpers without reflection;
 - cleanup on component unmount/replacement;
 - debug-only warnings for Set-after-unmount and Set-during-render;
 - a small debug guard for effect-triggered update loops.
+
+MVP 10 is a language/API cleanup rather than a new runtime feature. It changes
+the canonical state/effect surface to tuple state and optional effect deps,
+adds expression-oriented GOX conditional rendering, adds `Key={...}` as a
+pseudo-prop, and keeps low-level constructors as generated-code primitives.
 
 ## Architecture Review
 
@@ -120,6 +126,11 @@ GOX remains deliberately small:
 - Children become `Children: []gf.Node{...}`.
 - Expressions become `gf.Child(expr)`.
 - Fragments generate `gf.Fragment`.
+- GOX render expressions lower `condition && <Node />` to `gf.If`.
+- GOX ternary render expressions lower `condition ? <A /> : <B />` to
+  `gf.IfElse`.
+- `Key={...}` lowers to `gf.Key` and is removed from props/attributes.
+- Nested callback returns can contain GOX markup.
 
 Golden tests cover simple elements, component props, component children,
 fragments, helper expressions, keyed items/components, nested components, input
@@ -189,13 +200,16 @@ Run:
 scripts/size-budget.sh
 ```
 
+The budget gate also checks gzip and brotli delivery sizes and optional zstd
+when the `zstd` tool is installed.
+
 Measured during the foundation audit:
 
 | Example | TinyGo WASM |
 |---|---:|
-| Counter | 77,606 B |
-| Components | 82,907 B |
-| Todo | 109,836 B |
+| Counter | 77,890 B |
+| Components | 83,159 B |
+| Todo | 109,483 B |
 
 Counter and Components show the approximate runtime cost of MVP 9 lifecycle
 hooks. Todo includes example-level localStorage persistence and compact string

@@ -73,7 +73,14 @@ boundary creates another state scope.
 
 During component render, the runtime tracks the current component and resets
 its state-slot index. `gf.UseState(initial)` reads or creates the next slot in
-that component. Slots survive later renders of the same instance.
+that component and returns the current value plus a setter:
+
+```go
+count, setCount := gf.UseState(0)
+setCount(count + 1)
+```
+
+Slots survive later renders of the same instance.
 
 ```text
 current component
@@ -182,34 +189,36 @@ and DOM operations is the regression proxy.
 
 ## Lifecycle and effects
 
-MVP 9 adds component-scoped lifecycle slots next to state slots:
+MVP 9 adds component-scoped lifecycle slots next to state slots. MVP 10 makes
+the public API terser:
 
 ```go
-gf.UseMount(func() gf.Cleanup { ... })
+gf.UseEffect(func() gf.Cleanup { ... })
+gf.UseEffect(func() gf.Cleanup { ... }, gf.Deps(value, count))
+gf.UseEffect(func() gf.Cleanup { ... }, gf.EveryRender())
 gf.UseUnmount(func() { ... })
-gf.UseEffect(func() gf.Cleanup { ... }, gf.DepsOf(...))
 ```
 
 Lifecycle hooks are collected during component render and flushed only after
 the mounted DOM subtree has been patched. Effects therefore do not run while
 the runtime is building the virtual tree.
 
-`UseMount` runs once after the component instance is first mounted. Its cleanup
-runs on unmount. `UseUnmount` registers cleanup-only work. `UseEffect` runs
-after mount and after explicit dependency changes; previous cleanup runs before
-the next effect body and again on unmount.
+`UseEffect(fn)` runs once after the component instance is first mounted. Its
+cleanup runs on unmount. `UseUnmount` registers cleanup-only work.
+`UseEffect(fn, gf.Deps(...))` runs after mount and after explicit dependency
+changes; previous cleanup runs before the next effect body and again on
+unmount. `UseEffect(fn, gf.EveryRender())` runs after every component render.
 
 Dependencies are intentionally explicit and lightweight:
 
 ```go
-gf.NoDeps()
-gf.AlwaysDeps()
-gf.DepsOf(gf.DepString(value), gf.DepInt(count))
+gf.Deps(value, count)
+gf.EveryRender()
 ```
 
-The runtime does not accept arbitrary values and does not use
-`reflect.DeepEqual`. Applications reduce complex values to primitive
-dependency tokens.
+The runtime accepts primitive dependency values through a type switch and does
+not use `reflect.DeepEqual`. Unsupported complex values panic during render;
+applications reduce them to primitive dependency tokens.
 
 Unmount cleanup is tied to the existing reconciliation paths: conditional
 removal, keyed list removal, key/name replacement, fragment subtree removal,

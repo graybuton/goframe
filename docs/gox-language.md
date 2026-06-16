@@ -97,7 +97,7 @@ type CardProps struct {
 
 ```gox
 <Card Title="Stats">
-    <p>Counter: {count.Get()}</p>
+    <p>Counter: {count}</p>
 </Card>
 ```
 
@@ -109,7 +109,7 @@ gf.Component("Card", CardProps{
     Children: []gf.Node{
         gf.El("p", nil,
             gf.Text("Counter: "),
-            gf.Child(count.Get()),
+            gf.Child(count),
         ),
     },
 }, Card)
@@ -130,8 +130,8 @@ This makes Go-native list helpers usable directly in children:
 
 ```gox
 <ul>
-    {gf.For(items, func(item Item) gf.Node {
-        return gf.Component("ItemRow", ItemRowProps{Item: item}, ItemRow)
+    {gf.Map(items, func(item Item) gf.Node {
+        return <ItemRow Key={item.ID} Item={item} />
     })}
 </ul>
 ```
@@ -163,7 +163,7 @@ The browser renderer uses a DOM `DocumentFragment`.
 Child expressions use braces:
 
 ```gox
-<p>Current value: {count.Get()}</p>
+<p>Current value: {count}</p>
 ```
 
 They generate `gf.Child(expression)`. Supported runtime values are:
@@ -177,33 +177,120 @@ expressions:
 
 ```gox
 <Button OnClick={func() {
-    count.Set(count.Get() + 1)
+    setCount(count + 1)
 }} />
 ```
 
-## Conditional and list rendering
+GOX expressions may contain nested GOX markup inside Go callbacks when that
+markup appears in a return expression:
 
-GOX intentionally does not define template-specific `if` or `for` syntax.
-Use the runtime helpers inside normal expressions:
+```gox
+{gf.Map(items, func(item Item) gf.Node {
+    if item.Hidden {
+        return <></>
+    }
+    return <ItemRow Key={item.ID} Item={item} />
+})}
+```
+
+The compiler rewrites the nested `return <ItemRow />` into normal generated Go.
+
+## Conditional rendering
+
+GOX intentionally does not define template-block `if` syntax. Instead it adds
+two JSX-like render expressions inside child expression braces.
+
+`condition && <Node />` renders a node only when the condition is true:
 
 ```gox
 <main>
-    {gf.If(ready, ReadyView())}
-    {gf.IfElse(len(items) == 0, EmptyView(), ItemsView())}
-    {gf.For(items, func(item Item) gf.Node {
-        return gf.Key(item.ID,
-            gf.Component("ItemRow", ItemRowProps{Item: item}, ItemRow),
-        )
-    })}
+    {ready && <ReadyView />}
+    {(len(items) > 0) && (
+        <p>{len(items)} item(s)</p>
+    )}
 </main>
 ```
 
-Available helpers:
+Generated shape:
 
-- `gf.Empty()` returns a renderable empty result;
-- `gf.If` and `gf.IfElse` select nodes;
-- `gf.For` and `gf.ForIndexed` return `[]gf.Node`;
-- `gf.Key` and `gf.WithKey` retain stable identity metadata.
+```go
+gf.If(ready, gf.Component("ReadyView", ReadyViewProps{}, ReadyView))
+```
+
+Ordinary Go boolean expressions remain ordinary child expressions when the
+right-hand side is not GOX markup:
+
+```gox
+{ready && active}
+```
+
+```go
+gf.Child(ready && active)
+```
+
+`condition ? nodeA : nodeB` selects one of two GOX node branches:
+
+```gox
+{len(items) == 0 ? (
+    <EmptyState />
+) : (
+    <ItemList Items={items} />
+)}
+```
+
+Generated shape:
+
+```go
+gf.IfElse(
+    len(items) == 0,
+    gf.Component("EmptyState", EmptyStateProps{}, EmptyState),
+    gf.Component("ItemList", ItemListProps{Items: items}, ItemList),
+)
+```
+
+Both ternary branches must be GOX node expressions, components, elements,
+fragments, or parenthesized GOX node expressions. This is GOX syntax, not a
+general Go ternary operator.
+
+## List rendering
+
+Lists stay Go-native through helper functions:
+
+```gox
+{gf.Map(items, func(item Item) gf.Node {
+    return <ItemRow Key={item.ID} Item={item} />
+})}
+```
+
+`gf.MapIndexed` also provides the item index:
+
+```gox
+{gf.MapIndexed(items, func(index int, item Item) gf.Node {
+    return <li Key={index}>{item.Label}</li>
+})}
+```
+
+`gf.For` and `gf.ForIndexed` still exist as deprecated runtime aliases for
+generated-code-like Go. New examples and docs should prefer `gf.Map` and
+`gf.MapIndexed`.
+
+## Keys
+
+`Key` is a GOX pseudo-prop:
+
+```gox
+<TodoItem Key={todo.ID} Todo={todo} />
+<li Key="static-row">{label}</li>
+```
+
+It is not passed into component props and is not emitted as an HTML attribute.
+Generated code wraps the node:
+
+```go
+gf.Key(gf.ToString(todo.ID),
+    gf.Component("TodoItem", TodoItemProps{Todo: todo}, TodoItem),
+)
+```
 
 Keys provide stable sibling identity to the minimal DOM patch and component
 layers. A key around a `gf.Component` preserves that component instance,
@@ -216,10 +303,10 @@ Common DOM props and event names support lowercase and exported-style forms:
 ```gox
 <input
     Type="text"
-    Value={text.Get()}
+    Value={text}
     Placeholder="New task"
     OnInput={func(event gf.InputEvent) {
-        text.Set(event.Value())
+        setText(event.Value())
     }}
 />
 ```
@@ -262,7 +349,9 @@ reported by the selected Go or TinyGo compiler after generation.
 
 GOX does not currently support:
 
-- dedicated loop or `if` statements inside markup; use `gf.For` and `gf.If`;
+- dedicated template-block loop or `if` statements inside markup; use GOX
+  render expressions and Go callbacks with `gf.Map`;
+- arbitrary JavaScript-like expressions, arrow functions, or `items.map(...)`;
 - spread props;
 - component namespaces or dotted tags;
 - style objects;

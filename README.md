@@ -134,23 +134,54 @@ primitive values, a `gf.Node`, or `[]gf.Node`.
 Calling `Button(ButtonProps{...})` directly remains valid Go, but it is an
 ordinary function call and does not create component identity.
 
+GOX render expressions keep UI code close to JSX ergonomics without turning
+GOX into a separate template language:
+
+```gox
+{ready && <ReadyView />}
+
+{len(items) == 0 ? (
+    <EmptyState />
+) : (
+    <ItemList Items={items} />
+)}
+```
+
+List rendering stays Go-native, but callbacks may return GOX markup:
+
+```gox
+{gf.Map(items, func(item Item) gf.Node {
+    return <ItemRow Key={item.ID} Item={item} />
+})}
+```
+
+`Key={...}` is a GOX pseudo-prop. It is not passed into component props and is
+not emitted as an HTML attribute; generated code lowers it to `gf.Key`.
+
 See [GOX language](docs/gox-language.md) and the
 [components example](examples/components/README.md).
 
 ## Application primitives
 
-GOX keeps control flow in Go. Runtime helpers make common render choices
-concise without adding a second template language:
+State uses component-scoped slots and returns the current value plus a setter:
 
 ```go
-gf.If(show, node)
-gf.IfElse(show, thenNode, elseNode)
-gf.For(items, func(item Item) gf.Node { ... })
-gf.ForIndexed(items, func(index int, item Item) gf.Node { ... })
+count, setCount := gf.UseState(0)
+setCount(count + 1)
 ```
 
-`gf.Empty()` is a nil-safe empty result. `gf.Key("item-1", node)` provides
-stable identity for keyed child reuse and movement.
+GOX keeps control flow in Go. The preferred user-facing list helpers are:
+
+```go
+gf.Map(items, func(item Item) gf.Node { ... })
+gf.MapIndexed(items, func(index int, item Item) gf.Node { ... })
+```
+
+Low-level helpers such as `gf.Component`, `gf.El`, `gf.Child`, `gf.Key`,
+`gf.If`, `gf.IfElse`, `gf.For`, and `gf.ForIndexed` remain exported because
+generated `.gox.go` files use the public runtime package. Treat them as
+runtime/compiler primitives unless you are writing generated-code-like Go by
+hand.
 
 Browser props accept both lowercase and exported-style common names, including
 `value`/`Value`, `type`/`Type`, `placeholder`/`Placeholder`, and
@@ -167,18 +198,22 @@ func(gf.InputEvent)
 to the component instance currently rendering. State `Set` calls mark that
 owner dirty and are coalesced into one browser animation-frame update.
 
-MVP 9 adds minimal lifecycle hooks for component-owned side effects:
+MVP 9 adds minimal lifecycle hooks for component-owned side effects. MVP 10
+cleans up the public effect API:
 
 ```go
-gf.UseMount(func() gf.Cleanup { ... })
+gf.UseEffect(func() gf.Cleanup { ... })
+gf.UseEffect(func() gf.Cleanup { ... }, gf.Deps(value, count))
+gf.UseEffect(func() gf.Cleanup { ... }, gf.EveryRender())
 gf.UseUnmount(func() { ... })
-gf.UseEffect(func() gf.Cleanup { ... }, gf.DepsOf(gf.DepString(value)))
 ```
 
 Effects run after DOM patching, not during render. Cleanup runs on unmount and
-before an effect reruns. Dependencies are explicit primitive values; the
-runtime does not use reflection or deep equality. See
-[lifecycle and effects](docs/effects.md).
+before an effect reruns. `UseEffect(fn)` runs once after mount. Dependencies
+are explicit primitive values; unsupported dependency types panic with a clear
+message. The runtime does not use reflection or deep equality. `UseMount`
+remains as a deprecated alias for the once-after-mount shape. See [lifecycle
+and effects](docs/effects.md).
 
 The MVP patch layer updates text and props in place, keeps one stable listener
 per event name, patches unkeyed children positionally, and matches keyed
@@ -292,7 +327,8 @@ goxc size ./examples/counter/dist
 
 The command prefers `dist/`, then `build/`, when passed an application path.
 
-TinyGo package budgets can be checked after packaging the examples:
+TinyGo package budgets can be checked after packaging the examples. The gate
+checks raw WASM plus gzip, brotli, and optional zstd delivery sizes:
 
 ```bash
 scripts/size-budget.sh
@@ -364,22 +400,25 @@ Measured on June 16, 2026 with Go 1.24.4 and TinyGo 0.41.1:
 | Artifact | Bytes | Approximate size |
 |---|---:|---:|
 | Counter, Go `main.wasm` | 1,928,333 | 1.8 MiB |
-| Counter, TinyGo `main.wasm` | 77,606 | 75.8 KiB |
+| Counter, TinyGo `main.wasm` | 77,890 | 76.1 KiB |
+| Counter, TinyGo `main.wasm.br` | 25,965 | 25.4 KiB |
+| Counter, TinyGo `main.wasm.gz` | 30,850 | 30.1 KiB |
 | Components demo, Go `main.wasm` | 1,942,473 | 1.9 MiB |
-| Components demo, TinyGo `main.wasm` | 82,907 | 81.0 KiB |
+| Components demo, TinyGo `main.wasm` | 83,159 | 81.2 KiB |
+| Components demo, TinyGo `main.wasm.br` | 27,269 | 26.6 KiB |
+| Components demo, TinyGo `main.wasm.gz` | 32,785 | 32.0 KiB |
 | Todo demo, Go `main.wasm` | 2,007,086 | 1.9 MiB |
-| Todo demo, TinyGo `main.wasm` | 109,836 | 107.3 KiB |
+| Todo demo, TinyGo `main.wasm` | 109,483 | 106.9 KiB |
+| Todo demo, TinyGo `main.wasm.br` | 34,885 | 34.1 KiB |
+| Todo demo, TinyGo `main.wasm.gz` | 42,003 | 41.0 KiB |
 | Go `wasm_exec.js` | 16,992 | 16.6 KiB |
 | TinyGo `wasm_exec.js` | 16,715 | 16.3 KiB |
 
 MVP 8.1 removed `reflect.DeepEqual` and production debug probes from the
-runtime. MVP 9 adds lifecycle/effect hooks. Counter and Components grew by
-about 1 KiB, while Todo grew further because it now demonstrates compact
-localStorage persistence. Compared with the MVP 8 regression, TinyGo remains
-well below the `95 / 105 / 120 KiB` budgets at
-`77,606 / 82,907 / 109,836` bytes for counter, components, and Todo.
-Counter remains an integration probe rather than a representative application
-benchmark.
+runtime. MVP 9 adds lifecycle/effect hooks. MVP 10 keeps the runtime
+size-conscious while improving GOX expression ergonomics and adds compressed
+delivery budgets. Counter remains an integration probe rather than a
+representative application benchmark.
 
 ## Legacy CLI
 
@@ -414,12 +453,13 @@ required.
   positional within each component, so state/effect hook order must remain
   stable.
 - Lifecycle/effects are minimal; no context, error boundaries, async effects,
-  or priorities.
+  dependency inference, or priorities.
 - There is no automatic props memoization. Components encountered during a
   parent subtree update rerender.
 - Duplicate key diagnostics are debug-only and do not run in production builds.
-- GOX has no dedicated loop/conditional syntax or spread props; use Go-native
-  runtime helpers.
+- GOX has JSX-like render expressions for `condition && <Node />` and
+  `condition ? <A /> : <B />`, but no template-block `if`/`for`, spread props,
+  namespaces, or arbitrary JavaScript-like expression language.
 - No routing, SSR, hydration, CSS-in-Go, or hot reload.
 - TinyGo compatibility remains version- and feature-dependent.
 - The local server is for development, not production deployment.
