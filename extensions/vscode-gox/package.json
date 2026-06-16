@@ -1,0 +1,104 @@
+{
+  "name": "gox",
+  "displayName": "GOX Language Support",
+  "description": "Syntax highlighting, snippets, icons, and goxc commands for GoFrame GOX files.",
+  "version": "0.1.0",
+  "publisher": "goframe",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Other"
+  ],
+  "keywords": [
+    "go",
+    "gox",
+    "goframe",
+    "wasm",
+    "jsx"
+  ],
+  "activationEvents": [
+    "onCommand:gox.generate",
+    "onCommand:gox.package",
+    "onCommand:gox.serve",
+    "onCommand:gox.doctor"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "gox",
+        "aliases": [
+          "GOX",
+          "gox"
+        ],
+        "extensions": [
+          ".gox"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/gox-light.svg",
+          "dark": "./icons/gox-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "gox",
+        "scopeName": "source.gox",
+        "path": "./syntaxes/gox.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.go": "go",
+          "meta.embedded.inline.go": "go"
+        }
+      }
+    ],
+    "snippets": [
+      {
+        "language": "gox",
+        "path": "./snippets/gox.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "gox.generate",
+        "title": "GOX: Generate Current Project"
+      },
+      {
+        "command": "gox.package",
+        "title": "GOX: Package Current Project"
+      },
+      {
+        "command": "gox.serve",
+        "title": "GOX: Serve Current Project"
+      },
+      {
+        "command": "gox.doctor",
+        "title": "GOX: Run Doctor"
+      }
+    ],
+    "configuration": {
+      "title": "GOX",
+      "properties": {
+        "gox.goxcPath": {
+          "type": "string",
+          "default": "goxc",
+          "description": "Path or command name used to run the goxc toolchain."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.0"
+  }
+}

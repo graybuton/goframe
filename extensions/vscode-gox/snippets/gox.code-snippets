@@ -1,0 +1,70 @@
+{
+  "GOX App": {
+    "prefix": "goxapp",
+    "description": "Create a minimal GOX application component",
+    "body": [
+      "package main",
+      "",
+      "import gf \"github.com/jin-wu/goframe/pkg/goframe\"",
+      "",
+      "func App() gf.Node {",
+      "\treturn (",
+      "\t\t<main>",
+      "\t\t\t$0",
+      "\t\t</main>",
+      "\t)",
+      "}"
+    ]
+  },
+  "GOX Component": {
+    "prefix": "component",
+    "description": "Create a typed GOX function component",
+    "body": [
+      "type ${1:Button}Props struct {",
+      "\t${2:Label} string",
+      "}",
+      "",
+      "func ${1:Button}(props ${1:Button}Props) gf.Node {",
+      "\treturn (",
+      "\t\t<button>",
+      "\t\t\t{props.${2:Label}}",
+      "\t\t</button>",
+      "\t)",
+      "}"
+    ]
+  },
+  "GOX State": {
+    "prefix": "state",
+    "description": "Create a goframe state slot",
+    "body": [
+      "${1:count} := gf.UseState(${2:0})"
+    ]
+  },
+  "GOX Button Component": {
+    "prefix": "button",
+    "description": "Insert a Button component with an event handler",
+    "body": [
+      "<Button Label=\"${1:Click me}\" OnClick={func() {",
+      "\t$0",
+      "}} />"
+    ]
+  },
+  "GOX Card Component": {
+    "prefix": "card",
+    "description": "Insert a Card component with children",
+    "body": [
+      "<Card Title=\"${1:Title}\">",
+      "\t$0",
+      "</Card>"
+    ]
+  },
+  "GOX Fragment": {
+    "prefix": "fragment",
+    "description": "Insert a GOX fragment",
+    "body": [
+      "<>",
+      "\t$0",
+      "</>"
+    ]
+  }
+}
