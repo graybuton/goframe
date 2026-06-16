@@ -441,3 +441,9 @@ cd extensions/vscode-gox
 npm install
 npm run compile
 ```
+
+## License
+
+goframe is licensed under the Apache License, Version 2.0.
+
+See [LICENSE](LICENSE) and [NOTICE](NOTICE).

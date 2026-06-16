@@ -78,3 +78,7 @@ This MVP does not include an LSP, semantic highlighting, type-aware completion,
 inline `goxc` diagnostics, formatting, watch mode, debugger integration, or
 marketplace publishing. TextMate highlighting is intentionally heuristic and
 does not replace the GOX compiler.
+
+## License
+
+Apache-2.0. See the repository root LICENSE file.
