@@ -62,6 +62,30 @@ Expected TinyGo size is dashboard-sized but still below the MVP budget:
 - brotli <= 52 KiB;
 - zstd <= 60 KiB, when zstd is available.
 
+## Performance Notes
+
+`scripts/dashboard-browser-smoke.mjs` prints a non-gating performance report
+for each interaction. It separates:
+
+- component render deltas;
+- component patch deltas;
+- structural DOM operations;
+- MutationObserver records;
+- approximate action timing.
+
+Focus-only interaction is expected to produce zero runtime work. If the browser
+visually paints a focus ring while the report shows zero renders, patches, DOM
+ops, and mutations, that is browser paint rather than a GoFrame render.
+
+State ownership is intentionally visible in this example. `DashboardApp` owns
+the issue data and filters because metrics and the visible table derive from
+them. `IssueWorkspace` owns only row selection so selecting a row does not
+rerender `DashboardApp`, `MetricsGrid`, or `FilterBar`.
+
+Known remaining cost: without props memoization or table virtualization,
+updates inside `IssueWorkspace` can still rerender the visible rows. This is a
+useful pressure-test result, not something hidden by the example.
+
 ## Known Limitations
 
 - There is no router or URL state.
@@ -69,3 +93,5 @@ Expected TinyGo size is dashboard-sized but still below the MVP budget:
 - There is no virtualization; all 300 rows are real DOM rows.
 - GOX has no spread props, style objects, namespaces, or template loops.
 - Timing numbers printed by smoke are informational, not CI performance budgets.
+- There is no row virtualization or memoization, so full-table state changes
+  still visit rendered rows.

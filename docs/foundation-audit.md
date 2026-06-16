@@ -211,7 +211,7 @@ Measured during the foundation audit:
 | Counter | 77,890 B |
 | Components | 83,159 B |
 | Todo | 109,483 B |
-| Dashboard pressure test | 144,478 B |
+| Dashboard pressure test | 146,832 B |
 
 Counter and Components show the approximate runtime cost of MVP 9 lifecycle
 hooks. Todo includes example-level localStorage persistence and compact string

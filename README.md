@@ -422,9 +422,9 @@ Measured on June 16, 2026 with Go 1.24.4 and TinyGo 0.41.1:
 | Todo demo, TinyGo `main.wasm` | 109,483 | 106.9 KiB |
 | Todo demo, TinyGo `main.wasm.br` | 34,885 | 34.1 KiB |
 | Todo demo, TinyGo `main.wasm.gz` | 42,003 | 41.0 KiB |
-| Dashboard pressure test, TinyGo `main.wasm` | 144,478 | 141.1 KiB |
-| Dashboard pressure test, TinyGo `main.wasm.br` | 43,748 | 42.7 KiB |
-| Dashboard pressure test, TinyGo `main.wasm.gz` | 53,896 | 52.6 KiB |
+| Dashboard pressure test, TinyGo `main.wasm` | 146,832 | 143.4 KiB |
+| Dashboard pressure test, TinyGo `main.wasm.br` | 44,317 | 43.3 KiB |
+| Dashboard pressure test, TinyGo `main.wasm.gz` | 54,673 | 53.4 KiB |
 | Go `wasm_exec.js` | 16,992 | 16.6 KiB |
 | TinyGo `wasm_exec.js` | 16,715 | 16.3 KiB |
 

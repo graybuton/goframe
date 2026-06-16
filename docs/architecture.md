@@ -143,7 +143,7 @@ surface but dramatically reduces the counter:
 counter main.wasm     77,890 bytes
 components main.wasm  83,159 bytes
 todo main.wasm        109,483 bytes
-dashboard main.wasm   144,478 bytes
+dashboard main.wasm   146,832 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
