@@ -13,6 +13,24 @@ const chrome = process.env.CHROME ?? "google-chrome";
 const profile = await mkdtemp(join(tmpdir(), "goframe-dashboard-smoke-"));
 const expectedApp = new URL(appURL);
 const timings = [];
+const performanceReports = [];
+const componentNames = [
+    "App",
+    "Header",
+    "DashboardApp",
+    "DashboardShell",
+    "MetricsGrid",
+    "MetricCard",
+    "Card",
+    "FilterBar",
+    "SearchBox",
+    "IssueWorkspace",
+    "IssueTable",
+    "IssueRow",
+    "DetailPanel",
+    "EmptyDetail",
+    "Button",
+];
 
 const browser = spawn(chrome, [
     "--headless",
@@ -82,9 +100,23 @@ try {
         "dashboard initial render",
     );
 
+    assertDeepEqual(
+        await client.evaluate(installDashboardAuditExpression(componentNames)),
+        { ready: true },
+        "dashboard performance audit installed",
+    );
+
+    await startScenario(client, "focus-search");
+    await client.evaluate(`document.querySelector("#dashboard-search").focus()`);
+    await wait(120);
+    const focusReport = await finishScenario(client, "focus-search");
+    assertFocusOnlyReport(focusReport);
+
+    await startScenario(client, "search-billing");
     const searchStart = Date.now();
     await setInputValue(client, "#dashboard-search", "billing");
     timings.push({ step: "search-update", ms: Date.now() - searchStart });
+    const searchReport = await finishScenario(client, "search-billing");
     const searchState = await client.evaluate(`(() => {
         const rows = document.querySelectorAll(".issue-row").length;
         const summary = document.querySelector("[data-testid='visible-summary']")?.textContent.trim();
@@ -118,10 +150,12 @@ try {
         "dashboard search updates visible rows without replacing header/search",
     );
 
+    await startScenario(client, "row-select");
     const selectStart = Date.now();
     await client.evaluate(`document.querySelector(".issue-row .row-link").click()`);
     await wait(120);
     timings.push({ step: "selection-update", ms: Date.now() - selectStart });
+    const selectReport = await finishScenario(client, "row-select");
     const selected = await client.evaluate(`(() => {
         const first = document.querySelector(".issue-row");
         return {
@@ -137,8 +171,10 @@ try {
         "dashboard row selection updates detail only",
     );
 
+    await startScenario(client, "clear-search");
     await setInputValue(client, "#dashboard-search", "");
     await wait(120);
+    const clearSearchReport = await finishScenario(client, "clear-search");
     windowlessAssert(
         await client.evaluate(`(() => {
             window.__dashboardRow1 = document.querySelector("#issue-row-1");
@@ -150,9 +186,11 @@ try {
         "APP FAILURE: dashboard reset before sort did not restore 300 visible rows",
     );
 
+    await startScenario(client, "sort-priority");
     const sortStart = Date.now();
     await setSelectValue(client, "#sort-mode", "priority");
     timings.push({ step: "sort-update", ms: Date.now() - sortStart });
+    const sortReport = await finishScenario(client, "sort-priority");
     const sorted = await client.evaluate(`(() => {
         const after = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
         return {
@@ -168,7 +206,9 @@ try {
         "dashboard sort reorders keyed rows without replacing survivors",
     );
 
+    await startScenario(client, "status-blocked");
     await setSelectValue(client, "#status-filter", "blocked");
+    const statusReport = await finishScenario(client, "status-blocked");
     const filtered = await client.evaluate(`(() => {
         const rows = document.querySelectorAll(".issue-row").length;
         return {
@@ -186,19 +226,25 @@ try {
         "dashboard status filter updates table predictably",
     );
 
+    await startScenario(client, "reset-before-simulate");
     await clickButtonByText(client, "Reset");
     await wait(120);
+    const resetBeforeSimulateReport = await finishScenario(client, "reset-before-simulate");
     const beforeEvents = await metricValue(client, "Events");
+    await startScenario(client, "simulate-update");
     await clickButtonByText(client, "Simulate update");
     await wait(120);
+    const simulateReport = await finishScenario(client, "simulate-update");
     const afterEvents = await metricValue(client, "Events");
     if (!(afterEvents > beforeEvents)) {
         throw new Error(`APP FAILURE: simulate update did not increase events: before ${beforeEvents}, after ${afterEvents}`);
     }
     console.log("dashboard simulate update changes metrics: ok");
 
+    await startScenario(client, "reset-final");
     await clickButtonByText(client, "Reset");
     await wait(120);
+    const resetReport = await finishScenario(client, "reset-final");
     assertDeepEqual(
         await client.evaluate(`(() => ({
             rows: document.querySelectorAll(".issue-row").length,
@@ -219,6 +265,17 @@ try {
 
     client.close();
     console.log(`Dashboard timing report: ${JSON.stringify(timings)}`);
+    console.log(`Dashboard performance report: ${JSON.stringify([
+        focusReport,
+        searchReport,
+        selectReport,
+        clearSearchReport,
+        sortReport,
+        statusReport,
+        resetBeforeSimulateReport,
+        simulateReport,
+        resetReport,
+    ])}`);
     console.log("Dashboard browser smoke: ok");
 } finally {
     const exited = new Promise((resolve) => browser.once("exit", resolve));
@@ -293,6 +350,33 @@ async function metricValue(client, label) {
         }
         return -1;
     })()`);
+}
+
+async function startScenario(client, label) {
+    await client.evaluate(`(() => {
+        const audit = window.__dashboardAudit;
+        if (!audit) return false;
+        audit.start(${JSON.stringify(label)});
+        return true;
+    })()`);
+}
+
+async function finishScenario(client, label) {
+    const report = await client.evaluate(`(() => window.__dashboardAudit.finish(${JSON.stringify(label)}))()`);
+    performanceReports.push(report);
+    console.log(`dashboard perf ${label}: ${JSON.stringify(report)}`);
+    return report;
+}
+
+function assertFocusOnlyReport(report) {
+    const nonZeroRenders = Object.entries(report.renderDeltas).filter(([, value]) => value !== 0);
+    const nonZeroPatches = Object.entries(report.patchDeltas).filter(([, value]) => value !== 0);
+    const nonZeroOperations = Object.entries(report.operations).filter(([, value]) => value !== 0);
+    const nonZeroMutations = Object.entries(report.mutations).filter(([, value]) => value !== 0);
+    if (nonZeroRenders.length || nonZeroPatches.length || nonZeroOperations.length || nonZeroMutations.length) {
+        throw new Error(`APP FAILURE: focus-only should not trigger runtime work: ${JSON.stringify(report)}`);
+    }
+    console.log("dashboard focus-only does not trigger runtime work: ok");
 }
 
 async function waitForPage(port) {
@@ -482,4 +566,157 @@ function windowlessAssert(value, predicate, message) {
 
 function wait(duration) {
     return new Promise((resolve) => setTimeout(resolve, duration));
+}
+
+function emptyOperations() {
+    return {
+        createElement: 0,
+        createTextNode: 0,
+        appendChild: 0,
+        removeChild: 0,
+        replaceChild: 0,
+        insertBefore: 0,
+        setTextNodeValue: 0,
+        setAttribute: 0,
+        removeAttribute: 0,
+        setProperty: 0,
+        addEventListener: 0,
+        removeEventListener: 0,
+    };
+}
+
+function emptyMutations() {
+    return {
+        rootChildList: 0,
+        header: 0,
+        metrics: 0,
+        filters: 0,
+        table: 0,
+        detail: 0,
+    };
+}
+
+function installDashboardAuditExpression(names) {
+    return `(() => {
+        if (window.__dashboardAudit) return { ready: true };
+
+        const operations = ${JSON.stringify(emptyOperations())};
+        const mutations = ${JSON.stringify(emptyMutations())};
+        const componentNames = ${JSON.stringify(names)};
+        const audit = {
+            operations,
+            mutations,
+            baseline: null,
+            startedAt: 0,
+            label: "",
+            start(label) {
+                this.label = label;
+                this.startedAt = performance.now();
+                for (const key of Object.keys(this.operations)) this.operations[key] = 0;
+                for (const key of Object.keys(this.mutations)) this.mutations[key] = 0;
+                this.baseline = snapshotCounts(componentNames);
+            },
+            finish(label) {
+                const next = snapshotCounts(componentNames);
+                const renderDeltas = {};
+                const patchDeltas = {};
+                for (const name of componentNames) {
+                    renderDeltas[name] = next.renders[name] - this.baseline.renders[name];
+                    patchDeltas[name] = next.patches[name] - this.baseline.patches[name];
+                }
+                return {
+                    label,
+                    durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
+                    renderDeltas,
+                    patchDeltas,
+                    operations: { ...this.operations },
+                    mutations: { ...this.mutations },
+                    rows: document.querySelectorAll(".issue-row").length,
+                    summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+                };
+            },
+        };
+
+        const wrap = (owner, name, counter) => {
+            const original = owner[name];
+            owner[name] = function(...args) {
+                operations[counter]++;
+                return original.apply(this, args);
+            };
+        };
+        wrap(Document.prototype, "createElement", "createElement");
+        wrap(Document.prototype, "createTextNode", "createTextNode");
+        wrap(Node.prototype, "appendChild", "appendChild");
+        wrap(Node.prototype, "removeChild", "removeChild");
+        wrap(Node.prototype, "replaceChild", "replaceChild");
+        wrap(Node.prototype, "insertBefore", "insertBefore");
+        wrap(Element.prototype, "setAttribute", "setAttribute");
+        wrap(Element.prototype, "removeAttribute", "removeAttribute");
+        wrap(EventTarget.prototype, "addEventListener", "addEventListener");
+        wrap(EventTarget.prototype, "removeEventListener", "removeEventListener");
+
+        const nodeValue = Object.getOwnPropertyDescriptor(Node.prototype, "nodeValue");
+        Object.defineProperty(Node.prototype, "nodeValue", {
+            configurable: nodeValue.configurable,
+            enumerable: nodeValue.enumerable,
+            get: nodeValue.get,
+            set(value) {
+                operations.setTextNodeValue++;
+                return nodeValue.set.call(this, value);
+            },
+        });
+        const inputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+        Object.defineProperty(HTMLInputElement.prototype, "value", {
+            configurable: inputValue.configurable,
+            enumerable: inputValue.enumerable,
+            get: inputValue.get,
+            set(value) {
+                operations.setProperty++;
+                return inputValue.set.call(this, value);
+            },
+        });
+        const selectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+        Object.defineProperty(HTMLSelectElement.prototype, "value", {
+            configurable: selectValue.configurable,
+            enumerable: selectValue.enumerable,
+            get: selectValue.get,
+            set(value) {
+                operations.setProperty++;
+                return selectValue.set.call(this, value);
+            },
+        });
+
+        const observe = (selector, key, options) => {
+            const node = document.querySelector(selector);
+            if (!node) return;
+            new MutationObserver((records) => {
+                if (key === "rootChildList") {
+                    mutations[key] += records.filter((record) => record.type === "childList").length;
+                    return;
+                }
+                mutations[key] += records.length;
+            }).observe(node, options);
+        };
+        observe("#root", "rootChildList", { childList: true });
+        observe("[data-testid='dashboard-header']", "header", { childList: true, subtree: true, attributes: true, characterData: true });
+        observe("[data-testid='metrics-grid']", "metrics", { childList: true, subtree: true, attributes: true, characterData: true });
+        observe("[data-testid='filter-bar']", "filters", { childList: true, subtree: true, attributes: true, characterData: true });
+        observe("[data-testid='issue-table']", "table", { childList: true, subtree: true, attributes: true, characterData: true });
+        observe("[data-testid='detail-panel']", "detail", { childList: true, subtree: true, attributes: true, characterData: true });
+
+        window.__dashboardAudit = audit;
+        return { ready: true };
+
+        function snapshotCounts(names) {
+            const renderCounts = window.goframeComponentRenderCounts || {};
+            const patchCounts = window.goframeComponentPatchCounts || {};
+            const renders = {};
+            const patches = {};
+            for (const name of names) {
+                renders[name] = renderCounts[name] || 0;
+                patches[name] = patchCounts[name] || 0;
+            }
+            return { renders, patches };
+        }
+    })()`;
 }
