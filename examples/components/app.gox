@@ -1,0 +1,63 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type HeaderProps struct {
+	Title string
+}
+
+func Header(props HeaderProps) gf.Node {
+	return (
+		<header class="site-header">
+			<h1>{props.Title}</h1>
+			<p>Capitalized GOX tags call typed Go components.</p>
+		</header>
+	)
+}
+
+type ButtonProps struct {
+	Label   string
+	OnClick func()
+}
+
+func Button(props ButtonProps) gf.Node {
+	return (
+		<button class="button" type="button" onClick={props.OnClick}>
+			{props.Label}
+		</button>
+	)
+}
+
+type CardProps struct {
+	Title    string
+	Children []gf.Node
+}
+
+func Card(props CardProps) gf.Node {
+	return (
+		<section class="card">
+			<h2>{props.Title}</h2>
+			<div class="card-body">
+				{props.Children}
+			</div>
+		</section>
+	)
+}
+
+func App() gf.Node {
+	count := gf.UseState(0)
+
+	return (
+		<>
+			<Header Title="GoFrame Components Demo" />
+			<main class="page">
+				<Card Title="Counter">
+					<p>Current value: {count.Get()}</p>
+					<Button Label="Increment" OnClick={func() {
+						count.Set(count.Get() + 1)
+					}} />
+				</Card>
+			</main>
+		</>
+	)
+}

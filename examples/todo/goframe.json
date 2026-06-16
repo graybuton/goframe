@@ -1,0 +1,11 @@
+{
+  "name": "todo",
+  "entry": ".",
+  "output": "dist",
+  "compiler": "tinygo",
+  "wasm": "main.wasm",
+  "assets": [
+    "index.html",
+    "service-worker.js"
+  ]
+}

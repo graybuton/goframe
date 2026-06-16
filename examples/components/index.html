@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>goframe components</title>
+    <style>
+        :root {
+            color: #172033;
+            font-family: system-ui, sans-serif;
+            background: #f2f5fa;
+        }
+        body { margin: 0; }
+        .site-header {
+            color: white;
+            background: #172033;
+            padding: 2rem max(1.5rem, calc((100vw - 52rem) / 2));
+        }
+        .site-header h1, .site-header p { margin: 0; }
+        .site-header p { margin-top: 0.5rem; color: #bac8e8; }
+        .page { max-width: 52rem; margin: 2rem auto; padding: 0 1.5rem; }
+        .card {
+            background: white;
+            border: 1px solid #dbe2ef;
+            border-radius: 0.75rem;
+            box-shadow: 0 0.5rem 1.5rem rgb(23 32 51 / 8%);
+            padding: 1.5rem;
+        }
+        .card h2 { margin-top: 0; }
+        .card-body { display: grid; gap: 1rem; }
+        .card-body p { margin: 0; font-size: 1.25rem; }
+        .button {
+            width: fit-content;
+            border: 0;
+            border-radius: 0.5rem;
+            color: white;
+            background: #356ae6;
+            font: inherit;
+            padding: 0.65rem 1rem;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="root">Loading...</div>
+    <script>
+        const runtimeScript = document.createElement("script");
+        runtimeScript.src = "wasm_exec.js";
+        runtimeScript.onload = async () => {
+            const go = new Go();
+            const result = await WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject);
+            go.run(result.instance);
+        };
+        document.head.appendChild(runtimeScript);
+    </script>
+</body>
+</html>

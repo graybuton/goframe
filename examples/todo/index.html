@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>goframe todo</title>
+    <style>
+        :root {
+            color: #172033;
+            font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+            background: #eef3f8;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+        button, input { font: inherit; }
+        .site-header {
+            color: white;
+            background: linear-gradient(135deg, #172033, #185a75);
+            padding: 2.5rem max(1.25rem, calc((100vw - 44rem) / 2));
+        }
+        .site-header h1, .site-header p { margin: 0; }
+        .eyebrow {
+            color: #99def0;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            margin-bottom: 0.4rem !important;
+            text-transform: uppercase;
+        }
+        .page {
+            display: grid;
+            gap: 1rem;
+            max-width: 44rem;
+            margin: 1.5rem auto;
+            padding: 0 1.25rem 3rem;
+        }
+        .card {
+            background: white;
+            border: 1px solid #d9e3ec;
+            border-radius: 0.8rem;
+            box-shadow: 0 0.8rem 2rem rgb(23 32 51 / 8%);
+            padding: 1.25rem;
+        }
+        .card h2 { margin: 0 0 1rem; }
+        .card-body { display: grid; gap: 0.75rem; }
+        .todo-form {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 0.6rem;
+        }
+        input {
+            min-width: 0;
+            border: 1px solid #b8c7d5;
+            border-radius: 0.5rem;
+            padding: 0.7rem 0.8rem;
+        }
+        input:focus { outline: 2px solid #48a8c4; outline-offset: 1px; }
+        .button, .todo-toggle {
+            border: 0;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            padding: 0.65rem 0.85rem;
+        }
+        .button { color: white; background: #176f8b; }
+        .todo-list {
+            display: grid;
+            gap: 0.55rem;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        .todo-item {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 0.65rem;
+            align-items: center;
+            border: 1px solid #e0e7ee;
+            border-radius: 0.6rem;
+            padding: 0.65rem;
+        }
+        .todo-toggle { color: #185a75; background: #e5f4f8; }
+        .todo-item-done .todo-text { color: #71808c; text-decoration: line-through; }
+        .summary { color: #5e6c78; margin: 0; }
+        .empty-state {
+            display: grid;
+            gap: 0.25rem;
+            color: #647481;
+            padding: 1rem 0;
+            text-align: center;
+        }
+        @media (max-width: 34rem) {
+            .todo-form, .todo-item { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div id="root">Loading...</div>
+    <script>
+        window.goframeComponentRenderCounts = {};
+        window.goframeComponentPatchCounts = {};
+        window.goframeComponentRenderProbe = (name) => {
+            window.goframeComponentRenderCounts[name] =
+                (window.goframeComponentRenderCounts[name] || 0) + 1;
+        };
+        window.goframeComponentPatchProbe = (name) => {
+            window.goframeComponentPatchCounts[name] =
+                (window.goframeComponentPatchCounts[name] || 0) + 1;
+        };
+
+        const runtimeScript = document.createElement("script");
+        runtimeScript.src = "wasm_exec.js";
+        runtimeScript.onload = async () => {
+            const started = performance.now();
+            const go = new Go();
+            const result = await WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject);
+            console.info("goframe todo: WASM ready in", (performance.now() - started).toFixed(2), "ms");
+            go.run(result.instance);
+        };
+        document.head.appendChild(runtimeScript);
+
+        if (new URLSearchParams(location.search).has("sw") && "serviceWorker" in navigator) {
+            navigator.serviceWorker.register("./service-worker.js");
+        }
+    </script>
+</body>
+</html>
