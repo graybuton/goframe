@@ -11,8 +11,8 @@ const (
 	depsValues
 )
 
-// Deps is an explicit, lightweight dependency set for UseEffect.
-type Deps struct {
+// EffectDeps is an explicit, lightweight dependency set for UseEffect.
+type EffectDeps struct {
 	mode   depsMode
 	values []Dep
 }
@@ -20,12 +20,21 @@ type Deps struct {
 type depKind uint8
 
 const (
-	depString depKind = iota + 1
+	depNil depKind = iota + 1
+	depString
 	depBool
 	depInt
+	depInt8
+	depInt16
+	depInt32
 	depInt64
 	depUint
+	depUint8
+	depUint16
+	depUint32
 	depUint64
+	depUintptr
+	depFloat32
 	depFloat64
 )
 
@@ -39,26 +48,97 @@ type Dep struct {
 	boolean  bool
 }
 
+// Once returns a dependency set that runs an effect only after mount.
+func Once() EffectDeps {
+	return EffectDeps{mode: depsOnce}
+}
+
+// EveryRender returns a dependency set that runs an effect after every render.
+func EveryRender() EffectDeps {
+	return EffectDeps{mode: depsAlways}
+}
+
+// Deps returns a dependency set from primitive comparable dependency values.
+// Complex values should be reduced to a string, id, version, or counter first.
+func Deps(values ...any) EffectDeps {
+	if len(values) == 0 {
+		return Once()
+	}
+	deps := make([]Dep, len(values))
+	for index, value := range values {
+		deps[index] = dependencyValue(value)
+	}
+	return EffectDeps{
+		mode:   depsValues,
+		values: deps,
+	}
+}
+
 // NoDeps returns a dependency set that runs an effect only after mount.
-func NoDeps() Deps {
-	return Deps{mode: depsOnce}
+//
+// Deprecated: use Once or call UseEffect with no dependency argument.
+func NoDeps() EffectDeps {
+	return Once()
 }
 
 // AlwaysDeps returns a dependency set that runs an effect after every render.
-func AlwaysDeps() Deps {
-	return Deps{mode: depsAlways}
+//
+// Deprecated: use EveryRender.
+func AlwaysDeps() EffectDeps {
+	return EveryRender()
 }
 
 // DepsOf returns a dependency set from explicit comparable dependency values.
-func DepsOf(values ...Dep) Deps {
+//
+// Deprecated: use Deps.
+func DepsOf(values ...Dep) EffectDeps {
 	if len(values) == 0 {
-		return NoDeps()
+		return Once()
 	}
 	copied := make([]Dep, len(values))
 	copy(copied, values)
-	return Deps{
+	return EffectDeps{
 		mode:   depsValues,
 		values: copied,
+	}
+}
+
+func dependencyValue(value any) Dep {
+	switch value := value.(type) {
+	case nil:
+		return Dep{kind: depNil}
+	case string:
+		return DepString(value)
+	case bool:
+		return DepBool(value)
+	case int:
+		return Dep{kind: depInt, signed: int64(value)}
+	case int8:
+		return Dep{kind: depInt8, signed: int64(value)}
+	case int16:
+		return Dep{kind: depInt16, signed: int64(value)}
+	case int32:
+		return Dep{kind: depInt32, signed: int64(value)}
+	case int64:
+		return Dep{kind: depInt64, signed: value}
+	case uint:
+		return Dep{kind: depUint, unsigned: uint64(value)}
+	case uint8:
+		return Dep{kind: depUint8, unsigned: uint64(value)}
+	case uint16:
+		return Dep{kind: depUint16, unsigned: uint64(value)}
+	case uint32:
+		return Dep{kind: depUint32, unsigned: uint64(value)}
+	case uint64:
+		return Dep{kind: depUint64, unsigned: value}
+	case uintptr:
+		return Dep{kind: depUintptr, unsigned: uint64(value)}
+	case float32:
+		return Dep{kind: depFloat32, float: float64(value)}
+	case float64:
+		return Dep{kind: depFloat64, float: value}
+	default:
+		panic("goframe: unsupported effect dependency type; reduce complex values to string, id, version, or counter")
 	}
 }
 
@@ -102,7 +182,7 @@ type effectSlot struct {
 	kind    effectKind
 	effect  func() Cleanup
 	cleanup Cleanup
-	deps    Deps
+	deps    EffectDeps
 	pending bool
 	queued  bool
 	running bool
@@ -121,7 +201,7 @@ var (
 // UseMount runs effect once after this component instance is first mounted.
 // The returned cleanup, when non-nil, runs when the instance unmounts.
 func UseMount(effect func() Cleanup) {
-	useEffect(effectMount, effect, NoDeps())
+	useEffect(effectMount, effect, Once())
 }
 
 // UseUnmount registers a cleanup for this component instance.
@@ -135,12 +215,23 @@ func UseUnmount(cleanup Cleanup) {
 	instance.unmountSlots[index].cleanup = cleanup
 }
 
-// UseEffect runs effect after mount and after explicit dependency changes.
-func UseEffect(effect func() Cleanup, deps Deps) {
-	useEffect(effectRegular, effect, deps)
+// UseEffect runs effect after mount. With Deps it reruns after dependency
+// changes; with EveryRender it reruns after each component render.
+func UseEffect(effect func() Cleanup, deps ...EffectDeps) {
+	useEffect(effectRegular, effect, effectDepsArg(deps))
 }
 
-func useEffect(kind effectKind, effect func() Cleanup, deps Deps) {
+func effectDepsArg(deps []EffectDeps) EffectDeps {
+	if len(deps) == 0 {
+		return Once()
+	}
+	if len(deps) > 1 {
+		panic("goframe: UseEffect accepts at most one dependency set")
+	}
+	return deps[0]
+}
+
+func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 	if effect == nil {
 		panic("goframe: UseEffect requires an effect function")
 	}
@@ -178,7 +269,7 @@ func requireCurrentComponent(hook string) *componentInstance {
 	return instance
 }
 
-func shouldRunEffect(slot *effectSlot, deps Deps) bool {
+func shouldRunEffect(slot *effectSlot, deps EffectDeps) bool {
 	if !slot.hasRun {
 		return true
 	}
@@ -245,19 +336,19 @@ func runUnmountCleanups(instance *componentInstance) {
 	}
 }
 
-func copyDeps(deps Deps) Deps {
+func copyDeps(deps EffectDeps) EffectDeps {
 	if len(deps.values) == 0 {
-		return Deps{mode: deps.mode}
+		return EffectDeps{mode: deps.mode}
 	}
 	copied := make([]Dep, len(deps.values))
 	copy(copied, deps.values)
-	return Deps{
+	return EffectDeps{
 		mode:   deps.mode,
 		values: copied,
 	}
 }
 
-func depsEqual(first, second Deps) bool {
+func depsEqual(first, second EffectDeps) bool {
 	if first.mode != second.mode || len(first.values) != len(second.values) {
 		return false
 	}

@@ -3,59 +3,63 @@ package goframe
 import "testing"
 
 func TestUseStatePersistsWithinComponent(t *testing.T) {
-	var state *State[int]
+	var value int
+	var setValue func(int)
 	instance := testComponentInstance("Counter", func() Node {
-		state = UseState(0)
-		return Text(ToString(state.Get()))
+		value, setValue = UseState(0)
+		return Text(ToString(value))
 	}, nil)
 
 	renderComponentInstance(instance)
-	state.Set(7)
+	setValue(7)
 	renderComponentInstance(instance)
 
-	if got := state.Get(); got != 7 {
-		t.Fatalf("state after component rerender = %d, want 7", got)
+	if value != 7 {
+		t.Fatalf("state after component rerender = %d, want 7", value)
 	}
 }
 
 func TestUseStateIsComponentScoped(t *testing.T) {
-	var firstState, secondState *State[int]
+	var firstValue, secondValue int
+	var setFirst func(int)
 	first := testComponentInstance("First", func() Node {
-		firstState = UseState(1)
+		firstValue, setFirst = UseState(1)
 		return Empty()
 	}, nil)
 	second := testComponentInstance("Second", func() Node {
-		secondState = UseState(2)
+		secondValue, _ = UseState(2)
 		return Empty()
 	}, nil)
 
 	renderComponentInstance(first)
 	renderComponentInstance(second)
-	firstState.Set(10)
+	setFirst(10)
 	renderComponentInstance(first)
 	renderComponentInstance(second)
 
-	if firstState.Get() != 10 || secondState.Get() != 2 {
-		t.Fatalf("component states = %d, %d; want 10, 2", firstState.Get(), secondState.Get())
+	if firstValue != 10 || secondValue != 2 {
+		t.Fatalf("component states = %d, %d; want 10, 2", firstValue, secondValue)
 	}
 }
 
 func TestUseStateSupportsMultipleSlots(t *testing.T) {
-	var count *State[int]
-	var label *State[string]
+	var count int
+	var label string
+	var setCount func(int)
+	var setLabel func(string)
 	instance := testComponentInstance("Multi", func() Node {
-		count = UseState(0)
-		label = UseState("first")
+		count, setCount = UseState(0)
+		label, setLabel = UseState("first")
 		return Empty()
 	}, nil)
 
 	renderComponentInstance(instance)
-	count.Set(2)
-	label.Set("second")
+	setCount(2)
+	setLabel("second")
 	renderComponentInstance(instance)
 
-	if count.Get() != 2 || label.Get() != "second" {
-		t.Fatalf("slots = %d, %q; want 2, second", count.Get(), label.Get())
+	if count != 2 || label != "second" {
+		t.Fatalf("slots = %d, %q; want 2, second", count, label)
 	}
 }
 
@@ -70,17 +74,17 @@ func TestUseStateOutsideComponentPanics(t *testing.T) {
 }
 
 func TestStateMarksOwnerDirtyAndSchedulesIt(t *testing.T) {
-	var state *State[int]
+	var setState func(int)
 	var scheduled *componentInstance
 	instance := testComponentInstance("Owner", func() Node {
-		state = UseState(0)
+		_, setState = UseState(0)
 		return Empty()
 	}, func(instance *componentInstance) {
 		scheduled = instance
 	})
 	renderComponentInstance(instance)
 
-	state.Set(1)
+	setState(1)
 
 	if !instance.dirty || scheduled != instance {
 		t.Fatalf("dirty=%v scheduled=%p owner=%p", instance.dirty, scheduled, instance)
@@ -88,17 +92,17 @@ func TestStateMarksOwnerDirtyAndSchedulesIt(t *testing.T) {
 }
 
 func TestStateSetSameComparableValueDoesNotSchedule(t *testing.T) {
-	var state *State[string]
+	var setState func(string)
 	schedules := 0
 	instance := testComponentInstance("Owner", func() Node {
-		state = UseState("same")
+		_, setState = UseState("same")
 		return Empty()
 	}, func(*componentInstance) {
 		schedules++
 	})
 	renderComponentInstance(instance)
 
-	state.Set("same")
+	setState("same")
 
 	if instance.dirty || schedules != 0 {
 		t.Fatalf("dirty=%v schedules=%d, want no-op", instance.dirty, schedules)
@@ -106,7 +110,7 @@ func TestStateSetSameComparableValueDoesNotSchedule(t *testing.T) {
 }
 
 func TestDirtyChildDoesNotMarkRootOrSibling(t *testing.T) {
-	var state *State[int]
+	var setState func(int)
 	rootSchedules := 0
 	childSchedules := 0
 	siblingSchedules := 0
@@ -114,7 +118,7 @@ func TestDirtyChildDoesNotMarkRootOrSibling(t *testing.T) {
 		rootSchedules++
 	})
 	child := testComponentInstance("Child", func() Node {
-		state = UseState(0)
+		_, setState = UseState(0)
 		return Empty()
 	}, func(*componentInstance) {
 		childSchedules++
@@ -126,7 +130,7 @@ func TestDirtyChildDoesNotMarkRootOrSibling(t *testing.T) {
 	renderComponentInstance(child)
 	renderComponentInstance(sibling)
 
-	state.Set(1)
+	setState(1)
 
 	if root.dirty || sibling.dirty || rootSchedules != 0 || siblingSchedules != 0 {
 		t.Fatalf("root dirty=%v schedules=%d, sibling dirty=%v schedules=%d",
@@ -140,9 +144,9 @@ func TestDirtyChildDoesNotMarkRootOrSibling(t *testing.T) {
 func TestStateSetDuringRenderRemainsDirty(t *testing.T) {
 	schedules := 0
 	instance := testComponentInstance("RenderSet", func() Node {
-		state := UseState(0)
-		if state.Get() == 0 {
-			state.Set(1)
+		value, setValue := UseState(0)
+		if value == 0 {
+			setValue(1)
 		}
 		return Empty()
 	}, func(*componentInstance) {
@@ -157,10 +161,10 @@ func TestStateSetDuringRenderRemainsDirty(t *testing.T) {
 }
 
 func TestUnmountedStateDoesNotSchedule(t *testing.T) {
-	var state *State[int]
+	var setState func(int)
 	schedules := 0
 	instance := testComponentInstance("Unmounted", func() Node {
-		state = UseState(0)
+		_, setState = UseState(0)
 		return Empty()
 	}, func(*componentInstance) {
 		schedules++
@@ -168,7 +172,7 @@ func TestUnmountedStateDoesNotSchedule(t *testing.T) {
 	renderComponentInstance(instance)
 	deactivateComponent(instance)
 
-	state.Set(1)
+	setState(1)
 
 	if schedules != 0 || instance.dirty {
 		t.Fatalf("schedules=%d dirty=%v, want inactive", schedules, instance.dirty)

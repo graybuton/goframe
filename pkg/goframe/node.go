@@ -99,8 +99,8 @@ func IfElse(condition bool, thenNode Node, elseNode Node) Node {
 	return Child(elseNode)
 }
 
-// For maps items into renderable nodes.
-func For[T any](items []T, render func(item T) Node) []Node {
+// Map maps items into renderable nodes.
+func Map[T any](items []T, render func(item T) Node) []Node {
 	nodes := make([]Node, 0, len(items))
 	for _, item := range items {
 		nodes = append(nodes, Child(render(item)))
@@ -108,13 +108,27 @@ func For[T any](items []T, render func(item T) Node) []Node {
 	return nodes
 }
 
-// ForIndexed maps items into renderable nodes and provides each item index.
-func ForIndexed[T any](items []T, render func(index int, item T) Node) []Node {
+// MapIndexed maps items into renderable nodes and provides each item index.
+func MapIndexed[T any](items []T, render func(index int, item T) Node) []Node {
 	nodes := make([]Node, 0, len(items))
 	for index, item := range items {
 		nodes = append(nodes, Child(render(index, item)))
 	}
 	return nodes
+}
+
+// For maps items into renderable nodes.
+//
+// Deprecated: use Map.
+func For[T any](items []T, render func(item T) Node) []Node {
+	return Map(items, render)
+}
+
+// ForIndexed maps items into renderable nodes and provides each item index.
+//
+// Deprecated: use MapIndexed.
+func ForIndexed[T any](items []T, render func(index int, item T) Node) []Node {
+	return MapIndexed(items, render)
 }
 
 // Key associates a stable reconciliation identity with node.

@@ -72,7 +72,7 @@ func TestUseEffectRunsAfterMount(t *testing.T) {
 		UseEffect(func() Cleanup {
 			runs++
 			return nil
-		}, NoDeps())
+		})
 		return Empty()
 	}, nil)
 
@@ -89,24 +89,24 @@ func TestUseEffectRunsAfterMount(t *testing.T) {
 
 func TestUseEffectRerunsWhenDepsChange(t *testing.T) {
 	resetEffectsForTest()
-	var state *State[string]
+	var value string
+	var setValue func(string)
 	runs := 0
 	cleanups := 0
 	instance := testComponentInstance("EffectDeps", func() Node {
-		state = UseState("first")
-		value := state.Get()
+		value, setValue = UseState("first")
 		UseEffect(func() Cleanup {
 			runs++
 			return func() {
 				cleanups++
 			}
-		}, DepsOf(DepString(value)))
+		}, Deps(value))
 		return Empty()
 	}, nil)
 
 	renderComponentInstance(instance)
 	flushPendingEffects()
-	state.Set("second")
+	setValue("second")
 	renderComponentInstance(instance)
 	flushPendingEffects()
 
@@ -117,14 +117,13 @@ func TestUseEffectRerunsWhenDepsChange(t *testing.T) {
 
 func TestUseEffectSkipsWhenDepsUnchanged(t *testing.T) {
 	resetEffectsForTest()
-	var state *State[int]
 	runs := 0
 	instance := testComponentInstance("EffectSameDeps", func() Node {
-		state = UseState(1)
+		value, _ := UseState(1)
 		UseEffect(func() Cleanup {
 			runs++
 			return nil
-		}, DepsOf(DepInt(state.Get())))
+		}, Deps(value))
 		return Empty()
 	}, nil)
 
@@ -145,7 +144,7 @@ func TestUseEffectAlwaysDepsRunsEveryRender(t *testing.T) {
 		UseEffect(func() Cleanup {
 			runs++
 			return nil
-		}, AlwaysDeps())
+		}, EveryRender())
 		return Empty()
 	}, nil)
 
@@ -167,7 +166,7 @@ func TestUseEffectCleanupRunsOnUnmount(t *testing.T) {
 			return func() {
 				cleanups++
 			}
-		}, NoDeps())
+		})
 		return Empty()
 	}, nil)
 
@@ -183,28 +182,29 @@ func TestUseEffectCleanupRunsOnUnmount(t *testing.T) {
 func TestUseEffectStateUpdateSchedulesAfterRender(t *testing.T) {
 	resetEffectsForTest()
 	schedules := 0
-	var state *State[int]
+	var value int
+	var setValue func(int)
 	instance := testComponentInstance("EffectSet", func() Node {
-		state = UseState(0)
+		value, setValue = UseState(0)
 		UseEffect(func() Cleanup {
-			if state.Get() == 0 {
-				state.Set(1)
+			if value == 0 {
+				setValue(1)
 			}
 			return nil
-		}, NoDeps())
+		})
 		return Empty()
 	}, func(*componentInstance) {
 		schedules++
 	})
 
 	renderComponentInstance(instance)
-	if state.Get() != 0 || schedules != 0 {
-		t.Fatalf("state=%d schedules=%d before effect flush, want 0/0", state.Get(), schedules)
+	if value != 0 || schedules != 0 {
+		t.Fatalf("state=%d schedules=%d before effect flush, want 0/0", value, schedules)
 	}
 	flushPendingEffects()
 
-	if state.Get() != 1 || !instance.dirty || schedules != 1 {
-		t.Fatalf("state=%d dirty=%v schedules=%d, want effect-scheduled update", state.Get(), instance.dirty, schedules)
+	if got := instance.stateSlots[0].value; got != 1 || !instance.dirty || schedules != 1 {
+		t.Fatalf("state=%v dirty=%v schedules=%d, want effect-scheduled update", got, instance.dirty, schedules)
 	}
 }
 
@@ -216,7 +216,7 @@ func TestUseEffectOutsideComponentPanics(t *testing.T) {
 			t.Fatalf("panic = %v", recovered)
 		}
 	}()
-	UseEffect(func() Cleanup { return nil }, NoDeps())
+	UseEffect(func() Cleanup { return nil })
 }
 
 func TestUseUnmountOutsideComponentPanics(t *testing.T) {
@@ -237,7 +237,7 @@ func TestLifecycleHookTypeMismatchPanics(t *testing.T) {
 		if useMount {
 			UseMount(func() Cleanup { return nil })
 		} else {
-			UseEffect(func() Cleanup { return nil }, NoDeps())
+			UseEffect(func() Cleanup { return nil })
 		}
 		return Empty()
 	}, nil)
@@ -260,7 +260,7 @@ func TestUnmountedPendingEffectIsSkipped(t *testing.T) {
 		UseEffect(func() Cleanup {
 			runs++
 			return nil
-		}, NoDeps())
+		})
 		return Empty()
 	}, nil)
 
@@ -271,6 +271,21 @@ func TestUnmountedPendingEffectIsSkipped(t *testing.T) {
 	if runs != 0 {
 		t.Fatalf("runs = %d, want skipped pending effect", runs)
 	}
+}
+
+func TestUseEffectUnsupportedDependencyPanics(t *testing.T) {
+	resetEffectsForTest()
+	instance := testComponentInstance("UnsupportedDep", func() Node {
+		UseEffect(func() Cleanup { return nil }, Deps(struct{ Name string }{"bad"}))
+		return Empty()
+	}, nil)
+
+	defer func() {
+		if recovered := recover(); recovered != "goframe: unsupported effect dependency type; reduce complex values to string, id, version, or counter" {
+			t.Fatalf("panic = %v", recovered)
+		}
+	}()
+	renderComponentInstance(instance)
 }
 
 func resetEffectsForTest() {

@@ -90,11 +90,11 @@ func BenchmarkEventNameNormalization(b *testing.B) {
 
 func BenchmarkStateSlotAccess(b *testing.B) {
 	instance := testComponentInstance("Slots", func() Node {
-		a := UseState(1)
-		b := UseState(2)
-		c := UseState(3)
-		d := UseState(4)
-		if a.Get()+b.Get()+c.Get()+d.Get() == 0 {
+		a, _ := UseState(1)
+		b, _ := UseState(2)
+		c, _ := UseState(3)
+		d, _ := UseState(4)
+		if a+b+c+d == 0 {
 			return Text("impossible")
 		}
 		return Empty()
