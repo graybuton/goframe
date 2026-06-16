@@ -1,0 +1,2 @@
+testdata/errors/spread.gox:4:15: spread props are not supported yet: {...props}
+  <main {...props}></main>

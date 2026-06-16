@@ -1,0 +1,275 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "GOX",
+  "scopeName": "source.gox",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#markup"
+    },
+    {
+      "include": "#go-declarations"
+    },
+    {
+      "include": "source.go"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.go",
+          "begin": "//",
+          "end": "$"
+        },
+        {
+          "name": "comment.block.go",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "go-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(package|import|func|type|struct|interface|return|var|const|if|else|for|range|switch|case|default|break|continue|defer|go|select|map|chan)\\b",
+          "name": "keyword.control.go"
+        },
+        {
+          "match": "\\b(true|false|nil|iota)\\b",
+          "name": "constant.language.go"
+        },
+        {
+          "match": "\\b([A-Z][A-Za-z0-9_]*)\\b",
+          "name": "support.type.go"
+        },
+        {
+          "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.go"
+            },
+            "2": {
+              "name": "entity.name.function.go"
+            }
+          }
+        }
+      ]
+    },
+    "markup": {
+      "patterns": [
+        {
+          "include": "#fragment"
+        },
+        {
+          "include": "#component-tag"
+        },
+        {
+          "include": "#html-tag"
+        }
+      ]
+    },
+    "fragment": {
+      "name": "meta.fragment.gox",
+      "begin": "(<)(>)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.fragment.begin.gox"
+        },
+        "2": {
+          "name": "punctuation.definition.fragment.begin.gox"
+        }
+      },
+      "end": "(</)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.fragment.end.gox"
+        },
+        "2": {
+          "name": "punctuation.definition.fragment.end.gox"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#markup-content"
+        }
+      ]
+    },
+    "component-tag": {
+      "name": "meta.tag.component.gox",
+      "begin": "(<)([A-Z][A-Za-z0-9_]*)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.begin.gox"
+        },
+        "2": {
+          "name": "entity.name.tag.component.gox"
+        }
+      },
+      "end": "(/>)|(</)([A-Z][A-Za-z0-9_]*)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.self-closing.gox"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.begin.gox"
+        },
+        "3": {
+          "name": "entity.name.tag.component.gox"
+        },
+        "4": {
+          "name": "punctuation.definition.tag.end.gox"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-punctuation"
+        },
+        {
+          "include": "#attribute"
+        },
+        {
+          "include": "#markup-content"
+        }
+      ]
+    },
+    "html-tag": {
+      "name": "meta.tag.html.gox",
+      "begin": "(<)([a-z][A-Za-z0-9:_-]*)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.begin.gox"
+        },
+        "2": {
+          "name": "entity.name.tag.html.gox"
+        }
+      },
+      "end": "(/>)|(</)([a-z][A-Za-z0-9:_-]*)(>)",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.self-closing.gox"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.begin.gox"
+        },
+        "3": {
+          "name": "entity.name.tag.html.gox"
+        },
+        "4": {
+          "name": "punctuation.definition.tag.end.gox"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#tag-punctuation"
+        },
+        {
+          "include": "#attribute"
+        },
+        {
+          "include": "#markup-content"
+        }
+      ]
+    },
+    "tag-punctuation": {
+      "patterns": [
+        {
+          "match": ">",
+          "name": "punctuation.definition.tag.end.gox"
+        }
+      ]
+    },
+    "attribute": {
+      "patterns": [
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9:_-]*)(?=\\s*=)",
+          "name": "entity.other.attribute-name.gox"
+        },
+        {
+          "match": "=",
+          "name": "punctuation.separator.key-value.gox"
+        },
+        {
+          "name": "string.quoted.double.gox",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.gox"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.gox",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.gox"
+            }
+          ]
+        },
+        {
+          "include": "#expression"
+        }
+      ]
+    },
+    "markup-content": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#expression"
+        },
+        {
+          "include": "#markup"
+        },
+        {
+          "match": "[^<{]+",
+          "name": "string.unquoted.text.gox"
+        }
+      ]
+    },
+    "expression": {
+      "name": "meta.embedded.inline.go",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.begin.gox"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.end.gox"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#go-braces"
+        },
+        {
+          "include": "source.go"
+        }
+      ]
+    },
+    "go-braces": {
+      "name": "meta.embedded.block.go",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        {
+          "include": "#go-braces"
+        },
+        {
+          "include": "source.go"
+        }
+      ]
+    }
+  }
+}

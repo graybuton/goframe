@@ -1,0 +1,13 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(items []string) gf.Node {
+	return (
+		<ul>
+			{gf.ForIndexed(items, func(index int, item string) gf.Node {
+				return gf.Key(gf.ToString(index), gf.El("li", nil, gf.Text(item)))
+			})}
+		</ul>
+	)
+}

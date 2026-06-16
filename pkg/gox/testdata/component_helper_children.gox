@@ -1,0 +1,19 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type CardProps struct {
+	Children []gf.Node
+}
+
+func Card(props CardProps) gf.Node {
+	return <section>{props.Children}</section>
+}
+
+func View(show bool) gf.Node {
+	return (
+		<Card>
+			{gf.If(show, gf.Text("Visible"))}
+		</Card>
+	)
+}

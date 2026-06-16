@@ -1,0 +1,12 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(show bool) gf.Node {
+	return (
+		<main>
+			{gf.If(show, gf.Text("Visible"))}
+			{gf.IfElse(show, gf.Text("On"), gf.Text("Off"))}
+		</main>
+	)
+}

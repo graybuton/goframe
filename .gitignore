@@ -1,0 +1,41 @@
+# OS/editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# Go
+/bin/
+/tmp/
+*.test
+*.out
+coverage.out
+
+# WASM/build artifacts
+build/
+dist/
+*.wasm
+*.wasm.gz
+*.wasm.br
+*.map
+examples/*/build/
+examples/*/dist/
+examples/*/wasm_exec*.js
+scripts/fixtures/*/dist/
+
+# goxc generated temporary output
+.goxc-tmp/
+*.tmp
+
+# Node / VS Code extension
+node_modules/
+*.vsix
+extensions/vscode-gox/out/
+extensions/vscode-gox/dist/
+extensions/vscode-gox/node_modules/
+extensions/vscode-gox/*.vsix
+
+# Logs/cache
+*.log
+.cache/

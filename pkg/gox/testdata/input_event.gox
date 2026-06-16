@@ -1,0 +1,16 @@
+package demo
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+func View(value string, update func(string)) gf.Node {
+	return (
+		<input
+			Type="text"
+			Value={value}
+			Placeholder="New task"
+			OnInput={func(event gf.InputEvent) {
+				update(event.Value())
+			}}
+		/>
+	)
+}

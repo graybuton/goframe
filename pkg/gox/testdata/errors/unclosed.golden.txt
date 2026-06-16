@@ -1,0 +1,1 @@
+testdata/errors/unclosed.gox:6:1: unclosed tag <main>; expected </main>

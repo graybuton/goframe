@@ -1,0 +1,46 @@
+package main
+
+import gf "github.com/jin-wu/goframe/pkg/goframe"
+
+type CardProps struct {
+	Title    string
+	Children []gf.Node
+}
+
+func Card(props CardProps) gf.Node {
+	return (
+		<section class="card">
+			<h2>{props.Title}</h2>
+			<div>{props.Children}</div>
+		</section>
+	)
+}
+
+type ButtonProps struct {
+	Label   string
+	OnClick func()
+}
+
+func Button(props ButtonProps) gf.Node {
+	return <button onClick={props.OnClick}>{props.Label}</button>
+}
+
+func App() gf.Node {
+	count := gf.UseState(0)
+
+	return (
+		<>
+			<header>
+				<h1>GOX VS Code Demo</h1>
+			</header>
+			<main>
+				<Card Title="Counter">
+					<p>Current value: {count.Get()}</p>
+					<Button Label="Increment" OnClick={func() {
+						count.Set(count.Get() + 1)
+					}} />
+				</Card>
+			</main>
+		</>
+	)
+}

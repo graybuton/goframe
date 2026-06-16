@@ -1,0 +1,2 @@
+testdata/errors/invalid_component.gox:4:10: invalid component tag <Bad-Name>; component names must be Go identifiers
+  <Bad-Name />
