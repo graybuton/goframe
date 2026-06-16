@@ -37,6 +37,14 @@ Foundation Hardening II then closed two runtime risks:
   is dirty in the same flush;
 - duplicate sibling keys now produce debug-only browser diagnostics.
 
+MVP 9 closes the next lifecycle foundation gap:
+
+- component-scoped `UseMount`, `UseUnmount`, and `UseEffect`;
+- explicit primitive dependency helpers without reflection;
+- cleanup on component unmount/replacement;
+- debug-only warnings for Set-after-unmount and Set-during-render;
+- a small debug guard for effect-triggered update loops.
+
 ## Architecture Review
 
 The current separation of responsibilities is good for an MVP platform:
@@ -97,9 +105,10 @@ Runtime risks that remain:
   may panic if types change.
 - `Set` after unmount mutates the detached state slot but does not schedule.
   This is safe for now but there is no warning.
-- There are no unmount hooks, effects, or callback lifecycle APIs.
-- Event listener release depends on runtime unmount/replace paths; there is no
-  public disposal API for external DOM mutation.
+- Lifecycle hooks now cover mount/effect/unmount cleanup, but there is still no
+  context, error boundary, async lifecycle, or external DOM mutation recovery.
+- Event listener release depends on runtime unmount/replace paths; external
+  DOM mutation remains outside runtime ownership.
 
 ## GOX Compiler Review
 
@@ -184,9 +193,13 @@ Measured during the foundation audit:
 
 | Example | TinyGo WASM |
 |---|---:|
-| Counter | 76,767 B |
-| Components | 82,066 B |
-| Todo | 101,752 B |
+| Counter | 77,606 B |
+| Components | 82,907 B |
+| Todo | 109,836 B |
+
+Counter and Components show the approximate runtime cost of MVP 9 lifecycle
+hooks. Todo includes example-level localStorage persistence and compact string
+encoding, so its increase is not purely runtime overhead.
 
 ## Performance Review
 
@@ -258,13 +271,17 @@ Remaining safety risks:
 - Added dirty queue ancestor pruning.
 - Added debug-only duplicate key diagnostics.
 - Added pure runtime benchmarks and CI-friendly check scripts.
+- Added minimal lifecycle/effect hooks and cleanup semantics.
+- Added debug-only lifecycle warnings and an effect update-loop guard.
 
 ## Remaining Risks
 
 - Duplicate key diagnostics are debug-only and currently warning-only.
 - Component identity does not include Go function identity.
-- State slots are positional and do not support conditional hook ordering.
-- No lifecycle/effects/unmount hooks exist.
+- State and lifecycle slots are positional and do not support conditional hook
+  ordering.
+- Lifecycle/effects are intentionally minimal: no context, error boundaries,
+  async effects, or priorities.
 - No props memoization exists; this is a size and correctness tradeoff.
 - GOX parser remains a focused parser, not a full Go-aware frontend.
 
@@ -301,5 +318,5 @@ Recommended next hardening steps before new product features:
 3. Add CI wiring for TinyGo size budgets and browser smoke tests.
 4. Decide whether component identity should include function identity or a
    generated stable type token.
-5. Keep lifecycle/effects/context/router work out of the project until the
+5. Keep context/router/Player work out of the project until the lifecycle
    regression gates run reliably in CI.

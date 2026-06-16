@@ -266,7 +266,8 @@ GOX does not currently support:
 - spread props;
 - component namespaces or dotted tags;
 - style objects;
-- advanced reconciliation, lifecycle, or effects;
+- lifecycle/effect-specific GOX syntax; use Go calls such as `gf.UseEffect`;
+- advanced reconciliation controls;
 - async components;
 - routing;
 - SSR or hydration;

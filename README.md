@@ -77,7 +77,7 @@ goxc serve ./examples/components --port=8080
 ```
 
 The Todo example exercises application-level primitives, controlled inputs,
-typed events, conditional/list helpers, and keys:
+typed events, conditional/list helpers, keys, and lifecycle effects:
 
 ```bash
 goxc generate ./examples/todo
@@ -166,6 +166,19 @@ func(gf.InputEvent)
 `gf.InputEvent.Value()` supports controlled inputs. `gf.UseState` slots belong
 to the component instance currently rendering. State `Set` calls mark that
 owner dirty and are coalesced into one browser animation-frame update.
+
+MVP 9 adds minimal lifecycle hooks for component-owned side effects:
+
+```go
+gf.UseMount(func() gf.Cleanup { ... })
+gf.UseUnmount(func() { ... })
+gf.UseEffect(func() gf.Cleanup { ... }, gf.DepsOf(gf.DepString(value)))
+```
+
+Effects run after DOM patching, not during render. Cleanup runs on unmount and
+before an effect reruns. Dependencies are explicit primitive values; the
+runtime does not use reflection or deep equality. See
+[lifecycle and effects](docs/effects.md).
 
 The MVP patch layer updates text and props in place, keeps one stable listener
 per event name, patches unkeyed children positionally, and matches keyed
@@ -351,18 +364,20 @@ Measured on June 16, 2026 with Go 1.24.4 and TinyGo 0.41.1:
 | Artifact | Bytes | Approximate size |
 |---|---:|---:|
 | Counter, Go `main.wasm` | 1,928,333 | 1.8 MiB |
-| Counter, TinyGo `main.wasm` | 76,767 | 75.0 KiB |
+| Counter, TinyGo `main.wasm` | 77,606 | 75.8 KiB |
 | Components demo, Go `main.wasm` | 1,942,473 | 1.9 MiB |
-| Components demo, TinyGo `main.wasm` | 82,066 | 80.1 KiB |
+| Components demo, TinyGo `main.wasm` | 82,907 | 81.0 KiB |
 | Todo demo, Go `main.wasm` | 2,007,086 | 1.9 MiB |
-| Todo demo, TinyGo `main.wasm` | 101,752 | 99.4 KiB |
+| Todo demo, TinyGo `main.wasm` | 109,836 | 107.3 KiB |
 | Go `wasm_exec.js` | 16,992 | 16.6 KiB |
 | TinyGo `wasm_exec.js` | 16,715 | 16.3 KiB |
 
 MVP 8.1 removed `reflect.DeepEqual` and production debug probes from the
-runtime. Compared with the MVP 8 regression, TinyGo decreased from
-`111,148 / 116,447 / 135,344` bytes to `76,767 / 82,066 / 101,752` bytes for
-counter, components, and Todo.
+runtime. MVP 9 adds lifecycle/effect hooks. Counter and Components grew by
+about 1 KiB, while Todo grew further because it now demonstrates compact
+localStorage persistence. Compared with the MVP 8 regression, TinyGo remains
+well below the `95 / 105 / 120 KiB` budgets at
+`77,606 / 82,907 / 109,836` bytes for counter, components, and Todo.
 Counter remains an integration probe rather than a representative application
 benchmark.
 
@@ -394,10 +409,12 @@ required.
 
 ## Current limitations
 
-- Minimal mounted-tree and component reconciliation; no concurrent or
-  lifecycle system.
+- Minimal mounted-tree and component reconciliation; no concurrent scheduler.
 - One mounted app and one browser thread. State is component-scoped and
-  positional within each component, so hook order must remain stable.
+  positional within each component, so state/effect hook order must remain
+  stable.
+- Lifecycle/effects are minimal; no context, error boundaries, async effects,
+  or priorities.
 - There is no automatic props memoization. Components encountered during a
   parent subtree update rerender.
 - Duplicate key diagnostics are debug-only and do not run in production builds.
@@ -414,6 +431,7 @@ required.
 - [Component identity strategy](docs/component-identity.md)
 - [GOX language and component model](docs/gox-language.md)
 - [Runtime model](docs/runtime-model.md)
+- [Lifecycle and effects](docs/effects.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 - [Future GoFrame Player vision](docs/player-vision.md)
 - [Counter example](examples/counter/README.md)

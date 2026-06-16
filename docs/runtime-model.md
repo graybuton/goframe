@@ -1,7 +1,8 @@
 # Runtime model
 
-This document describes the MVP 8 runtime. It is a small component and DOM
-reconciliation foundation, not React Fiber or a production lifecycle system.
+This document describes the current MVP runtime. It is a small component, DOM
+reconciliation, and lifecycle foundation, not React Fiber or a production
+effect scheduler.
 
 ## From DOM identity to component identity
 
@@ -179,6 +180,49 @@ The dirty update starts at `TodoForm`. Its unchanged DOM remains in place.
 Paint Flashing is not directly automated; the absence of structural mutations
 and DOM operations is the regression proxy.
 
+## Lifecycle and effects
+
+MVP 9 adds component-scoped lifecycle slots next to state slots:
+
+```go
+gf.UseMount(func() gf.Cleanup { ... })
+gf.UseUnmount(func() { ... })
+gf.UseEffect(func() gf.Cleanup { ... }, gf.DepsOf(...))
+```
+
+Lifecycle hooks are collected during component render and flushed only after
+the mounted DOM subtree has been patched. Effects therefore do not run while
+the runtime is building the virtual tree.
+
+`UseMount` runs once after the component instance is first mounted. Its cleanup
+runs on unmount. `UseUnmount` registers cleanup-only work. `UseEffect` runs
+after mount and after explicit dependency changes; previous cleanup runs before
+the next effect body and again on unmount.
+
+Dependencies are intentionally explicit and lightweight:
+
+```go
+gf.NoDeps()
+gf.AlwaysDeps()
+gf.DepsOf(gf.DepString(value), gf.DepInt(count))
+```
+
+The runtime does not accept arbitrary values and does not use
+`reflect.DeepEqual`. Applications reduce complex values to primitive
+dependency tokens.
+
+Unmount cleanup is tied to the existing reconciliation paths: conditional
+removal, keyed list removal, key/name replacement, fragment subtree removal,
+and application replacement. State updates after unmount are safe no-ops in
+production and debug warnings in `goframe_debug` builds.
+
+State updates during render are still scheduled safely, but debug builds warn
+because repeated render-time updates can create loops. Effect-triggered update
+loops also have a small debug guard that reports and stops pending updates
+after the guard threshold.
+
+See [lifecycle and effects](effects.md) for API details.
+
 ## Debug probes
 
 Render, patch, and performance probes compile only with the `goframe_debug`
@@ -220,8 +264,9 @@ The dependency-free headless Chrome probe verifies:
 ## Current limitations
 
 - one mounted application and one browser thread;
-- positional state slots require stable `UseState` call order;
-- no lifecycle, effects, context, error boundaries, or component unmount hooks;
+- positional state and lifecycle slots require stable hook call order;
+- lifecycle/effects are minimal and have no priorities or async scheduler;
+- no context or error boundaries;
 - component identity uses the declared component name, not Go function identity;
 - no automatic props memoization;
 - dirty component scheduling has no priorities, interruption, or concurrency;
