@@ -20,6 +20,7 @@ func TestProductionRuntimeAvoidsHeavyImports(t *testing.T) {
 		"reflect":       true,
 		"regexp":        true,
 		"runtime/debug": true,
+		"unsafe":        true,
 	}
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -85,6 +86,7 @@ func TestProductionRuntimeDoesNotContainBrowserDebugGlobals(t *testing.T) {
 		"goframeComponentPatchProbe",
 		"goframeRenderProbe",
 		"goframeDuplicateKeyWarnings",
+		"goframeLifecycleWarnings",
 	}
 	entries, err := os.ReadDir(".")
 	if err != nil {

@@ -64,11 +64,19 @@ func (state *State[T]) Get() T {
 // Set updates the state, marks its owner component dirty, and requests a
 // batched patch of that component subtree.
 func (state *State[T]) Set(value T) {
+	owner := state.slot.owner
+	if owner == nil || !owner.active {
+		reportStateSetAfterUnmount(ownerDebugName(owner))
+		return
+	}
+	if currentComponent != nil {
+		reportStateSetDuringRender(ownerDebugName(owner), ownerDebugName(currentComponent))
+	}
 	if stateValuesEqual(state.slot.value, value) {
 		return
 	}
 	state.slot.value = value
-	markComponentDirty(state.slot.owner)
+	markComponentDirty(owner)
 }
 
 func stateValuesEqual(oldValue, newValue any) bool {

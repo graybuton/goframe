@@ -10,7 +10,8 @@ demonstrates:
 - component composition and children;
 - keyed component and DOM identity through `gf.Key`;
 - todo state scoped to `TodoApp` and input state scoped to `TodoForm`;
-- dirty component updates followed by a mounted-tree DOM patch.
+- dirty component updates followed by a mounted-tree DOM patch;
+- `gf.UseMount` and `gf.UseEffect` for localStorage persistence.
 
 Install `goxc`, package with TinyGo, and serve the result:
 
@@ -35,6 +36,11 @@ patching text, props, events, and child order. Typing marks only `TodoForm`
 dirty. Todo changes mark `TodoApp` dirty. `App` and `Header` remain outside
 both update paths.
 
+Todo persistence intentionally lives in the example, not in the core runtime.
+It uses a compact string encoding instead of `encoding/json` so the runtime and
+TinyGo bundle stay small. `UseMount` loads localStorage after the first DOM
+mount, and `UseEffect` writes only when the encoded todo list changes.
+
 Build an instrumented regression bundle, serve it on port `18080`, and run the
 dependency-free browser identity probe:
 
@@ -49,3 +55,5 @@ The smoke test verifies node identity, component render/patch counts,
 MutationObserver records, structural DOM operations, and event listener churn.
 During typing it expects zero root/Header/TodoList/TodoForm child-list
 mutations, zero structural DOM operations, and zero listener add/remove calls.
+It also verifies that todos are persisted to localStorage and restored after a
+page reload.

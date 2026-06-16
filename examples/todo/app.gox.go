@@ -193,6 +193,26 @@ func TodoApp(props TodoAppProps) gf.Node {
 	todos := gf.UseState([]Todo{})
 	nextID := gf.UseState(1)
 
+	gf.UseMount(func() gf.Cleanup {
+		if raw, ok := localStorageGet(todoStorageKey); ok {
+			stored := decodeTodos(raw)
+			todoSkipNextPersist = true
+			todos.Set(stored)
+			nextID.Set(nextTodoID(stored))
+		}
+		return nil
+	})
+
+	encodedTodos := encodeTodos(todos.Get())
+	gf.UseEffect(func() gf.Cleanup {
+		if todoSkipNextPersist {
+			todoSkipNextPersist = false
+			return nil
+		}
+		localStorageSet(todoStorageKey, encodedTodos)
+		return nil
+	}, gf.DepsOf(gf.DepString(encodedTodos)))
+
 	addTodo := func(value string) {
 		next := append([]Todo(nil), todos.Get()...)
 		next = append(next, Todo{ID: nextID.Get(), Text: value})

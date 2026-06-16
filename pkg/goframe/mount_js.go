@@ -6,14 +6,18 @@ import "syscall/js"
 
 type rootProps struct{}
 
+const maxEffectUpdateLoop = 60
+
 var mountedApp struct {
-	root      js.Value
-	app       func() Node
-	tree      *mountedNode
-	rendering bool
-	batch     updateBatch
-	dirty     []*componentInstance
-	dirtySet  map[*componentInstance]bool
+	root                  js.Value
+	app                   func() Node
+	tree                  *mountedNode
+	rendering             bool
+	batch                 updateBatch
+	dirty                 []*componentInstance
+	dirtySet              map[*componentInstance]bool
+	effectScheduledUpdate bool
+	effectLoopCount       int
 }
 
 // Mount creates the root component instance and connects component-owned state
@@ -39,6 +43,9 @@ func Mount(rootID string, app func() Node) {
 	mountedApp.batch.reset()
 	mountedApp.dirty = nil
 	mountedApp.dirtySet = make(map[*componentInstance]bool)
+	mountedApp.effectScheduledUpdate = false
+	mountedApp.effectLoopCount = 0
+	pendingEffects = nil
 
 	mountApplication(document)
 }
@@ -46,9 +53,6 @@ func Mount(rootID string, app func() Node) {
 func mountApplication(document js.Value) {
 	started := performanceNow()
 	mountedApp.rendering = true
-	defer func() {
-		mountedApp.rendering = false
-	}()
 
 	rootNode := Component("App", rootProps{}, func(rootProps) Node {
 		return mountedApp.app()
@@ -56,12 +60,18 @@ func mountApplication(document js.Value) {
 	mountedApp.root.Set("textContent", "")
 	mountedApp.tree = mountNode(document, rootNode, nil)
 	placeMountedBefore(mountedApp.root, mountedApp.tree, js.Null())
+	mountedApp.rendering = false
 	reportRender("first-render", performanceNow()-started)
+	flushPendingEffects()
+	checkEffectUpdateLoop()
 }
 
 func queueDirtyComponent(instance *componentInstance) {
 	if instance == nil || !instance.active || mountedApp.dirtySet[instance] {
 		return
+	}
+	if flushingEffects {
+		mountedApp.effectScheduledUpdate = true
 	}
 	mountedApp.dirtySet[instance] = true
 	mountedApp.dirty = append(mountedApp.dirty, instance)
@@ -95,9 +105,6 @@ func flushDirtyComponents() {
 
 	started := performanceNow()
 	mountedApp.rendering = true
-	defer func() {
-		mountedApp.rendering = false
-	}()
 
 	dirty := pruneDirtyComponents(mountedApp.dirty)
 	mountedApp.dirty = nil
@@ -111,7 +118,30 @@ func flushDirtyComponents() {
 		}
 	}
 	restoreFocus(document, focus)
+	mountedApp.rendering = false
 	reportRender("update", performanceNow()-started)
+	flushPendingEffects()
+	checkEffectUpdateLoop()
+}
+
+func checkEffectUpdateLoop() {
+	if !mountedApp.effectScheduledUpdate {
+		mountedApp.effectLoopCount = 0
+		return
+	}
+	mountedApp.effectScheduledUpdate = false
+	mountedApp.effectLoopCount++
+	if mountedApp.effectLoopCount <= maxEffectUpdateLoop {
+		return
+	}
+	reportEffectUpdateLoopGuard()
+	if !shouldStopEffectUpdateLoop() {
+		return
+	}
+	mountedApp.dirty = nil
+	mountedApp.dirtySet = make(map[*componentInstance]bool)
+	mountedApp.batch.reset()
+	mountedApp.effectLoopCount = 0
 }
 
 type focusSnapshot struct {
