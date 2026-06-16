@@ -96,9 +96,11 @@ func summaryText(visible, total int) string {
 }
 
 func matchesIssueQuery(item Issue, query string) bool {
-	return strings.Contains(strings.ToLower(item.Title), query) ||
-		strings.Contains(strings.ToLower(item.Owner), query) ||
-		strings.Contains(strings.ToLower(item.Service), query)
+	return strings.Contains(item.SearchText, query)
+}
+
+func searchText(title, owner, service string) string {
+	return strings.ToLower(title) + " " + strings.ToLower(owner) + " " + strings.ToLower(service)
 }
 
 func priorityRank(priority Priority) int {

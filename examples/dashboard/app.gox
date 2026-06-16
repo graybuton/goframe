@@ -10,7 +10,6 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 	statusFilter, setStatusFilter := gf.UseState(StatusAll)
 	priorityFilter, setPriorityFilter := gf.UseState(PriorityAll)
 	sortMode, setSortMode := gf.UseState(SortByUpdated)
-	selectedID, setSelectedID := gf.UseState(0)
 
 	filters := FilterState{
 		Query:    query,
@@ -20,7 +19,6 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 	}
 	visible := visibleIssues(issues, filters)
 	metrics := dashboardMetrics(issues, len(visible))
-	selectedIssue, selectedFound := findIssue(issues, selectedID)
 
 	gf.UseEffect(func() gf.Cleanup {
 		setDocumentTitle("GoFrame Dashboard · " + gf.ToString(len(visible)) + " visible")
@@ -33,7 +31,6 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 		setStatusFilter(StatusAll)
 		setPriorityFilter(PriorityAll)
 		setSortMode(SortByUpdated)
-		setSelectedID(0)
 	}
 
 	toggleIssue := func(id int) {
@@ -60,29 +57,12 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 				/>
 			</Card>
 
-			<div class="content-grid">
-				<Card Title="Issues" TestID="issues-card">
-					<p class="summary" data-testid="visible-summary">
-						{summaryText(len(visible), len(issues))}
-					</p>
-					{len(visible) == 0 ? (
-						<EmptyState Query={query} />
-					) : (
-						<IssueTable
-							Items={visible}
-							SelectedID={selectedID}
-							OnSelect={setSelectedID}
-							OnToggle={toggleIssue}
-						/>
-					)}
-				</Card>
-
-				<DetailPanel
-					Issue={selectedIssue}
-					Found={selectedFound}
-					OnToggle={toggleIssue}
-				/>
-			</div>
+			<IssueWorkspace
+				Items={visible}
+				AllItems={issues}
+				Query={query}
+				OnToggle={toggleIssue}
+			/>
 		</DashboardShell>
 	)
 }

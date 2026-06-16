@@ -32,14 +32,15 @@ const (
 const dashboardItemCount = 300
 
 type Issue struct {
-	ID        int
-	Title     string
-	Owner     string
-	Status    Status
-	Priority  Priority
-	Service   string
-	UpdatedAt int
-	Events    int
+	ID         int
+	Title      string
+	Owner      string
+	Status     Status
+	Priority   Priority
+	Service    string
+	SearchText string
+	UpdatedAt  int
+	Events     int
 }
 
 type Metrics struct {

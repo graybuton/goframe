@@ -4,9 +4,9 @@ import "testing"
 
 func TestFilterIssues(t *testing.T) {
 	items := []Issue{
-		{ID: 1, Title: "Investigate api latency", Owner: "Ava", Status: StatusOpen, Priority: PriorityHigh, Service: "api"},
-		{ID: 2, Title: "Patch billing queue", Owner: "Noah", Status: StatusBlocked, Priority: PriorityCritical, Service: "billing"},
-		{ID: 3, Title: "Review search deploy", Owner: "Mina", Status: StatusResolved, Priority: PriorityLow, Service: "search"},
+		testIssue(1, "Investigate api latency", "Ava", StatusOpen, PriorityHigh, "api"),
+		testIssue(2, "Patch billing queue", "Noah", StatusBlocked, PriorityCritical, "billing"),
+		testIssue(3, "Review search deploy", "Mina", StatusResolved, PriorityLow, "search"),
 	}
 
 	got := filterIssues(items, "billing", StatusBlocked, PriorityCritical)
@@ -17,6 +17,18 @@ func TestFilterIssues(t *testing.T) {
 	got = filterIssues(items, "ava", StatusAll, PriorityAll)
 	if len(got) != 1 || got[0].ID != 1 {
 		t.Fatalf("owner query filtered = %#v, want only issue 1", got)
+	}
+}
+
+func testIssue(id int, title, owner string, status Status, priority Priority, service string) Issue {
+	return Issue{
+		ID:         id,
+		Title:      title,
+		Owner:      owner,
+		Status:     status,
+		Priority:   priority,
+		Service:    service,
+		SearchText: searchText(title, owner, service),
 	}
 }
 
@@ -66,5 +78,37 @@ func TestSimulateIssueUpdate(t *testing.T) {
 	}
 	if items[0].Events != 1 || items[0].Priority != PriorityLow || items[0].Status != StatusOpen {
 		t.Fatalf("simulate update mutated original = %#v", items[0])
+	}
+}
+
+func BenchmarkFilterIssues300(b *testing.B) {
+	items := makeDemoIssues(300)
+	b.ReportAllocs()
+	for range b.N {
+		_ = filterIssues(items, "billing", StatusAll, PriorityAll)
+	}
+}
+
+func BenchmarkSortIssues300(b *testing.B) {
+	items := makeDemoIssues(300)
+	b.ReportAllocs()
+	for range b.N {
+		_ = sortIssues(items, SortByPriority)
+	}
+}
+
+func BenchmarkDashboardMetrics300(b *testing.B) {
+	items := makeDemoIssues(300)
+	b.ReportAllocs()
+	for range b.N {
+		_ = dashboardMetrics(items, 300)
+	}
+}
+
+func BenchmarkFindIssue300(b *testing.B) {
+	items := makeDemoIssues(300)
+	b.ReportAllocs()
+	for range b.N {
+		_, _ = findIssue(items, 240)
 	}
 }

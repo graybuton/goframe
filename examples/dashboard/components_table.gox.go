@@ -4,6 +4,49 @@ package main
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+type IssueWorkspaceProps struct {
+	Items    []Issue
+	AllItems []Issue
+	Query    string
+	OnToggle func(id int)
+}
+
+func IssueWorkspace(props IssueWorkspaceProps) gf.Node {
+	selectedID, setSelectedID := gf.UseState(0)
+	selectedIssue, selectedFound := findIssue(props.AllItems, selectedID)
+
+	return gf.El("div", gf.Props{
+		"class":       "content-grid",
+		"data-testid": "issue-workspace",
+	},
+		gf.Component("Card", CardProps{
+			Title:  "Issues",
+			TestID: "issues-card",
+			Children: []gf.Node{
+				gf.El("p", gf.Props{
+					"class":       "summary",
+					"data-testid": "visible-summary",
+				},
+					gf.Child(summaryText(len(props.Items), len(props.AllItems))),
+				),
+				gf.IfElse(len(props.Items) == 0, gf.Component("EmptyState", EmptyStateProps{
+					Query: props.Query,
+				}, EmptyState), gf.Component("IssueTable", IssueTableProps{
+					Items:      props.Items,
+					SelectedID: selectedID,
+					OnSelect:   setSelectedID,
+					OnToggle:   props.OnToggle,
+				}, IssueTable)),
+			},
+		}, Card),
+		gf.Component("DetailPanel", DetailPanelProps{
+			Issue:    selectedIssue,
+			Found:    selectedFound,
+			OnToggle: props.OnToggle,
+		}, DetailPanel),
+	)
+}
+
 type IssueTableProps struct {
 	Items      []Issue
 	SelectedID int

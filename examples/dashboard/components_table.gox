@@ -2,6 +2,44 @@ package main
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+type IssueWorkspaceProps struct {
+	Items    []Issue
+	AllItems []Issue
+	Query    string
+	OnToggle func(id int)
+}
+
+func IssueWorkspace(props IssueWorkspaceProps) gf.Node {
+	selectedID, setSelectedID := gf.UseState(0)
+	selectedIssue, selectedFound := findIssue(props.AllItems, selectedID)
+
+	return (
+		<div class="content-grid" data-testid="issue-workspace">
+			<Card Title="Issues" TestID="issues-card">
+				<p class="summary" data-testid="visible-summary">
+					{summaryText(len(props.Items), len(props.AllItems))}
+				</p>
+				{len(props.Items) == 0 ? (
+					<EmptyState Query={props.Query} />
+				) : (
+					<IssueTable
+						Items={props.Items}
+						SelectedID={selectedID}
+						OnSelect={setSelectedID}
+						OnToggle={props.OnToggle}
+					/>
+				)}
+			</Card>
+
+			<DetailPanel
+				Issue={selectedIssue}
+				Found={selectedFound}
+				OnToggle={props.OnToggle}
+			/>
+		</div>
+	)
+}
+
 type IssueTableProps struct {
 	Items      []Issue
 	SelectedID int

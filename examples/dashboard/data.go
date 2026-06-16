@@ -21,15 +21,17 @@ func makeDemoIssues(count int) []Issue {
 		if id%23 == 0 {
 			priority = PriorityCritical
 		}
+		title := verbs[index%len(verbs)] + " " + service + " " + objects[(index*3)%len(objects)]
 		issues = append(issues, Issue{
-			ID:        id,
-			Title:     verbs[index%len(verbs)] + " " + service + " " + objects[(index*3)%len(objects)],
-			Owner:     owner,
-			Status:    status,
-			Priority:  priority,
-			Service:   service,
-			UpdatedAt: 9000 - ((index * 37) % 8000),
-			Events:    1 + ((index * 17) % 90),
+			ID:         id,
+			Title:      title,
+			Owner:      owner,
+			Status:     status,
+			Priority:   priority,
+			Service:    service,
+			SearchText: searchText(title, owner, service),
+			UpdatedAt:  9000 - ((index * 37) % 8000),
+			Events:     1 + ((index * 17) % 90),
 		})
 	}
 	return issues

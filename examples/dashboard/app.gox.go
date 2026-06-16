@@ -12,7 +12,6 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 	statusFilter, setStatusFilter := gf.UseState(StatusAll)
 	priorityFilter, setPriorityFilter := gf.UseState(PriorityAll)
 	sortMode, setSortMode := gf.UseState(SortByUpdated)
-	selectedID, setSelectedID := gf.UseState(0)
 
 	filters := FilterState{
 		Query:    query,
@@ -22,7 +21,6 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 	}
 	visible := visibleIssues(issues, filters)
 	metrics := dashboardMetrics(issues, len(visible))
-	selectedIssue, selectedFound := findIssue(issues, selectedID)
 
 	gf.UseEffect(func() gf.Cleanup {
 		setDocumentTitle("GoFrame Dashboard · " + gf.ToString(len(visible)) + " visible")
@@ -35,7 +33,6 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 		setStatusFilter(StatusAll)
 		setPriorityFilter(PriorityAll)
 		setSortMode(SortByUpdated)
-		setSelectedID(0)
 	}
 
 	toggleIssue := func(id int) {
@@ -66,35 +63,12 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 					}, FilterBar),
 				},
 			}, Card),
-			gf.El("div", gf.Props{
-				"class": "content-grid",
-			},
-				gf.Component("Card", CardProps{
-					Title:  "Issues",
-					TestID: "issues-card",
-					Children: []gf.Node{
-						gf.El("p", gf.Props{
-							"class":       "summary",
-							"data-testid": "visible-summary",
-						},
-							gf.Child(summaryText(len(visible), len(issues))),
-						),
-						gf.IfElse(len(visible) == 0, gf.Component("EmptyState", EmptyStateProps{
-							Query: query,
-						}, EmptyState), gf.Component("IssueTable", IssueTableProps{
-							Items:      visible,
-							SelectedID: selectedID,
-							OnSelect:   setSelectedID,
-							OnToggle:   toggleIssue,
-						}, IssueTable)),
-					},
-				}, Card),
-				gf.Component("DetailPanel", DetailPanelProps{
-					Issue:    selectedIssue,
-					Found:    selectedFound,
-					OnToggle: toggleIssue,
-				}, DetailPanel),
-			),
+			gf.Component("IssueWorkspace", IssueWorkspaceProps{
+				Items:    visible,
+				AllItems: issues,
+				Query:    query,
+				OnToggle: toggleIssue,
+			}, IssueWorkspace),
 		},
 	}, DashboardShell)
 }
