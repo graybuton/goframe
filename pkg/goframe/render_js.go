@@ -221,8 +221,8 @@ func removeMounted(parent js.Value, mounted *mountedNode) {
 
 func releaseMounted(mounted *mountedNode) {
 	if mounted.component != nil {
-		deactivateComponent(mounted.component)
 		releaseMounted(mounted.componentChild)
+		deactivateComponent(mounted.component)
 		mounted.component = nil
 		mounted.componentChild = nil
 		return

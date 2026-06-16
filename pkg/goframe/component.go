@@ -36,6 +36,10 @@ type componentInstance struct {
 	node           ComponentNode
 	stateSlots     []*stateSlot
 	stateIndex     int
+	effectSlots    []*effectSlot
+	effectIndex    int
+	unmountSlots   []*unmountSlot
+	unmountIndex   int
 	dirty          bool
 	active         bool
 	scheduleUpdate func(*componentInstance)
@@ -60,6 +64,8 @@ func renderComponentInstance(instance *componentInstance) Node {
 	previous := currentComponent
 	currentComponent = instance
 	instance.stateIndex = 0
+	instance.effectIndex = 0
+	instance.unmountIndex = 0
 	instance.dirty = false
 	defer func() {
 		currentComponent = previous
@@ -123,9 +129,16 @@ func deactivateComponent(instance *componentInstance) {
 	if instance == nil {
 		return
 	}
-	instance.active = false
+	if instance.active {
+		instance.active = false
+		runUnmountCleanups(instance)
+	} else {
+		instance.active = false
+	}
 	instance.dirty = false
 	instance.parent = nil
 	instance.update = nil
 	instance.stateSlots = nil
+	instance.effectSlots = nil
+	instance.unmountSlots = nil
 }
