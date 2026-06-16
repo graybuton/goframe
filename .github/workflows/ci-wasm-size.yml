@@ -1,0 +1,59 @@
+name: WASM Size
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  TINYGO_VERSION: 0.41.1
+
+jobs:
+  tinygo-size:
+    name: TinyGo packages and size budgets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Install compression tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y brotli zstd
+
+      - name: Install TinyGo
+        run: |
+          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"
+          sudo apt-get install -y /tmp/tinygo.deb
+          tinygo version
+
+      - name: Install goxc
+        run: go install ./cmd/goxc
+
+      - name: Package examples
+        run: |
+          goxc generate ./examples/counter
+          goxc package ./examples/counter --compiler=tinygo
+          goxc generate ./examples/components
+          goxc package ./examples/components --compiler=tinygo
+          goxc generate ./examples/todo
+          goxc package ./examples/todo --compiler=tinygo
+
+      - name: Size budgets
+        run: scripts/size-budget.sh | tee size-report.txt
+
+      - name: Upload size report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wasm-size-report
+          path: size-report.txt
