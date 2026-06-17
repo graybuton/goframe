@@ -5,8 +5,7 @@ import gf "github.com/graybuton/goframe/pkg/goframe"
 type DashboardAppProps struct{}
 
 func DashboardApp(props DashboardAppProps) gf.Node {
-	issues, setIssues := gf.UseState(resetDemoIssues())
-	dataVersion, setDataVersion := gf.UseState(0)
+	issues, dispatchIssues := gf.UseReducer(resetDemoIssues(), reduceIssues)
 	query, setQuery := gf.UseState("")
 	statusFilter, setStatusFilter := gf.UseState(StatusAll)
 	priorityFilter, setPriorityFilter := gf.UseState(PriorityAll)
@@ -27,8 +26,7 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 	}, gf.Deps(len(visible)))
 
 	reset := func() {
-		setIssues(resetDemoIssues())
-		setDataVersion(dataVersion + 1)
+		dispatchIssues(IssueAction{Kind: IssueActionReset})
 		setQuery("")
 		setStatusFilter(StatusAll)
 		setPriorityFilter(PriorityAll)
@@ -36,13 +34,11 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 	}
 
 	toggleIssue := func(id int) {
-		setIssues(toggleIssueStatus(issues, id))
-		setDataVersion(dataVersion + 1)
+		dispatchIssues(IssueAction{Kind: IssueActionToggle, ID: id})
 	}
 
 	simulateUpdate := func() {
-		setIssues(simulateIssueUpdate(issues))
-		setDataVersion(dataVersion + 1)
+		dispatchIssues(IssueAction{Kind: IssueActionSimulate})
 	}
 
 	return (
@@ -64,7 +60,6 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 			<IssueWorkspace
 				Items={visible}
 				AllItems={issues}
-				DataVersion={dataVersion}
 				Query={query}
 				OnToggle={toggleIssue}
 			/>
