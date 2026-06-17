@@ -50,8 +50,9 @@ Before creating a tag:
 - release package layout is checked with `goxc package --asset-hash --preload`
   for affected examples;
 - README, docs, and changelog are updated;
-- no `dist/`, `build/`, `.wasm`, `.wasm.gz`, `.wasm.br`, `.wasm.zst`,
-  `node_modules`, `.vsix`, or `.test` files are tracked.
+- no `dist/`, `build/`, `.goframe`, `.gox.go`, `.wasm`, `.wasm.gz`,
+  `.wasm.br`, `.wasm.zst`, `node_modules`, `.vsix`, or `.test` files are
+  tracked.
 
 ## Current Publishing Policy
 

@@ -89,8 +89,9 @@ The Todo reconciliation smoke test uses a separate instrumented build so debug
 probes do not increase production WASM:
 
 ```bash
-tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-  -o ./examples/todo/dist/assets/bundle.wasm ./examples/todo
+(cd ./examples/todo/.goframe/work/dev && \
+  tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+    -o ../../package/standalone/assets/bundle.wasm .)
 goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```
@@ -191,7 +192,8 @@ Low-level helpers such as `gf.Component`, `gf.El`, `gf.Child`, `gf.Key`,
 `gf.If`, `gf.IfElse`, `gf.For`, and `gf.ForIndexed` remain exported because
 generated `.gox.go` files use the public runtime package. Treat them as
 runtime/compiler primitives unless you are writing generated-code-like Go by
-hand.
+hand. In normal projects, `.gox.go` files live under `.goframe/gen` or an
+explicit `--out` directory and should not be committed.
 
 Browser props accept both lowercase and exported-style common names, including
 `value`/`Value`, `type`/`Type`, `placeholder`/`Placeholder`, and
@@ -269,14 +271,36 @@ See [VS Code GOX extension](extensions/vscode-gox/README.md).
 
 ## Command responsibilities
 
+Generated, build, and package internals live under an app-local hidden
+workspace by default:
+
+```text
+<app>/.goframe/
+```
+
+Use `GOFRAME_WORKSPACE=/work/goframe` or `--workspace /work/goframe` when the
+source tree is read-only, for example in Docker or CI.
+
 ### Generate
 
-`generate` transforms `.gox` source into adjacent `.gox.go` files:
+`generate` transforms `.gox` source into Go compiler output under the hidden
+app workspace:
 
 ```bash
 goxc generate ./examples/counter
 goxc generate ./examples/counter/app.gox
 ```
+
+Default output:
+
+```text
+examples/counter/.goframe/gen/app.gox.go
+```
+
+Generated `.gox.go` files are toolchain output and are not committed. Use
+`--out=directory` to write generated files somewhere explicit. `--in-place`
+restores the old adjacent `.gox.go` behavior for debugging or legacy workflows
+and prints a warning.
 
 ### Build
 
@@ -291,7 +315,7 @@ goxc build ./examples/counter --compiler=go
 Default output:
 
 ```text
-examples/counter/build/bundle.wasm
+examples/counter/.goframe/build/tinygo/dev/bundle.wasm
 ```
 
 `--out=directory` overrides the build directory.
@@ -305,7 +329,7 @@ goxc package ./examples/counter --compiler=tinygo
 ```
 
 ```text
-examples/counter/dist/
+examples/counter/.goframe/package/standalone/
 ├── index.html
 ├── asset-manifest.json
 ├── goframe-package.json
@@ -341,15 +365,28 @@ precompressed files.
 
 See [cache-safe package delivery](docs/deployment.md).
 
+### Export
+
+`export` copies the latest standalone package to a user-facing deploy
+directory:
+
+```bash
+goxc package ./examples/counter --compiler=tinygo --asset-hash --preload --compress=gzip,br
+goxc export ./examples/counter --out ./dist
+```
+
+`dist/` appears only when you explicitly export to it.
+
 ### Size
 
 ```bash
 goxc size ./examples/counter
-goxc size ./examples/counter/build
-goxc size ./examples/counter/dist
+goxc size --dir=./dist
 ```
 
-The command prefers `dist/`, then `build/`, when passed an application path.
+When passed an application path, the command reads
+`.goframe/package/standalone`. Explicit directories are still supported with
+`--dir`.
 
 TinyGo package budgets can be checked after packaging the examples. The gate
 checks raw WASM plus gzip, brotli, and optional zstd delivery sizes:
@@ -368,11 +405,12 @@ scripts/perf-report.sh
 
 ```bash
 goxc serve ./examples/counter --port=8080
-goxc serve --dir=./examples/counter/dist --port=8080
+goxc serve --dir=./dist --port=8080
 ```
 
-The local server correctly serves `.wasm` as `application/wasm`. It does not
-perform gzip or brotli content negotiation.
+By default, `serve <app>` serves `.goframe/package/standalone`; run
+`goxc package <app>` first. The local server correctly serves `.wasm` as
+`application/wasm`. It does not perform gzip or brotli content negotiation.
 
 ### Clean
 
@@ -381,8 +419,9 @@ goxc clean ./examples/counter
 goxc clean ./examples/counter --generated
 ```
 
-The default removes `build/` and the manifest output directory. Generated
-`.gox.go` files are removed only with `--generated`.
+The default removes `.goframe/work`, `.goframe/build`, and `.goframe/package`.
+Generated `.goframe/gen` files and legacy adjacent `.gox.go` files are removed
+only with `--generated`.
 
 ### Doctor and version
 
@@ -414,7 +453,9 @@ early.
 }
 ```
 
-CLI flags override manifest compiler and output choices.
+CLI flags override manifest compiler and output choices. The `output` field is
+kept as a legacy/export convention; normal package output is written under the
+hidden `.goframe/package/standalone` workspace.
 
 ## Size experiment
 
@@ -447,8 +488,9 @@ delivery budgets. Counter remains an integration probe rather than a
 representative application benchmark.
 MVP 12 adds a dashboard-sized example and browser smoke coverage for a more
 realistic 300-row interactive app.
-MVP 13 moves package output to `dist/assets/` and adds content-hashed release
-assets for cache-safe delivery.
+MVP 13 adds content-hashed release assets for cache-safe delivery. MVP 13.1
+keeps the app source tree clean by moving generated, build, and package
+outputs under `.goframe/`; use `goxc export` when you want a visible `dist/`.
 
 ## Legacy CLI
 

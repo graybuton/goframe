@@ -37,9 +37,9 @@ scripts/size-budget.sh
 
 The workflow uploads the printed size report as an artifact.
 
-The size gate measures the packaged WASM entrypoint under the MVP 13
-`dist/assets/bundle*.wasm` layout, with a legacy fallback for older
-`dist/main.wasm` packages.
+The size gate measures the packaged WASM entrypoint under
+`.goframe/package/standalone/assets/bundle*.wasm`, with a legacy fallback for
+older `main.wasm` packages.
 
 ### Browser Smoke
 

@@ -35,10 +35,20 @@ goxc package ./examples/dashboard --compiler=tinygo
 goxc serve ./examples/dashboard --port=8080
 ```
 
+Generated, build, and package artifacts stay under `examples/dashboard/.goframe`
+by default. The authored app directory should not gain adjacent `.gox.go`,
+`build/`, or `dist/` entries.
+
 Release-style package check:
 
 ```bash
 goxc package ./examples/dashboard --compiler=tinygo --asset-hash --preload --compress=gzip,br
+```
+
+Export only when you want a visible deploy directory:
+
+```bash
+goxc export ./examples/dashboard --out ./dist
 ```
 
 Fallback through the standard Go WASM compiler:

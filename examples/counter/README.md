@@ -37,7 +37,7 @@ goxc build ./examples/counter --compiler=tinygo
 Output:
 
 ```text
-examples/counter/build/bundle.wasm
+examples/counter/.goframe/build/tinygo/dev/bundle.wasm
 ```
 
 Use `--compiler=go` for standard Go compatibility mode.
@@ -47,7 +47,7 @@ Use `--compiler=go` for standard Go compatibility mode.
 `goxc package` creates:
 
 ```text
-dist/
+examples/counter/.goframe/package/standalone/
 ├── index.html
 ├── asset-manifest.json
 ├── goframe-package.json
@@ -67,6 +67,12 @@ Release-style package output can add content hashes and preload hints:
 
 ```bash
 goxc package ./examples/counter --asset-hash --preload --compress=gzip,br
+```
+
+Export to a visible deploy directory only when needed:
+
+```bash
+goxc export ./examples/counter --out ./dist
 ```
 
 `goxc serve` always serves the raw WASM and does not perform compressed-content

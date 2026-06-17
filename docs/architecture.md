@@ -38,11 +38,13 @@ analysis, formatting, and diagnostics remain future LSP responsibilities.
 ### Generate
 
 ```text
-.gox source -> generated .gox.go
+.gox source -> generated .goframe/gen/*.gox.go
 ```
 
 Generation is deterministic source transformation. Generated files remain next
-to their `.gox` sources so normal Go and TinyGo compilers can consume them.
+to the app in a hidden toolchain workspace, not next to authored source files.
+`goxc build` and `goxc package` materialize a build workspace that normal Go
+and TinyGo compilers can consume.
 
 The MVP component model deliberately delegates type checking to Go:
 
@@ -65,7 +67,7 @@ slots, and update a dirty component subtree independently.
 ### Build
 
 ```text
-generated Go source -> raw build/bundle.wasm
+materialized Go source -> raw .goframe/build/<compiler>/<profile>/bundle.wasm
 ```
 
 Build only compiles. It does not copy HTML, create a distribution, or generate
@@ -74,7 +76,7 @@ gzip/brotli files. Both Go and TinyGo targets use the same raw output contract.
 ### Package
 
 ```text
-application + selected compiler -> runnable dist/ bundle
+application + selected compiler -> runnable .goframe/package/standalone bundle
 ```
 
 Packaging compiles the selected target and combines `assets/bundle.wasm`, the
@@ -83,8 +85,9 @@ and generated `goframe-package.json`. Compiler-specific runtime names are
 normalized to `assets/bundle.wasm` and `assets/wasm_exec.js`.
 
 Packaging prepares artifacts in a staging directory before publishing them to
-`dist/`. This keeps failed compile/copy/compression steps from immediately
-damaging the currently published bundle.
+`.goframe/package/standalone`. This keeps failed compile/copy/compression
+steps from damaging the currently runnable package and keeps the authored app
+directory free of visible generated files.
 
 Precompression is optional packaging assistance, never default compiler
 behavior:
@@ -105,11 +108,18 @@ goxc package ./app --asset-hash --preload --compress=gzip,br
 
 See `docs/deployment.md` for the cache policy and manifest contract.
 
+Use `goxc export ./app --out ./dist` to copy the latest standalone package to a
+deployment directory. Export is intentionally explicit so normal build/package
+commands do not create visible `dist/` output.
+
 ### Serve
 
 `goxc serve` is a small development server for a packaged directory. It serves
 WASM with `application/wasm`, but intentionally does not attempt to be a
 production deployment system.
+
+By default, `serve <app>` serves `.goframe/package/standalone`. `serve --dir`
+continues to serve an explicit exported directory.
 
 ## Project manifest
 

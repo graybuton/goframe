@@ -12,7 +12,7 @@ goxc package ./examples/todo --compiler=tinygo
 Default output:
 
 ```text
-dist/
+examples/todo/.goframe/package/standalone/
 ├── index.html
 ├── asset-manifest.json
 ├── goframe-package.json
@@ -25,6 +25,17 @@ The logical WASM bundle name is `bundle.wasm`. Existing manifests that
 explicitly set `"wasm": "main.wasm"` still package, but new examples and docs
 use `bundle.wasm`.
 
+`goxc package` keeps package output inside the hidden app workspace so the
+authored application directory stays clean. Use `goxc export` when you want a
+visible deployment directory:
+
+```bash
+goxc package ./examples/todo --compiler=tinygo --asset-hash --preload --compress=gzip,br
+goxc export ./examples/todo --out ./dist
+```
+
+Only the export step creates `./dist`.
+
 ## Hashed Release Package
 
 ```bash
@@ -35,7 +46,7 @@ With `--asset-hash`, emitted assets include an 8-character SHA-256 content hash
 based on the original uncompressed bytes:
 
 ```text
-dist/
+examples/todo/.goframe/package/standalone/
 ├── index.html
 ├── asset-manifest.json
 ├── goframe-package.json
@@ -137,6 +148,39 @@ In dev packages, hash fields are omitted.
   "generatedAt": "2026-06-17T00:00:00Z"
 }
 ```
+
+## Clean App Workspace
+
+GoFrame toolchain internals live in an app-local hidden workspace:
+
+```text
+<app>/.goframe/
+├── gen/
+├── work/
+├── build/
+├── package/
+├── cache/
+└── logs/
+```
+
+Default command outputs:
+
+- `goxc generate <app>` writes generated `.gox.go` files to `.goframe/gen`;
+- `goxc build <app>` writes raw WASM to `.goframe/build/<compiler>/dev`;
+- `goxc package <app>` writes standalone output to
+  `.goframe/package/standalone`;
+- `goxc serve <app>` serves `.goframe/package/standalone`;
+- `goxc size <app>` reads `.goframe/package/standalone`;
+- `goxc export <app> --out <dir>` copies the standalone package to an explicit
+  deployment directory.
+
+`GOFRAME_WORKSPACE=/work/goframe` or `--workspace /work/goframe` moves this
+workspace outside the source tree. With an external workspace, goxc creates a
+safe app-specific subdirectory to avoid collisions between apps.
+
+`goxc generate --in-place` is available only for debugging or legacy workflows.
+It writes adjacent `.gox.go` files and prints a warning. Normal source trees
+should not commit generated `.gox.go`.
 
 ## Cache Policy
 
