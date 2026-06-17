@@ -340,6 +340,9 @@ examples/counter/.goframe/package/standalone/
 
 Compiler-specific filenames are internal details. A packaged application uses
 `assets/bundle.wasm` and `assets/wasm_exec.js` for both Go and TinyGo.
+By default, package output stays under `.goframe/package/standalone`. If you
+explicitly pass `--out`, point it at an empty directory or a previous GoFrame
+package output; goxc treats that directory as tool-owned package output.
 
 Cache-safe release packaging can add content hashes, preload hints, and
 precompressed assets:
@@ -379,9 +382,10 @@ goxc export ./examples/counter --out ./dist
 
 The export directory is treated as tool-owned. If `--out` points at a
 non-empty directory that does not contain a previous GoFrame export marker
-(`goframe-package.json` or `asset-manifest.json`), `goxc export` fails instead
-of deleting a possibly user-owned `assets/` directory. Pass `--force` only when
-you intentionally want goxc to treat that directory as package output:
+(`goframe-package.json`, `asset-manifest.json`, or legacy `manifest.json`),
+`goxc export` fails instead of deleting a possibly user-owned `assets/`
+directory. Pass `--force` only when you intentionally want goxc to treat that
+directory as package output:
 
 ```bash
 goxc export ./examples/counter --out ./dist --force

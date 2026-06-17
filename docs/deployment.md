@@ -36,9 +36,16 @@ goxc export ./examples/todo --out ./dist
 
 Only the export step creates `./dist`.
 
+If you intentionally pass `goxc package --out <dir>`, that directory is also
+treated as package output owned by goxc. It must be empty or already contain a
+GoFrame package marker; otherwise package fails before removing any existing
+`assets/` directory. The recommended visible deployment flow remains
+`goxc package` followed by `goxc export`.
+
 The export directory is tool-owned. If `--out` already exists, is non-empty,
-and does not contain `goframe-package.json` or `asset-manifest.json` from a
-previous GoFrame export, `goxc export` fails before touching it:
+and does not contain `goframe-package.json`, `asset-manifest.json`, or legacy
+`manifest.json` from a previous GoFrame export, `goxc export` fails before
+touching it:
 
 ```bash
 goxc export ./examples/todo --out ./dist

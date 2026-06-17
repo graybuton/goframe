@@ -11,6 +11,9 @@
   deployment directories.
 - Packaging safety checks for export ownership, legacy clean migration, and
   clearer hidden-workspace module errors.
+- Foundation Audit III safety coverage for explicit package output ownership,
+  package asset path validation, legacy `manifest.json` cleanup markers, and
+  clean workspace CLI edge cases.
 - Dependabot configuration for GitHub Actions, Go modules, and VS Code
   extension npm dependencies.
 - Dashboard-sized pressure-test example with 300 deterministic issue rows,
