@@ -246,7 +246,9 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
 - Component state slots are positional and require stable call order.
 - Lifecycle/effects are minimal; there is no Fiber scheduler, context, or
   error-boundary model.
-- No automatic props memoization; descendants rerender with their parent.
+- No automatic props memoization; descendants rerender with their parent unless
+  components explicitly implement `MemoEqual` on their props and the framework can
+  perform a deterministic memoized bailout.
 - Duplicate key diagnostics are debug-only.
 - GOX has expression-oriented conditional rendering, but no template-block
   loops/conditionals, spread props, or component namespaces.

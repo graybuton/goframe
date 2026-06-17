@@ -98,9 +98,11 @@ the issue data and filters because metrics and the visible table derive from
 them. `IssueWorkspace` owns only row selection so selecting a row does not
 rerender `DashboardApp`, `MetricsGrid`, or `FilterBar`.
 
-Known remaining cost: without props memoization or table virtualization,
-updates inside `IssueWorkspace` can still rerender the visible rows. This is a
-useful pressure-test result, not something hidden by the example.
+Known remaining cost: without table virtualization,
+selection-related updates can still rerender visible rows, but `IssueRow`
+implements `MemoEqual` and dashboard smoke now expects row memo skips on
+selection. This is a useful pressure-test result, and a baseline for future
+runtime optimization.
 
 ## Known Limitations
 
@@ -109,5 +111,5 @@ useful pressure-test result, not something hidden by the example.
 - There is no virtualization; all 300 rows are real DOM rows.
 - GOX has no spread props, style objects, namespaces, or template loops.
 - Timing numbers printed by smoke are informational, not CI performance budgets.
-- There is no row virtualization or memoization, so full-table state changes
-  still visit rendered rows.
+- There is no row virtualization, so full-table state changes still visit all
+  rendered rows.

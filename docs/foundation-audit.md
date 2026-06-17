@@ -71,7 +71,8 @@ Temporary decisions to keep visible:
 - Direct function component calls are valid Go but do not create runtime
   component identity.
 - State slots are component-scoped but still positional.
-- There is no automatic props memoization.
+- There is no automatic deep comparison memoization. Components may opt in to
+  explicit memo bailouts with `MemoEqual` on props when appropriate.
 - The browser runtime assumes it owns the mounted DOM subtree.
 
 These are acceptable now, but they are the areas most likely to be touched by a
@@ -313,7 +314,8 @@ Remaining safety risks:
   ordering.
 - Lifecycle/effects are intentionally minimal: no context, error boundaries,
   async effects, or priorities.
-- No props memoization exists; this is a size and correctness tradeoff.
+- Memoization is explicit and opt-in via `MemoEqual` on props. Automatic
+  memoization is intentionally avoided to keep runtime behavior predictable.
 - GOX parser remains a focused parser, not a full Go-aware frontend.
 
 ## Regression Gates

@@ -18,6 +18,8 @@
   extension npm dependencies.
 - Dashboard-sized pressure-test example with 300 deterministic issue rows,
   filters, keyed table sorting, detail panel updates, and smoke coverage.
+- Explicit `MemoEqual`-based component memoization in runtime, with dashboard row
+  memo skip coverage and browser smoke assertions.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

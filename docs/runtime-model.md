@@ -278,7 +278,8 @@ The dependency-free headless Chrome probe verifies:
 - lifecycle/effects are minimal and have no priorities or async scheduler;
 - no context or error boundaries;
 - component identity uses the declared component name, not Go function identity;
-- no automatic props memoization;
+- explicit opt-in props memoization via `MemoEqual`; components still rerender
+  by default when props are not memoized.
 - dirty component scheduling has no priorities, interruption, or concurrency;
 - duplicate-key diagnostics are debug-only and do not include source locations;
 - no SSR or hydration;
