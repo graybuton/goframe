@@ -156,6 +156,7 @@ try {
     await wait(120);
     timings.push({ step: "selection-update", ms: Date.now() - selectStart });
     const selectReport = await finishScenario(client, "row-select");
+    await assertRowSelectionReport(client, selectReport);
     const selected = await client.evaluate(`(() => {
         const first = document.querySelector(".issue-row");
         return {
@@ -634,23 +635,28 @@ function installDashboardAuditExpression(names) {
                 this.baseline = snapshotCounts(componentNames);
             },
             finish(label) {
-                const next = snapshotCounts(componentNames);
-                const renderDeltas = {};
-                const patchDeltas = {};
-                for (const name of componentNames) {
-                    renderDeltas[name] = next.renders[name] - this.baseline.renders[name];
-                    patchDeltas[name] = next.patches[name] - this.baseline.patches[name];
-                }
-                return {
-                    label,
-                    durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
-                    renderDeltas,
-                    patchDeltas,
-                    operations: { ...this.operations },
-                    mutations: { ...this.mutations },
-                    rows: document.querySelectorAll(".issue-row").length,
-                    summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
-                };
+            const next = snapshotCounts(componentNames);
+            const renderDeltas = {};
+            const patchDeltas = {};
+            for (const name of componentNames) {
+                renderDeltas[name] = next.renders[name] - this.baseline.renders[name];
+                patchDeltas[name] = next.patches[name] - this.baseline.patches[name];
+            }
+            const memoDeltas = {};
+            for (const name of componentNames) {
+                memoDeltas[name] = next.memoSkips[name] - this.baseline.memoSkips[name];
+            }
+            return {
+                label,
+                durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
+                renderDeltas,
+                patchDeltas,
+                memoDeltas,
+                operations: { ...this.operations },
+                mutations: { ...this.mutations },
+                rows: document.querySelectorAll(".issue-row").length,
+                summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+            };
             },
         };
 
@@ -727,13 +733,37 @@ function installDashboardAuditExpression(names) {
         function snapshotCounts(names) {
             const renderCounts = window.goframeComponentRenderCounts || {};
             const patchCounts = window.goframeComponentPatchCounts || {};
+            const memoSkips = window.goframeComponentMemoSkips || {};
             const renders = {};
             const patches = {};
+            const skips = {};
             for (const name of names) {
                 renders[name] = renderCounts[name] || 0;
                 patches[name] = patchCounts[name] || 0;
+                skips[name] = memoSkips[name] || 0;
             }
-            return { renders, patches };
+            return { renders, patches, memoSkips: skips };
         }
     })()`;
+}
+
+async function assertRowSelectionReport(client, report) {
+    const rows = await client.evaluate(`document.querySelectorAll(".issue-row").length`);
+    const allowed = Math.max(2, Math.floor(rows / 2));
+    if (report.renderDeltas.IssueRow > allowed) {
+        throw new Error(`APP FAILURE: IssueRow renders ${report.renderDeltas.IssueRow} for row selection (limit ${allowed})`);
+    }
+    if (report.memoDeltas.IssueRow <= 0) {
+        throw new Error(`APP FAILURE: IssueRow memo skips not observed on row selection: ${JSON.stringify(report.memoDeltas)}`);
+    }
+    if (report.renderDeltas.Header !== 0 || report.renderDeltas.FilterBar !== 0 || report.renderDeltas.MetricsGrid !== 0) {
+        throw new Error(`APP FAILURE: unrelated renders triggered by row selection: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    if (report.patchDeltas.Header !== 0 || report.patchDeltas.FilterBar !== 0 || report.patchDeltas.MetricsGrid !== 0) {
+        throw new Error(`APP FAILURE: unrelated patches triggered by row selection: ${JSON.stringify(report.patchDeltas)}`);
+    }
+    if (report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
+        throw new Error(`APP FAILURE: listener churn during row selection: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard row-selection memo summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, memoDeltas: report.memoDeltas })}`);
 }
