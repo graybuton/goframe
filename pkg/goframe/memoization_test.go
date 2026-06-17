@@ -2,6 +2,10 @@ package goframe
 
 import "testing"
 
+type plainPropsFixture struct {
+	ID int
+}
+
 type memoizedPropsFixture struct {
 	ID      int
 	Version int
@@ -14,18 +18,18 @@ func (props memoizedPropsFixture) MemoEqual(next memoizedPropsFixture) bool {
 		props.Label == next.Label
 }
 
-func TestShouldSkipComponentRenderRequiresMemoizedProps(t *testing.T) {
-	node := Component("NoMemo", memoizedPropsFixture{ID: 1}, func(memoizedPropsFixture) Node {
+func TestShouldSkipComponentRenderRequiresMemoEqual(t *testing.T) {
+	node := Component("NoMemo", plainPropsFixture{ID: 1}, func(plainPropsFixture) Node {
 		return Empty()
 	}).(ComponentNode)
 	instance := newComponentInstance(node, "row-1", nil, nil)
 	instance.dirty = false
-	next := Component("NoMemo", memoizedPropsFixture{ID: 2}, func(memoizedPropsFixture) Node {
+	next := Component("NoMemo", plainPropsFixture{ID: 1}, func(plainPropsFixture) Node {
 		return Empty()
 	}).(ComponentNode)
 
 	if shouldSkipComponentRender(instance, next, "row-1") {
-		t.Fatal("component without MemoEqual should not be skipped")
+		t.Fatal("component without MemoEqual must not skip even when props are equal")
 	}
 }
 
@@ -66,7 +70,7 @@ func TestShouldSkipComponentRenderSkipsOnlyWhenNameAndKeyMatch(t *testing.T) {
 	}
 }
 
-func TestShouldSkipComponentRenderSkipsWhenNotDirtyAndDirtyPropsEqual(t *testing.T) {
+func TestShouldSkipComponentRenderDoesNotSkipWhenMemoPropsChanged(t *testing.T) {
 	node := Component("Memo", memoizedPropsFixture{ID: 1, Version: 2, Label: "a"}, func(memoizedPropsFixture) Node {
 		return Empty()
 	}).(ComponentNode)

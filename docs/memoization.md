@@ -46,6 +46,11 @@ selection keeps the same version, so unchanged rows can skip. Dataset changes
 from reset, simulate update, or toggle increment the version, so row handlers
 are refreshed before they can act on stale issue data.
 
+That is an intentional tradeoff: dataset-changing actions invalidate row
+memoization broadly, even when only one row changed. This keeps callback
+correctness explicit until the runtime has a smaller primitive such as
+functional state updates, stable event callbacks, or selectors.
+
 Do not ignore function props when the callback closes over changing data and no
 other compared prop tracks that data.
 
