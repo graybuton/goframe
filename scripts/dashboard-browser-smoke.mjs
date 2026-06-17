@@ -150,18 +150,25 @@ try {
         "dashboard search updates visible rows without replacing header/search",
     );
 
+    await client.evaluate(`document.querySelector(".issue-row .row-link").click()`);
+    await wait(120);
     await startScenario(client, "row-select");
     const selectStart = Date.now();
-    await client.evaluate(`document.querySelector(".issue-row .row-link").click()`);
+    await client.evaluate(`(() => {
+        const rows = document.querySelectorAll(".issue-row");
+        const links = document.querySelectorAll(".issue-row .row-link");
+        window.__dashboardSelectionTarget = rows[1].id.replace("issue-row-", "");
+        links[1].click();
+    })()`);
     await wait(120);
     timings.push({ step: "selection-update", ms: Date.now() - selectStart });
     const selectReport = await finishScenario(client, "row-select");
-    await assertRowSelectionReport(client, selectReport);
+    assertRowSelectionReport(selectReport);
     const selected = await client.evaluate(`(() => {
-        const first = document.querySelector(".issue-row");
+        const target = window.__dashboardSelectionTarget;
         return {
             selected: Boolean(document.querySelector(".issue-row-selected")),
-            detail: document.querySelector("[data-testid='detail-panel']")?.textContent.includes(first.id.replace("issue-row-", "")),
+            detail: document.querySelector("[data-testid='detail-panel']")?.textContent.includes(target),
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
             searchSame: window.__dashboardSearch === document.querySelector("#dashboard-search"),
         };
@@ -254,6 +261,21 @@ try {
     }
     console.log("dashboard simulate update changes metrics: ok");
 
+    await startScenario(client, "post-simulate-row-toggle");
+    const postSimulateToggleBefore = await firstRowStatus(client);
+    await client.evaluate(`document.querySelector(".issue-row .button").click()`);
+    await wait(120);
+    const postSimulateToggleReport = await finishScenario(client, "post-simulate-row-toggle");
+    const postSimulateToggleAfter = await firstRowStatus(client);
+    const eventsAfterPostSimulateToggle = await metricValue(client, "Events");
+    if (postSimulateToggleBefore === postSimulateToggleAfter) {
+        throw new Error(`APP FAILURE: post-simulate row toggle did not change first row status: ${postSimulateToggleBefore}`);
+    }
+    if (eventsAfterPostSimulateToggle !== afterEvents) {
+        throw new Error(`APP FAILURE: post-simulate row toggle used stale issue data: events after simulate ${afterEvents}, after toggle ${eventsAfterPostSimulateToggle}`);
+    }
+    console.log("dashboard post-simulate row toggle preserves simulated data: ok");
+
     await startScenario(client, "reset-final");
     await clickButtonByText(client, "Reset");
     await wait(120);
@@ -288,6 +310,7 @@ try {
         resetBeforeSimulateReport,
         toggleReport,
         simulateReport,
+        postSimulateToggleReport,
         resetReport,
     ])}`);
     console.log("Dashboard browser smoke: ok");
@@ -747,9 +770,8 @@ function installDashboardAuditExpression(names) {
     })()`;
 }
 
-async function assertRowSelectionReport(client, report) {
-    const rows = await client.evaluate(`document.querySelectorAll(".issue-row").length`);
-    const allowed = Math.max(2, Math.floor(rows / 2));
+function assertRowSelectionReport(report) {
+    const allowed = 2;
     if (report.renderDeltas.IssueRow > allowed) {
         throw new Error(`APP FAILURE: IssueRow renders ${report.renderDeltas.IssueRow} for row selection (limit ${allowed})`);
     }
