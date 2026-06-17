@@ -233,7 +233,8 @@ children by key. Dirty component updates start directly at their mounted
 subtree, so unrelated ancestors and siblings are not traversed. If a parent and
 child are both dirty in the same batch, ancestor pruning keeps only the parent
 update. Descendant components encountered inside an updated parent subtree
-rerender; there is no automatic props memoization.
+rerender. For selective subtree bailouts, define `MemoEqual` on props to opt
+in to explicit component memoization and skip stable re-renders.
 
 Duplicate sibling keys are a user error. Production builds keep the smallest
 behavior and do not diagnose them; `goframe_debug` builds record and warn about
@@ -546,8 +547,9 @@ required.
   stable.
 - Lifecycle/effects are minimal; no context, error boundaries, async effects,
   dependency inference, or priorities.
-- There is no automatic props memoization. Components encountered during a
-  parent subtree update rerender.
+- Memoization is explicit and opt-in today:
+  components can implement `MemoEqual` on their props type to skip renders when
+  prop shapes are unchanged and the component is otherwise clean.
 - Duplicate key diagnostics are debug-only and do not run in production builds.
 - GOX has JSX-like render expressions for `condition && <Node />` and
   `condition ? <A /> : <B />`, but no template-block `if`/`for`, spread props,

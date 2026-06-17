@@ -6,6 +6,7 @@ type DashboardAppProps struct{}
 
 func DashboardApp(props DashboardAppProps) gf.Node {
 	issues, setIssues := gf.UseState(resetDemoIssues())
+	dataVersion, setDataVersion := gf.UseState(0)
 	query, setQuery := gf.UseState("")
 	statusFilter, setStatusFilter := gf.UseState(StatusAll)
 	priorityFilter, setPriorityFilter := gf.UseState(PriorityAll)
@@ -27,6 +28,7 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 
 	reset := func() {
 		setIssues(resetDemoIssues())
+		setDataVersion(dataVersion + 1)
 		setQuery("")
 		setStatusFilter(StatusAll)
 		setPriorityFilter(PriorityAll)
@@ -35,10 +37,12 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 
 	toggleIssue := func(id int) {
 		setIssues(toggleIssueStatus(issues, id))
+		setDataVersion(dataVersion + 1)
 	}
 
 	simulateUpdate := func() {
 		setIssues(simulateIssueUpdate(issues))
+		setDataVersion(dataVersion + 1)
 	}
 
 	return (
@@ -60,6 +64,7 @@ func DashboardApp(props DashboardAppProps) gf.Node {
 			<IssueWorkspace
 				Items={visible}
 				AllItems={issues}
+				DataVersion={dataVersion}
 				Query={query}
 				OnToggle={toggleIssue}
 			/>

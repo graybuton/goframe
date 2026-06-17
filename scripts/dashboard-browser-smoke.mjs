@@ -150,17 +150,25 @@ try {
         "dashboard search updates visible rows without replacing header/search",
     );
 
+    await client.evaluate(`document.querySelector(".issue-row .row-link").click()`);
+    await wait(120);
     await startScenario(client, "row-select");
     const selectStart = Date.now();
-    await client.evaluate(`document.querySelector(".issue-row .row-link").click()`);
+    await client.evaluate(`(() => {
+        const rows = document.querySelectorAll(".issue-row");
+        const links = document.querySelectorAll(".issue-row .row-link");
+        window.__dashboardSelectionTarget = rows[1].id.replace("issue-row-", "");
+        links[1].click();
+    })()`);
     await wait(120);
     timings.push({ step: "selection-update", ms: Date.now() - selectStart });
     const selectReport = await finishScenario(client, "row-select");
+    assertRowSelectionReport(selectReport);
     const selected = await client.evaluate(`(() => {
-        const first = document.querySelector(".issue-row");
+        const target = window.__dashboardSelectionTarget;
         return {
             selected: Boolean(document.querySelector(".issue-row-selected")),
-            detail: document.querySelector("[data-testid='detail-panel']")?.textContent.includes(first.id.replace("issue-row-", "")),
+            detail: document.querySelector("[data-testid='detail-panel']")?.textContent.includes(target),
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
             searchSame: window.__dashboardSearch === document.querySelector("#dashboard-search"),
         };
@@ -253,6 +261,21 @@ try {
     }
     console.log("dashboard simulate update changes metrics: ok");
 
+    await startScenario(client, "post-simulate-row-toggle");
+    const postSimulateToggleBefore = await firstRowStatus(client);
+    await client.evaluate(`document.querySelector(".issue-row .button").click()`);
+    await wait(120);
+    const postSimulateToggleReport = await finishScenario(client, "post-simulate-row-toggle");
+    const postSimulateToggleAfter = await firstRowStatus(client);
+    const eventsAfterPostSimulateToggle = await metricValue(client, "Events");
+    if (postSimulateToggleBefore === postSimulateToggleAfter) {
+        throw new Error(`APP FAILURE: post-simulate row toggle did not change first row status: ${postSimulateToggleBefore}`);
+    }
+    if (eventsAfterPostSimulateToggle !== afterEvents) {
+        throw new Error(`APP FAILURE: post-simulate row toggle used stale issue data: events after simulate ${afterEvents}, after toggle ${eventsAfterPostSimulateToggle}`);
+    }
+    console.log("dashboard post-simulate row toggle preserves simulated data: ok");
+
     await startScenario(client, "reset-final");
     await clickButtonByText(client, "Reset");
     await wait(120);
@@ -287,6 +310,7 @@ try {
         resetBeforeSimulateReport,
         toggleReport,
         simulateReport,
+        postSimulateToggleReport,
         resetReport,
     ])}`);
     console.log("Dashboard browser smoke: ok");
@@ -634,23 +658,28 @@ function installDashboardAuditExpression(names) {
                 this.baseline = snapshotCounts(componentNames);
             },
             finish(label) {
-                const next = snapshotCounts(componentNames);
-                const renderDeltas = {};
-                const patchDeltas = {};
-                for (const name of componentNames) {
-                    renderDeltas[name] = next.renders[name] - this.baseline.renders[name];
-                    patchDeltas[name] = next.patches[name] - this.baseline.patches[name];
-                }
-                return {
-                    label,
-                    durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
-                    renderDeltas,
-                    patchDeltas,
-                    operations: { ...this.operations },
-                    mutations: { ...this.mutations },
-                    rows: document.querySelectorAll(".issue-row").length,
-                    summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
-                };
+            const next = snapshotCounts(componentNames);
+            const renderDeltas = {};
+            const patchDeltas = {};
+            for (const name of componentNames) {
+                renderDeltas[name] = next.renders[name] - this.baseline.renders[name];
+                patchDeltas[name] = next.patches[name] - this.baseline.patches[name];
+            }
+            const memoDeltas = {};
+            for (const name of componentNames) {
+                memoDeltas[name] = next.memoSkips[name] - this.baseline.memoSkips[name];
+            }
+            return {
+                label,
+                durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
+                renderDeltas,
+                patchDeltas,
+                memoDeltas,
+                operations: { ...this.operations },
+                mutations: { ...this.mutations },
+                rows: document.querySelectorAll(".issue-row").length,
+                summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+            };
             },
         };
 
@@ -727,13 +756,36 @@ function installDashboardAuditExpression(names) {
         function snapshotCounts(names) {
             const renderCounts = window.goframeComponentRenderCounts || {};
             const patchCounts = window.goframeComponentPatchCounts || {};
+            const memoSkips = window.goframeComponentMemoSkips || {};
             const renders = {};
             const patches = {};
+            const skips = {};
             for (const name of names) {
                 renders[name] = renderCounts[name] || 0;
                 patches[name] = patchCounts[name] || 0;
+                skips[name] = memoSkips[name] || 0;
             }
-            return { renders, patches };
+            return { renders, patches, memoSkips: skips };
         }
     })()`;
+}
+
+function assertRowSelectionReport(report) {
+    const allowed = 2;
+    if (report.renderDeltas.IssueRow > allowed) {
+        throw new Error(`APP FAILURE: IssueRow renders ${report.renderDeltas.IssueRow} for row selection (limit ${allowed})`);
+    }
+    if (report.memoDeltas.IssueRow <= 0) {
+        throw new Error(`APP FAILURE: IssueRow memo skips not observed on row selection: ${JSON.stringify(report.memoDeltas)}`);
+    }
+    if (report.renderDeltas.Header !== 0 || report.renderDeltas.FilterBar !== 0 || report.renderDeltas.MetricsGrid !== 0) {
+        throw new Error(`APP FAILURE: unrelated renders triggered by row selection: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    if (report.patchDeltas.Header !== 0 || report.patchDeltas.FilterBar !== 0 || report.patchDeltas.MetricsGrid !== 0) {
+        throw new Error(`APP FAILURE: unrelated patches triggered by row selection: ${JSON.stringify(report.patchDeltas)}`);
+    }
+    if (report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
+        throw new Error(`APP FAILURE: listener churn during row selection: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard row-selection memo summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, memoDeltas: report.memoDeltas })}`);
 }

@@ -147,7 +147,8 @@ The Todo example uses effects to persist tasks:
 - No cleanup ordering guarantees beyond each component instance cleaning its
   own registered hooks.
 - No lifecycle hooks for before-render or before-patch.
-- No component memoization.
+- No automatic component memoization in the GOX compiler or runtime. Memoization is
+  explicit via `MemoEqual` on component props and is intentionally opt-in.
 - No context, router integration, SSR, hydration, or async component model.
 - Hook order changes are unsupported and may panic only when the slot type
   changes.

@@ -13,6 +13,7 @@
     <script>
         window.goframeComponentRenderCounts = {};
         window.goframeComponentPatchCounts = {};
+        window.goframeComponentMemoSkips = {};
         window.goframeComponentRenderProbe = (name) => {
             window.goframeComponentRenderCounts[name] =
                 (window.goframeComponentRenderCounts[name] || 0) + 1;
@@ -20,6 +21,10 @@
         window.goframeComponentPatchProbe = (name) => {
             window.goframeComponentPatchCounts[name] =
                 (window.goframeComponentPatchCounts[name] || 0) + 1;
+        };
+        window.goframeComponentMemoSkipProbe = (name) => {
+            window.goframeComponentMemoSkips[name] =
+                (window.goframeComponentMemoSkips[name] || 0) + 1;
         };
     </script>
     <!-- goframe:runtime -->
