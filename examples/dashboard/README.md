@@ -35,6 +35,12 @@ goxc package ./examples/dashboard --compiler=tinygo
 goxc serve ./examples/dashboard --port=8080
 ```
 
+Release-style package check:
+
+```bash
+goxc package ./examples/dashboard --compiler=tinygo --asset-hash --preload --compress=gzip,br
+```
+
 Fallback through the standard Go WASM compiler:
 
 ```bash

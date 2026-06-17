@@ -2,8 +2,8 @@ const CACHE_NAME = "goframe-counter-v2";
 const OPTIONAL_ASSETS = [
     "./",
     "./index.html",
-    "./main.wasm",
-    "./wasm_exec.js",
+    "./assets/bundle.wasm",
+    "./assets/wasm_exec.js",
 ];
 
 self.addEventListener("install", (event) => {

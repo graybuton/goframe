@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>goframe todo</title>
+    <!-- goframe:preload -->
+    <!-- /goframe:preload -->
     <style>
         :root {
             color: #172033;
@@ -106,21 +108,20 @@
             window.goframeComponentPatchCounts[name] =
                 (window.goframeComponentPatchCounts[name] || 0) + 1;
         };
-
-        const runtimeScript = document.createElement("script");
-        runtimeScript.src = "wasm_exec.js";
-        runtimeScript.onload = async () => {
-            const started = performance.now();
-            const go = new Go();
-            const result = await WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject);
-            console.info("goframe todo: WASM ready in", (performance.now() - started).toFixed(2), "ms");
-            go.run(result.instance);
-        };
-        document.head.appendChild(runtimeScript);
-
-        if (new URLSearchParams(location.search).has("sw") && "serviceWorker" in navigator) {
-            navigator.serviceWorker.register("./service-worker.js");
-        }
     </script>
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
+    <script>
+        const started = performance.now();
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+            .then((result) => {
+                console.info("goframe todo: WASM ready in", (performance.now() - started).toFixed(2), "ms");
+                go.run(result.instance);
+            });
+    </script>
+    <!-- /goframe:bootstrap -->
 </body>
 </html>

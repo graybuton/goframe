@@ -23,9 +23,8 @@ goxc size ./examples/counter
 goxc serve ./examples/counter --port=8080
 ```
 
-Open <http://127.0.0.1:8080>. Use `?sw=1` to enable the optional service-worker
-cache. Browser console logs show WASM instantiation. Render-duration probes are
-compiled only with the `goframe_debug` build tag.
+Open <http://127.0.0.1:8080>. Browser console logs show WASM instantiation.
+Render-duration probes are compiled only with the `goframe_debug` build tag.
 
 ## Raw compiler output
 
@@ -38,7 +37,7 @@ goxc build ./examples/counter --compiler=tinygo
 Output:
 
 ```text
-examples/counter/build/main.wasm
+examples/counter/build/bundle.wasm
 ```
 
 Use `--compiler=go` for standard Go compatibility mode.
@@ -50,10 +49,11 @@ Use `--compiler=go` for standard Go compatibility mode.
 ```text
 dist/
 ├── index.html
-├── main.wasm
-├── manifest.json
-├── service-worker.js
-└── wasm_exec.js
+├── asset-manifest.json
+├── goframe-package.json
+└── assets/
+    ├── bundle.wasm
+    └── wasm_exec.js
 ```
 
 The default package is not compressed. Compression normally belongs to the
@@ -61,6 +61,12 @@ deployment server or CDN. Explicit precompression is available for experiments:
 
 ```bash
 goxc package ./examples/counter --compress=br
+```
+
+Release-style package output can add content hashes and preload hints:
+
+```bash
+goxc package ./examples/counter --asset-hash --preload --compress=gzip,br
 ```
 
 `goxc serve` always serves the raw WASM and does not perform compressed-content

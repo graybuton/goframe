@@ -25,7 +25,7 @@ goxc size ./examples/todo
 goxc serve ./examples/todo --port=8080
 ```
 
-Open <http://127.0.0.1:8080>. Add `?sw=1` to opt into the service-worker cache.
+Open <http://127.0.0.1:8080>.
 
 Use standard Go compatibility mode when TinyGo is unavailable:
 
@@ -49,7 +49,7 @@ dependency-free browser identity probe:
 
 ```bash
 tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-  -o ./examples/todo/dist/main.wasm ./examples/todo
+  -o ./examples/todo/dist/assets/bundle.wasm ./examples/todo
 goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```
