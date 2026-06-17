@@ -63,6 +63,24 @@ runs:
 npm run compile
 ```
 
+## Dependabot
+
+Dependabot version updates are configured in `.github/dependabot.yml`.
+
+The project tracks:
+
+- GitHub Actions updates;
+- Go module updates;
+- VS Code extension npm dependency updates.
+
+Dependabot runs weekly on Monday in the Europe/Helsinki timezone. Dependabot
+PRs are not auto-merged; they must pass CI, including size budgets and browser
+smoke when relevant.
+
+Security alerts and security updates should be enabled from the GitHub
+repository security settings. Recommended labels are `dependencies`,
+`github-actions`, `go`, `vscode`, and `npm`.
+
 ## Local Checks
 
 Core local verification:

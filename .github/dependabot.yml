@@ -1,0 +1,53 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Helsinki"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(actions)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:30"
+      timezone: "Europe/Helsinki"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(go)"
+    labels:
+      - "dependencies"
+      - "go"
+
+  - package-ecosystem: "npm"
+    directory: "/extensions/vscode-gox"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+      timezone: "Europe/Helsinki"
+    open-pull-requests-limit: 3
+    groups:
+      vscode-extension-dev:
+        patterns:
+          - "*"
+        dependency-type: "development"
+        update-types:
+          - "patch"
+          - "minor"
+    commit-message:
+      prefix: "chore(vscode)"
+    labels:
+      - "dependencies"
+      - "vscode"
+      - "npm"

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Dependabot configuration for GitHub Actions, Go modules, and VS Code
+  extension npm dependencies.
 - Dashboard-sized pressure-test example with 300 deterministic issue rows,
   filters, keyed table sorting, detail panel updates, and smoke coverage.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
