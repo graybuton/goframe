@@ -57,9 +57,8 @@ goxc size ./examples/counter
 goxc serve ./examples/counter --port=8080
 ```
 
-Open <http://127.0.0.1:8080>. Add `?sw=1` to opt into the service-worker cache
-experiment. Browser console logs show WASM instantiation. Render and patch
-probes require a `goframe_debug` build.
+Open <http://127.0.0.1:8080>. Browser console logs show WASM instantiation.
+Render and patch probes require a `goframe_debug` build.
 
 Use the standard Go compiler explicitly when compatibility matters more than
 download size:
@@ -91,7 +90,7 @@ probes do not increase production WASM:
 
 ```bash
 tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-  -o ./examples/todo/dist/main.wasm ./examples/todo
+  -o ./examples/todo/dist/assets/bundle.wasm ./examples/todo
 goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```
@@ -292,7 +291,7 @@ goxc build ./examples/counter --compiler=go
 Default output:
 
 ```text
-examples/counter/build/main.wasm
+examples/counter/build/bundle.wasm
 ```
 
 `--out=directory` overrides the build directory.
@@ -308,14 +307,26 @@ goxc package ./examples/counter --compiler=tinygo
 ```text
 examples/counter/dist/
 ├── index.html
-├── main.wasm
-├── manifest.json
-├── service-worker.js
-└── wasm_exec.js
+├── asset-manifest.json
+├── goframe-package.json
+└── assets/
+    ├── bundle.wasm
+    └── wasm_exec.js
 ```
 
 Compiler-specific filenames are internal details. A packaged application uses
-`main.wasm` and `wasm_exec.js` for both Go and TinyGo.
+`assets/bundle.wasm` and `assets/wasm_exec.js` for both Go and TinyGo.
+
+Cache-safe release packaging can add content hashes, preload hints, and
+precompressed assets:
+
+```bash
+goxc package ./examples/counter --compiler=tinygo --asset-hash --preload --compress=gzip,br
+```
+
+This keeps `index.html`, `asset-manifest.json`, and `goframe-package.json`
+stable while writing immutable assets such as
+`assets/bundle.a83f19c4.wasm`.
 
 Compression is a deployment, web-server, CDN, or reverse-proxy responsibility.
 `goxc package` does not compress by default. Precompression is available only
@@ -327,6 +338,8 @@ goxc package ./examples/counter --compress=gzip,br
 
 Production servers must return the matching `Content-Encoding` when serving
 precompressed files.
+
+See [cache-safe package delivery](docs/deployment.md).
 
 ### Size
 
@@ -394,10 +407,9 @@ early.
   "entry": ".",
   "output": "dist",
   "compiler": "tinygo",
-  "wasm": "main.wasm",
+  "wasm": "bundle.wasm",
   "assets": [
-    "index.html",
-    "service-worker.js"
+    "index.html"
   ]
 }
 ```
@@ -410,21 +422,21 @@ Measured on June 16, 2026 with Go 1.24.4 and TinyGo 0.41.1:
 
 | Artifact | Bytes | Approximate size |
 |---|---:|---:|
-| Counter, Go `main.wasm` | 1,928,333 | 1.8 MiB |
-| Counter, TinyGo `main.wasm` | 77,890 | 76.1 KiB |
-| Counter, TinyGo `main.wasm.br` | 25,965 | 25.4 KiB |
-| Counter, TinyGo `main.wasm.gz` | 30,850 | 30.1 KiB |
-| Components demo, Go `main.wasm` | 1,942,473 | 1.9 MiB |
-| Components demo, TinyGo `main.wasm` | 83,159 | 81.2 KiB |
-| Components demo, TinyGo `main.wasm.br` | 27,269 | 26.6 KiB |
-| Components demo, TinyGo `main.wasm.gz` | 32,785 | 32.0 KiB |
-| Todo demo, Go `main.wasm` | 2,007,086 | 1.9 MiB |
-| Todo demo, TinyGo `main.wasm` | 109,483 | 106.9 KiB |
-| Todo demo, TinyGo `main.wasm.br` | 34,885 | 34.1 KiB |
-| Todo demo, TinyGo `main.wasm.gz` | 42,003 | 41.0 KiB |
-| Dashboard pressure test, TinyGo `main.wasm` | 146,832 | 143.4 KiB |
-| Dashboard pressure test, TinyGo `main.wasm.br` | 44,317 | 43.3 KiB |
-| Dashboard pressure test, TinyGo `main.wasm.gz` | 54,673 | 53.4 KiB |
+| Counter, Go `bundle.wasm` | 1,928,333 | 1.8 MiB |
+| Counter, TinyGo `bundle.wasm` | 77,890 | 76.1 KiB |
+| Counter, TinyGo `bundle.wasm.br` | 25,965 | 25.4 KiB |
+| Counter, TinyGo `bundle.wasm.gz` | 30,850 | 30.1 KiB |
+| Components demo, Go `bundle.wasm` | 1,942,473 | 1.9 MiB |
+| Components demo, TinyGo `bundle.wasm` | 83,159 | 81.2 KiB |
+| Components demo, TinyGo `bundle.wasm.br` | 27,269 | 26.6 KiB |
+| Components demo, TinyGo `bundle.wasm.gz` | 32,785 | 32.0 KiB |
+| Todo demo, Go `bundle.wasm` | 2,007,086 | 1.9 MiB |
+| Todo demo, TinyGo `bundle.wasm` | 109,483 | 106.9 KiB |
+| Todo demo, TinyGo `bundle.wasm.br` | 34,885 | 34.1 KiB |
+| Todo demo, TinyGo `bundle.wasm.gz` | 42,003 | 41.0 KiB |
+| Dashboard pressure test, TinyGo `bundle.wasm` | 146,832 | 143.4 KiB |
+| Dashboard pressure test, TinyGo `bundle.wasm.br` | 44,317 | 43.3 KiB |
+| Dashboard pressure test, TinyGo `bundle.wasm.gz` | 54,673 | 53.4 KiB |
 | Go `wasm_exec.js` | 16,992 | 16.6 KiB |
 | TinyGo `wasm_exec.js` | 16,715 | 16.3 KiB |
 
@@ -435,6 +447,8 @@ delivery budgets. Counter remains an integration probe rather than a
 representative application benchmark.
 MVP 12 adds a dashboard-sized example and browser smoke coverage for a more
 realistic 300-row interactive app.
+MVP 13 moves package output to `dist/assets/` and adds content-hashed release
+assets for cache-safe delivery.
 
 ## Legacy CLI
 

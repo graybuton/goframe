@@ -4,6 +4,9 @@
 
 ### Added
 
+- Hashed asset packaging for `goxc package`, including `dist/assets/`,
+  `asset-manifest.json`, `goframe-package.json`, preload hints, and
+  `bundle.wasm` naming.
 - Dependabot configuration for GitHub Actions, Go modules, and VS Code
   extension npm dependencies.
 - Dashboard-sized pressure-test example with 300 deterministic issue rows,

@@ -255,7 +255,7 @@ Build the instrumented Todo WASM and serve it on port `18080`:
 
 ```bash
 tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-  -o ./examples/todo/dist/main.wasm ./examples/todo
+  -o ./examples/todo/dist/assets/bundle.wasm ./examples/todo
 goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```

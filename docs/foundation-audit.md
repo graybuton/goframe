@@ -162,11 +162,12 @@ Fixed CLI issues:
 - Manifest parsing now rejects unknown fields with a useful JSON error.
 - `package` builds the bundle in a staging directory first, then publishes
   prepared artifacts into `dist/`.
+- MVP 13 package publishing removes stale root bundle artifacts and the
+  package-owned `dist/assets/` directory before publishing the next staged
+  bundle.
 
 Remaining CLI risks:
 
-- Package publishing preserves unrelated files in `dist/`; this avoids deleting
-  user files but means stale removed assets can remain.
 - `serve` is a local development server. It binds to `127.0.0.1` and is not a
   hardened production static server.
 - `--out` is intentionally user-directed and may point outside the application
