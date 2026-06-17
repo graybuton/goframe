@@ -116,6 +116,18 @@ func IssueRow(props IssueRowProps) gf.Node {
 	)
 }
 
+func (props IssueRowProps) MemoEqual(next IssueRowProps) bool {
+	return props.Issue.ID == next.Issue.ID &&
+		props.Issue.Status == next.Issue.Status &&
+		props.Issue.Priority == next.Issue.Priority &&
+		props.Issue.UpdatedAt == next.Issue.UpdatedAt &&
+		props.Issue.Events == next.Issue.Events &&
+		props.Selected == next.Selected &&
+		props.Issue.Title == next.Issue.Title &&
+		props.Issue.Owner == next.Issue.Owner &&
+		props.Issue.Service == next.Issue.Service
+}
+
 type EmptyStateProps struct {
 	Query string
 }
