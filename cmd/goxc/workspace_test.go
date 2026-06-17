@@ -5,6 +5,18 @@ import (
 	"testing"
 )
 
+func TestPrepareBuildWorkspaceRejectsUnsupportedEntry(t *testing.T) {
+	_, err := prepareBuildWorkspace(BuildLayout{}, projectManifest{Entry: "cmd/app"})
+	if err == nil {
+		t.Fatal("prepareBuildWorkspace() accepted unsupported entry")
+	}
+	for _, want := range []string{"entry", "not supported", `"."`, "single-package"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
 func TestWriteWorkspaceGoModFailsWithoutRepoRootOrVersion(t *testing.T) {
 	oldFind := findRepositoryRootForWorkspace
 	oldVersion := goframeModuleVersionForBuild

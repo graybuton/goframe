@@ -67,3 +67,23 @@ func TestCleanLegacyRemovesGoframeOwnedDist(t *testing.T) {
 		t.Fatalf("goframe-owned dist still exists: %v", err)
 	}
 }
+
+func TestCleanLegacyRemovesLegacyManifestDist(t *testing.T) {
+	appDir := t.TempDir()
+	dist := filepath.Join(appDir, "dist")
+	if err := os.Mkdir(dist, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, legacyPackageManifest), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.gox"), []byte("<div></div>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanApp(cleanOptions{appDir: appDir, legacy: true}); err != nil {
+		t.Fatalf("cleanApp(legacy) error: %v", err)
+	}
+	if _, err := os.Stat(dist); !os.IsNotExist(err) {
+		t.Fatalf("legacy manifest dist still exists: %v", err)
+	}
+}

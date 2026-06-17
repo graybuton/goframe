@@ -182,7 +182,13 @@ func packageApp(options packageOptions) error {
 	if err != nil {
 		return err
 	}
+	explicitOutDir := options.outDir != ""
 	options.outDir = packageOutputDirectory(options, layout)
+	if explicitOutDir {
+		if err := validatePackageDestination(options.outDir); err != nil {
+			return err
+		}
+	}
 	workDir, err := prepareBuildWorkspace(layout, manifest)
 	if err != nil {
 		return fmt.Errorf("prepare package workspace: %w", err)
@@ -446,7 +452,10 @@ func replaceHTMLBlock(content, name, replacement string) (string, bool) {
 }
 
 func writePackageAsset(sourcePath, assetsDir, logicalName string, options packageOptions) (packageAsset, error) {
-	logicalName = path.Clean(filepath.ToSlash(logicalName))
+	logicalName, err := cleanPackageAssetName(logicalName)
+	if err != nil {
+		return packageAsset{}, err
+	}
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return packageAsset{}, fmt.Errorf("read %s: %w", sourcePath, err)
@@ -496,6 +505,14 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 		}
 	}
 	return asset, nil
+}
+
+func cleanPackageAssetName(name string) (string, error) {
+	clean := path.Clean(filepath.ToSlash(name))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
+		return "", fmt.Errorf("package asset logical name %q must be a relative child path", name)
+	}
+	return clean, nil
 }
 
 func shortContentHash(content []byte) string {
