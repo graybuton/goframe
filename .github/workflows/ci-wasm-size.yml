@@ -49,10 +49,13 @@ jobs:
           goxc package ./examples/todo --compiler=tinygo
           goxc generate ./examples/dashboard
           goxc package ./examples/dashboard --compiler=tinygo
+          goxc generate ./examples/context
+          goxc package ./examples/context --compiler=tinygo
           goxc package ./examples/counter --compiler=tinygo --asset-hash --preload --compress=gzip,br
           goxc package ./examples/components --compiler=tinygo --asset-hash --preload --compress=gzip,br
           goxc package ./examples/todo --compiler=tinygo --asset-hash --preload --compress=gzip,br
           goxc package ./examples/dashboard --compiler=tinygo --asset-hash --preload --compress=gzip,br
+          goxc package ./examples/context --compiler=tinygo --asset-hash --preload --compress=gzip,br
 
       - name: Size budgets
         run: scripts/size-budget.sh | tee size-report.txt
