@@ -110,6 +110,25 @@ search, status filtering, sorting, reset, and simulated dataset updates still
 visit or rerender many visible rows. That is an intentional baseline for future
 runtime optimization rather than a hidden runtime feature.
 
+For DOM pressure audits, run:
+
+```bash
+node --experimental-websocket scripts/dashboard-dom-pressure.mjs
+```
+
+The pressure audit repeatedly switches the status filter from Open to All. On
+the current 300-row fixture, Open shows 72 rows and All restores 300 rows, so
+the All transition recreates 228 rows. In a debug TinyGo build that is roughly
+6,156 created DOM nodes and 456 event listeners reattached per All transition.
+The audit fails if the live DOM node count or net listener count grows across
+cycles. A stable live DOM count with growing DevTools/Performance `Nodes`
+should be treated as a detached-node/GC accounting signal to investigate, not
+as proof of a live DOM leak by itself.
+
+The expected next product-level answer to this pressure is row virtualization,
+not a hidden runtime heuristic. Virtualization is intentionally outside this
+example and outside the current runtime MVPs.
+
 ## Known Limitations
 
 - There is no router or URL state.
