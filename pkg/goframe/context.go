@@ -2,6 +2,11 @@ package goframe
 
 var nextContextID int
 
+// contextSubscriptionsByID lets provider appearance/removal recompute nearest
+// provider topology for consumers that were previously subscribed to default or
+// to an outer provider. Ordinary provider value updates use provider.subscribers.
+var contextSubscriptionsByID map[int]map[*contextSubscription]bool
+
 // Context carries a typed value through a scoped component subtree.
 type Context[T any] struct {
 	id           int
@@ -42,9 +47,13 @@ func ProvideContext[T any](ctx *Context[T], value T) {
 		panic("goframe: ProvideContext requires a context")
 	}
 	instance := requireCurrentComponent("ProvideContext")
-	provider := ensureContextProvider(instance, ctx.id, value)
+	provider, created := ensureContextProvider(instance, ctx.id, value)
 	provider.value = value
 	recordProvidedContext(instance, ctx.id)
+	if created {
+		refreshContextTopology(ctx.id)
+		return
+	}
 	notifyContextSubscribers(provider, value)
 }
 
@@ -96,7 +105,7 @@ func UseContextSelector[T any, S comparable](ctx *Context[T], selector func(T) S
 	return selected
 }
 
-func ensureContextProvider[T any](instance *componentInstance, contextID int, value T) *contextProvider {
+func ensureContextProvider[T any](instance *componentInstance, contextID int, value T) (*contextProvider, bool) {
 	if instance.contextProviders == nil {
 		instance.contextProviders = make(map[int]*contextProvider)
 	}
@@ -109,8 +118,9 @@ func ensureContextProvider[T any](instance *componentInstance, contextID int, va
 			subscribers: make(map[*contextSubscription]bool),
 		}
 		instance.contextProviders[contextID] = provider
+		return provider, true
 	}
-	return provider
+	return provider, false
 }
 
 func recordProvidedContext(instance *componentInstance, contextID int) {
@@ -129,7 +139,7 @@ func finishComponentContextRender(instance *componentInstance) {
 
 func releaseUnusedContextSubscriptions(instance *componentInstance) {
 	for index := instance.contextIndex; index < len(instance.contextSlots); index++ {
-		unsubscribeContext(instance.contextSlots[index])
+		releaseContextSubscription(instance.contextSlots[index])
 		instance.contextSlots[index] = nil
 	}
 	instance.contextSlots = instance.contextSlots[:instance.contextIndex]
@@ -190,6 +200,7 @@ func subscribeContext(
 			update:       update,
 		}
 		instance.contextSlots = append(instance.contextSlots, slot)
+		registerContextSubscription(slot)
 		setContextSubscriptionProvider(slot, provider)
 		return
 	}
@@ -205,6 +216,36 @@ func subscribeContext(
 	slot.defaultValue = defaultValue
 	slot.update = update
 	setContextSubscriptionProvider(slot, provider)
+}
+
+func registerContextSubscription(slot *contextSubscription) {
+	if slot == nil {
+		return
+	}
+	if contextSubscriptionsByID == nil {
+		contextSubscriptionsByID = make(map[int]map[*contextSubscription]bool)
+	}
+	slots := contextSubscriptionsByID[slot.contextID]
+	if slots == nil {
+		slots = make(map[*contextSubscription]bool)
+		contextSubscriptionsByID[slot.contextID] = slots
+	}
+	slots[slot] = true
+}
+
+func releaseContextSubscription(slot *contextSubscription) {
+	if slot == nil {
+		return
+	}
+	unsubscribeContext(slot)
+	if contextSubscriptionsByID == nil {
+		return
+	}
+	slots := contextSubscriptionsByID[slot.contextID]
+	delete(slots, slot)
+	if len(slots) == 0 {
+		delete(contextSubscriptionsByID, slot.contextID)
+	}
 }
 
 func setContextSubscriptionProvider(slot *contextSubscription, provider *contextProvider) {
@@ -233,7 +274,7 @@ func unsubscribeContext(slot *contextSubscription) {
 func notifyContextSubscribers(provider *contextProvider, value any) {
 	for slot := range provider.subscribers {
 		if slot == nil || slot.owner == nil || !slot.owner.active {
-			delete(provider.subscribers, slot)
+			releaseContextSubscription(slot)
 			continue
 		}
 		if slot.update(slot, value) {
@@ -243,21 +284,46 @@ func notifyContextSubscribers(provider *contextProvider, value any) {
 }
 
 func removeContextProvider(provider *contextProvider) {
-	for slot := range provider.subscribers {
-		if slot == nil {
-			continue
-		}
-		delete(provider.subscribers, slot)
-		slot.provider = nil
-		if slot.owner != nil && slot.owner.active && slot.update(slot, slot.defaultValue) {
-			markComponentDirty(slot.owner)
-		}
+	if provider == nil {
+		return
 	}
+	if provider.owner != nil && provider.owner.contextProviders != nil {
+		delete(provider.owner.contextProviders, provider.id)
+	}
+	refreshContextTopology(provider.id)
+}
+
+func refreshContextTopology(contextID int) {
+	if contextSubscriptionsByID == nil {
+		return
+	}
+	for slot := range contextSubscriptionsByID[contextID] {
+		refreshContextSubscription(slot)
+	}
+}
+
+func refreshContextSubscription(slot *contextSubscription) {
+	if slot == nil || slot.owner == nil || !slot.owner.active {
+		releaseContextSubscription(slot)
+		return
+	}
+	provider := findContextProvider(slot.owner.parent, slot.contextID)
+	if provider == slot.provider {
+		return
+	}
+
+	value := slot.defaultValue
+	if provider != nil {
+		value = provider.value
+	}
+	slot.update(slot, value)
+	setContextSubscriptionProvider(slot, provider)
+	markComponentDirty(slot.owner)
 }
 
 func releaseContextSubscriptions(instance *componentInstance) {
 	for _, slot := range instance.contextSlots {
-		unsubscribeContext(slot)
+		releaseContextSubscription(slot)
 	}
 }
 

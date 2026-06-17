@@ -248,6 +248,150 @@ func TestContextProviderRemovalDirtiesConsumersForDefault(t *testing.T) {
 	}
 }
 
+func TestContextProviderAppearanceDirtiesDefaultConsumerThroughMemoAncestor(t *testing.T) {
+	ctx := CreateContext(contextValueFixture{Count: 0})
+	providing := false
+	provider := contextTestInstance("Provider", nil, func() {
+		if providing {
+			ProvideContext(ctx, contextValueFixture{Count: 7})
+		}
+	})
+	renderComponentInstance(provider)
+
+	memoNode := Component("Memo", contextMemoPropsFixture{ID: 1}, func(contextMemoPropsFixture) Node {
+		return Empty()
+	}).(ComponentNode)
+	memo := newComponentInstance(memoNode, "memo", provider, nil)
+	memo.dirty = false
+
+	got := -1
+	consumer := contextTestInstance("Consumer", memo, func() {
+		got = UseContextSelector(ctx, func(value contextValueFixture) int {
+			return value.Count
+		})
+	})
+	renderComponentInstance(consumer)
+	if got != 0 {
+		t.Fatalf("initial selected context value = %d, want default 0", got)
+	}
+
+	providing = true
+	renderComponentInstance(provider)
+
+	if !consumer.dirty {
+		t.Fatal("consumer should be dirtied when provider appears above it")
+	}
+	if memo.dirtyDescendants != 1 {
+		t.Fatalf("memo dirty descendants = %d, want 1", memo.dirtyDescendants)
+	}
+	next := Component("Memo", contextMemoPropsFixture{ID: 1}, func(contextMemoPropsFixture) Node {
+		return Empty()
+	}).(ComponentNode)
+	if shouldSkipComponentRender(memo, next, "memo") {
+		t.Fatal("memoized ancestor must not skip context provider appearance")
+	}
+
+	renderComponentInstance(consumer)
+	if got != 7 {
+		t.Fatalf("selected context value after provider appears = %d, want 7", got)
+	}
+}
+
+func TestContextInnerProviderAppearanceRebindsConsumerFromOuterProvider(t *testing.T) {
+	ctx := CreateContext(contextValueFixture{Count: 0})
+	outer := contextProviderInstance("Outer", nil, ctx, contextValueFixture{Count: 1})
+	renderComponentInstance(outer)
+
+	innerProviding := false
+	inner := contextTestInstance("Inner", outer, func() {
+		if innerProviding {
+			ProvideContext(ctx, contextValueFixture{Count: 2})
+		}
+	})
+	renderComponentInstance(inner)
+
+	got := -1
+	consumer := contextTestInstance("Consumer", inner, func() {
+		got = UseContextSelector(ctx, func(value contextValueFixture) int {
+			return value.Count
+		})
+	})
+	renderComponentInstance(consumer)
+	if got != 1 {
+		t.Fatalf("initial selected context value = %d, want outer 1", got)
+	}
+
+	innerProviding = true
+	renderComponentInstance(inner)
+
+	if !consumer.dirty {
+		t.Fatal("consumer should be dirtied when inner provider appears")
+	}
+	renderComponentInstance(consumer)
+	if got != 2 {
+		t.Fatalf("selected context value after inner provider appears = %d, want inner 2", got)
+	}
+}
+
+func TestContextProviderTopologyChangeDirtiesConsumerWhenSelectionIsEqual(t *testing.T) {
+	ctx := CreateContext(contextValueFixture{Count: 1})
+	providing := false
+	provider := contextTestInstance("Provider", nil, func() {
+		if providing {
+			ProvideContext(ctx, contextValueFixture{Count: 1})
+		}
+	})
+	renderComponentInstance(provider)
+
+	consumer := contextSelectorConsumer(provider, ctx, func(value contextValueFixture) int {
+		return value.Count
+	})
+	renderComponentInstance(consumer)
+
+	providing = true
+	renderComponentInstance(provider)
+
+	if !consumer.dirty {
+		t.Fatal("consumer should be dirtied when nearest provider changes even if selected value is equal")
+	}
+}
+
+func TestContextInnerProviderRemovalRebindsConsumerToOuterProvider(t *testing.T) {
+	ctx := CreateContext(contextValueFixture{Count: 0})
+	outer := contextProviderInstance("Outer", nil, ctx, contextValueFixture{Count: 1})
+	renderComponentInstance(outer)
+
+	innerProviding := true
+	inner := contextTestInstance("Inner", outer, func() {
+		if innerProviding {
+			ProvideContext(ctx, contextValueFixture{Count: 2})
+		}
+	})
+	renderComponentInstance(inner)
+
+	got := -1
+	consumer := contextTestInstance("Consumer", inner, func() {
+		got = UseContextSelector(ctx, func(value contextValueFixture) int {
+			return value.Count
+		})
+	})
+	renderComponentInstance(consumer)
+	if got != 2 {
+		t.Fatalf("initial selected context value = %d, want inner 2", got)
+	}
+
+	innerProviding = false
+	renderComponentInstance(inner)
+
+	if !consumer.dirty {
+		t.Fatal("consumer should be dirtied when inner provider is removed")
+	}
+	renderComponentInstance(consumer)
+	if got != 1 {
+		t.Fatalf("selected context value after inner provider removal = %d, want outer 1", got)
+	}
+}
+
 func TestContextDirtyConsumerPreventsMemoAncestorSkip(t *testing.T) {
 	ctx := CreateContext(contextValueFixture{})
 	provider := contextProviderInstance("Provider", nil, ctx, contextValueFixture{Count: 1})

@@ -87,6 +87,12 @@ Consumers under nested providers subscribe to the inner provider, not the outer
 provider. Unmounted consumers unsubscribe, and unmounted providers detach their
 subscribers.
 
+Provider topology changes are observable. If a provider appears above an
+existing consumer, disappears, or a nearer nested provider appears between an
+outer provider and a consumer, affected consumers are marked dirty and resubscribe
+to the new nearest provider on their next render. This happens even when a
+selector's comparable result is equal, because the provider scope itself changed.
+
 ## Memoization Interaction
 
 Context selectors are designed to work with explicit `MemoEqual` bailouts.
@@ -94,6 +100,11 @@ Context selectors are designed to work with explicit `MemoEqual` bailouts.
 If a parent/provider rerenders, clean memoized descendants may skip. A context
 consumer whose selected value changed is marked dirty, so memoized ancestors
 above it cannot skip over the update.
+
+Memoized ancestors also cannot hide context topology changes. When a provider
+appears, is removed, or a nearer nested provider takes over, the runtime marks
+affected consumers dirty and updates dirty descendant accounting through any
+memoized wrappers above them.
 
 This means selector consumers should usually be component boundaries, and clean
 structural wrappers can use explicit `MemoEqual` where useful.
