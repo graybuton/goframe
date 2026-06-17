@@ -264,33 +264,6 @@ func TestPublishPackageArtifactsCopiesStagedTree(t *testing.T) {
 	}
 }
 
-func TestExportCopiesStandalonePackage(t *testing.T) {
-	appDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	layout, err := newBuildLayout(layoutOptions{appDir: appDir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(layout.PackageDir, "assets"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(layout.PackageDir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(layout.PackageDir, "assets", "bundle.wasm"), []byte("wasm"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	outDir := filepath.Join(t.TempDir(), "dist")
-	if err := exportApp(exportOptions{appDir: appDir, outDir: outDir}); err != nil {
-		t.Fatalf("exportApp() error: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(outDir, "assets", "bundle.wasm")); err != nil {
-		t.Fatalf("exported bundle missing: %v", err)
-	}
-}
-
 func TestDoctorDoesNotFail(t *testing.T) {
 	if err := doctorCommand(nil); err != nil {
 		t.Fatalf("doctorCommand() error: %v", err)

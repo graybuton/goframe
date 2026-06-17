@@ -14,6 +14,7 @@ type cleanOptions struct {
 	appDir    string
 	workspace string
 	generated bool
+	legacy    bool
 }
 
 func cleanCommand(args []string) error {
@@ -31,6 +32,8 @@ func parseCleanOptions(args []string) (cleanOptions, error) {
 		switch {
 		case arg == "--generated":
 			options.generated = true
+		case arg == "--legacy":
+			options.legacy = true
 		case strings.HasPrefix(arg, "--workspace="):
 			options.workspace = strings.TrimPrefix(arg, "--workspace=")
 		case arg == "--workspace":
@@ -48,7 +51,7 @@ func parseCleanOptions(args []string) (cleanOptions, error) {
 		}
 	}
 	if options.appDir == "" {
-		return cleanOptions{}, errors.New("usage: goxc clean <app-directory> [--generated] [--workspace=directory]")
+		return cleanOptions{}, errors.New("usage: goxc clean <app-directory> [--generated] [--legacy] [--workspace=directory]")
 	}
 	return options, nil
 }
@@ -66,16 +69,31 @@ func cleanApp(options cleanOptions) error {
 		filepath.Join(layout.WorkspaceRoot, "build"),
 		filepath.Join(layout.WorkspaceRoot, "package"),
 	} {
-		if err := os.RemoveAll(directory); err != nil {
-			return fmt.Errorf("remove %s: %w", directory, err)
+		if err := removeDirectoryIfExists(directory); err != nil {
+			return err
 		}
-		fmt.Printf("removed %s\n", directory)
+	}
+	if options.legacy {
+		if err := cleanLegacyArtifacts(options.appDir); err != nil {
+			return err
+		}
+	}
+	if options.generated || options.legacy {
+		if err := cleanAdjacentGeneratedFiles(options.appDir); err != nil {
+			return err
+		}
 	}
 	if !options.generated {
 		return nil
 	}
+	if err := removeDirectoryIfExists(layout.GenDir); err != nil {
+		return err
+	}
+	return nil
+}
 
-	files, err := gox.FindFiles(options.appDir)
+func cleanAdjacentGeneratedFiles(appDir string) error {
+	files, err := gox.FindFiles(appDir)
 	if err != nil {
 		return err
 	}
@@ -88,9 +106,32 @@ func cleanApp(options cleanOptions) error {
 		}
 		fmt.Printf("removed %s\n", generated)
 	}
-	if err := os.RemoveAll(layout.GenDir); err != nil {
-		return fmt.Errorf("remove %s: %w", layout.GenDir, err)
+	return nil
+}
+
+func cleanLegacyArtifacts(appDir string) error {
+	if err := removeDirectoryIfExists(filepath.Join(appDir, "build")); err != nil {
+		return err
 	}
-	fmt.Printf("removed %s\n", layout.GenDir)
+	dist := filepath.Join(appDir, "dist")
+	if isGoframeOwnedExport(dist) {
+		return removeDirectoryIfExists(dist)
+	}
+	if entries, err := os.ReadDir(dist); err == nil && len(entries) > 0 {
+		fmt.Printf("skipped %s; it does not look like a GoFrame package export\n", dist)
+	}
+	return nil
+}
+
+func removeDirectoryIfExists(directory string) error {
+	if _, err := os.Stat(directory); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect %s: %w", directory, err)
+	}
+	if err := os.RemoveAll(directory); err != nil {
+		return fmt.Errorf("remove %s: %w", directory, err)
+	}
+	fmt.Printf("removed %s\n", directory)
 	return nil
 }
