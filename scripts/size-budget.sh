@@ -115,13 +115,13 @@ check_app() {
 
 bundle_path() {
 	local app="$1"
-	local dist="$ROOT_DIR/examples/$app/dist"
+	local package_dir="$ROOT_DIR/examples/$app/.goframe/package/standalone"
 	local matches=()
 	shopt -s nullglob
-	matches=("$dist"/assets/bundle*.wasm "$dist"/main.wasm)
+	matches=("$package_dir"/assets/bundle*.wasm "$package_dir"/main.wasm)
 	shopt -u nullglob
 	if (( ${#matches[@]} == 0 )); then
-		echo "$dist/assets/bundle.wasm"
+		echo "$package_dir/assets/bundle.wasm"
 		return 0
 	fi
 	echo "${matches[0]}"
