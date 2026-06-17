@@ -57,7 +57,8 @@ other compared prop tracks that data.
 - No automatic memoization for all components.
 - No reflection-based comparison.
 - No `unsafe`, no generated equality wrappers, no deep auto-compare.
-- No context/selectors as part of memoization strategy.
+- Context selectors can mark memoized descendants dirty when their selected
+  value changes, but memoization still requires explicit props `MemoEqual`.
 - No stable event callback hook yet; reducer dispatch covers state transitions
   that can be represented as pure actions.
 - No virtualization or router/Player integration in this stage.

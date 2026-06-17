@@ -50,6 +50,7 @@ component instance
   -> component name and optional key
   -> latest props
   -> component-scoped state slots
+  -> context provider values and selector subscriptions
   -> dirty flag
   -> mounted child subtree
 ```
@@ -109,6 +110,41 @@ time. This means an old event handler retained by a memoized child can still
 apply an action to current state rather than to a value captured during an
 older render. Reducers should be pure state transitions; they should not depend
 on mutable render-local captures unless that coupling is intentional.
+
+## Scoped context selectors
+
+Context values are scoped by component parent links:
+
+```go
+ctx := gf.CreateContext(defaultValue)
+
+gf.ProvideContext(ctx, value)
+selected := gf.UseContextSelector(ctx, func(value T) S {
+	return value.Field
+})
+```
+
+`ProvideContext` is a render-time hook on a normal component. It stores a typed
+value on that provider component instance for descendants. The nearest provider
+wins, and nested providers isolate their subscribers from outer provider
+updates.
+
+`UseContextSelector` stores a selector subscription in positional context slots.
+The selected result type must be `comparable`; the runtime uses `==` to decide
+whether the consumer should be marked dirty. There is no reflection, deep
+equality, or generated selector equality.
+
+`UseContext` returns the full nearest value and subscribes broadly. Since the
+runtime cannot compare arbitrary context values without reflection, broad
+consumers rerender on provider updates. Performance-sensitive code should use
+selectors.
+
+When a provider updates, selector consumers are checked immediately. Consumers
+whose selected value changed are marked dirty, and dirty-descendant accounting
+prevents memoized ancestors from skipping over those updates. Unmounted
+consumers unsubscribe, and unmounted providers detach their subscriber set.
+
+See [context selectors](context.md) for API guidance and limitations.
 
 ## Dirty subtree updates
 
@@ -292,7 +328,9 @@ The dependency-free headless Chrome probe verifies:
 - one mounted application and one browser thread;
 - positional state and lifecycle slots require stable hook call order;
 - lifecycle/effects are minimal and have no priorities or async scheduler;
-- no context or error boundaries;
+- context is scoped and selector-based, but has no async/server bridge or
+  custom non-comparable selector equality;
+- no error boundaries;
 - component identity uses the declared component name, not Go function identity;
 - explicit opt-in props memoization via `MemoEqual`; components still rerender
   by default when props are not memoized.

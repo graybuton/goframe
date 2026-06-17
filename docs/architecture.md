@@ -171,6 +171,7 @@ counter bundle.wasm     77,890 bytes
 components bundle.wasm  83,159 bytes
 todo bundle.wasm        109,483 bytes
 dashboard bundle.wasm   146,832 bytes
+context bundle.wasm     106,631 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -181,7 +182,7 @@ than Counter because it also demonstrates compact localStorage persistence.
 
 The repository includes `scripts/size-budget.sh` as a regression gate for raw,
 gzip, brotli, and optional zstd packaged TinyGo examples, including the
-dashboard-sized pressure-test example.
+dashboard-sized pressure-test example and the context selector example.
 `scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
 budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
 regression probes.
@@ -217,6 +218,7 @@ The MVP runtime currently has:
 - component instances identified by name, key, and sibling position;
 - component-scoped positional state slots, including the root `App`;
 - reducer dispatch that applies actions to the latest component state slot;
+- scoped context providers with selector-based consumer dirtying;
 - component-scoped lifecycle/effect slots;
 - dirty component updates coalesced into one animation-frame flush;
 - direct dirty-owner subtree updates without root traversal;
@@ -245,8 +247,10 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
 
 - Minimal reconciliation only; no Fiber, concurrent rendering, or priorities.
 - Component state slots are positional and require stable call order.
-- Lifecycle/effects are minimal; there is no Fiber scheduler, context, or
-  error-boundary model.
+- Lifecycle/effects are minimal; there is no Fiber scheduler or error-boundary
+  model.
+- Context is scoped and selector-based, but has no async/server bridge or
+  custom non-comparable selector equality.
 - No automatic props memoization; descendants rerender with their parent unless
   components explicitly implement `MemoEqual` on their props and the framework can
   perform a deterministic memoized bailout.

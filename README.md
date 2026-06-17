@@ -107,6 +107,13 @@ goxc size ./examples/dashboard
 goxc serve ./examples/dashboard --port=8080
 ```
 
+The context example demonstrates scoped providers and selector consumers:
+
+```bash
+goxc package ./examples/context --compiler=tinygo
+goxc serve ./examples/context --port=8080
+```
+
 ## GOX component model
 
 Lowercase tags create HTML elements:
@@ -223,6 +230,23 @@ to the component instance currently rendering. State `Set` calls mark that
 owner dirty and are coalesced into one browser animation-frame update.
 `gf.UseReducer` uses the same slots, but dispatch reads the latest slot state
 at event time before applying a pure reducer action.
+
+Context is scoped by the component tree. Use selectors for performance-sensitive
+consumers:
+
+```go
+var PreferencesContext = gf.CreateContext(Preferences{})
+
+gf.ProvideContext(PreferencesContext, preferences)
+
+density := gf.UseContextSelector(PreferencesContext, func(value Preferences) string {
+    return value.Density
+})
+```
+
+`UseContext` returns the whole nearest value and subscribes broadly. Prefer
+`UseContextSelector` when only a comparable field should trigger a rerender.
+See [context selectors](docs/context.md).
 
 MVP 9 adds minimal lifecycle hooks for component-owned side effects. MVP 10
 cleans up the public effect API:
@@ -559,8 +583,9 @@ required.
 - One mounted app and one browser thread. State is component-scoped and
   positional within each component, so state/effect hook order must remain
   stable.
-- Lifecycle/effects are minimal; no context, error boundaries, async effects,
-  dependency inference, or priorities.
+- Lifecycle/effects are minimal; context is scoped and selector-based, but
+  there are no error boundaries, async effects, dependency inference, or
+  priorities.
 - Memoization is explicit and opt-in today:
   components can implement `MemoEqual` on their props type to skip renders when
   prop shapes are unchanged and the component is otherwise clean.
@@ -580,6 +605,7 @@ required.
 - [GOX language and component model](docs/gox-language.md)
 - [Runtime model](docs/runtime-model.md)
 - [Lifecycle and effects](docs/effects.md)
+- [Context selectors](docs/context.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 - [Future GoFrame Player vision](docs/player-vision.md)
 - [Counter example](examples/counter/README.md)
