@@ -110,7 +110,9 @@ See `docs/deployment.md` for the cache policy and manifest contract.
 
 Use `goxc export ./app --out ./dist` to copy the latest standalone package to a
 deployment directory. Export is intentionally explicit so normal build/package
-commands do not create visible `dist/` output.
+commands do not create visible `dist/` output. Export destinations are treated
+as tool-owned: non-empty directories without GoFrame export manifests are
+rejected unless `--force` is passed.
 
 ### Serve
 
@@ -135,6 +137,10 @@ An optional `goframe.json` describes application defaults:
 CLI flags override manifest defaults. Paths in the manifest must remain inside
 the application directory. Unknown manifest fields are rejected so typos fail
 early instead of silently falling back to defaults.
+
+The hidden workspace builder currently supports single-package apps with
+`"entry": "."`. That is enough for the current examples. Multi-package app
+entry handling is deliberately left for a later toolchain design.
 
 ## Build targets
 

@@ -36,6 +36,22 @@ goxc export ./examples/todo --out ./dist
 
 Only the export step creates `./dist`.
 
+The export directory is tool-owned. If `--out` already exists, is non-empty,
+and does not contain `goframe-package.json` or `asset-manifest.json` from a
+previous GoFrame export, `goxc export` fails before touching it:
+
+```bash
+goxc export ./examples/todo --out ./dist
+# fails if ./dist is a non-empty user directory
+```
+
+Use `--force` only when you intentionally want goxc to treat that directory as
+package output and overwrite package-owned assets:
+
+```bash
+goxc export ./examples/todo --out ./dist --force
+```
+
 ## Hashed Release Package
 
 ```bash
@@ -181,6 +197,17 @@ safe app-specific subdirectory to avoid collisions between apps.
 `goxc generate --in-place` is available only for debugging or legacy workflows.
 It writes adjacent `.gox.go` files and prints a warning. Normal source trees
 should not commit generated `.gox.go`.
+
+`goxc clean <app>` removes `.goframe/work`, `.goframe/build`, and
+`.goframe/package`. `goxc clean <app> --generated` also removes `.goframe/gen`
+and adjacent legacy `.gox.go` files. `goxc clean <app> --legacy` helps migrate
+old workspaces by removing legacy `build/` and adjacent generated `.gox.go`
+files. Legacy `dist/` is removed only if it looks like a GoFrame export; user
+directories are skipped instead of silently deleted.
+
+The materialized hidden workspace currently supports single-package apps with
+`"entry": "."`. If an app needs multi-package entry handling, goxc fails with a
+clear error instead of guessing.
 
 ## Cache Policy
 

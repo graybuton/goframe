@@ -377,6 +377,16 @@ goxc export ./examples/counter --out ./dist
 
 `dist/` appears only when you explicitly export to it.
 
+The export directory is treated as tool-owned. If `--out` points at a
+non-empty directory that does not contain a previous GoFrame export marker
+(`goframe-package.json` or `asset-manifest.json`), `goxc export` fails instead
+of deleting a possibly user-owned `assets/` directory. Pass `--force` only when
+you intentionally want goxc to treat that directory as package output:
+
+```bash
+goxc export ./examples/counter --out ./dist --force
+```
+
 ### Size
 
 ```bash
@@ -417,11 +427,15 @@ By default, `serve <app>` serves `.goframe/package/standalone`; run
 ```bash
 goxc clean ./examples/counter
 goxc clean ./examples/counter --generated
+goxc clean ./examples/counter --legacy
 ```
 
 The default removes `.goframe/work`, `.goframe/build`, and `.goframe/package`.
 Generated `.goframe/gen` files and legacy adjacent `.gox.go` files are removed
-only with `--generated`.
+only with `--generated`. `--legacy` helps migrate old app folders by removing
+legacy `build/` and adjacent generated `.gox.go` files. It removes legacy
+`dist/` only when the directory looks like a GoFrame export; otherwise it is
+left alone.
 
 ### Doctor and version
 
@@ -455,7 +469,9 @@ early.
 
 CLI flags override manifest compiler and output choices. The `output` field is
 kept as a legacy/export convention; normal package output is written under the
-hidden `.goframe/package/standalone` workspace.
+hidden `.goframe/package/standalone` workspace. The hidden workspace builder
+currently supports single-package applications with `"entry": "."`; multi-
+package entries are a future toolchain step.
 
 ## Size experiment
 
