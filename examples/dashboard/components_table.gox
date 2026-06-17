@@ -5,7 +5,6 @@ import gf "github.com/graybuton/goframe/pkg/goframe"
 type IssueWorkspaceProps struct {
 	Items    []Issue
 	AllItems []Issue
-	DataVersion int
 	Query    string
 	OnToggle func(id int)
 }
@@ -26,7 +25,6 @@ func IssueWorkspace(props IssueWorkspaceProps) gf.Node {
 					<IssueTable
 						Items={props.Items}
 						SelectedID={selectedID}
-						DataVersion={props.DataVersion}
 						OnSelect={setSelectedID}
 						OnToggle={props.OnToggle}
 					/>
@@ -45,7 +43,6 @@ func IssueWorkspace(props IssueWorkspaceProps) gf.Node {
 type IssueTableProps struct {
 	Items      []Issue
 	SelectedID int
-	DataVersion int
 	OnSelect   func(id int)
 	OnToggle   func(id int)
 }
@@ -70,7 +67,6 @@ func IssueTable(props IssueTableProps) gf.Node {
 						Key={issue.ID}
 						Issue={issue}
 						Selected={issue.ID == props.SelectedID}
-						DataVersion={props.DataVersion}
 						OnSelect={props.OnSelect}
 						OnToggle={props.OnToggle}
 					/>
@@ -83,7 +79,6 @@ func IssueTable(props IssueTableProps) gf.Node {
 type IssueRowProps struct {
 	Issue    Issue
 	Selected bool
-	DataVersion int
 	OnSelect  func(id int)
 	OnToggle  func(id int)
 }
@@ -128,7 +123,6 @@ func (props IssueRowProps) MemoEqual(next IssueRowProps) bool {
 		props.Issue.UpdatedAt == next.Issue.UpdatedAt &&
 		props.Issue.Events == next.Issue.Events &&
 		props.Selected == next.Selected &&
-		props.DataVersion == next.DataVersion &&
 		props.Issue.Title == next.Issue.Title &&
 		props.Issue.Owner == next.Issue.Owner &&
 		props.Issue.Service == next.Issue.Service

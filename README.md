@@ -181,6 +181,18 @@ count, setCount := gf.UseState(0)
 setCount(count + 1)
 ```
 
+For event handlers that should update the latest state without closing over an
+old render value, use reducer dispatch:
+
+```go
+type CounterAction int
+
+count, dispatch := gf.UseReducer(0, func(state int, action CounterAction) int {
+    return state + int(action)
+})
+dispatch(1)
+```
+
 GOX keeps control flow in Go. The preferred user-facing list helpers are:
 
 ```go
@@ -209,6 +221,8 @@ func(gf.InputEvent)
 `gf.InputEvent.Value()` supports controlled inputs. `gf.UseState` slots belong
 to the component instance currently rendering. State `Set` calls mark that
 owner dirty and are coalesced into one browser animation-frame update.
+`gf.UseReducer` uses the same slots, but dispatch reads the latest slot state
+at event time before applying a pure reducer action.
 
 MVP 9 adds minimal lifecycle hooks for component-owned side effects. MVP 10
 cleans up the public effect API:

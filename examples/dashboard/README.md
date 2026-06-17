@@ -100,9 +100,10 @@ rerender `DashboardApp`, `MetricsGrid`, or `FilterBar`.
 
 `IssueRow` implements `MemoEqual`, and dashboard smoke expects row selection to
 rerender only the rows whose selected state changed. Unchanged rows should
-record memo skips. Dataset-changing actions also pass a `DataVersion` prop so
-memoized rows refresh event handlers before they can close over stale issue
-data.
+record memo skips. Dataset-changing actions use `gf.UseReducer`, so old row
+event handlers dispatch actions against the latest issue state instead of a
+slice captured by an older render. That removes the earlier `DataVersion`
+workaround and keeps row memoization useful for single-row data changes.
 
 Known remaining cost: without table virtualization, full-table actions such as
 search, status filtering, sorting, reset, and simulated dataset updates still

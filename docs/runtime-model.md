@@ -94,6 +94,22 @@ order. Calling `UseState` outside a component render panics with a focused
 message. Setting the same supported primitive value is a no-op; slices and
 other composite values conservatively schedule an update.
 
+`gf.UseReducer(initial, reducer)` uses the same component-scoped state slots,
+but returns a dispatch function instead of a setter:
+
+```go
+type Reducer[S any, A any] func(state S, action A) S
+
+issues, dispatchIssues := gf.UseReducer(resetDemoIssues(), reduceIssues)
+dispatchIssues(IssueAction{Kind: IssueActionToggle, ID: id})
+```
+
+Dispatch reads the latest slot state and latest reducer function at dispatch
+time. This means an old event handler retained by a memoized child can still
+apply an action to current state rather than to a value captured during an
+older render. Reducers should be pure state transitions; they should not depend
+on mutable render-local captures unless that coupling is intentional.
+
 ## Dirty subtree updates
 
 `State.Set` updates its slot immediately, marks the owning component dirty, and

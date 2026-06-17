@@ -22,6 +22,9 @@
   memo skip coverage and browser smoke assertions.
 - Memoization safety coverage for dirty descendants and dashboard callback
   freshness.
+- `UseReducer` state dispatch that applies actions to the latest component
+  state slot, used by the dashboard to remove the `DataVersion` memoization
+  workaround.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

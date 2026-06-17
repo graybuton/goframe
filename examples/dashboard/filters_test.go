@@ -81,6 +81,67 @@ func TestSimulateIssueUpdate(t *testing.T) {
 	}
 }
 
+func TestReduceIssuesToggle(t *testing.T) {
+	items := []Issue{{ID: 1, Status: StatusOpen, UpdatedAt: 10}, {ID: 2, Status: StatusBlocked, UpdatedAt: 20}}
+
+	got := reduceIssues(items, IssueAction{Kind: IssueActionToggle, ID: 2})
+
+	if got[1].Status != StatusResolved || got[1].UpdatedAt != 520 {
+		t.Fatalf("toggle action issue 2 = %#v", got[1])
+	}
+	if got[0] != items[0] {
+		t.Fatalf("toggle action changed unrelated issue: %#v", got[0])
+	}
+	if items[1].Status != StatusBlocked || items[1].UpdatedAt != 20 {
+		t.Fatalf("toggle action mutated original = %#v", items[1])
+	}
+}
+
+func TestReduceIssuesSimulate(t *testing.T) {
+	items := []Issue{
+		{ID: 1, Status: StatusResolved, Priority: PriorityHigh, Events: 5, UpdatedAt: 10},
+		{ID: 2, Status: StatusOpen, Priority: PriorityLow, Events: 1, UpdatedAt: 20},
+	}
+
+	got := reduceIssues(items, IssueAction{Kind: IssueActionSimulate})
+
+	if got[1].Status != StatusInProgress || got[1].Priority != PriorityMedium || got[1].Events != 4 || got[1].UpdatedAt != 1020 {
+		t.Fatalf("simulate action issue 2 = %#v", got[1])
+	}
+	if items[1].Status != StatusOpen || items[1].Priority != PriorityLow || items[1].Events != 1 || items[1].UpdatedAt != 20 {
+		t.Fatalf("simulate action mutated original = %#v", items[1])
+	}
+}
+
+func TestReduceIssuesReset(t *testing.T) {
+	items := []Issue{{ID: 999, Status: StatusResolved}}
+
+	got := reduceIssues(items, IssueAction{Kind: IssueActionReset})
+
+	if len(got) != dashboardItemCount || got[0].ID != 1 {
+		t.Fatalf("reset action returned %d items, first %#v", len(got), got[0])
+	}
+	if items[0].ID != 999 {
+		t.Fatalf("reset action mutated original = %#v", items[0])
+	}
+}
+
+func TestReduceIssuesUnknownActionReturnsSameSlice(t *testing.T) {
+	items := []Issue{{ID: 1}}
+
+	got := reduceIssues(items, IssueAction{Kind: IssueActionKind(99)})
+
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("unknown action = %#v", got)
+	}
+	if len(got) > 0 {
+		got[0].ID = 2
+	}
+	if items[0].ID != 2 {
+		t.Fatal("unknown action should return the original slice for no-op actions")
+	}
+}
+
 func BenchmarkFilterIssues300(b *testing.B) {
 	items := makeDemoIssues(300)
 	b.ReportAllocs()

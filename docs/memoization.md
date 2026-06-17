@@ -37,19 +37,17 @@ forces a rerender whenever the callback's captured data changes.
 
 Safe patterns:
 
-- include a callback/data version token in props and compare it in `MemoEqual`;
+- use `gf.UseReducer` dispatch for state-changing callbacks so old DOM
+  handlers apply actions to the latest state slot;
+- include a callback/data version token in props and compare it in `MemoEqual`
+  when callbacks cannot be expressed as reducer actions;
 - compare a stable command ID or owner version instead of comparing functions;
 - include data fields that the callback closes over.
 
-The dashboard example uses a `DataVersion` prop on `IssueRowProps`. Row
-selection keeps the same version, so unchanged rows can skip. Dataset changes
-from reset, simulate update, or toggle increment the version, so row handlers
-are refreshed before they can act on stale issue data.
-
-That is an intentional tradeoff: dataset-changing actions invalidate row
-memoization broadly, even when only one row changed. This keeps callback
-correctness explicit until the runtime has a smaller primitive such as
-functional state updates, stable event callbacks, or selectors.
+The dashboard example uses `gf.UseReducer` for issue dataset changes. `IssueRow`
+callbacks dispatch typed actions, and dispatch reads the latest issue slice from
+the component state slot at event time. This lets `IssueRowProps.MemoEqual`
+ignore function props without keeping stale issue data in old handlers.
 
 Do not ignore function props when the callback closes over changing data and no
 other compared prop tracks that data.
@@ -60,6 +58,8 @@ other compared prop tracks that data.
 - No reflection-based comparison.
 - No `unsafe`, no generated equality wrappers, no deep auto-compare.
 - No context/selectors as part of memoization strategy.
+- No stable event callback hook yet; reducer dispatch covers state transitions
+  that can be represented as pure actions.
 - No virtualization or router/Player integration in this stage.
 
 ## Interaction with keys and identity

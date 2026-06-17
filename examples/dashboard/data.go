@@ -1,5 +1,18 @@
 package main
 
+type IssueActionKind int
+
+const (
+	IssueActionToggle IssueActionKind = iota
+	IssueActionSimulate
+	IssueActionReset
+)
+
+type IssueAction struct {
+	Kind IssueActionKind
+	ID   int
+}
+
 func makeDemoIssues(count int) []Issue {
 	owners := []string{"Ava", "Noah", "Mina", "Theo", "Iris", "Kai", "Lena", "Omar"}
 	services := []string{"api", "billing", "search", "worker", "auth", "storage", "edge", "console"}
@@ -39,6 +52,19 @@ func makeDemoIssues(count int) []Issue {
 
 func resetDemoIssues() []Issue {
 	return makeDemoIssues(dashboardItemCount)
+}
+
+func reduceIssues(items []Issue, action IssueAction) []Issue {
+	switch action.Kind {
+	case IssueActionToggle:
+		return toggleIssueStatus(items, action.ID)
+	case IssueActionSimulate:
+		return simulateIssueUpdate(items)
+	case IssueActionReset:
+		return resetDemoIssues()
+	default:
+		return items
+	}
 }
 
 func simulateIssueUpdate(items []Issue) []Issue {
