@@ -47,9 +47,12 @@ Before creating a tag:
 - VS Code extension JSON validation and compile pass;
 - `scripts/artifact-check.sh` passes;
 - `scripts/module-path-check.sh` passes;
+- release package layout is checked with `goxc package --asset-hash --preload`
+  for affected examples;
 - README, docs, and changelog are updated;
-- no `dist/`, `build/`, `.wasm`, `.wasm.gz`, `.wasm.br`, `.wasm.zst`,
-  `node_modules`, `.vsix`, or `.test` files are tracked.
+- no `dist/`, `build/`, `.goframe`, `.gox.go`, `.wasm`, `.wasm.gz`,
+  `.wasm.br`, `.wasm.zst`, `node_modules`, `.vsix`, or `.test` files are
+  tracked.
 
 ## Current Publishing Policy
 

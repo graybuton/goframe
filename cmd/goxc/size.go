@@ -5,38 +5,34 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
-func sizeCommand(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: goxc size <app-or-artifact-directory>")
-	}
+type sizeOptions struct {
+	path      string
+	dir       string
+	workspace string
+}
 
-	directory, err := artifactDirectory(args[0])
+func sizeCommand(args []string) error {
+	options, err := parseSizeOptions(args)
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return fmt.Errorf("read artifact directory: %w", err)
-	}
 
+	directory, err := artifactDirectory(options)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("size report: %s\n\n", directory)
 	fmt.Printf("%-24s %12s %14s\n", "File", "Size", "Bytes")
 	fmt.Printf("%-24s %12s %14s\n", "------------------------", "------------", "--------------")
 
 	found := false
-	for _, entry := range entries {
-		if entry.IsDir() || !reportableFile(entry.Name()) {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return fmt.Errorf("inspect %s: %w", entry.Name(), err)
-		}
+	for _, artifact := range reportableArtifacts(directory) {
 		found = true
-		fmt.Printf("%-24s %12s %14d\n", entry.Name(), humanSize(info.Size()), info.Size())
+		fmt.Printf("%-24s %12s %14d\n", artifact.name, humanSize(artifact.size), artifact.size)
 	}
 	if !found {
 		return fmt.Errorf("no WASM artifacts found in %s; run `goxc build` or `goxc package` first", directory)
@@ -44,13 +40,96 @@ func sizeCommand(args []string) error {
 	return nil
 }
 
-func artifactDirectory(path string) (string, error) {
+func parseSizeOptions(args []string) (sizeOptions, error) {
+	var options sizeOptions
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case strings.HasPrefix(arg, "--dir="):
+			options.dir = strings.TrimPrefix(arg, "--dir=")
+		case arg == "--dir":
+			index++
+			if index >= len(args) {
+				return sizeOptions{}, errors.New("--dir requires a value")
+			}
+			options.dir = args[index]
+		case strings.HasPrefix(arg, "--workspace="):
+			options.workspace = strings.TrimPrefix(arg, "--workspace=")
+		case arg == "--workspace":
+			index++
+			if index >= len(args) {
+				return sizeOptions{}, errors.New("--workspace requires a value")
+			}
+			options.workspace = args[index]
+		case strings.HasPrefix(arg, "-"):
+			return sizeOptions{}, fmt.Errorf("unknown size flag %q", arg)
+		case options.path == "":
+			options.path = arg
+		default:
+			return sizeOptions{}, fmt.Errorf("unexpected size argument %q", arg)
+		}
+	}
+	if options.dir == "" && options.path == "" {
+		return sizeOptions{}, errors.New("usage: goxc size <app-or-artifact-directory> [--workspace=directory] or goxc size --dir=<artifact-directory>")
+	}
+	return options, nil
+}
+
+type sizeArtifact struct {
+	name string
+	size int64
+}
+
+func reportableArtifacts(directory string) []sizeArtifact {
+	artifacts := []sizeArtifact{}
+	_ = filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(directory, path)
+		if err != nil {
+			return nil
+		}
+		relative = filepath.ToSlash(relative)
+		if !reportableFile(relative) {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		artifacts = append(artifacts, sizeArtifact{name: relative, size: info.Size()})
+		return nil
+	})
+	sort.Slice(artifacts, func(first, second int) bool {
+		return artifacts[first].name < artifacts[second].name
+	})
+	return artifacts
+}
+
+func artifactDirectory(options sizeOptions) (string, error) {
+	if options.dir != "" {
+		return artifactDirectoryFromPath(options.dir)
+	}
+	path := options.path
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", path)
+	}
+	if _, err := os.Stat(filepath.Join(path, manifestName)); err == nil {
+		layout, err := newBuildLayout(layoutOptions{appDir: path, workspace: options.workspace})
+		if err != nil {
+			return "", err
+		}
+		if containsArtifact(layout.PackageDir) {
+			return layout.PackageDir, nil
+		}
+	}
+	if containsArtifact(path) {
+		return path, nil
 	}
 	for _, child := range []string{"dist", "build"} {
 		candidate := filepath.Join(path, child)
@@ -61,24 +140,39 @@ func artifactDirectory(path string) (string, error) {
 	return path, nil
 }
 
-func containsArtifact(directory string) bool {
-	entries, err := os.ReadDir(directory)
+func artifactDirectoryFromPath(path string) (string, error) {
+	info, err := os.Stat(path)
 	if err != nil {
-		return false
+		return "", err
 	}
-	for _, entry := range entries {
-		if !entry.IsDir() && reportableFile(entry.Name()) {
-			return true
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", path)
+	}
+	return path, nil
+}
+
+func containsArtifact(directory string) bool {
+	found := false
+	_ = filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
 		}
-	}
-	return false
+		relative, err := filepath.Rel(directory, path)
+		if err == nil && reportableFile(filepath.ToSlash(relative)) {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 func reportableFile(name string) bool {
 	return strings.HasSuffix(name, ".wasm") ||
 		strings.HasSuffix(name, ".wasm.gz") ||
 		strings.HasSuffix(name, ".wasm.br") ||
-		name == "wasm_exec.js"
+		strings.HasSuffix(name, ".wasm.zst") ||
+		strings.HasPrefix(filepath.Base(name), "wasm_exec") && strings.HasSuffix(name, ".js")
 }
 
 func humanSize(size int64) string {

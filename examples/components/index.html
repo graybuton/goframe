@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>goframe components</title>
+    <!-- goframe:preload -->
+    <!-- /goframe:preload -->
     <style>
         :root {
             color: #172033;
@@ -43,15 +45,15 @@
 </head>
 <body>
     <div id="root">Loading...</div>
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
     <script>
-        const runtimeScript = document.createElement("script");
-        runtimeScript.src = "wasm_exec.js";
-        runtimeScript.onload = async () => {
-            const go = new Go();
-            const result = await WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject);
-            go.run(result.instance);
-        };
-        document.head.appendChild(runtimeScript);
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+            .then((result) => go.run(result.instance));
     </script>
+    <!-- /goframe:bootstrap -->
 </body>
 </html>

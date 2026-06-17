@@ -6,12 +6,6 @@ import (
 	gf "github.com/graybuton/goframe/pkg/goframe"
 )
 
-type Todo struct {
-	ID   int
-	Text string
-	Done bool
-}
-
 type HeaderProps struct {
 	Title string
 }

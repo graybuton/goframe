@@ -29,7 +29,8 @@ The audit found three small but real hardening issues and fixed them:
 - `goframe.json` silently ignored unknown fields, making typo mistakes hard to
   diagnose.
 - `goxc package` prepared some artifacts directly in `dist/`; it now stages the
-  package before publishing.
+  package before publishing, and MVP 13.1 keeps normal package output inside
+  `.goframe/package/standalone`.
 
 Foundation Hardening II then closed two runtime risks:
 
@@ -149,9 +150,10 @@ Remaining compiler risks:
 
 `goxc` responsibilities are now clean:
 
-- `generate`: `.gox` to `.gox.go`.
-- `build`: raw WASM into `build/`.
-- `package`: runnable `dist/` bundle.
+- `generate`: `.gox` to `.goframe/gen/*.gox.go`.
+- `build`: raw WASM into `.goframe/build/`.
+- `package`: runnable `.goframe/package/standalone` bundle.
+- `export`: explicit deploy directory copy.
 - `size`: artifact inspection.
 - `serve`: localhost static server with `application/wasm`.
 - `doctor`: toolchain diagnostics.
@@ -161,12 +163,12 @@ Fixed CLI issues:
 
 - Manifest parsing now rejects unknown fields with a useful JSON error.
 - `package` builds the bundle in a staging directory first, then publishes
-  prepared artifacts into `dist/`.
+  prepared artifacts into `.goframe/package/standalone`.
+- MVP 13 package publishing removes stale root bundle artifacts and the
+  package-owned `assets/` directory before publishing the next staged bundle.
 
 Remaining CLI risks:
 
-- Package publishing preserves unrelated files in `dist/`; this avoids deleting
-  user files but means stale removed assets can remain.
 - `serve` is a local development server. It binds to `127.0.0.1` and is not a
   hardened production static server.
 - `--out` is intentionally user-directed and may point outside the application
@@ -268,8 +270,9 @@ CLI:
 
 - Compiler commands use `exec.Command` with arguments, not shell strings.
 - Manifest child paths are validated as relative child paths.
-- `clean` removes only `build/`, manifest output, and generated `.gox.go` when
-  explicitly requested.
+- `clean` removes `.goframe/work`, `.goframe/build`, and `.goframe/package` by
+  default; `--generated` also removes `.goframe/gen` and legacy adjacent
+  `.gox.go` files.
 - `serve` is localhost-only.
 
 Remaining safety risks:

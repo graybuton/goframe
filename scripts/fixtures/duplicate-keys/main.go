@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 package main
 
 import gf "github.com/graybuton/goframe/pkg/goframe"

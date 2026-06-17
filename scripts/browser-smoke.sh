@@ -63,6 +63,18 @@ wait_for_server() {
 	return 1
 }
 
+manifest_wasm_path() {
+	local app="$1"
+	node -e 'const fs = require("node:fs");
+const manifestPath = process.argv[1] + "/.goframe/package/standalone/asset-manifest.json";
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+if (!manifest.entrypoints || !manifest.entrypoints.wasm) {
+  console.error(`missing entrypoints.wasm in ${manifestPath}`);
+  process.exit(1);
+}
+console.log(manifest.entrypoints.wasm);' "$app"
+}
+
 build_smoke_url() {
 	local port="$1"
 	echo "${TODO_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
@@ -116,9 +128,11 @@ run_with_server() {
 	fi
 
 	local wasm_headers
-	wasm_headers="$(curl -fsSI "http://127.0.0.1:$port/main.wasm?smoke=$(date +%s%N)" || true)"
+	local wasm_path
+	wasm_path="$(manifest_wasm_path "$app")"
+	wasm_headers="$(curl -fsSI "http://127.0.0.1:$port/$wasm_path?smoke=$(date +%s%N)" || true)"
 	if [[ "$wasm_headers" != *"application/wasm"* ]]; then
-		echo "HARNESS FAILURE: server did not expose main.wasm as application/wasm on port $port"
+		echo "HARNESS FAILURE: server did not expose $wasm_path as application/wasm on port $port"
 		echo "$wasm_headers"
 		cat "$log_file"
 		exit 1
@@ -147,8 +161,11 @@ require_command "$CHROME_BIN" "Set CHROME=/path/to/chrome if Chrome is installed
 
 echo "== Todo debug browser smoke =="
 "$GOXC" package ./examples/todo --compiler=tinygo
-tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-	-o ./examples/todo/dist/main.wasm ./examples/todo
+(
+	cd ./examples/todo/.goframe/work/dev
+	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+		-o "$ROOT_DIR/examples/todo/.goframe/package/standalone/assets/bundle.wasm" .
+)
 
 TODO_PORT="$(resolve_port "${GOFRAME_TODO_SMOKE_PORT:-}")"
 export GOFRAME_CHROME_DEBUG_PORT="${GOFRAME_CHROME_DEBUG_PORT:-$(pick_free_port)}"
@@ -159,8 +176,11 @@ run_with_server ./examples/todo "$TODO_PORT" "$TODO_URL" \
 echo
 echo "== Duplicate key debug browser smoke =="
 "$GOXC" package ./scripts/fixtures/duplicate-keys --compiler=tinygo
-tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-	-o ./scripts/fixtures/duplicate-keys/dist/main.wasm ./scripts/fixtures/duplicate-keys
+(
+	cd ./scripts/fixtures/duplicate-keys/.goframe/work/dev
+	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+		-o "$ROOT_DIR/scripts/fixtures/duplicate-keys/.goframe/package/standalone/assets/bundle.wasm" .
+)
 
 DUPLICATE_PORT="$(resolve_port "${GOFRAME_DUPLICATE_KEY_SMOKE_PORT:-}")"
 export GOFRAME_DUPLICATE_KEY_CHROME_DEBUG_PORT="${GOFRAME_DUPLICATE_KEY_CHROME_DEBUG_PORT:-$(pick_free_port)}"
@@ -171,8 +191,11 @@ run_with_server ./scripts/fixtures/duplicate-keys "$DUPLICATE_PORT" "$DUPLICATE_
 echo
 echo "== Dashboard debug browser smoke =="
 "$GOXC" package ./examples/dashboard --compiler=tinygo
-tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-	-o ./examples/dashboard/dist/main.wasm ./examples/dashboard
+(
+	cd ./examples/dashboard/.goframe/work/dev
+	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+		-o "$ROOT_DIR/examples/dashboard/.goframe/package/standalone/assets/bundle.wasm" .
+)
 
 DASHBOARD_PORT="$(resolve_port "${GOFRAME_DASHBOARD_SMOKE_PORT:-}")"
 export GOFRAME_DASHBOARD_CHROME_DEBUG_PORT="${GOFRAME_DASHBOARD_CHROME_DEBUG_PORT:-$(pick_free_port)}"

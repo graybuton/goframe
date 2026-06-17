@@ -13,11 +13,13 @@
 coverage.out
 
 # WASM/build artifacts
+.goframe/
 build/
 dist/
 *.wasm
 *.wasm.gz
 *.wasm.br
+*.wasm.zst
 *.map
 examples/*/build/
 examples/*/dist/
@@ -25,6 +27,7 @@ examples/*/wasm_exec*.js
 scripts/fixtures/*/dist/
 
 # goxc generated temporary output
+*.gox.go
 .goxc-tmp/
 *.tmp
 

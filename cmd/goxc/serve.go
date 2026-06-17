@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 type serveOptions struct {
-	appDir string
-	dir    string
-	port   int
+	appDir    string
+	dir       string
+	workspace string
+	port      int
 }
 
 func serveCommand(args []string) error {
@@ -37,6 +37,14 @@ func parseServeOptions(args []string) (serveOptions, error) {
 				return serveOptions{}, errors.New("--dir requires a value")
 			}
 			options.dir = args[index]
+		case strings.HasPrefix(arg, "--workspace="):
+			options.workspace = strings.TrimPrefix(arg, "--workspace=")
+		case arg == "--workspace":
+			index++
+			if index >= len(args) {
+				return serveOptions{}, errors.New("--workspace requires a value")
+			}
+			options.workspace = args[index]
 		case strings.HasPrefix(arg, "--port="):
 			port, err := strconv.Atoi(strings.TrimPrefix(arg, "--port="))
 			if err != nil {
@@ -66,13 +74,13 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	}
 	if options.dir == "" {
 		if options.appDir == "" {
-			return serveOptions{}, errors.New("usage: goxc serve <app-directory> [--port=8080] or goxc serve --dir=<directory>")
+			return serveOptions{}, errors.New("usage: goxc serve <app-directory> [--port=8080] [--workspace=directory] or goxc serve --dir=<directory>")
 		}
-		manifest, err := loadManifest(options.appDir)
+		layout, err := newBuildLayout(layoutOptions{appDir: options.appDir, workspace: options.workspace})
 		if err != nil {
 			return serveOptions{}, err
 		}
-		options.dir = filepath.Join(options.appDir, manifest.Output)
+		options.dir = layout.PackageDir
 	}
 	return options, nil
 }
@@ -80,7 +88,10 @@ func parseServeOptions(args []string) (serveOptions, error) {
 func serve(options serveOptions) error {
 	info, err := os.Stat(options.dir)
 	if err != nil {
-		return fmt.Errorf("open serve directory: %w; run `goxc package` first", err)
+		if options.appDir != "" {
+			return fmt.Errorf("no standalone package found; run `goxc package %s` first", options.appDir)
+		}
+		return fmt.Errorf("open serve directory: %w", err)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("%s is not a directory", options.dir)
@@ -94,8 +105,21 @@ func serve(options serveOptions) error {
 func staticHandler(directory string) http.Handler {
 	files := http.FileServer(http.Dir(directory))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if strings.HasSuffix(request.URL.Path, ".wasm") {
+		path := request.URL.Path
+		if strings.HasSuffix(path, ".br") {
+			response.Header().Set("Content-Encoding", "br")
+			path = strings.TrimSuffix(path, ".br")
+		} else if strings.HasSuffix(path, ".gz") {
+			response.Header().Set("Content-Encoding", "gzip")
+			path = strings.TrimSuffix(path, ".gz")
+		}
+		switch {
+		case strings.HasSuffix(path, ".wasm"):
 			response.Header().Set("Content-Type", "application/wasm")
+		case strings.HasSuffix(path, ".js"):
+			response.Header().Set("Content-Type", "text/javascript")
+		case strings.HasSuffix(path, ".css"):
+			response.Header().Set("Content-Type", "text/css")
 		}
 		files.ServeHTTP(response, request)
 	})

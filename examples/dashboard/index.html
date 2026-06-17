@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>goframe dashboard</title>
+    <!-- goframe:preload -->
+    <!-- /goframe:preload -->
     <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -19,17 +21,20 @@
             window.goframeComponentPatchCounts[name] =
                 (window.goframeComponentPatchCounts[name] || 0) + 1;
         };
-
-        const runtimeScript = document.createElement("script");
-        runtimeScript.src = "wasm_exec.js";
-        runtimeScript.onload = async () => {
-            const started = performance.now();
-            const go = new Go();
-            const result = await WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject);
-            console.info("goframe dashboard: WASM ready in", (performance.now() - started).toFixed(2), "ms");
-            go.run(result.instance);
-        };
-        document.head.appendChild(runtimeScript);
     </script>
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
+    <script>
+        const started = performance.now();
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+            .then((result) => {
+                console.info("goframe dashboard: WASM ready in", (performance.now() - started).toFixed(2), "ms");
+                go.run(result.instance);
+            });
+    </script>
+    <!-- /goframe:bootstrap -->
 </body>
 </html>

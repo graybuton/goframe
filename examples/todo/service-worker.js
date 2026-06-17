@@ -1,5 +1,5 @@
 const CACHE_NAME = "goframe-todo-v1";
-const ASSETS = ["./", "./index.html", "./main.wasm", "./wasm_exec.js"];
+const ASSETS = ["./", "./index.html", "./assets/bundle.wasm", "./assets/wasm_exec.js"];
 
 self.addEventListener("install", (event) => {
     event.waitUntil(

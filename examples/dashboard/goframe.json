@@ -3,7 +3,7 @@
   "entry": ".",
   "output": "dist",
   "compiler": "tinygo",
-  "wasm": "main.wasm",
+  "wasm": "bundle.wasm",
   "assets": [
     "index.html",
     "styles.css"

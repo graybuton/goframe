@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$ROOT_DIR"
 
-pattern='(^|/)(dist|build)/|\.wasm(\.gz|\.br|\.zst)?$|node_modules|\.vsix$|\.test$'
+pattern='(^|/)(dist|build|\.goframe)/|\.gox\.go$|\.wasm(\.gz|\.br|\.zst)?$|node_modules|\.vsix$|\.test$'
 tracked="$(git ls-files | grep -E "$pattern" || true)"
 
 if [[ -n "$tracked" ]]; then

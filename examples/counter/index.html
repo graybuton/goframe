@@ -8,14 +8,14 @@
         body { font-family: sans-serif; margin: 3rem; }
         button { font: inherit; padding: 0.5rem 0.8rem; }
     </style>
+    <!-- goframe:preload -->
+    <!-- /goframe:preload -->
 </head>
 <body>
     <div id="root">Loading...</div>
 
     <script>
         const startupStarted = performance.now();
-        const wasmFile = "main.wasm";
-        const runtimeFile = "wasm_exec.js";
 
         globalThis.goframeRenderProbe = (phase, duration) => {
             console.log(`[goframe] ${phase}: ${duration.toFixed(2)} ms`);
@@ -25,39 +25,26 @@
                 );
             }
         };
-
-        const runtimeScript = document.createElement("script");
-        runtimeScript.src = runtimeFile;
-        runtimeScript.onload = async () => {
-            try {
-                const instantiateStarted = performance.now();
-                const go = new Go();
-                const result = await WebAssembly.instantiateStreaming(
-                    fetch(wasmFile),
-                    go.importObject,
-                );
+    </script>
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
+    <script>
+        const instantiateStarted = performance.now();
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+            .then((result) => {
                 console.log(
                     `[goframe] WASM instantiate: ${(performance.now() - instantiateStarted).toFixed(2)} ms`,
                 );
                 go.run(result.instance);
-            } catch (error) {
+            })
+            .catch((error) => {
                 console.error("[goframe] startup failed", error);
                 document.getElementById("root").textContent = "Failed to start goframe. See console.";
-            }
-        };
-        runtimeScript.onerror = () => {
-            console.error(`[goframe] failed to load ${runtimeFile}`);
-        };
-        document.head.appendChild(runtimeScript);
-
-        const enableServiceWorker = new URLSearchParams(location.search).has("sw");
-        if ("serviceWorker" in navigator && enableServiceWorker) {
-            addEventListener("load", () => {
-                navigator.serviceWorker.register("./service-worker.js").catch((error) => {
-                    console.warn("[goframe] service worker registration skipped", error);
-                });
             });
-        }
     </script>
+    <!-- /goframe:bootstrap -->
 </body>
 </html>

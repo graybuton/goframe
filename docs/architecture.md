@@ -38,11 +38,13 @@ analysis, formatting, and diagnostics remain future LSP responsibilities.
 ### Generate
 
 ```text
-.gox source -> generated .gox.go
+.gox source -> generated .goframe/gen/*.gox.go
 ```
 
 Generation is deterministic source transformation. Generated files remain next
-to their `.gox` sources so normal Go and TinyGo compilers can consume them.
+to the app in a hidden toolchain workspace, not next to authored source files.
+`goxc build` and `goxc package` materialize a build workspace that normal Go
+and TinyGo compilers can consume.
 
 The MVP component model deliberately delegates type checking to Go:
 
@@ -65,7 +67,7 @@ slots, and update a dirty component subtree independently.
 ### Build
 
 ```text
-generated Go source -> raw build/main.wasm
+materialized Go source -> raw .goframe/build/<compiler>/<profile>/bundle.wasm
 ```
 
 Build only compiles. It does not copy HTML, create a distribution, or generate
@@ -74,17 +76,18 @@ gzip/brotli files. Both Go and TinyGo targets use the same raw output contract.
 ### Package
 
 ```text
-application + selected compiler -> runnable dist/ bundle
+application + selected compiler -> runnable .goframe/package/standalone bundle
 ```
 
-Packaging compiles the selected target and combines `main.wasm`, the matching
-runtime shim, declared static assets, and generated `manifest.json`.
-Compiler-specific runtime names are normalized to `main.wasm` and
-`wasm_exec.js`.
+Packaging compiles the selected target and combines `assets/bundle.wasm`, the
+matching runtime shim, declared static assets, generated `asset-manifest.json`,
+and generated `goframe-package.json`. Compiler-specific runtime names are
+normalized to `assets/bundle.wasm` and `assets/wasm_exec.js`.
 
 Packaging prepares artifacts in a staging directory before publishing them to
-`dist/`. This keeps failed compile/copy/compression steps from immediately
-damaging the currently published bundle.
+`.goframe/package/standalone`. This keeps failed compile/copy/compression
+steps from damaging the currently runnable package and keeps the authored app
+directory free of visible generated files.
 
 Precompression is optional packaging assistance, never default compiler
 behavior:
@@ -96,11 +99,29 @@ goxc package ./app --compress=gzip,br
 Compression and content negotiation primarily belong to deployment
 infrastructure: web servers, CDNs, and reverse proxies.
 
+Release-style packages can opt into content-hashed asset filenames and preload
+hints:
+
+```bash
+goxc package ./app --asset-hash --preload --compress=gzip,br
+```
+
+See `docs/deployment.md` for the cache policy and manifest contract.
+
+Use `goxc export ./app --out ./dist` to copy the latest standalone package to a
+deployment directory. Export is intentionally explicit so normal build/package
+commands do not create visible `dist/` output. Export destinations are treated
+as tool-owned: non-empty directories without GoFrame export manifests are
+rejected unless `--force` is passed.
+
 ### Serve
 
 `goxc serve` is a small development server for a packaged directory. It serves
 WASM with `application/wasm`, but intentionally does not attempt to be a
 production deployment system.
+
+By default, `serve <app>` serves `.goframe/package/standalone`. `serve --dir`
+continues to serve an explicit exported directory.
 
 ## Project manifest
 
@@ -110,12 +131,16 @@ An optional `goframe.json` describes application defaults:
 - Go package entry;
 - package output directory;
 - preferred compiler;
-- normalized WASM filename;
+- normalized WASM filename, defaulting to `bundle.wasm`;
 - static assets copied by packaging.
 
 CLI flags override manifest defaults. Paths in the manifest must remain inside
 the application directory. Unknown manifest fields are rejected so typos fail
 early instead of silently falling back to defaults.
+
+The hidden workspace builder currently supports single-package apps with
+`"entry": "."`. That is enough for the current examples. Multi-package app
+entry handling is deliberately left for a later toolchain design.
 
 ## Build targets
 
@@ -129,9 +154,9 @@ large counter binary.
 Recorded Go 1.24.4 output on June 16, 2026:
 
 ```text
-counter main.wasm     1,928,333 bytes
-components main.wasm  1,942,473 bytes
-todo main.wasm        2,007,086 bytes
+counter bundle.wasm     1,928,333 bytes
+components bundle.wasm  1,942,473 bytes
+todo bundle.wasm        2,007,086 bytes
 ```
 
 ### TinyGo lightweight mode
@@ -140,10 +165,10 @@ TinyGo is the preferred lightweight experiment. It supports a smaller runtime
 surface but dramatically reduces the counter:
 
 ```text
-counter main.wasm     77,890 bytes
-components main.wasm  83,159 bytes
-todo main.wasm        109,483 bytes
-dashboard main.wasm   146,832 bytes
+counter bundle.wasm     77,890 bytes
+components bundle.wasm  83,159 bytes
+todo bundle.wasm        109,483 bytes
+dashboard bundle.wasm   146,832 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser

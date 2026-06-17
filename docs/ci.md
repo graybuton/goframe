@@ -27,13 +27,19 @@ It checks:
 and manually through `workflow_dispatch`.
 
 It installs Go, TinyGo `0.41.1`, brotli, and zstd. Then it packages the
-counter, components, todo, and dashboard examples with TinyGo and runs:
+counter, components, todo, and dashboard examples with TinyGo. It also runs a
+release-style package pass with `--asset-hash --preload --compress=gzip,br`
+before checking:
 
 ```bash
 scripts/size-budget.sh
 ```
 
 The workflow uploads the printed size report as an artifact.
+
+The size gate measures the packaged WASM entrypoint under
+`.goframe/package/standalone/assets/bundle*.wasm`, with a legacy fallback for
+older `main.wasm` packages.
 
 ### Browser Smoke
 
@@ -106,6 +112,9 @@ Size budget only:
 ```bash
 scripts/size-budget.sh
 ```
+
+Package delivery details, including content-hashed assets and preload hints,
+are documented in `docs/deployment.md`.
 
 Browser smoke:
 

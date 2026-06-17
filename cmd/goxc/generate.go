@@ -3,40 +3,131 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/graybuton/goframe/pkg/gox"
 )
 
+type generateOptions struct {
+	path      string
+	outDir    string
+	workspace string
+	inPlace   bool
+}
+
 func generateCommand(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: goxc generate <file-or-directory>")
+	options, err := parseGenerateOptions(args)
+	if err != nil {
+		return err
 	}
-	return generatePath(args[0], true)
+	return generatePath(options, true)
 }
 
-func generateForBuild(path string) error {
-	return generatePath(path, false)
+func parseGenerateOptions(args []string) (generateOptions, error) {
+	var options generateOptions
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == "--in-place":
+			options.inPlace = true
+		case strings.HasPrefix(arg, "--out="):
+			options.outDir = strings.TrimPrefix(arg, "--out=")
+		case arg == "--out":
+			index++
+			if index >= len(args) {
+				return generateOptions{}, errors.New("--out requires a value")
+			}
+			options.outDir = args[index]
+		case strings.HasPrefix(arg, "--workspace="):
+			options.workspace = strings.TrimPrefix(arg, "--workspace=")
+		case arg == "--workspace":
+			index++
+			if index >= len(args) {
+				return generateOptions{}, errors.New("--workspace requires a value")
+			}
+			options.workspace = args[index]
+		case strings.HasPrefix(arg, "-"):
+			return generateOptions{}, fmt.Errorf("unknown generate flag %q", arg)
+		case options.path == "":
+			options.path = arg
+		default:
+			return generateOptions{}, fmt.Errorf("unexpected generate argument %q", arg)
+		}
+	}
+	if options.path == "" {
+		return generateOptions{}, errors.New("usage: goxc generate <file-or-directory> [--out=directory] [--workspace=directory] [--in-place]")
+	}
+	if options.inPlace && options.outDir != "" {
+		return generateOptions{}, errors.New("--in-place cannot be combined with --out")
+	}
+	return options, nil
 }
 
-func generatePath(path string, requireFiles bool) error {
-	files, err := gox.FindFiles(path)
+func generatePath(options generateOptions, requireFiles bool) error {
+	files, err := gox.FindFiles(options.path)
 	if err != nil {
 		return err
 	}
 	if len(files) == 0 {
 		if requireFiles {
-			return fmt.Errorf("no .gox files found below %s", path)
+			return fmt.Errorf("no .gox files found below %s", options.path)
 		}
-		fmt.Printf("no .gox files found below %s; building Go sources\n", path)
+		fmt.Printf("no .gox files found below %s; building Go sources\n", options.path)
 		return nil
 	}
 
+	if options.inPlace {
+		fmt.Fprintln(os.Stderr, "warning: --in-place writes generated compiler output into the source tree; use only for debugging or legacy workflows")
+		for _, file := range files {
+			output, err := gox.GenerateFile(file)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("generated %s -> %s\n", file, output)
+		}
+		return nil
+	}
+
+	appDir, err := generationAppDir(options.path)
+	if err != nil {
+		return err
+	}
+	outputRoot := options.outDir
+	if outputRoot == "" {
+		layout, err := newBuildLayout(layoutOptions{appDir: appDir, workspace: options.workspace})
+		if err != nil {
+			return err
+		}
+		outputRoot = layout.GenDir
+	}
+
 	for _, file := range files {
-		output, err := gox.GenerateFile(file)
+		relative, err := filepath.Rel(appDir, file)
+		if err != nil {
+			return fmt.Errorf("resolve GOX source %s: %w", file, err)
+		}
+		output := filepath.Join(outputRoot, relative+".go")
+		output, err = gox.GenerateFileTo(file, output)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("generated %s -> %s\n", file, output)
 	}
 	return nil
+}
+
+func generationAppDir(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return path, nil
+	}
+	if filepath.Ext(path) != ".gox" {
+		return "", fmt.Errorf("%s is not a .gox file", path)
+	}
+	return filepath.Dir(path), nil
 }
