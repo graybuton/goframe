@@ -98,11 +98,16 @@ the issue data and filters because metrics and the visible table derive from
 them. `IssueWorkspace` owns only row selection so selecting a row does not
 rerender `DashboardApp`, `MetricsGrid`, or `FilterBar`.
 
-Known remaining cost: without table virtualization,
-selection-related updates can still rerender visible rows, but `IssueRow`
-implements `MemoEqual` and dashboard smoke now expects row memo skips on
-selection. This is a useful pressure-test result, and a baseline for future
-runtime optimization.
+`IssueRow` implements `MemoEqual`, and dashboard smoke expects row selection to
+rerender only the rows whose selected state changed. Unchanged rows should
+record memo skips. Dataset-changing actions also pass a `DataVersion` prop so
+memoized rows refresh event handlers before they can close over stale issue
+data.
+
+Known remaining cost: without table virtualization, full-table actions such as
+search, status filtering, sorting, reset, and simulated dataset updates still
+visit or rerender many visible rows. That is an intentional baseline for future
+runtime optimization rather than a hidden runtime feature.
 
 ## Known Limitations
 

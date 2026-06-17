@@ -21,6 +21,7 @@ Then `goframe` may skip rerendering that component when all of the following are
 - component name/key identity matches
 - the previous and next props satisfy `MemoEqual`
 - the component instance is not dirty from its own local state/effects
+- no dirty descendant is waiting inside the component subtree
 
 ## Why explicit only
 
@@ -31,7 +32,22 @@ MVP 14 uses explicit `MemoEqual` so authors decide the comparator semantics.
 
 `MemoEqual` is user-defined. If you intentionally ignore function props, event
 handlers may remain the previous callback until the component is rendered again.
-Design your comparators accordingly.
+This is correct only when the ignored callback is stable or when another prop
+forces a rerender whenever the callback's captured data changes.
+
+Safe patterns:
+
+- include a callback/data version token in props and compare it in `MemoEqual`;
+- compare a stable command ID or owner version instead of comparing functions;
+- include data fields that the callback closes over.
+
+The dashboard example uses a `DataVersion` prop on `IssueRowProps`. Row
+selection keeps the same version, so unchanged rows can skip. Dataset changes
+from reset, simulate update, or toggle increment the version, so row handlers
+are refreshed before they can act on stale issue data.
+
+Do not ignore function props when the callback closes over changing data and no
+other compared prop tracks that data.
 
 ## Limits today
 
@@ -46,6 +62,23 @@ Design your comparators accordingly.
 Memoized skip applies within the same component identity boundary:
 component name + key + same instance. Key or component identity changes still
 remount/recreate as normal.
+
+## Dirty descendants
+
+A memoized component is not allowed to skip when a descendant component is dirty.
+This matters with dirty queue ancestor pruning:
+
+```txt
+Parent dirty
+  MemoChild props equal
+    GrandChild dirty from local state
+```
+
+The flush queue may prune `GrandChild` because `Parent` will patch its subtree.
+`MemoChild` must still render/patch through to the dirty grandchild, even though
+its own props compare equal. The runtime tracks dirty descendants on component
+ancestors and blocks the memo skip until those descendant updates are rendered
+or the subtree is unmounted.
 
 ## What memoization does not change
 
