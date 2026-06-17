@@ -312,8 +312,9 @@ Remaining safety risks:
 - Component identity does not include Go function identity.
 - State and lifecycle slots are positional and do not support conditional hook
   ordering.
-- Lifecycle/effects are intentionally minimal: no context, error boundaries,
-  async effects, or priorities.
+- Lifecycle/effects are intentionally minimal. Context is scoped and
+  selector-based, but there are still no error boundaries, async effects, or
+  priorities.
 - Memoization is explicit and opt-in via `MemoEqual` on props. Automatic
   memoization is intentionally avoided to keep runtime behavior predictable.
 - GOX parser remains a focused parser, not a full Go-aware frontend.

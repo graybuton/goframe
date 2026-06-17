@@ -4,6 +4,7 @@ type stateSlot struct {
 	value   any
 	owner   *componentInstance
 	reducer any
+	kind    string
 }
 
 type stateHandle[T any] struct {
@@ -71,9 +72,13 @@ func useStateSlot[T any](initial T, hookName string) stateHandle[T] {
 		instance.stateSlots = append(instance.stateSlots, &stateSlot{
 			value: initial,
 			owner: instance,
+			kind:  hookName,
 		})
 	}
 	slot := instance.stateSlots[index]
+	if slot.kind != hookName {
+		panic("goframe: hook at state slot " + ToString(index) + " changed from " + slot.kind + " to " + hookName)
+	}
 	if _, ok := slotValue[T](slot); !ok {
 		panic("goframe: " + hookName + " state type changed between component renders")
 	}

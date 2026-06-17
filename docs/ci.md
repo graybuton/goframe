@@ -27,8 +27,8 @@ It checks:
 and manually through `workflow_dispatch`.
 
 It installs Go, TinyGo `0.41.1`, brotli, and zstd. Then it packages the
-counter, components, todo, and dashboard examples with TinyGo. It also runs a
-release-style package pass with `--asset-hash --preload --compress=gzip,br`
+counter, components, todo, dashboard, and context examples with TinyGo. It also
+runs a release-style package pass with `--asset-hash --preload --compress=gzip,br`
 before checking:
 
 ```bash
@@ -56,7 +56,8 @@ scripts/browser-smoke.sh
 The smoke script chooses dynamic ports, verifies the expected app origin before
 storage cleanup, checks WASM MIME type, and separates harness failures from app
 failures. It currently covers Todo reconciliation, duplicate-key debug
-diagnostics, and dashboard-sized filtering/sorting/selection behavior.
+diagnostics, dashboard-sized filtering/sorting/selection behavior, and context
+selector rerender isolation.
 
 ### VS Code Extension
 

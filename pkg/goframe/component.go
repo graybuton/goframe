@@ -67,6 +67,10 @@ type componentInstance struct {
 	effectIndex      int
 	unmountSlots     []*unmountSlot
 	unmountIndex     int
+	contextSlots     []*contextSubscription
+	contextIndex     int
+	contextProviders map[int]*contextProvider
+	providedContexts []int
 	dirty            bool
 	dirtyCounted     bool
 	dirtyDescendants int
@@ -109,6 +113,8 @@ func renderComponentInstance(instance *componentInstance) Node {
 	instance.stateIndex = 0
 	instance.effectIndex = 0
 	instance.unmountIndex = 0
+	instance.contextIndex = 0
+	instance.providedContexts = instance.providedContexts[:0]
 	clearComponentDirty(instance)
 	defer func() {
 		currentComponent = previous
@@ -116,6 +122,7 @@ func renderComponentInstance(instance *componentInstance) Node {
 
 	reportComponentRender(instance.name)
 	node := instance.node.render()
+	finishComponentContextRender(instance)
 	return Child(node)
 }
 
@@ -199,6 +206,8 @@ func deactivateComponent(instance *componentInstance) {
 	} else {
 		instance.active = false
 	}
+	releaseContextSubscriptions(instance)
+	releaseContextProviders(instance)
 	clearComponentDirty(instance)
 	instance.dirtyDescendants = 0
 	instance.parent = nil
@@ -206,4 +215,7 @@ func deactivateComponent(instance *componentInstance) {
 	instance.stateSlots = nil
 	instance.effectSlots = nil
 	instance.unmountSlots = nil
+	instance.contextSlots = nil
+	instance.contextProviders = nil
+	instance.providedContexts = nil
 }

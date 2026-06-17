@@ -1,0 +1,227 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+var preferencesContext = gf.CreateContext(defaultPreferences())
+
+type AppProps struct{}
+
+func App() gf.Node {
+	return (
+		<main class="context-page">
+			<header class="context-header" data-testid="context-header">
+				<p class="eyebrow">GoFrame context selectors</p>
+				<h1>Scoped context with selector consumers</h1>
+				<p>Each consumer subscribes to one comparable field.</p>
+			</header>
+			<PreferencesProvider>
+				<ConsumerGrid>
+					<DensityConsumer />
+					<AccentConsumer />
+					<CounterConsumer />
+					<BroadConsumer />
+					<StaticPanel />
+					<NestedAccentProvider />
+				</ConsumerGrid>
+			</PreferencesProvider>
+		</main>
+	)
+}
+
+type PreferencesProviderProps struct {
+	Children []gf.Node
+}
+
+func PreferencesProvider(props PreferencesProviderProps) gf.Node {
+	preferences, dispatch := gf.UseReducer(defaultPreferences(), reducePreferences)
+	gf.ProvideContext(preferencesContext, preferences)
+
+	return (
+		<section class={"preferences-provider density-" + preferences.Density + " accent-" + preferences.Accent} data-testid="preferences-provider">
+			<PreferencesControls Preferences={preferences} Dispatch={dispatch} />
+			{props.Children}
+		</section>
+	)
+}
+
+type PreferencesControlsProps struct {
+	Preferences Preferences
+	Dispatch    func(PreferenceAction)
+}
+
+func PreferencesControls(props PreferencesControlsProps) gf.Node {
+	setDensity := func(value string) {
+		props.Dispatch(PreferenceAction{Kind: PreferenceActionDensity, Value: value})
+	}
+	setAccent := func(value string) {
+		props.Dispatch(PreferenceAction{Kind: PreferenceActionAccent, Value: value})
+	}
+	increment := func() {
+		props.Dispatch(PreferenceAction{Kind: PreferenceActionIncrement})
+	}
+	reset := func() {
+		props.Dispatch(PreferenceAction{Kind: PreferenceActionReset})
+	}
+
+	return (
+		<section class="controls" data-testid="preferences-controls">
+			<label>
+				Density
+				<select id="density-select" value={props.Preferences.Density} OnChange={func(event gf.InputEvent) {
+					setDensity(event.Value())
+				}}>
+					<option value={DensityComfortable}>comfortable</option>
+					<option value={DensityCompact}>compact</option>
+				</select>
+			</label>
+			<label>
+				Accent
+				<select id="accent-select" value={props.Preferences.Accent} OnChange={func(event gf.InputEvent) {
+					setAccent(event.Value())
+				}}>
+					<option value={AccentBlue}>blue</option>
+					<option value={AccentGreen}>green</option>
+					<option value={AccentPurple}>purple</option>
+				</select>
+			</label>
+			<button Type="button" id="increment-counter" OnClick={increment}>Increment counter</button>
+			<button Type="button" id="reset-preferences" OnClick={reset}>Reset</button>
+		</section>
+	)
+}
+
+type ConsumerGridProps struct {
+	Children []gf.Node
+}
+
+func (props ConsumerGridProps) MemoEqual(next ConsumerGridProps) bool {
+	return true
+}
+
+func ConsumerGrid(props ConsumerGridProps) gf.Node {
+	return (
+		<section class="consumer-grid" data-testid="consumer-grid">
+			{props.Children}
+		</section>
+	)
+}
+
+type DensityConsumerProps struct{}
+
+func (props DensityConsumerProps) MemoEqual(next DensityConsumerProps) bool {
+	return true
+}
+
+func DensityConsumer(props DensityConsumerProps) gf.Node {
+	density := gf.UseContextSelector(preferencesContext, func(value Preferences) string {
+		return value.Density
+	})
+	return (
+		<article class="consumer-card" data-testid="density-consumer" data-value={density}>
+			<span>Density</span>
+			<strong>{density}</strong>
+		</article>
+	)
+}
+
+type AccentConsumerProps struct{}
+
+func (props AccentConsumerProps) MemoEqual(next AccentConsumerProps) bool {
+	return true
+}
+
+func AccentConsumer(props AccentConsumerProps) gf.Node {
+	accent := gf.UseContextSelector(preferencesContext, func(value Preferences) string {
+		return value.Accent
+	})
+	return (
+		<article class="consumer-card" data-testid="accent-consumer" data-value={accent}>
+			<span>Accent</span>
+			<strong>{accent}</strong>
+		</article>
+	)
+}
+
+type CounterConsumerProps struct{}
+
+func (props CounterConsumerProps) MemoEqual(next CounterConsumerProps) bool {
+	return true
+}
+
+func CounterConsumer(props CounterConsumerProps) gf.Node {
+	count := gf.UseContextSelector(preferencesContext, func(value Preferences) int {
+		return value.Count
+	})
+	return (
+		<article class="consumer-card" data-testid="counter-consumer" data-value={count}>
+			<span>Counter</span>
+			<strong>{count}</strong>
+		</article>
+	)
+}
+
+type BroadConsumerProps struct{}
+
+func (props BroadConsumerProps) MemoEqual(next BroadConsumerProps) bool {
+	return true
+}
+
+func BroadConsumer(props BroadConsumerProps) gf.Node {
+	preferences := gf.UseContext(preferencesContext)
+	return (
+		<article class="consumer-card broad" data-testid="broad-consumer">
+			<span>Broad consumer</span>
+			<strong>{preferences.Density} / {preferences.Accent} / {preferences.Count}</strong>
+		</article>
+	)
+}
+
+type StaticPanelProps struct{}
+
+func (props StaticPanelProps) MemoEqual(next StaticPanelProps) bool {
+	return true
+}
+
+func StaticPanel(props StaticPanelProps) gf.Node {
+	return (
+		<article class="consumer-card static" data-testid="static-panel">
+			<span>Static panel</span>
+			<strong>unchanged</strong>
+		</article>
+	)
+}
+
+type NestedAccentProviderProps struct{}
+
+func (props NestedAccentProviderProps) MemoEqual(next NestedAccentProviderProps) bool {
+	return true
+}
+
+func NestedAccentProvider(props NestedAccentProviderProps) gf.Node {
+	outer := gf.UseContext(preferencesContext)
+	inner := outer
+	inner.Accent = AccentPurple
+	gf.ProvideContext(preferencesContext, inner)
+
+	return (
+		<article class="consumer-card nested" data-testid="nested-provider">
+			<span>Nested provider</span>
+			<InnerAccentConsumer />
+		</article>
+	)
+}
+
+type InnerAccentConsumerProps struct{}
+
+func (props InnerAccentConsumerProps) MemoEqual(next InnerAccentConsumerProps) bool {
+	return true
+}
+
+func InnerAccentConsumer(props InnerAccentConsumerProps) gf.Node {
+	accent := gf.UseContextSelector(preferencesContext, func(value Preferences) string {
+		return value.Accent
+	})
+	return (
+		<strong data-testid="inner-accent-consumer" data-value={accent}>{accent}</strong>
+	)
+}

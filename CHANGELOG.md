@@ -25,6 +25,8 @@
 - `UseReducer` state dispatch that applies actions to the latest component
   state slot, used by the dashboard to remove the `DataVersion` memoization
   workaround.
+- Scoped context selectors with nearest-provider lookup, comparable selector
+  dirtying, and a focused context example plus browser smoke coverage.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
