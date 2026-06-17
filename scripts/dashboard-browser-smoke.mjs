@@ -244,6 +244,7 @@ try {
     await client.evaluate(`document.querySelector(".issue-row .button").click()`);
     await wait(120);
     const toggleReport = await finishScenario(client, "row-toggle");
+    assertRowDataChangeReport(toggleReport, "row toggle");
     const toggleAfter = await firstRowStatus(client);
     if (toggleBefore === toggleAfter) {
         throw new Error(`APP FAILURE: row toggle did not change first row status: ${toggleBefore}`);
@@ -255,6 +256,7 @@ try {
     await clickButtonByText(client, "Simulate update");
     await wait(120);
     const simulateReport = await finishScenario(client, "simulate-update");
+    assertRowDataChangeReport(simulateReport, "simulate update");
     const afterEvents = await metricValue(client, "Events");
     if (!(afterEvents > beforeEvents)) {
         throw new Error(`APP FAILURE: simulate update did not increase events: before ${beforeEvents}, after ${afterEvents}`);
@@ -266,6 +268,7 @@ try {
     await client.evaluate(`document.querySelector(".issue-row .button").click()`);
     await wait(120);
     const postSimulateToggleReport = await finishScenario(client, "post-simulate-row-toggle");
+    assertRowDataChangeReport(postSimulateToggleReport, "post-simulate row toggle");
     const postSimulateToggleAfter = await firstRowStatus(client);
     const eventsAfterPostSimulateToggle = await metricValue(client, "Events");
     if (postSimulateToggleBefore === postSimulateToggleAfter) {
@@ -788,4 +791,23 @@ function assertRowSelectionReport(report) {
         throw new Error(`APP FAILURE: listener churn during row selection: ${JSON.stringify(report.operations)}`);
     }
     console.log(`dashboard row-selection memo summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, memoDeltas: report.memoDeltas })}`);
+}
+
+function assertRowDataChangeReport(report, label) {
+    const allowed = 2;
+    if (report.renderDeltas.IssueRow > allowed) {
+        throw new Error(`APP FAILURE: IssueRow renders ${report.renderDeltas.IssueRow} for ${label} (limit ${allowed})`);
+    }
+    if (report.memoDeltas.IssueRow <= 0) {
+        throw new Error(`APP FAILURE: IssueRow memo skips not observed for ${label}: ${JSON.stringify(report.memoDeltas)}`);
+    }
+    if (report.operations.createElement !== 0 || report.operations.createTextNode !== 0 ||
+        report.operations.appendChild !== 0 || report.operations.removeChild !== 0 ||
+        report.operations.replaceChild !== 0 || report.operations.insertBefore !== 0) {
+        throw new Error(`APP FAILURE: structural DOM operations during ${label}: ${JSON.stringify(report.operations)}`);
+    }
+    if (report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
+        throw new Error(`APP FAILURE: listener churn during ${label}: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard ${label} memo summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, memoDeltas: report.memoDeltas })}`);
 }
