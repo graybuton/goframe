@@ -63,6 +63,12 @@ func GenerateNamed(filename string, source []byte) ([]byte, error) {
 
 // GenerateFile writes a .gox.go file next to the source .gox file.
 func GenerateFile(path string) (string, error) {
+	outputPath := path + ".go"
+	return GenerateFileTo(path, outputPath)
+}
+
+// GenerateFileTo writes generated Go for a .gox file to outputPath.
+func GenerateFileTo(path, outputPath string) (string, error) {
 	source, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", path, err)
@@ -72,7 +78,9 @@ func GenerateFile(path string) (string, error) {
 		return "", err
 	}
 
-	outputPath := path + ".go"
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return "", fmt.Errorf("create generated directory for %s: %w", outputPath, err)
+	}
 	if err := os.WriteFile(outputPath, generated, 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", outputPath, err)
 	}

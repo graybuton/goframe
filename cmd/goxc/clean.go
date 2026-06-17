@@ -12,6 +12,7 @@ import (
 
 type cleanOptions struct {
 	appDir    string
+	workspace string
 	generated bool
 }
 
@@ -25,10 +26,19 @@ func cleanCommand(args []string) error {
 
 func parseCleanOptions(args []string) (cleanOptions, error) {
 	var options cleanOptions
-	for _, arg := range args {
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
 		switch {
 		case arg == "--generated":
 			options.generated = true
+		case strings.HasPrefix(arg, "--workspace="):
+			options.workspace = strings.TrimPrefix(arg, "--workspace=")
+		case arg == "--workspace":
+			index++
+			if index >= len(args) {
+				return cleanOptions{}, errors.New("--workspace requires a value")
+			}
+			options.workspace = args[index]
 		case strings.HasPrefix(arg, "-"):
 			return cleanOptions{}, fmt.Errorf("unknown clean flag %q", arg)
 		case options.appDir == "":
@@ -38,7 +48,7 @@ func parseCleanOptions(args []string) (cleanOptions, error) {
 		}
 	}
 	if options.appDir == "" {
-		return cleanOptions{}, errors.New("usage: goxc clean <app-directory> [--generated]")
+		return cleanOptions{}, errors.New("usage: goxc clean <app-directory> [--generated] [--workspace=directory]")
 	}
 	return options, nil
 }
@@ -47,13 +57,14 @@ func cleanApp(options cleanOptions) error {
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return err
 	}
-	manifest, err := loadManifest(options.appDir)
+	layout, err := newBuildLayout(layoutOptions{appDir: options.appDir, workspace: options.workspace})
 	if err != nil {
 		return err
 	}
 	for _, directory := range []string{
-		filepath.Join(options.appDir, "build"),
-		filepath.Join(options.appDir, manifest.Output),
+		filepath.Join(layout.WorkspaceRoot, "work"),
+		filepath.Join(layout.WorkspaceRoot, "build"),
+		filepath.Join(layout.WorkspaceRoot, "package"),
 	} {
 		if err := os.RemoveAll(directory); err != nil {
 			return fmt.Errorf("remove %s: %w", directory, err)
@@ -77,5 +88,9 @@ func cleanApp(options cleanOptions) error {
 		}
 		fmt.Printf("removed %s\n", generated)
 	}
+	if err := os.RemoveAll(layout.GenDir); err != nil {
+		return fmt.Errorf("remove %s: %w", layout.GenDir, err)
+	}
+	fmt.Printf("removed %s\n", layout.GenDir)
 	return nil
 }

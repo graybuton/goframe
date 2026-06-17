@@ -9,12 +9,19 @@ import (
 	"strings"
 )
 
+type sizeOptions struct {
+	path      string
+	dir       string
+	workspace string
+}
+
 func sizeCommand(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: goxc size <app-or-artifact-directory>")
+	options, err := parseSizeOptions(args)
+	if err != nil {
+		return err
 	}
 
-	directory, err := artifactDirectory(args[0])
+	directory, err := artifactDirectory(options)
 	if err != nil {
 		return err
 	}
@@ -31,6 +38,41 @@ func sizeCommand(args []string) error {
 		return fmt.Errorf("no WASM artifacts found in %s; run `goxc build` or `goxc package` first", directory)
 	}
 	return nil
+}
+
+func parseSizeOptions(args []string) (sizeOptions, error) {
+	var options sizeOptions
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case strings.HasPrefix(arg, "--dir="):
+			options.dir = strings.TrimPrefix(arg, "--dir=")
+		case arg == "--dir":
+			index++
+			if index >= len(args) {
+				return sizeOptions{}, errors.New("--dir requires a value")
+			}
+			options.dir = args[index]
+		case strings.HasPrefix(arg, "--workspace="):
+			options.workspace = strings.TrimPrefix(arg, "--workspace=")
+		case arg == "--workspace":
+			index++
+			if index >= len(args) {
+				return sizeOptions{}, errors.New("--workspace requires a value")
+			}
+			options.workspace = args[index]
+		case strings.HasPrefix(arg, "-"):
+			return sizeOptions{}, fmt.Errorf("unknown size flag %q", arg)
+		case options.path == "":
+			options.path = arg
+		default:
+			return sizeOptions{}, fmt.Errorf("unexpected size argument %q", arg)
+		}
+	}
+	if options.dir == "" && options.path == "" {
+		return sizeOptions{}, errors.New("usage: goxc size <app-or-artifact-directory> [--workspace=directory] or goxc size --dir=<artifact-directory>")
+	}
+	return options, nil
 }
 
 type sizeArtifact struct {
@@ -65,7 +107,11 @@ func reportableArtifacts(directory string) []sizeArtifact {
 	return artifacts
 }
 
-func artifactDirectory(path string) (string, error) {
+func artifactDirectory(options sizeOptions) (string, error) {
+	if options.dir != "" {
+		return artifactDirectoryFromPath(options.dir)
+	}
+	path := options.path
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
@@ -73,11 +119,34 @@ func artifactDirectory(path string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", path)
 	}
+	if _, err := os.Stat(filepath.Join(path, manifestName)); err == nil {
+		layout, err := newBuildLayout(layoutOptions{appDir: path, workspace: options.workspace})
+		if err != nil {
+			return "", err
+		}
+		if containsArtifact(layout.PackageDir) {
+			return layout.PackageDir, nil
+		}
+	}
+	if containsArtifact(path) {
+		return path, nil
+	}
 	for _, child := range []string{"dist", "build"} {
 		candidate := filepath.Join(path, child)
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() && containsArtifact(candidate) {
 			return candidate, nil
 		}
+	}
+	return path, nil
+}
+
+func artifactDirectoryFromPath(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", path)
 	}
 	return path, nil
 }

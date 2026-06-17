@@ -20,11 +20,38 @@ func TestParseBuildOptions(t *testing.T) {
 
 func TestBuildAndPackageOutputPaths(t *testing.T) {
 	manifest := projectManifest{Output: "public", WASM: "app.wasm"}
-	if got := buildOutputPath(buildOptions{appDir: "demo"}, manifest); got != filepath.Join("demo", "build", "app.wasm") {
+	layout := BuildLayout{
+		BuildDir:   filepath.Join("demo", defaultWorkspaceName, "build", "tinygo", "dev"),
+		PackageDir: filepath.Join("demo", defaultWorkspaceName, "package", "standalone"),
+	}
+	if got := buildOutputPath(buildOptions{appDir: "demo"}, manifest, layout); got != filepath.Join("demo", defaultWorkspaceName, "build", "tinygo", "dev", "app.wasm") {
 		t.Fatalf("build output = %q", got)
 	}
-	if got := packageOutputDirectory(packageOptions{appDir: "demo"}, manifest); got != filepath.Join("demo", "public") {
+	if got := packageOutputDirectory(packageOptions{appDir: "demo"}, layout); got != filepath.Join("demo", defaultWorkspaceName, "package", "standalone") {
 		t.Fatalf("package output = %q", got)
+	}
+}
+
+func TestBuildLayoutDefaultsAndExternalWorkspace(t *testing.T) {
+	appDir := filepath.Join(t.TempDir(), "dashboard")
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir, compiler: "tinygo"})
+	if err != nil {
+		t.Fatalf("newBuildLayout() error: %v", err)
+	}
+	if layout.WorkspaceRoot != filepath.Join(appDir, defaultWorkspaceName) {
+		t.Fatalf("workspace root = %q", layout.WorkspaceRoot)
+	}
+	if layout.BuildDir != filepath.Join(appDir, defaultWorkspaceName, "build", "tinygo", "dev") {
+		t.Fatalf("build dir = %q", layout.BuildDir)
+	}
+
+	external := filepath.Join(t.TempDir(), "workspace")
+	layout, err = newBuildLayout(layoutOptions{appDir: appDir, compiler: "tinygo", workspace: external})
+	if err != nil {
+		t.Fatalf("newBuildLayout(external) error: %v", err)
+	}
+	if !strings.HasPrefix(layout.WorkspaceRoot, external+string(filepath.Separator)) {
+		t.Fatalf("external workspace root = %q, want below %q", layout.WorkspaceRoot, external)
 	}
 }
 
@@ -99,8 +126,13 @@ func TestManifestRejectsTrailingJSON(t *testing.T) {
 
 func TestCleanRemovesArtifactsAndGeneratedOnRequest(t *testing.T) {
 	appDir := t.TempDir()
-	for _, directory := range []string{"build", "dist"} {
-		if err := os.Mkdir(filepath.Join(appDir, directory), 0o755); err != nil {
+	for _, directory := range []string{
+		filepath.Join(defaultWorkspaceName, "work"),
+		filepath.Join(defaultWorkspaceName, "build"),
+		filepath.Join(defaultWorkspaceName, "package"),
+		filepath.Join(defaultWorkspaceName, "gen"),
+	} {
+		if err := os.MkdirAll(filepath.Join(appDir, directory), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -114,6 +146,11 @@ func TestCleanRemovesArtifactsAndGeneratedOnRequest(t *testing.T) {
 	if err := cleanApp(cleanOptions{appDir: appDir}); err != nil {
 		t.Fatalf("cleanApp() error: %v", err)
 	}
+	for _, directory := range []string{"work", "build", "package"} {
+		if _, err := os.Stat(filepath.Join(appDir, defaultWorkspaceName, directory)); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists: %v", directory, err)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(appDir, "app.gox.go")); err != nil {
 		t.Fatalf("generated file removed without --generated: %v", err)
 	}
@@ -122,6 +159,33 @@ func TestCleanRemovesArtifactsAndGeneratedOnRequest(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(appDir, "app.gox.go")); !os.IsNotExist(err) {
 		t.Fatalf("generated file still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(appDir, defaultWorkspaceName, "gen")); !os.IsNotExist(err) {
+		t.Fatalf("generated directory still exists: %v", err)
+	}
+}
+
+func TestGeneratePathWritesToHiddenWorkspaceByDefault(t *testing.T) {
+	appDir := t.TempDir()
+	source := `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <div>Hello</div>
+}
+`
+	if err := os.WriteFile(filepath.Join(appDir, "app.gox"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := generatePath(generateOptions{path: appDir}, true); err != nil {
+		t.Fatalf("generatePath() error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(appDir, "app.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("adjacent generated file exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(appDir, defaultWorkspaceName, "gen", "app.gox.go")); err != nil {
+		t.Fatalf("hidden generated file missing: %v", err)
 	}
 }
 
@@ -197,6 +261,33 @@ func TestPublishPackageArtifactsCopiesStagedTree(t *testing.T) {
 		if string(got) != want {
 			t.Fatalf("%s = %q, want %q", path, got, want)
 		}
+	}
+}
+
+func TestExportCopiesStandalonePackage(t *testing.T) {
+	appDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(layout.PackageDir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.PackageDir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.PackageDir, "assets", "bundle.wasm"), []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "dist")
+	if err := exportApp(exportOptions{appDir: appDir, outDir: outDir}); err != nil {
+		t.Fatalf("exportApp() error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "assets", "bundle.wasm")); err != nil {
+		t.Fatalf("exported bundle missing: %v", err)
 	}
 }
 

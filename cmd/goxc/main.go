@@ -28,6 +28,8 @@ func main() {
 		err = buildCommand(os.Args[2:])
 	case "package":
 		err = packageCommand(os.Args[2:])
+	case "export":
+		err = exportCommand(os.Args[2:])
 	case "size":
 		err = sizeCommand(os.Args[2:])
 	case "serve":
@@ -52,9 +54,10 @@ func usage(output io.Writer) {
 	fmt.Fprintln(output, "usage: goxc <command> [arguments]")
 	fmt.Fprintln(output, "")
 	fmt.Fprintln(output, "commands:")
-	fmt.Fprintln(output, "  generate <path>       generate .go files from .gox files")
-	fmt.Fprintln(output, "  build <app>           compile raw WASM into build/")
-	fmt.Fprintln(output, "  package <app>         create a runnable dist/ bundle")
+	fmt.Fprintln(output, "  generate <path>       generate .go files from .gox files into .goframe/gen/")
+	fmt.Fprintln(output, "  build <app>           compile raw WASM into .goframe/build/")
+	fmt.Fprintln(output, "  package <app>         create a runnable bundle in .goframe/package/")
+	fmt.Fprintln(output, "  export <app> --out    copy the latest standalone package to a deploy directory")
 	fmt.Fprintln(output, "  size <app-or-dir>     report artifact sizes")
 	fmt.Fprintln(output, "  serve [app]           serve a packaged application locally")
 	fmt.Fprintln(output, "  clean <app>           remove build and package artifacts")

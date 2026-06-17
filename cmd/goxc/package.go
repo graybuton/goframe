@@ -35,6 +35,7 @@ type packageOptions struct {
 	appDir    string
 	compiler  string
 	outDir    string
+	workspace string
 	compress  map[string]bool
 	assetHash bool
 	preload   bool
@@ -106,6 +107,14 @@ func parsePackageOptions(args []string) (packageOptions, error) {
 				return packageOptions{}, errors.New("--out requires a value")
 			}
 			options.outDir = args[index]
+		case strings.HasPrefix(arg, "--workspace="):
+			options.workspace = strings.TrimPrefix(arg, "--workspace=")
+		case arg == "--workspace":
+			index++
+			if index >= len(args) {
+				return packageOptions{}, errors.New("--workspace requires a value")
+			}
+			options.workspace = args[index]
 		case strings.HasPrefix(arg, "--compress="):
 			if err := parseCompression(strings.TrimPrefix(arg, "--compress="), options.compress); err != nil {
 				return packageOptions{}, err
@@ -131,7 +140,7 @@ func parsePackageOptions(args []string) (packageOptions, error) {
 		}
 	}
 	if options.appDir == "" {
-		return packageOptions{}, errors.New("usage: goxc package <app-directory> [--compiler=go|tinygo] [--out=directory] [--asset-hash] [--preload] [--compress=gzip,br]")
+		return packageOptions{}, errors.New("usage: goxc package <app-directory> [--compiler=go|tinygo] [--out=directory] [--workspace=directory] [--asset-hash] [--preload] [--compress=gzip,br]")
 	}
 	return options, nil
 }
@@ -161,12 +170,22 @@ func packageApp(options packageOptions) error {
 	if err := validateCompiler(options.compiler); err != nil {
 		return err
 	}
-	options.outDir = packageOutputDirectory(options, manifest)
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return err
 	}
-	if err := generateForBuild(options.appDir); err != nil {
-		return fmt.Errorf("generate GOX: %w", err)
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    options.appDir,
+		compiler:  options.compiler,
+		profile:   packageProfile(options.assetHash, options.preload, options.compress),
+		workspace: options.workspace,
+	})
+	if err != nil {
+		return err
+	}
+	options.outDir = packageOutputDirectory(options, layout)
+	workDir, err := prepareBuildWorkspace(layout, manifest)
+	if err != nil {
+		return fmt.Errorf("prepare package workspace: %w", err)
 	}
 
 	tempDir, err := os.MkdirTemp("", "goxc-package-*")
@@ -177,7 +196,7 @@ func packageApp(options packageOptions) error {
 
 	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
 	tempWASM := filepath.Join(tempDir, wasmLogicalName)
-	entryPath := filepath.Join(options.appDir, manifest.Entry)
+	entryPath := filepath.Join(workDir, manifest.Entry)
 	fmt.Printf("packaging %s with %s compiler\n", options.appDir, options.compiler)
 	if err := compileWASM(options.compiler, entryPath, tempWASM); err != nil {
 		return err
@@ -291,11 +310,11 @@ func packageApp(options packageOptions) error {
 	return nil
 }
 
-func packageOutputDirectory(options packageOptions, manifest projectManifest) string {
+func packageOutputDirectory(options packageOptions, layout BuildLayout) string {
 	if options.outDir != "" {
 		return options.outDir
 	}
-	return filepath.Join(options.appDir, manifest.Output)
+	return layout.PackageDir
 }
 
 func cleanPackageArtifacts(directory, wasmName string) error {

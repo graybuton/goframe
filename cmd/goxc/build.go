@@ -13,6 +13,7 @@ type buildOptions struct {
 	appDir        string
 	compiler      string
 	outDir        string
+	workspace     string
 	legacyRelease bool
 }
 
@@ -51,6 +52,14 @@ func parseBuildOptions(args []string) (buildOptions, error) {
 				return buildOptions{}, errors.New("--out requires a value")
 			}
 			options.outDir = args[index]
+		case strings.HasPrefix(arg, "--workspace="):
+			options.workspace = strings.TrimPrefix(arg, "--workspace=")
+		case arg == "--workspace":
+			index++
+			if index >= len(args) {
+				return buildOptions{}, errors.New("--workspace requires a value")
+			}
+			options.workspace = args[index]
 		case strings.HasPrefix(arg, "-"):
 			return buildOptions{}, fmt.Errorf("unknown build flag %q", arg)
 		case options.appDir == "":
@@ -60,7 +69,7 @@ func parseBuildOptions(args []string) (buildOptions, error) {
 		}
 	}
 	if options.appDir == "" {
-		return buildOptions{}, errors.New("usage: goxc build <app-directory> [--compiler=go|tinygo] [--out=directory]")
+		return buildOptions{}, errors.New("usage: goxc build <app-directory> [--compiler=go|tinygo] [--out=directory] [--workspace=directory]")
 	}
 	return options, nil
 }
@@ -79,15 +88,25 @@ func buildApp(options buildOptions) (string, error) {
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return "", err
 	}
-	if err := generateForBuild(options.appDir); err != nil {
-		return "", fmt.Errorf("generate GOX: %w", err)
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    options.appDir,
+		compiler:  options.compiler,
+		profile:   defaultProfileName,
+		workspace: options.workspace,
+	})
+	if err != nil {
+		return "", err
 	}
-	outputPath := buildOutputPath(options, manifest)
+	workDir, err := prepareBuildWorkspace(layout, manifest)
+	if err != nil {
+		return "", fmt.Errorf("prepare build workspace: %w", err)
+	}
+	outputPath := buildOutputPath(options, manifest, layout)
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return "", fmt.Errorf("create build directory: %w", err)
 	}
 
-	entryPath := filepath.Join(options.appDir, manifest.Entry)
+	entryPath := filepath.Join(workDir, manifest.Entry)
 	fmt.Printf("building %s with %s compiler\n", options.appDir, options.compiler)
 	if err := compileWASM(options.compiler, entryPath, outputPath); err != nil {
 		return "", err
@@ -96,10 +115,10 @@ func buildApp(options buildOptions) (string, error) {
 	return outputPath, nil
 }
 
-func buildOutputPath(options buildOptions, manifest projectManifest) string {
+func buildOutputPath(options buildOptions, manifest projectManifest, layout BuildLayout) string {
 	directory := options.outDir
 	if directory == "" {
-		directory = filepath.Join(options.appDir, "build")
+		directory = layout.BuildDir
 	}
 	return filepath.Join(directory, manifest.WASM)
 }
@@ -116,6 +135,15 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 	if err != nil {
 		return fmt.Errorf("resolve application entry: %w", err)
 	}
+	entryArg := entryPath
+	commandDir := ""
+	if info, err := os.Stat(entryPath); err == nil && info.IsDir() {
+		commandDir = entryPath
+		entryArg = "."
+	} else {
+		commandDir = filepath.Dir(entryPath)
+		entryArg = "./" + filepath.Base(entryPath)
+	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return fmt.Errorf("create compiler output directory: %w", err)
 	}
@@ -128,7 +156,7 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 			"-trimpath",
 			"-ldflags=-s -w -buildid=",
 			"-o", outputPath,
-			entryPath,
+			entryArg,
 		)
 	} else {
 		command = exec.Command(compilerPath,
@@ -137,9 +165,10 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 			"-no-debug",
 			"-panic=trap",
 			"-o", outputPath,
-			entryPath,
+			entryArg,
 		)
 	}
+	command.Dir = commandDir
 	command.Env = compilerEnvironment(compiler)
 	if compiler == "go" {
 		command.Env = append(command.Env, "GOOS=js", "GOARCH=wasm")
