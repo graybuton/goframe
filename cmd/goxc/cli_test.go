@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,12 +29,15 @@ func TestBuildAndPackageOutputPaths(t *testing.T) {
 }
 
 func TestParsePackageOptionsCompression(t *testing.T) {
-	options, err := parsePackageOptions([]string{"app", "--compress=gzip,br"})
+	options, err := parsePackageOptions([]string{"app", "--asset-hash", "--preload", "--compress=gzip,br"})
 	if err != nil {
 		t.Fatalf("parsePackageOptions() error: %v", err)
 	}
 	if !options.compress["gzip"] || !options.compress["br"] {
 		t.Fatalf("compression options = %#v", options.compress)
+	}
+	if !options.assetHash || !options.preload {
+		t.Fatalf("asset flags = assetHash:%v preload:%v", options.assetHash, options.preload)
 	}
 }
 
@@ -43,7 +47,7 @@ func TestLoadManifestDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadManifest(defaults) error: %v", err)
 	}
-	if defaults.Compiler != "go" || defaults.Output != "dist" || defaults.WASM != "main.wasm" {
+	if defaults.Compiler != "go" || defaults.Output != "dist" || defaults.WASM != "bundle.wasm" {
 		t.Fatalf("unexpected defaults: %+v", defaults)
 	}
 
@@ -130,15 +134,26 @@ func TestSizeReportsHelpfulErrorForEmptyDirectory(t *testing.T) {
 
 func TestCleanPackageArtifactsRemovesOldCompression(t *testing.T) {
 	directory := t.TempDir()
-	for _, name := range []string{"main.wasm", "main.wasm.gz", "main.wasm.br"} {
+	if err := os.Mkdir(filepath.Join(directory, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"main.wasm",
+		"main.wasm.gz",
+		"main.wasm.br",
+		"bundle.wasm",
+		"asset-manifest.json",
+		"goframe-package.json",
+		filepath.Join("assets", "bundle.oldhash.wasm"),
+	} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte(name), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := cleanPackageArtifacts(directory, "main.wasm"); err != nil {
+	if err := cleanPackageArtifacts(directory, "bundle.wasm"); err != nil {
 		t.Fatalf("cleanPackageArtifacts() error: %v", err)
 	}
-	for _, name := range []string{"main.wasm", "main.wasm.gz", "main.wasm.br"} {
+	for _, name := range []string{"main.wasm", "main.wasm.gz", "main.wasm.br", "bundle.wasm", "asset-manifest.json", "goframe-package.json", "assets"} {
 		if _, err := os.Stat(filepath.Join(directory, name)); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists: %v", name, err)
 		}
@@ -152,9 +167,12 @@ func TestPublishPackageArtifactsCopiesStagedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, content := range map[string]string{
-		"main.wasm":        "wasm",
-		"manifest.json":    "{}",
-		"assets/style.css": "body{}",
+		"index.html":                 "<html></html>",
+		"asset-manifest.json":        "{}",
+		"goframe-package.json":       "{}",
+		"assets/bundle.wasm":         "wasm",
+		"assets/wasm_exec.js":        "js",
+		"assets/styles.12345678.css": "body{}",
 	} {
 		if err := os.WriteFile(filepath.Join(source, path), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -165,9 +183,12 @@ func TestPublishPackageArtifactsCopiesStagedTree(t *testing.T) {
 		t.Fatalf("publishPackageArtifacts() error: %v", err)
 	}
 	for path, want := range map[string]string{
-		"main.wasm":        "wasm",
-		"manifest.json":    "{}",
-		"assets/style.css": "body{}",
+		"index.html":                 "<html></html>",
+		"asset-manifest.json":        "{}",
+		"goframe-package.json":       "{}",
+		"assets/bundle.wasm":         "wasm",
+		"assets/wasm_exec.js":        "js",
+		"assets/styles.12345678.css": "body{}",
 	} {
 		got, err := os.ReadFile(filepath.Join(destination, path))
 		if err != nil {
@@ -187,16 +208,100 @@ func TestDoctorDoesNotFail(t *testing.T) {
 
 func TestStaticHandlerServesWASMContentType(t *testing.T) {
 	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+	if err := os.Mkdir(filepath.Join(directory, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "assets", "bundle.wasm"), []byte("wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	request := httptest.NewRequest("GET", "/main.wasm", nil)
+	request := httptest.NewRequest("GET", "/assets/bundle.wasm", nil)
 	response := httptest.NewRecorder()
 	staticHandler(directory).ServeHTTP(response, request)
 
 	if got := response.Header().Get("Content-Type"); got != "application/wasm" {
 		t.Fatalf("Content-Type = %q, want application/wasm", got)
+	}
+}
+
+func TestHashedAssetName(t *testing.T) {
+	if got := hashedAssetName("bundle.wasm", "a83f19c4"); got != "bundle.a83f19c4.wasm" {
+		t.Fatalf("hashedAssetName(bundle) = %q", got)
+	}
+	if got := hashedAssetName("css/styles.css", "77a1de20"); got != "css/styles.77a1de20.css" {
+		t.Fatalf("hashedAssetName(styles) = %q", got)
+	}
+}
+
+func TestRewriteIndexHTMLPlaceholders(t *testing.T) {
+	source := `<!doctype html>
+<head>
+<!-- goframe:preload -->
+<!-- /goframe:preload -->
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<!-- goframe:runtime -->
+<script src="wasm_exec.js"></script>
+<!-- /goframe:runtime -->
+<!-- goframe:bootstrap -->
+<script>WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject)</script>
+<!-- /goframe:bootstrap -->
+</body>`
+	got := rewriteIndexHTML(source, htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.a83f19c4.wasm",
+		runtimePath: "assets/wasm_exec.91b2cc10.js",
+		stylePaths:  []string{"assets/styles.77a1de20.css"},
+		styleRewrites: map[string]string{
+			"styles.css": "assets/styles.77a1de20.css",
+		},
+	})
+	for _, want := range []string{
+		`href="assets/bundle.a83f19c4.wasm" as="fetch" type="application/wasm" crossorigin`,
+		`<script src="assets/wasm_exec.91b2cc10.js"></script>`,
+		`fetch("assets/bundle.a83f19c4.wasm")`,
+		`href="assets/styles.77a1de20.css"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rewritten HTML missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWritePackageAssetUsesHashAndManifestPath(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "bundle.wasm")
+	if err := os.WriteFile(source, []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assetsDir := filepath.Join(t.TempDir(), "assets")
+	asset, err := writePackageAsset(source, assetsDir, "bundle.wasm", packageOptions{assetHash: true, compress: map[string]bool{}})
+	if err != nil {
+		t.Fatalf("writePackageAsset() error: %v", err)
+	}
+	if asset.Hash == "" || asset.Path != "assets/bundle."+asset.Hash+".wasm" || asset.Type != "application/wasm" {
+		t.Fatalf("asset entry = %+v", asset)
+	}
+	if _, err := os.Stat(filepath.Join(assetsDir, "bundle."+asset.Hash+".wasm")); err != nil {
+		t.Fatalf("hashed asset not written: %v", err)
+	}
+}
+
+func TestWritePackageAssetCreatesGzipSidecar(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "bundle.wasm")
+	if err := os.WriteFile(source, []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assetsDir := filepath.Join(t.TempDir(), "assets")
+	asset, err := writePackageAsset(source, assetsDir, "bundle.wasm", packageOptions{compress: map[string]bool{"gzip": true}})
+	if err != nil {
+		t.Fatalf("writePackageAsset() error: %v", err)
+	}
+	if asset.Compressed["gzip"] != "assets/bundle.wasm.gz" {
+		t.Fatalf("gzip manifest entry = %#v", asset.Compressed)
+	}
+	if _, err := os.Stat(filepath.Join(assetsDir, "bundle.wasm.gz")); err != nil {
+		t.Fatalf("gzip sidecar not written: %v", err)
 	}
 }
 

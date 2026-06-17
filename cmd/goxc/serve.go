@@ -94,8 +94,21 @@ func serve(options serveOptions) error {
 func staticHandler(directory string) http.Handler {
 	files := http.FileServer(http.Dir(directory))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if strings.HasSuffix(request.URL.Path, ".wasm") {
+		path := request.URL.Path
+		if strings.HasSuffix(path, ".br") {
+			response.Header().Set("Content-Encoding", "br")
+			path = strings.TrimSuffix(path, ".br")
+		} else if strings.HasSuffix(path, ".gz") {
+			response.Header().Set("Content-Encoding", "gzip")
+			path = strings.TrimSuffix(path, ".gz")
+		}
+		switch {
+		case strings.HasSuffix(path, ".wasm"):
 			response.Header().Set("Content-Type", "application/wasm")
+		case strings.HasSuffix(path, ".js"):
+			response.Header().Set("Content-Type", "text/javascript")
+		case strings.HasSuffix(path, ".css"):
+			response.Header().Set("Content-Type", "text/css")
 		}
 		files.ServeHTTP(response, request)
 	})

@@ -28,8 +28,8 @@ func loadManifest(appDir string) (projectManifest, error) {
 		Entry:    ".",
 		Output:   "dist",
 		Compiler: "go",
-		WASM:     "main.wasm",
-		Assets:   []string{"index.html", "service-worker.js"},
+		WASM:     "bundle.wasm",
+		Assets:   []string{"index.html"},
 	}
 
 	content, err := os.ReadFile(filepath.Join(appDir, manifestName))
@@ -61,10 +61,10 @@ func loadManifest(appDir string) (projectManifest, error) {
 		manifest.Compiler = "go"
 	}
 	if manifest.WASM == "" {
-		manifest.WASM = "main.wasm"
+		manifest.WASM = "bundle.wasm"
 	}
 	if manifest.Assets == nil {
-		manifest.Assets = []string{"index.html", "service-worker.js"}
+		manifest.Assets = []string{"index.html"}
 	}
 
 	if !safeRelativePath(manifest.Entry) {
