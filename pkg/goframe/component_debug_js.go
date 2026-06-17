@@ -18,6 +18,13 @@ func reportComponentPatch(name string) {
 	}
 }
 
+func reportComponentMemoSkip(name string) {
+	probe := js.Global().Get("goframeComponentMemoSkipProbe")
+	if probe.Type() == js.TypeFunction {
+		probe.Invoke(name)
+	}
+}
+
 func reportDuplicateSiblingNodeKeys(nodes []Node, owner string) {
 	keys := make([]string, 0, len(nodes))
 	for _, node := range nodes {

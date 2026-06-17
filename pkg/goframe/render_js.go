@@ -142,8 +142,13 @@ func patchComponent(document, parent js.Value, mounted *mountedNode, newNode Com
 	instance := mounted.component
 	reportComponentPatch(instance.name)
 	instance.parent = owner
+	if shouldSkipComponentRender(instance, newNode, mounted.key) {
+		instance.node = newNode
+		instance.dirty = false
+		reportComponentMemoSkip(instance.name)
+		return
+	}
 	instance.node = newNode
-
 	child := patchMounted(document, parent, mounted.componentChild, renderComponentInstance(instance), instance)
 	mounted.componentChild = child
 }
