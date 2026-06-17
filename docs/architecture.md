@@ -113,6 +113,8 @@ deployment directory. Export is intentionally explicit so normal build/package
 commands do not create visible `dist/` output. Export destinations are treated
 as tool-owned: non-empty directories without GoFrame export manifests are
 rejected unless `--force` is passed.
+Explicit `goxc package --out <dir>` is also treated as package-owned output and
+is rejected when `<dir>` is a non-empty non-GoFrame directory.
 
 ### Serve
 

@@ -166,13 +166,18 @@ Fixed CLI issues:
   prepared artifacts into `.goframe/package/standalone`.
 - MVP 13 package publishing removes stale root bundle artifacts and the
   package-owned `assets/` directory before publishing the next staged bundle.
+- Explicit package/export output directories are treated as tool-owned. Non-empty
+  directories without GoFrame package markers are rejected before package-owned
+  `assets/` cleanup.
+- Legacy `manifest.json` is still recognized as a GoFrame-owned package marker
+  for migration cleanup.
 
 Remaining CLI risks:
 
 - `serve` is a local development server. It binds to `127.0.0.1` and is not a
   hardened production static server.
 - `--out` is intentionally user-directed and may point outside the application
-  directory.
+  directory, but non-empty unmarked package/export directories are rejected.
 - Compression remains an explicit package helper; production deployments should
   prefer web-server or CDN compression.
 
@@ -273,6 +278,10 @@ CLI:
 - `clean` removes `.goframe/work`, `.goframe/build`, and `.goframe/package` by
   default; `--generated` also removes `.goframe/gen` and legacy adjacent
   `.gox.go` files.
+- `clean --legacy` removes old `build/` and GoFrame-owned `dist/` output while
+  preserving user-owned `dist/` directories.
+- Package asset logical names are validated before writing into `assets/` so
+  package helpers cannot escape the package asset directory.
 - `serve` is localhost-only.
 
 Remaining safety risks:
@@ -327,6 +336,7 @@ Automated checks currently include:
 - CLI manifest and package staging tests.
 - Browser Todo smoke script.
 - Browser duplicate-key smoke script.
+- Browser dashboard smoke and dashboard pressure-test trace.
 - Size budget script.
 - Pure runtime benchmark script.
 - Component identity decision document.
@@ -335,10 +345,12 @@ Automated checks currently include:
 
 Recommended next hardening steps before new product features:
 
-1. Add debug duplicate-key source locations.
-2. Add ancestor dirty queue metrics in `goframe_debug`.
-3. Add CI wiring for TinyGo size budgets and browser smoke tests.
-4. Decide whether component identity should include function identity or a
-   generated stable type token.
-5. Keep context/router/Player work out of the project until the lifecycle
-   regression gates run reliably in CI.
+1. Use the dashboard pressure test to guide runtime optimization work with
+   before/after render, patch, and DOM operation metrics.
+2. Keep memoization, context, router, Player, SSR, hydration, and bundle
+   splitting out of scope until the current packaging/runtime gates stay green
+   through PR review.
+3. Decide whether component identity should include function identity or a
+   generated stable type token before adding larger component lifecycle features.
+4. Add debug duplicate-key source locations only if diagnostics need to become
+   developer-facing rather than smoke-test-facing.

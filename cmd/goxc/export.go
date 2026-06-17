@@ -103,11 +103,28 @@ func validateExportDestination(outDir string, force bool) error {
 	return fmt.Errorf("export output directory %s is not empty and does not look like a previous GoFrame export; pass --force to treat it as tool-owned and overwrite package artifacts", outDir)
 }
 
+func validatePackageDestination(outDir string) error {
+	entries, err := os.ReadDir(outDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect package output directory: %w", err)
+	}
+	if len(entries) == 0 || isGoframeOwnedExport(outDir) {
+		return nil
+	}
+	return fmt.Errorf("package output directory %s is not empty and does not look like a previous GoFrame package; use the default hidden workspace output, choose an empty directory, or export a package with `goxc export --force` when overwriting is intentional", outDir)
+}
+
 func isGoframeOwnedExport(directory string) bool {
 	if fileExists(filepath.Join(directory, packageMetadataName)) {
 		return true
 	}
 	if fileExists(filepath.Join(directory, assetManifestName)) {
+		return true
+	}
+	if fileExists(filepath.Join(directory, legacyPackageManifest)) {
 		return true
 	}
 	return false

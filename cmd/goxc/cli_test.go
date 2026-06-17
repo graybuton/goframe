@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -55,6 +56,30 @@ func TestBuildLayoutDefaultsAndExternalWorkspace(t *testing.T) {
 	}
 }
 
+func TestBuildLayoutExternalWorkspaceAvoidsAppCollisions(t *testing.T) {
+	root := t.TempDir()
+	firstApp := filepath.Join(root, "one", "dashboard")
+	secondApp := filepath.Join(root, "two", "dashboard")
+	external := filepath.Join(t.TempDir(), "workspace")
+
+	first, err := newBuildLayout(layoutOptions{appDir: firstApp, workspace: external})
+	if err != nil {
+		t.Fatalf("newBuildLayout(first) error: %v", err)
+	}
+	second, err := newBuildLayout(layoutOptions{appDir: secondApp, workspace: external})
+	if err != nil {
+		t.Fatalf("newBuildLayout(second) error: %v", err)
+	}
+	if first.WorkspaceRoot == second.WorkspaceRoot {
+		t.Fatalf("external workspace roots collide: %q", first.WorkspaceRoot)
+	}
+	for _, layout := range []BuildLayout{first, second} {
+		if !strings.HasPrefix(layout.WorkspaceRoot, external+string(filepath.Separator)) {
+			t.Fatalf("workspace root %q is not below %q", layout.WorkspaceRoot, external)
+		}
+	}
+}
+
 func TestParsePackageOptionsCompression(t *testing.T) {
 	options, err := parsePackageOptions([]string{"app", "--asset-hash", "--preload", "--compress=gzip,br"})
 	if err != nil {
@@ -91,6 +116,21 @@ func TestLoadManifestDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadManifestAcceptsLegacyMainWASM(t *testing.T) {
+	appDir := t.TempDir()
+	content := []byte(`{"wasm":"main.wasm"}`)
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := loadManifest(appDir)
+	if err != nil {
+		t.Fatalf("loadManifest(main.wasm) error: %v", err)
+	}
+	if manifest.WASM != "main.wasm" {
+		t.Fatalf("WASM = %q, want main.wasm", manifest.WASM)
+	}
+}
+
 func TestManifestRejectsApplicationRootAsOutput(t *testing.T) {
 	appDir := t.TempDir()
 	content := []byte(`{"output":"."}`)
@@ -99,6 +139,29 @@ func TestManifestRejectsApplicationRootAsOutput(t *testing.T) {
 	}
 	if _, err := loadManifest(appDir); err == nil {
 		t.Fatal("loadManifest() accepted application root as output")
+	}
+}
+
+func TestManifestRejectsEscapingPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "entry", content: `{"entry":"../cmd"}`},
+		{name: "output", content: `{"output":"../dist"}`},
+		{name: "wasm", content: `{"wasm":"../bundle.wasm"}`},
+		{name: "asset", content: `{"assets":["../secret.css"]}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(test.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadManifest(appDir); err == nil {
+				t.Fatalf("loadManifest() accepted escaping %s path", test.name)
+			}
+		})
 	}
 }
 
@@ -189,10 +252,79 @@ func App() gf.Node {
 	}
 }
 
+func TestGenerateInPlaceWritesAdjacentFileAndWarns(t *testing.T) {
+	appDir := t.TempDir()
+	source := `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <div>Hello</div>
+}
+`
+	if err := os.WriteFile(filepath.Join(appDir, "app.gox"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr := captureStderr(t, func() {
+		if err := generatePath(generateOptions{path: appDir, inPlace: true}, true); err != nil {
+			t.Fatalf("generatePath(inPlace) error: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "--in-place writes generated compiler output into the source tree") {
+		t.Fatalf("missing --in-place warning in stderr: %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(appDir, "app.gox.go")); err != nil {
+		t.Fatalf("adjacent generated file missing: %v", err)
+	}
+}
+
 func TestSizeReportsHelpfulErrorForEmptyDirectory(t *testing.T) {
 	err := sizeCommand([]string{t.TempDir()})
 	if err == nil {
 		t.Fatal("sizeCommand() returned nil error")
+	}
+}
+
+func TestParseServeOptionsUsesWorkspacePackageDir(t *testing.T) {
+	appDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	options, err := parseServeOptions([]string{appDir})
+	if err != nil {
+		t.Fatalf("parseServeOptions() error: %v", err)
+	}
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.dir != layout.PackageDir {
+		t.Fatalf("serve dir = %q, want %q", options.dir, layout.PackageDir)
+	}
+}
+
+func TestArtifactDirectoryPrefersWorkspacePackage(t *testing.T) {
+	appDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(layout.PackageDir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.PackageDir, "assets", "bundle.wasm"), []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := artifactDirectory(sizeOptions{path: appDir})
+	if err != nil {
+		t.Fatalf("artifactDirectory() error: %v", err)
+	}
+	if got != layout.PackageDir {
+		t.Fatalf("artifact dir = %q, want %q", got, layout.PackageDir)
 	}
 }
 
@@ -221,6 +353,26 @@ func TestCleanPackageArtifactsRemovesOldCompression(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(directory, name)); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists: %v", name, err)
 		}
+	}
+}
+
+func TestValidatePackageDestinationRejectsUnownedNonEmptyDirectory(t *testing.T) {
+	outDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outDir, "notes.txt"), []byte("user"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePackageDestination(outDir); err == nil {
+		t.Fatal("validatePackageDestination() accepted non-empty unowned directory")
+	}
+}
+
+func TestValidatePackageDestinationAllowsPreviousGoFramePackage(t *testing.T) {
+	outDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outDir, packageMetadataName), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePackageDestination(outDir); err != nil {
+		t.Fatalf("validatePackageDestination(previous package) error: %v", err)
 	}
 }
 
@@ -261,6 +413,20 @@ func TestPublishPackageArtifactsCopiesStagedTree(t *testing.T) {
 		if string(got) != want {
 			t.Fatalf("%s = %q, want %q", path, got, want)
 		}
+	}
+}
+
+func TestWritePackageAssetRejectsEscapingLogicalName(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "styles.css")
+	if err := os.WriteFile(source, []byte("body{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assetsDir := filepath.Join(t.TempDir(), "assets")
+	if _, err := writePackageAsset(source, assetsDir, "../styles.css", packageOptions{compress: map[string]bool{}}); err == nil {
+		t.Fatal("writePackageAsset() accepted escaping logical name")
+	}
+	if _, err := os.Stat(filepath.Join(assetsDir, "..", "styles.css")); !os.IsNotExist(err) {
+		t.Fatalf("escaping asset was written: %v", err)
 	}
 }
 
@@ -373,4 +539,31 @@ func TestHumanSize(t *testing.T) {
 	if got := humanSize(73_631); got != "71.9 KiB" {
 		t.Fatalf("humanSize() = %q, want 71.9 KiB", got)
 	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = writer
+	defer func() {
+		os.Stderr = old
+	}()
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
