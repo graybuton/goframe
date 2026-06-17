@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -11,6 +12,7 @@ type exportOptions struct {
 	appDir    string
 	outDir    string
 	workspace string
+	force     bool
 }
 
 func exportCommand(args []string) error {
@@ -42,6 +44,8 @@ func parseExportOptions(args []string) (exportOptions, error) {
 				return exportOptions{}, errors.New("--workspace requires a value")
 			}
 			options.workspace = args[index]
+		case arg == "--force":
+			options.force = true
 		case strings.HasPrefix(arg, "-"):
 			return exportOptions{}, fmt.Errorf("unknown export flag %q", arg)
 		case options.appDir == "":
@@ -51,7 +55,7 @@ func parseExportOptions(args []string) (exportOptions, error) {
 		}
 	}
 	if options.appDir == "" || options.outDir == "" {
-		return exportOptions{}, errors.New("usage: goxc export <app-directory> --out=directory [--workspace=directory]")
+		return exportOptions{}, errors.New("usage: goxc export <app-directory> --out=directory [--workspace=directory] [--force]")
 	}
 	return options, nil
 }
@@ -69,6 +73,9 @@ func exportApp(options exportOptions) error {
 	} else if !info.IsDir() {
 		return fmt.Errorf("standalone package path is not a directory: %s", layout.PackageDir)
 	}
+	if err := validateExportDestination(options.outDir, options.force); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(options.outDir, 0o755); err != nil {
 		return fmt.Errorf("create export directory: %w", err)
 	}
@@ -80,4 +87,28 @@ func exportApp(options exportOptions) error {
 	}
 	fmt.Printf("exported %s -> %s\n", layout.PackageDir, options.outDir)
 	return nil
+}
+
+func validateExportDestination(outDir string, force bool) error {
+	entries, err := os.ReadDir(outDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect export directory: %w", err)
+	}
+	if len(entries) == 0 || force || isGoframeOwnedExport(outDir) {
+		return nil
+	}
+	return fmt.Errorf("export output directory %s is not empty and does not look like a previous GoFrame export; pass --force to treat it as tool-owned and overwrite package artifacts", outDir)
+}
+
+func isGoframeOwnedExport(directory string) bool {
+	if fileExists(filepath.Join(directory, packageMetadataName)) {
+		return true
+	}
+	if fileExists(filepath.Join(directory, assetManifestName)) {
+		return true
+	}
+	return false
 }

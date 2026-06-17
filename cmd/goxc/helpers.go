@@ -72,3 +72,8 @@ func samePath(first, second string) bool {
 	secondPath, secondErr := filepath.Abs(second)
 	return firstErr == nil && secondErr == nil && firstPath == secondPath
 }
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
