@@ -113,10 +113,24 @@ check_app() {
 	return "$status"
 }
 
+bundle_path() {
+	local app="$1"
+	local dist="$ROOT_DIR/examples/$app/dist"
+	local matches=()
+	shopt -s nullglob
+	matches=("$dist"/assets/bundle*.wasm "$dist"/main.wasm)
+	shopt -u nullglob
+	if (( ${#matches[@]} == 0 )); then
+		echo "$dist/assets/bundle.wasm"
+		return 0
+	fi
+	echo "${matches[0]}"
+}
+
 status=0
-check_app "counter" "$ROOT_DIR/examples/counter/dist/main.wasm" 97280 40960 56320 49152 || status=1
-check_app "components" "$ROOT_DIR/examples/components/dist/main.wasm" 107520 43008 56320 49152 || status=1
-check_app "todo" "$ROOT_DIR/examples/todo/dist/main.wasm" 122880 40960 56320 49152 || status=1
-check_app "dashboard" "$ROOT_DIR/examples/dashboard/dist/main.wasm" 153600 53248 71680 61440 || status=1
+check_app "counter" "$(bundle_path counter)" 97280 40960 56320 49152 || status=1
+check_app "components" "$(bundle_path components)" 107520 43008 56320 49152 || status=1
+check_app "todo" "$(bundle_path todo)" 122880 40960 56320 49152 || status=1
+check_app "dashboard" "$(bundle_path dashboard)" 153600 53248 71680 61440 || status=1
 
 exit "$status"
