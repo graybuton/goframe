@@ -297,6 +297,48 @@ func TestUseReducerStateTypeMismatchPanics(t *testing.T) {
 	})
 }
 
+func TestStateHookKindMismatchPanics(t *testing.T) {
+	useReducer := false
+	instance := testComponentInstance("StateKind", func() Node {
+		if useReducer {
+			_, _ = UseReducer(0, func(state int, action int) int {
+				return state + action
+			})
+		} else {
+			_, _ = UseState(0)
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	useReducer = true
+
+	assertPanic(t, "goframe: hook at state slot 0 changed from UseState to UseReducer", func() {
+		renderComponentInstance(instance)
+	})
+}
+
+func TestReducerHookKindMismatchPanics(t *testing.T) {
+	useState := false
+	instance := testComponentInstance("ReducerKind", func() Node {
+		if useState {
+			_, _ = UseState(0)
+		} else {
+			_, _ = UseReducer(0, func(state int, action int) int {
+				return state + action
+			})
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	useState = true
+
+	assertPanic(t, "goframe: hook at state slot 0 changed from UseReducer to UseState", func() {
+		renderComponentInstance(instance)
+	})
+}
+
 func TestUseReducerReducerTypeMismatchPanics(t *testing.T) {
 	useStringAction := false
 	instance := testComponentInstance("Reducer", func() Node {
