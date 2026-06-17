@@ -56,21 +56,23 @@ func C[P any](name string, props P, render ComponentFunc[P]) Node {
 }
 
 type componentInstance struct {
-	name           string
-	key            string
-	parent         *componentInstance
-	node           ComponentNode
-	memoEqual      func(any, any) bool
-	stateSlots     []*stateSlot
-	stateIndex     int
-	effectSlots    []*effectSlot
-	effectIndex    int
-	unmountSlots   []*unmountSlot
-	unmountIndex   int
-	dirty          bool
-	active         bool
-	scheduleUpdate func(*componentInstance)
-	update         func()
+	name             string
+	key              string
+	parent           *componentInstance
+	node             ComponentNode
+	memoEqual        func(any, any) bool
+	stateSlots       []*stateSlot
+	stateIndex       int
+	effectSlots      []*effectSlot
+	effectIndex      int
+	unmountSlots     []*unmountSlot
+	unmountIndex     int
+	dirty            bool
+	dirtyCounted     bool
+	dirtyDescendants int
+	active           bool
+	scheduleUpdate   func(*componentInstance)
+	update           func()
 }
 
 var currentComponent *componentInstance
@@ -95,7 +97,7 @@ func shouldSkipComponentRender(instance *componentInstance, nextNode ComponentNo
 	if instance.key != nextKey {
 		return false
 	}
-	if instance.memoEqual == nil || instance.dirty || !instance.active {
+	if instance.memoEqual == nil || instance.dirty || instance.dirtyDescendants > 0 || !instance.active {
 		return false
 	}
 	return instance.memoEqual(instance.node.Props, nextNode.Props)
@@ -107,7 +109,7 @@ func renderComponentInstance(instance *componentInstance) Node {
 	instance.stateIndex = 0
 	instance.effectIndex = 0
 	instance.unmountIndex = 0
-	instance.dirty = false
+	clearComponentDirty(instance)
 	defer func() {
 		currentComponent = previous
 	}()
@@ -121,10 +123,31 @@ func markComponentDirty(instance *componentInstance) {
 	if instance == nil || !instance.active {
 		return
 	}
+	if !instance.dirtyCounted {
+		for ancestor := instance.parent; ancestor != nil; ancestor = ancestor.parent {
+			ancestor.dirtyDescendants++
+		}
+		instance.dirtyCounted = true
+	}
 	instance.dirty = true
 	if instance.scheduleUpdate != nil {
 		instance.scheduleUpdate(instance)
 	}
+}
+
+func clearComponentDirty(instance *componentInstance) {
+	if instance == nil {
+		return
+	}
+	if instance.dirtyCounted {
+		for ancestor := instance.parent; ancestor != nil; ancestor = ancestor.parent {
+			if ancestor.dirtyDescendants > 0 {
+				ancestor.dirtyDescendants--
+			}
+		}
+		instance.dirtyCounted = false
+	}
+	instance.dirty = false
 }
 
 func pruneDirtyComponents(dirty []*componentInstance) []*componentInstance {
@@ -176,7 +199,8 @@ func deactivateComponent(instance *componentInstance) {
 	} else {
 		instance.active = false
 	}
-	instance.dirty = false
+	clearComponentDirty(instance)
+	instance.dirtyDescendants = 0
 	instance.parent = nil
 	instance.update = nil
 	instance.stateSlots = nil
