@@ -68,6 +68,13 @@ type VirtualRange struct {
 	TotalHeight  int
 }
 
+const (
+	virtualTableTopSpacerKey    = "goframe:virtual-table:spacer:top"
+	virtualTableBottomSpacerKey = "goframe:virtual-table:spacer:bottom"
+	virtualTableEmptyKey        = "goframe:virtual-table:empty"
+	virtualTableRowKeyPrefix    = "goframe:virtual-table:row:"
+)
+
 func renderVirtualList[T any](props VirtualListProps[T]) Node {
 	validateVirtualDimensions("VirtualList", props.Height, props.ItemHeight, "ItemHeight")
 	if props.RenderItem == nil {
@@ -126,12 +133,13 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 	bodyChildren := make([]Node, 0, rangeInfo.End-rangeInfo.Start+2)
 	if len(props.Items) == 0 {
 		if props.Empty != nil {
-			bodyChildren = append(bodyChildren, virtualTableContentRow(props.Empty(), props.ColumnCount))
+			bodyChildren = append(bodyChildren, Key(virtualTableEmptyKey, virtualTableContentRow(props.Empty(), props.ColumnCount)))
 		}
 	} else {
-		if rangeInfo.TopSpacer > 0 {
-			bodyChildren = append(bodyChildren, virtualTableSpacerRow("top", rangeInfo.TopSpacer, props.ColumnCount))
-		}
+		bodyChildren = append(bodyChildren, Key(
+			virtualTableTopSpacerKey,
+			virtualTableSpacerRow("top", rangeInfo.TopSpacer, props.ColumnCount),
+		))
 		for index := rangeInfo.Start; index < rangeInfo.End; index++ {
 			key := virtualItemKey(props.Key, props.Items[index], index)
 			row := VirtualRow[T]{
@@ -140,11 +148,12 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 				Key:      key,
 				RowStyle: "height:" + ToString(props.RowHeight) + "px;",
 			}
-			bodyChildren = append(bodyChildren, Key(key, props.RenderRow(row)))
+			bodyChildren = append(bodyChildren, Key(virtualTableRowKeyPrefix+key, props.RenderRow(row)))
 		}
-		if rangeInfo.BottomSpacer > 0 {
-			bodyChildren = append(bodyChildren, virtualTableSpacerRow("bottom", rangeInfo.BottomSpacer, props.ColumnCount))
-		}
+		bodyChildren = append(bodyChildren, Key(
+			virtualTableBottomSpacerKey,
+			virtualTableSpacerRow("bottom", rangeInfo.BottomSpacer, props.ColumnCount),
+		))
 	}
 
 	tableChildren := make([]Node, 0, 2)
@@ -247,7 +256,7 @@ func virtualTableSpacerRow(name string, height int, columnCount int) Node {
 		"style":       "height:" + ToString(height) + "px;",
 	}, El("td", Props{
 		"colspan": virtualTableColumnCount(columnCount),
-		"style":   "height:" + ToString(height) + "px;padding:0;border:0;",
+		"style":   "height:" + ToString(height) + "px;padding:0;border:0;line-height:0;font-size:0;",
 	}))
 }
 

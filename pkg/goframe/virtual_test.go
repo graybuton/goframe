@@ -161,6 +161,138 @@ func TestVirtualTableContentRowUsesColumnCount(t *testing.T) {
 	}
 }
 
+func TestVirtualTableUsesStableSpacerAndNamespacedRowKeys(t *testing.T) {
+	userKeys := []string{}
+	children := renderVirtualTableBodyChildrenForTest(VirtualTableProps[int]{
+		Items:       []int{1, 2, 3},
+		Height:      40,
+		RowHeight:   20,
+		Overscan:    0,
+		ColumnCount: 7,
+		Key: func(item int, index int) string {
+			if item == 1 {
+				return virtualTableTopSpacerKey
+			}
+			return "item-" + ToString(item)
+		},
+		RenderRow: func(row VirtualRow[int]) Node {
+			userKeys = append(userKeys, row.Key)
+			return Key(row.Key, El("tr", Props{"style": row.RowStyle}, El("td", Props{}, Text(ToString(row.Item)))))
+		},
+	})
+
+	if len(children) != 4 {
+		t.Fatalf("tbody child count = %d, want 4", len(children))
+	}
+	top := requireKeyedNode(t, children[0])
+	firstRow := requireKeyedNode(t, children[1])
+	secondRow := requireKeyedNode(t, children[2])
+	bottom := requireKeyedNode(t, children[3])
+
+	if top.Key != virtualTableTopSpacerKey {
+		t.Fatalf("top spacer key = %q, want %q", top.Key, virtualTableTopSpacerKey)
+	}
+	if bottom.Key != virtualTableBottomSpacerKey {
+		t.Fatalf("bottom spacer key = %q, want %q", bottom.Key, virtualTableBottomSpacerKey)
+	}
+	if firstRow.Key != virtualTableRowKeyPrefix+virtualTableTopSpacerKey {
+		t.Fatalf("first row internal key = %q, want namespaced user key", firstRow.Key)
+	}
+	if secondRow.Key != virtualTableRowKeyPrefix+"item-2" {
+		t.Fatalf("second row internal key = %q, want namespaced item key", secondRow.Key)
+	}
+	if firstRow.Key == top.Key || firstRow.Key == bottom.Key {
+		t.Fatalf("row internal key %q collided with spacer keys", firstRow.Key)
+	}
+	if len(userKeys) != 2 || userKeys[0] != virtualTableTopSpacerKey || userKeys[1] != "item-2" {
+		t.Fatalf("user-facing row keys = %#v, want original keys", userKeys)
+	}
+}
+
+func TestVirtualTableKeepsZeroHeightSpacersMounted(t *testing.T) {
+	children := renderVirtualTableBodyChildrenForTest(VirtualTableProps[int]{
+		Items:       []int{1, 2},
+		Height:      100,
+		RowHeight:   20,
+		Overscan:    0,
+		ColumnCount: 7,
+		RenderRow: func(row VirtualRow[int]) Node {
+			return El("tr", Props{"style": row.RowStyle}, El("td", Props{}, Text(ToString(row.Item))))
+		},
+	})
+
+	if len(children) != 4 {
+		t.Fatalf("tbody child count = %d, want top spacer, 2 rows, bottom spacer", len(children))
+	}
+	top := requireVNode(t, requireKeyedNode(t, children[0]).Node)
+	bottom := requireVNode(t, requireKeyedNode(t, children[3]).Node)
+	if got := top.Props["style"]; got != "height:0px;" {
+		t.Fatalf("top spacer style = %#v, want height:0px;", got)
+	}
+	if got := bottom.Props["style"]; got != "height:0px;" {
+		t.Fatalf("bottom spacer style = %#v, want height:0px;", got)
+	}
+	topCell := requireVNode(t, top.Children[0])
+	if got := topCell.Props["style"]; got != "height:0px;padding:0;border:0;line-height:0;font-size:0;" {
+		t.Fatalf("top spacer cell style = %#v, want zero-height style", got)
+	}
+}
+
+func TestVirtualTableKeysEmptyState(t *testing.T) {
+	children := renderVirtualTableBodyChildrenForTest(VirtualTableProps[int]{
+		Items:       nil,
+		Height:      100,
+		RowHeight:   20,
+		ColumnCount: 7,
+		RenderRow: func(row VirtualRow[int]) Node {
+			return El("tr", Props{}, El("td", Props{}, Text(ToString(row.Item))))
+		},
+		Empty: func() Node {
+			return Text("empty")
+		},
+	})
+
+	if len(children) != 1 {
+		t.Fatalf("empty tbody child count = %d, want 1", len(children))
+	}
+	empty := requireKeyedNode(t, children[0])
+	if empty.Key != virtualTableEmptyKey {
+		t.Fatalf("empty key = %q, want %q", empty.Key, virtualTableEmptyKey)
+	}
+	row := requireVNode(t, empty.Node)
+	cell := requireVNode(t, row.Children[0])
+	if got := cell.Props["colspan"]; got != "7" {
+		t.Fatalf("empty colspan = %#v, want 7", got)
+	}
+}
+
+func renderVirtualTableBodyChildrenForTest[T any](props VirtualTableProps[T]) []Node {
+	node := VirtualTable(props).(ComponentNode)
+	instance := newComponentInstance(node, "", nil, nil)
+	outer := renderComponentInstance(instance).(VNode)
+	table := outer.Children[0].(VNode)
+	tbody := table.Children[len(table.Children)-1].(VNode)
+	return tbody.Children
+}
+
+func requireKeyedNode(t *testing.T, node Node) KeyedNode {
+	t.Helper()
+	keyed, ok := node.(KeyedNode)
+	if !ok {
+		t.Fatalf("node = %#v, want KeyedNode", node)
+	}
+	return keyed
+}
+
+func requireVNode(t *testing.T, node Node) VNode {
+	t.Helper()
+	vnode, ok := node.(VNode)
+	if !ok {
+		t.Fatalf("node = %#v, want VNode", node)
+	}
+	return vnode
+}
+
 func assertPanics(t *testing.T, fn func()) {
 	t.Helper()
 	defer func() {

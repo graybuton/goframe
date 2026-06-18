@@ -114,6 +114,7 @@ try {
         "dashboard initial render",
     );
     await assertDashboardTableLayout(client, "initial");
+    await assertVirtualTableSpacerStability(client, "initial");
 
     assertDeepEqual(
         await client.evaluate(installDashboardAuditExpression(componentNames)),
@@ -213,6 +214,29 @@ try {
         "APP FAILURE: dashboard reset before sort did not restore bounded mounted rows",
     );
 
+    const withinRowScrollBefore = await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+        window.__dashboardBeforeWithinRowScroll = [...document.querySelectorAll(".issue-row")].map((node) => node.id);
+        return window.__dashboardBeforeWithinRowScroll;
+    })()`);
+    await wait(120);
+    await assertVirtualTableSpacerStability(client, "before within-row scroll");
+    await startScenario(client, "table-scroll-within-row");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 10;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(120);
+    const withinRowScrollReport = await finishScenario(client, "table-scroll-within-row");
+    const withinRowScroll = await client.evaluate(`(() => ({
+        rowIDs: [...document.querySelectorAll(".issue-row")].map((node) => node.id),
+    }))()`);
+    assertWithinRowScrollReport(withinRowScrollReport, withinRowScrollBefore, withinRowScroll);
+    await assertVirtualTableSpacerStability(client, "within-row scroll");
+
     await startScenario(client, "table-scroll");
     await client.evaluate(`(() => {
         const viewport = document.querySelector("[data-testid='issue-table']");
@@ -236,6 +260,7 @@ try {
     if (!scrolled.changed || !scrolled.target) {
         throw new Error(`APP FAILURE: dashboard scroll should change visible row window: ${JSON.stringify(scrolled)}`);
     }
+    await assertVirtualTableSpacerStability(client, "cross-row scroll");
     await client.evaluate(`(() => {
         const target = document.querySelector("#issue-row-" + window.__dashboardScrolledTarget + " .row-link");
         target.click();
@@ -257,6 +282,7 @@ try {
         viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
     })()`);
     await wait(160);
+    await assertVirtualTableSpacerStability(client, "scroll back to top");
     await client.evaluate(`(() => {
         const before = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
         window.__dashboardBeforeSort = before;
@@ -287,6 +313,7 @@ try {
         { changed: true, headerSame: true, overlapPreserved: true },
         "dashboard sort updates virtual row window without replacing visible survivors",
     );
+    await assertVirtualTableSpacerStability(client, "sort");
 
     await startScenario(client, "status-blocked");
     await setSelectValue(client, "#status-filter", "blocked");
@@ -310,6 +337,7 @@ try {
         "dashboard status filter updates table predictably",
     );
     await assertDashboardTableLayout(client, "status filter");
+    await assertVirtualTableSpacerStability(client, "status filter");
 
     await startScenario(client, "reset-before-simulate");
     await clickButtonByText(client, "Reset");
@@ -378,6 +406,7 @@ try {
         "dashboard reset restores deterministic view",
     );
     await assertDashboardTableLayout(client, "reset");
+    await assertVirtualTableSpacerStability(client, "reset");
 
     client.close();
     console.log(`Dashboard timing report: ${JSON.stringify(timings)}`);
@@ -386,6 +415,7 @@ try {
         searchReport,
         selectReport,
         clearSearchReport,
+        withinRowScrollReport,
         scrollReport,
         sortReport,
         statusReport,
@@ -561,6 +591,53 @@ async function assertDashboardTableLayout(client, label) {
         throw new Error(`APP FAILURE: dashboard table layout collapsed during ${label}: ${failures.join("; ")} ${JSON.stringify(layout)}`);
     }
     console.log(`dashboard table layout ${label}: ok`);
+}
+
+async function assertVirtualTableSpacerStability(client, label) {
+    const state = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const spacers = tbody ? [...tbody.querySelectorAll(".gf-virtual-table-spacer")] : [];
+        if (top && !window.__dashboardSpacerTop) window.__dashboardSpacerTop = top;
+        if (bottom && !window.__dashboardSpacerBottom) window.__dashboardSpacerBottom = bottom;
+        return {
+            spacerCount: spacers.length,
+            topExists: Boolean(top),
+            bottomExists: Boolean(bottom),
+            topSame: Boolean(top && window.__dashboardSpacerTop === top),
+            bottomSame: Boolean(bottom && window.__dashboardSpacerBottom === bottom),
+            childCount: tbody?.children.length ?? 0,
+            rowCount: document.querySelectorAll(".issue-row").length,
+        };
+    })()`);
+    const failures = [];
+    if (state.spacerCount !== 2) failures.push(`spacer count=${state.spacerCount}`);
+    if (!state.topExists) failures.push("top spacer missing");
+    if (!state.bottomExists) failures.push("bottom spacer missing");
+    if (!state.topSame) failures.push("top spacer node identity changed");
+    if (!state.bottomSame) failures.push("bottom spacer node identity changed");
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, `dashboard spacer stability ${label} mounted rows`);
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: virtual table spacers unstable during ${label}: ${failures.join("; ")} ${JSON.stringify(state)}`);
+    }
+    console.log(`dashboard virtual table spacers ${label}: ok`);
+}
+
+function assertWithinRowScrollReport(report, beforeState, state) {
+    const before = JSON.stringify(beforeState);
+    const current = JSON.stringify(state.rowIDs);
+    if (before !== current) {
+        throw new Error(`APP FAILURE: within-row scroll changed mounted row IDs: before ${before}, after ${current}`);
+    }
+    if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
+        throw new Error(`APP FAILURE: within-row scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+        report.operations.insertBefore !== 0 || report.operations.appendChild !== 0) {
+        throw new Error(`APP FAILURE: within-row scroll should not churn DOM: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard within-row scroll no-op summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations })}`);
 }
 
 async function waitForPage(port) {

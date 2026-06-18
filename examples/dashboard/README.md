@@ -111,7 +111,10 @@ logical issues and summaries still report the logical filtered count, but the
 mounted `.issue-row` elements stay bounded to the visible window plus overscan.
 The table passes `ColumnCount: 7` so spacer rows preserve the real dashboard
 columns: Issue, Status, Priority, Owner, Service, Events, and Action. This is
-real virtualization: offscreen rows are not hidden DOM nodes.
+real virtualization: offscreen rows are not hidden DOM nodes. The framework
+keeps top and bottom spacer rows keyed and mounted, including at `0px` height,
+so scroll/filter updates do not remount spacer `tr` nodes or match them against
+user rows.
 
 For DOM pressure audits, run:
 
@@ -131,6 +134,7 @@ With `gf.VirtualTable`, a typical debug run reports:
 - mounted issue rows: about 20, with a smoke bound of 70;
 - Open -> All average duration: about 47 ms in the local debug audit;
 - Open -> All created nodes: about 432;
+- virtual table spacer rows stable across filter and scroll cycles;
 - live DOM count stable across cycles;
 - net listener count stable across cycles.
 

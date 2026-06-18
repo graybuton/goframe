@@ -77,6 +77,12 @@ try {
         throw new Error(`APP FAILURE: dashboard should start with ${expectedAllRows} logical rows and bounded mounted rows: ${JSON.stringify(initial)}`);
     }
     await assertDashboardTableLayout(client, "initial");
+    await assertVirtualTableSpacerStability(client, "initial");
+    const scrollRecords = [
+        await runScrollStability(client, "scroll-within-row", 10),
+        await runScrollStability(client, "scroll-cross-row", 48 * 8 + 10),
+        await runScrollStability(client, "scroll-back-top", 0),
+    ];
 
     const records = [];
     for (let cycle = 1; cycle <= cycles; cycle++) {
@@ -89,6 +95,7 @@ try {
     const finalIdle = await samplePage(client, "post-idle-gc", cycles, "all");
 
     printRecords(records);
+    printScrollRecords(scrollRecords);
     const analysis = analyzeRecords(records, finalIdle);
     printAnalysis(initial, finalIdle, analysis);
     if (analysis.failures.length > 0) {
@@ -306,6 +313,7 @@ async function runTransition(client, cycle, status, label) {
     const metricsAfter = await performanceMetrics(client);
     await collectGarbage(client);
     const afterGC = await samplePage(client, label, cycle, status);
+    const spacerState = await assertVirtualTableSpacerStability(client, `${label} cycle ${cycle}`);
     if (status === "all") {
         await assertDashboardTableLayout(client, `${label} cycle ${cycle}`);
     }
@@ -335,7 +343,34 @@ async function runTransition(client, cycle, status, label) {
         renderReports: audit.renderReports,
         runtimeRenderMs: round(sumBy(audit.renderReports, (entry) => entry.duration || 0)),
         performanceDeltas: diffMetrics(metricsBefore, metricsAfter),
+        spacerCount: spacerState.spacerCount,
+        spacerTopStable: spacerState.topSame,
+        spacerBottomStable: spacerState.bottomSame,
         trace,
+    };
+}
+
+async function runScrollStability(client, label, scrollTop) {
+    await client.evaluate(`window.__dashboardPressure.start(${JSON.stringify(label)})`);
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = ${scrollTop};
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await settle(client);
+    const audit = await client.evaluate(`window.__dashboardPressure.finish(${JSON.stringify(label)})`);
+    const spacerState = await assertVirtualTableSpacerStability(client, label);
+    return {
+        label,
+        scrollTop,
+        rows: audit.rows,
+        operations: audit.operations,
+        renderDeltas: audit.renderDeltas,
+        patchDeltas: audit.patchDeltas,
+        memoDeltas: audit.memoDeltas,
+        spacerCount: spacerState.spacerCount,
+        spacerTopStable: spacerState.topSame,
+        spacerBottomStable: spacerState.bottomSame,
     };
 }
 
@@ -407,6 +442,38 @@ async function assertDashboardTableLayout(client, label) {
     if (failures.length > 0) {
         throw new Error(`APP FAILURE: dashboard table layout collapsed during ${label}: ${failures.join("; ")} ${JSON.stringify(layout)}`);
     }
+}
+
+async function assertVirtualTableSpacerStability(client, label) {
+    const state = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const spacers = tbody ? [...tbody.querySelectorAll(".gf-virtual-table-spacer")] : [];
+        if (top && !window.__dashboardPressureSpacerTop) window.__dashboardPressureSpacerTop = top;
+        if (bottom && !window.__dashboardPressureSpacerBottom) window.__dashboardPressureSpacerBottom = bottom;
+        return {
+            spacerCount: spacers.length,
+            topExists: Boolean(top),
+            bottomExists: Boolean(bottom),
+            topSame: Boolean(top && window.__dashboardPressureSpacerTop === top),
+            bottomSame: Boolean(bottom && window.__dashboardPressureSpacerBottom === bottom),
+            rowCount: document.querySelectorAll(".issue-row").length,
+        };
+    })()`);
+    const failures = [];
+    if (state.spacerCount !== 2) failures.push(`spacer count=${state.spacerCount}`);
+    if (!state.topExists) failures.push("top spacer missing");
+    if (!state.bottomExists) failures.push("bottom spacer missing");
+    if (!state.topSame) failures.push("top spacer identity changed");
+    if (!state.bottomSame) failures.push("bottom spacer identity changed");
+    if (state.rowCount <= 0 || state.rowCount > maxMountedRows) {
+        failures.push(`mounted rows=${state.rowCount}, limit ${maxMountedRows}`);
+    }
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: virtual table spacers unstable during ${label}: ${failures.join("; ")} ${JSON.stringify(state)}`);
+    }
+    return state;
 }
 
 async function performanceMetrics(client) {
@@ -704,6 +771,9 @@ function printRecords(records) {
         rowRender: record.renderDeltas.IssueRow,
         rowPatch: record.patchDeltas.IssueRow,
         rowMemo: record.memoDeltas.IssueRow,
+        spacers: record.spacerCount,
+        topStable: record.spacerTopStable,
+        bottomStable: record.spacerBottomStable,
         rtRenderMs: record.runtimeRenderMs,
         scriptMs: record.performanceDeltas.ScriptDuration,
         layoutMs: record.performanceDeltas.LayoutDuration,
@@ -713,6 +783,26 @@ function printRecords(records) {
         heapGC: record.jsHeapUsedAfterGC,
     }));
     console.table(rows);
+}
+
+function printScrollRecords(records) {
+    console.table(records.map((record) => ({
+        label: record.label,
+        scrollTop: record.scrollTop,
+        rows: record.rows,
+        create: record.operations.createElement + record.operations.createTextNode + record.operations.createComment,
+        insert: record.operations.insertBefore + record.operations.appendChild,
+        remove: record.operations.removeChild,
+        addEvt: record.operations.addEventListener,
+        remEvt: record.operations.removeEventListener,
+        tableRender: record.renderDeltas.VirtualTable,
+        rowRender: record.renderDeltas.IssueRow,
+        rowPatch: record.patchDeltas.IssueRow,
+        rowMemo: record.memoDeltas.IssueRow,
+        spacers: record.spacerCount,
+        topStable: record.spacerTopStable,
+        bottomStable: record.spacerBottomStable,
+    })));
 }
 
 function analyzeRecords(records, finalIdle) {
@@ -735,6 +825,9 @@ function analyzeRecords(records, finalIdle) {
         if (record.operations.addEventListener > maxAllEventAdds) {
             failures.push(`cycle ${record.cycle} All addEventListener delta=${record.operations.addEventListener}, limit ${maxAllEventAdds}`);
         }
+        if (record.spacerCount !== 2 || !record.spacerTopStable || !record.spacerBottomStable) {
+            failures.push(`cycle ${record.cycle} All spacer instability: count=${record.spacerCount}, top=${record.spacerTopStable}, bottom=${record.spacerBottomStable}`);
+        }
     }
     for (const record of openRecords) {
         if (record.logicalRows <= 0 || record.logicalRows >= expectedAllRows) {
@@ -742,6 +835,9 @@ function analyzeRecords(records, finalIdle) {
         }
         if (record.rows <= 0 || record.rows > maxMountedRows) {
             failures.push(`cycle ${record.cycle} Open mounted rows=${record.rows}, limit ${maxMountedRows}`);
+        }
+        if (record.spacerCount !== 2 || !record.spacerTopStable || !record.spacerBottomStable) {
+            failures.push(`cycle ${record.cycle} Open spacer instability: count=${record.spacerCount}, top=${record.spacerTopStable}, bottom=${record.spacerBottomStable}`);
         }
     }
 
@@ -793,6 +889,8 @@ function analyzeRecords(records, finalIdle) {
             postIdleCDPNodes: finalIdle.metrics.Nodes ?? 0,
             postIdleJSEventListeners: finalIdle.metrics.JSEventListeners ?? 0,
             postIdleJSHeapUsed: finalIdle.metrics.JSHeapUsedSize ?? 0,
+            spacerTopStable: allRecords.every((record) => record.spacerTopStable),
+            spacerBottomStable: allRecords.every((record) => record.spacerBottomStable),
         },
     };
 }

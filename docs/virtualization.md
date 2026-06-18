@@ -72,6 +72,12 @@ that value as the `colspan` for spacer and empty rows. If `ColumnCount <= 0`,
 the runtime falls back to `1`; examples should not rely on that fallback unless
 the table really has one column.
 
+The top and bottom spacer rows are internal keyed rows and remain mounted even
+when their height is `0px`. User row keys are namespaced internally before
+reconciliation, while `VirtualRow.Key` remains the user-facing item key passed
+to `RenderRow`. This prevents spacer rows and user rows from matching each
+other during scroll, filter, and sort updates.
+
 ## Range Calculation
 
 The current range model is intentionally fixed-height:
@@ -121,6 +127,7 @@ debug pressure run reports about 20 mounted rows, around 432 created nodes for
 The pressure script gates the important invariants:
 
 - mounted rows remain bounded;
+- top and bottom spacer rows keep stable DOM identity;
 - live DOM count stabilizes across cycles;
 - net listener count stabilizes across cycles;
 - `Open -> All` no longer creates thousands of row nodes.
