@@ -627,6 +627,7 @@ required.
 
 - [Architecture and toolchain boundaries](docs/architecture.md)
 - [Foundation audit](docs/foundation-audit.md)
+- [Foundation Audit IV](docs/foundation-audit-iv.md)
 - [Component identity strategy](docs/component-identity.md)
 - [GOX language and component model](docs/gox-language.md)
 - [Runtime model](docs/runtime-model.md)
