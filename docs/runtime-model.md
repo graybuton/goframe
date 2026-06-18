@@ -217,6 +217,28 @@ cursor position. Stable-ID focus restoration remains a replacement fallback.
 its required reference. It calls `insertBefore` only when an actual move is
 needed.
 
+## Virtualized collections
+
+`gf.VirtualList` and `gf.VirtualTable` are framework-level fixed-height
+collection primitives. They keep the mounted DOM bounded to the visible window
+plus overscan while preserving a much larger logical item count.
+
+The virtual range stores the first visible row rather than raw scroll pixels.
+Scroll events that remain inside the same row boundary do not schedule another
+state update. When the row boundary changes, the virtualized component updates
+its range and keyed reconciliation mounts, unmounts, or moves only the window
+that should be present.
+
+Virtualization and memoization solve different costs. Memoization skips render
+and patch work for clean mounted components; virtualization avoids mounting
+offscreen components at all. The dashboard uses both: `IssueRow` remains
+memoized for row selection/toggle work, while `gf.VirtualTable` prevents
+filter transitions from creating hundreds of offscreen rows.
+
+The current virtualized model assumes fixed item or row height. Dynamic
+measurement, infinite loading, keyboard navigation, and richer table
+accessibility are future work. See [virtualized collections](virtualization.md).
+
 ## DOM stability regression
 
 DOM node replacement, component render, patch traversal, DOM mutation, and
@@ -330,6 +352,8 @@ The dependency-free headless Chrome probe verifies:
 - lifecycle/effects are minimal and have no priorities or async scheduler;
 - context is scoped and selector-based, but has no async/server bridge or
   custom non-comparable selector equality;
+- virtualized collections are fixed-height only and do not include dynamic
+  measurement, infinite loading, or keyboard navigation;
 - no error boundaries;
 - component identity uses the declared component name, not Go function identity;
 - explicit opt-in props memoization via `MemoEqual`; components still rerender

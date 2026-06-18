@@ -27,6 +27,9 @@
   workaround.
 - Scoped context selectors with nearest-provider lookup, comparable selector
   dirtying, and a focused context example plus browser smoke coverage.
+- Fixed-height `VirtualList` and `VirtualTable` primitives, dashboard table
+  virtualization, and a focused virtualized collections example plus smoke
+  coverage.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

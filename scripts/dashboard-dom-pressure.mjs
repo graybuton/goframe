@@ -18,6 +18,11 @@ const cycles = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_CYCLES ?? "20");
 const settleFrames = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_SETTLE_FRAMES ?? "2");
 const postIdleMs = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_POST_IDLE_MS ?? "3000");
 const profile = await mkdtemp(join(tmpdir(), "goframe-dashboard-pressure-"));
+const expectedAllRows = 300;
+const expectedTableColumns = 7;
+const maxMountedRows = 70;
+const maxAllCreateNodes = 2500;
+const maxAllEventAdds = 160;
 const componentNames = [
     "App",
     "Header",
@@ -30,6 +35,8 @@ const componentNames = [
     "SearchBox",
     "IssueWorkspace",
     "IssueTable",
+    "VirtualTable",
+    "IssueTableHeader",
     "IssueRow",
     "DetailPanel",
     "EmptyDetail",
@@ -66,9 +73,16 @@ try {
     await client.evaluate(installPressureAuditExpression(componentNames));
 
     const initial = await samplePage(client, "initial", 0, "all");
-    if (initial.rows !== 300) {
-        throw new Error(`APP FAILURE: dashboard should start with 300 rows, got ${initial.rows}`);
+    if (initial.logicalRows !== expectedAllRows || initial.rows <= 0 || initial.rows > maxMountedRows) {
+        throw new Error(`APP FAILURE: dashboard should start with ${expectedAllRows} logical rows and bounded mounted rows: ${JSON.stringify(initial)}`);
     }
+    await assertDashboardTableLayout(client, "initial");
+    await assertVirtualTableSpacerStability(client, "initial");
+    const scrollRecords = [
+        await runScrollStability(client, "scroll-within-row", 10),
+        await runScrollStability(client, "scroll-cross-row", 48 * 8 + 10),
+        await runScrollStability(client, "scroll-back-top", 0),
+    ];
 
     const records = [];
     for (let cycle = 1; cycle <= cycles; cycle++) {
@@ -76,12 +90,16 @@ try {
         records.push(await runTransition(client, cycle, "all", "All"));
     }
 
+    const continuousScrollRecord = await runContinuousScrollAudit(client);
+
     await wait(postIdleMs);
     await collectGarbage(client);
     const finalIdle = await samplePage(client, "post-idle-gc", cycles, "all");
 
     printRecords(records);
-    const analysis = analyzeRecords(records, finalIdle);
+    printScrollRecords(scrollRecords);
+    printContinuousScrollRecord(continuousScrollRecord);
+    const analysis = analyzeRecords(records, finalIdle, continuousScrollRecord);
     printAnalysis(initial, finalIdle, analysis);
     if (analysis.failures.length > 0) {
         throw new Error(`APP FAILURE: dashboard DOM pressure leak guard failed:\n${analysis.failures.join("\n")}`);
@@ -298,6 +316,10 @@ async function runTransition(client, cycle, status, label) {
     const metricsAfter = await performanceMetrics(client);
     await collectGarbage(client);
     const afterGC = await samplePage(client, label, cycle, status);
+    const spacerState = await assertVirtualTableSpacerStability(client, `${label} cycle ${cycle}`);
+    if (status === "all") {
+        await assertDashboardTableLayout(client, `${label} cycle ${cycle}`);
+    }
 
     return {
         cycle,
@@ -305,6 +327,8 @@ async function runTransition(client, cycle, status, label) {
         status,
         durationMs: audit.durationMs,
         rows: audit.rows,
+        logicalRows: audit.logicalRows,
+        totalRows: audit.totalRows,
         summary: audit.summary,
         liveDOMNodes: audit.liveDOMNodes,
         allNodesAfterGC: afterGC.liveDOMNodes,
@@ -322,7 +346,106 @@ async function runTransition(client, cycle, status, label) {
         renderReports: audit.renderReports,
         runtimeRenderMs: round(sumBy(audit.renderReports, (entry) => entry.duration || 0)),
         performanceDeltas: diffMetrics(metricsBefore, metricsAfter),
+        spacerCount: spacerState.spacerCount,
+        spacerTopStable: spacerState.topSame,
+        spacerBottomStable: spacerState.bottomSame,
         trace,
+    };
+}
+
+async function runScrollStability(client, label, scrollTop) {
+    await client.evaluate(`window.__dashboardPressure.start(${JSON.stringify(label)})`);
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = ${scrollTop};
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await settle(client);
+    const audit = await client.evaluate(`window.__dashboardPressure.finish(${JSON.stringify(label)})`);
+    const spacerState = await assertVirtualTableSpacerStability(client, label);
+    return {
+        label,
+        scrollTop,
+        rows: audit.rows,
+        operations: audit.operations,
+        renderDeltas: audit.renderDeltas,
+        patchDeltas: audit.patchDeltas,
+        memoDeltas: audit.memoDeltas,
+        spacerCount: spacerState.spacerCount,
+        spacerTopStable: spacerState.topSame,
+        spacerBottomStable: spacerState.bottomSame,
+    };
+}
+
+async function runContinuousScrollAudit(client) {
+    const label = "continuous-scroll-buffered";
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await settle(client);
+    const before = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        window.__dashboardPressureContinuousTop = top;
+        window.__dashboardPressureContinuousBottom = bottom;
+        return {
+            rows: document.querySelectorAll(".issue-row").length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+        };
+    })()`);
+    await client.evaluate(`window.__dashboardPressure.start(${JSON.stringify(label)})`);
+    const scrollSummary = await client.evaluate(`(async () => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        let steps = 0;
+        let maxRows = document.querySelectorAll(".issue-row").length;
+        for (let top = 0; top <= 48 * 80; top += 12) {
+            viewport.scrollTop = top;
+            viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+            steps++;
+            maxRows = Math.max(maxRows, document.querySelectorAll(".issue-row").length);
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            maxRows = Math.max(maxRows, document.querySelectorAll(".issue-row").length);
+        }
+        return { steps, maxRows };
+    })()`);
+    await settle(client);
+    const audit = await client.evaluate(`window.__dashboardPressure.finish(${JSON.stringify(label)})`);
+    const spacerState = await assertVirtualTableSpacerStability(client, label);
+    const after = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        return {
+            rows: document.querySelectorAll(".issue-row").length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+            topSame: Boolean(top && window.__dashboardPressureContinuousTop === top),
+            bottomSame: Boolean(bottom && window.__dashboardPressureContinuousBottom === bottom),
+        };
+    })()`);
+    const mountedRowsMax = Math.max(before.rows, scrollSummary.maxRows, after.rows);
+    return {
+        label,
+        scrollSteps: scrollSummary.steps,
+        durationMs: audit.durationMs,
+        rows: audit.rows,
+        mountedRowsMax,
+        operations: audit.operations,
+        renderDeltas: audit.renderDeltas,
+        patchDeltas: audit.patchDeltas,
+        memoDeltas: audit.memoDeltas,
+        netListeners: audit.netListeners,
+        listenerNetDelta: audit.operations.addEventListener - audit.operations.removeEventListener,
+        renderScrollRatio: round(audit.renderDeltas.VirtualTable / scrollSummary.steps),
+        spacerCount: spacerState.spacerCount,
+        spacerTopStable: spacerState.topSame && after.topSame,
+        spacerBottomStable: spacerState.bottomSame && after.bottomSame,
+        childCountBefore: before.childCount,
+        childCountAfter: after.childCount,
     };
 }
 
@@ -349,7 +472,83 @@ async function samplePage(client, label, cycle, status) {
         liveDOMNodes: document.querySelectorAll("*").length,
         summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
     }))()`);
+    const parsed = parseSummary(page.summary);
+    page.logicalRows = parsed.visible;
+    page.totalRows = parsed.total;
     return { ...page, metrics: await performanceMetrics(client) };
+}
+
+async function assertDashboardTableLayout(client, label) {
+    const layout = await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        const table = viewport?.querySelector("table");
+        const headerCells = table ? [...table.querySelectorAll("thead th")] : [];
+        const firstRow = table?.querySelector("tbody tr.issue-row");
+        const firstRowCells = firstRow ? [...firstRow.querySelectorAll("td")] : [];
+        const rowLink = firstRow?.querySelector(".row-link");
+        return {
+            viewportWidth: viewport ? Math.round(viewport.getBoundingClientRect().width) : 0,
+            tableWidth: table ? Math.round(table.getBoundingClientRect().width) : 0,
+            headerCellCount: headerCells.length,
+            firstRowCellCount: firstRowCells.length,
+            headerWidths: headerCells.map((cell) => Math.round(cell.getBoundingClientRect().width)),
+            firstRowWidths: firstRowCells.map((cell) => Math.round(cell.getBoundingClientRect().width)),
+            rowLinkWidth: rowLink ? Math.round(rowLink.getBoundingClientRect().width) : 0,
+        };
+    })()`);
+    const failures = [];
+    if (layout.headerCellCount !== expectedTableColumns) failures.push(`header cells=${layout.headerCellCount}`);
+    if (layout.firstRowCellCount !== expectedTableColumns) failures.push(`row cells=${layout.firstRowCellCount}`);
+    if (!(layout.viewportWidth > 0 && layout.tableWidth >= layout.viewportWidth * 0.95)) {
+        failures.push(`table width ${layout.tableWidth}, viewport width ${layout.viewportWidth}`);
+    }
+    for (const [index, width] of layout.headerWidths.entries()) {
+        if (width <= 30) failures.push(`header width[${index}]=${width}`);
+    }
+    if ((layout.firstRowWidths[0] ?? 0) <= 100) {
+        failures.push(`issue column width=${layout.firstRowWidths[0] ?? 0}`);
+    }
+    if ((layout.firstRowWidths[6] ?? 0) <= 50) {
+        failures.push(`action column width=${layout.firstRowWidths[6] ?? 0}`);
+    }
+    if (layout.rowLinkWidth <= 100) {
+        failures.push(`row link width=${layout.rowLinkWidth}`);
+    }
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: dashboard table layout collapsed during ${label}: ${failures.join("; ")} ${JSON.stringify(layout)}`);
+    }
+}
+
+async function assertVirtualTableSpacerStability(client, label) {
+    const state = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const spacers = tbody ? [...tbody.querySelectorAll(".gf-virtual-table-spacer")] : [];
+        if (top && !window.__dashboardPressureSpacerTop) window.__dashboardPressureSpacerTop = top;
+        if (bottom && !window.__dashboardPressureSpacerBottom) window.__dashboardPressureSpacerBottom = bottom;
+        return {
+            spacerCount: spacers.length,
+            topExists: Boolean(top),
+            bottomExists: Boolean(bottom),
+            topSame: Boolean(top && window.__dashboardPressureSpacerTop === top),
+            bottomSame: Boolean(bottom && window.__dashboardPressureSpacerBottom === bottom),
+            rowCount: document.querySelectorAll(".issue-row").length,
+        };
+    })()`);
+    const failures = [];
+    if (state.spacerCount !== 2) failures.push(`spacer count=${state.spacerCount}`);
+    if (!state.topExists) failures.push("top spacer missing");
+    if (!state.bottomExists) failures.push("bottom spacer missing");
+    if (!state.topSame) failures.push("top spacer identity changed");
+    if (!state.bottomSame) failures.push("bottom spacer identity changed");
+    if (state.rowCount <= 0 || state.rowCount > maxMountedRows) {
+        failures.push(`mounted rows=${state.rowCount}, limit ${maxMountedRows}`);
+    }
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: virtual table spacers unstable during ${label}: ${failures.join("; ")} ${JSON.stringify(state)}`);
+    }
+    return state;
 }
 
 async function performanceMetrics(client) {
@@ -516,12 +715,16 @@ function installPressureAuditExpression(names) {
                 for (const key of Object.keys(operations)) {
                     opDeltas[key] = operations[key] - this.operationBaseline[key];
                 }
+                const summary = document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "";
+                const match = /^Showing (\\d+) of (\\d+) issues$/.exec(summary);
                 return {
                     label,
                     durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
                     rows: document.querySelectorAll(".issue-row").length,
+                    logicalRows: match ? Number(match[1]) : -1,
+                    totalRows: match ? Number(match[2]) : -1,
                     liveDOMNodes: document.querySelectorAll("*").length,
-                    summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+                    summary,
                     netListeners,
                     operations: opDeltas,
                     renderDeltas,
@@ -630,6 +833,7 @@ function printRecords(records) {
         to: record.transition,
         ms: record.durationMs,
         rows: record.rows,
+        logical: record.logicalRows,
         liveDOM: record.liveDOMNodes,
         cdpNodesGC: record.cdpNodesAfterGC,
         jsListenersGC: record.jsEventListenersAfterGC,
@@ -642,6 +846,9 @@ function printRecords(records) {
         rowRender: record.renderDeltas.IssueRow,
         rowPatch: record.patchDeltas.IssueRow,
         rowMemo: record.memoDeltas.IssueRow,
+        spacers: record.spacerCount,
+        topStable: record.spacerTopStable,
+        bottomStable: record.spacerBottomStable,
         rtRenderMs: record.runtimeRenderMs,
         scriptMs: record.performanceDeltas.ScriptDuration,
         layoutMs: record.performanceDeltas.LayoutDuration,
@@ -653,16 +860,75 @@ function printRecords(records) {
     console.table(rows);
 }
 
-function analyzeRecords(records, finalIdle) {
+function printScrollRecords(records) {
+    console.table(records.map((record) => ({
+        label: record.label,
+        scrollTop: record.scrollTop,
+        rows: record.rows,
+        create: record.operations.createElement + record.operations.createTextNode + record.operations.createComment,
+        insert: record.operations.insertBefore + record.operations.appendChild,
+        remove: record.operations.removeChild,
+        addEvt: record.operations.addEventListener,
+        remEvt: record.operations.removeEventListener,
+        tableRender: record.renderDeltas.VirtualTable,
+        rowRender: record.renderDeltas.IssueRow,
+        rowPatch: record.patchDeltas.IssueRow,
+        rowMemo: record.memoDeltas.IssueRow,
+        spacers: record.spacerCount,
+        topStable: record.spacerTopStable,
+        bottomStable: record.spacerBottomStable,
+    })));
+}
+
+function printContinuousScrollRecord(record) {
+    console.log(`Dashboard DOM pressure continuous scroll: ${JSON.stringify({
+        scrollSteps: record.scrollSteps,
+        virtualTableRenders: record.renderDeltas.VirtualTable,
+        issueRowRenders: record.renderDeltas.IssueRow,
+        renderScrollRatio: record.renderScrollRatio,
+        createElement: record.operations.createElement,
+        removeChild: record.operations.removeChild,
+        insertBefore: record.operations.insertBefore,
+        appendChild: record.operations.appendChild,
+        listenerNetDelta: record.listenerNetDelta,
+        spacersStable: record.spacerCount === 2 && record.spacerTopStable && record.spacerBottomStable,
+        mountedRowsMax: record.mountedRowsMax,
+    })}`);
+}
+
+function analyzeRecords(records, finalIdle, continuousScrollRecord) {
     const failures = [];
     const warnings = [];
     const allRecords = records.filter((record) => record.status === "all");
     const openRecords = records.filter((record) => record.status === "open");
-    const expectedAllRows = 300;
 
     for (const record of allRecords) {
-        if (record.rows !== expectedAllRows) {
-            failures.push(`cycle ${record.cycle} All rows=${record.rows}, want ${expectedAllRows}`);
+        if (record.logicalRows !== expectedAllRows) {
+            failures.push(`cycle ${record.cycle} All logical rows=${record.logicalRows}, want ${expectedAllRows}`);
+        }
+        if (record.rows <= 0 || record.rows > maxMountedRows) {
+            failures.push(`cycle ${record.cycle} All mounted rows=${record.rows}, limit ${maxMountedRows}`);
+        }
+        const createdNodes = record.operations.createElement + record.operations.createTextNode + record.operations.createComment;
+        if (createdNodes > maxAllCreateNodes) {
+            failures.push(`cycle ${record.cycle} All created DOM nodes=${createdNodes}, limit ${maxAllCreateNodes}`);
+        }
+        if (record.operations.addEventListener > maxAllEventAdds) {
+            failures.push(`cycle ${record.cycle} All addEventListener delta=${record.operations.addEventListener}, limit ${maxAllEventAdds}`);
+        }
+        if (record.spacerCount !== 2 || !record.spacerTopStable || !record.spacerBottomStable) {
+            failures.push(`cycle ${record.cycle} All spacer instability: count=${record.spacerCount}, top=${record.spacerTopStable}, bottom=${record.spacerBottomStable}`);
+        }
+    }
+    for (const record of openRecords) {
+        if (record.logicalRows <= 0 || record.logicalRows >= expectedAllRows) {
+            failures.push(`cycle ${record.cycle} Open logical rows=${record.logicalRows}, expected filtered subset`);
+        }
+        if (record.rows <= 0 || record.rows > maxMountedRows) {
+            failures.push(`cycle ${record.cycle} Open mounted rows=${record.rows}, limit ${maxMountedRows}`);
+        }
+        if (record.spacerCount !== 2 || !record.spacerTopStable || !record.spacerBottomStable) {
+            failures.push(`cycle ${record.cycle} Open spacer instability: count=${record.spacerCount}, top=${record.spacerTopStable}, bottom=${record.spacerBottomStable}`);
         }
     }
 
@@ -684,14 +950,44 @@ function analyzeRecords(records, finalIdle) {
     const averageAllLayout = average(allRecords.map((record) => record.performanceDeltas.LayoutDuration));
     const averageAllScript = average(allRecords.map((record) => record.performanceDeltas.ScriptDuration));
     const averageAllRender = average(allRecords.map((record) => record.runtimeRenderMs));
+    if (averageAllDuration > 150) {
+        warnings.push(`average All transition duration ${round(averageAllDuration)}ms remains high despite bounded DOM.`);
+    }
+
+    if (continuousScrollRecord) {
+        const maxTableRenders = Math.ceil(continuousScrollRecord.scrollSteps / 4);
+        const createdNodes = continuousScrollRecord.operations.createElement +
+            continuousScrollRecord.operations.createTextNode +
+            continuousScrollRecord.operations.createComment;
+        const insertedNodes = continuousScrollRecord.operations.insertBefore +
+            continuousScrollRecord.operations.appendChild;
+        const maxChurn = maxMountedRows * maxTableRenders;
+        if (continuousScrollRecord.renderDeltas.VirtualTable > maxTableRenders) {
+            failures.push(`continuous scroll VirtualTable renders=${continuousScrollRecord.renderDeltas.VirtualTable}, scroll steps=${continuousScrollRecord.scrollSteps}, limit=${maxTableRenders}`);
+        }
+        if (continuousScrollRecord.mountedRowsMax <= 0 || continuousScrollRecord.mountedRowsMax > maxMountedRows) {
+            failures.push(`continuous scroll mounted rows max=${continuousScrollRecord.mountedRowsMax}, limit=${maxMountedRows}`);
+        }
+        if (continuousScrollRecord.spacerCount !== 2 || !continuousScrollRecord.spacerTopStable || !continuousScrollRecord.spacerBottomStable) {
+            failures.push(`continuous scroll spacer instability: count=${continuousScrollRecord.spacerCount}, top=${continuousScrollRecord.spacerTopStable}, bottom=${continuousScrollRecord.spacerBottomStable}`);
+        }
+        if (continuousScrollRecord.listenerNetDelta !== 0) {
+            failures.push(`continuous scroll listener net delta=${continuousScrollRecord.listenerNetDelta}`);
+        }
+        if (createdNodes > maxChurn || insertedNodes > maxChurn || continuousScrollRecord.operations.removeChild > maxChurn) {
+            failures.push(`continuous scroll DOM churn unbounded: create=${createdNodes}, insert=${insertedNodes}, remove=${continuousScrollRecord.operations.removeChild}, limit=${maxChurn}`);
+        }
+    }
 
     return {
         failures,
         warnings,
         summary: {
             cycles,
-            allRows: expectedAllRows,
-            openRows: openRecords[0]?.rows ?? 0,
+            allRowsLogical: expectedAllRows,
+            allRowsMountedMax: Math.max(...allRecords.map((record) => record.rows)),
+            openRowsLogical: openRecords[0]?.logicalRows ?? 0,
+            openRowsMountedMax: Math.max(...openRecords.map((record) => record.rows)),
             averageAllDuration: round(averageAllDuration),
             averageAllCreateNodes: round(averageAllCreate),
             averageAllRemoveNodes: round(averageAllRemove),
@@ -709,6 +1005,17 @@ function analyzeRecords(records, finalIdle) {
             postIdleCDPNodes: finalIdle.metrics.Nodes ?? 0,
             postIdleJSEventListeners: finalIdle.metrics.JSEventListeners ?? 0,
             postIdleJSHeapUsed: finalIdle.metrics.JSHeapUsedSize ?? 0,
+            spacerTopStable: allRecords.every((record) => record.spacerTopStable),
+            spacerBottomStable: allRecords.every((record) => record.spacerBottomStable),
+            continuousScrollSteps: continuousScrollRecord?.scrollSteps ?? 0,
+            continuousVirtualTableRenders: continuousScrollRecord?.renderDeltas.VirtualTable ?? 0,
+            continuousIssueRowRenders: continuousScrollRecord?.renderDeltas.IssueRow ?? 0,
+            continuousRenderScrollRatio: continuousScrollRecord?.renderScrollRatio ?? 0,
+            continuousSpacersStable: continuousScrollRecord ?
+                continuousScrollRecord.spacerCount === 2 && continuousScrollRecord.spacerTopStable && continuousScrollRecord.spacerBottomStable :
+                false,
+            continuousMountedRowsMax: continuousScrollRecord?.mountedRowsMax ?? 0,
+            continuousListenerNetDelta: continuousScrollRecord?.listenerNetDelta ?? 0,
         },
     };
 }
@@ -742,6 +1049,14 @@ function average(values) {
 function drift(values) {
     if (values.length === 0) return 0;
     return Math.max(...values) - Math.min(...values);
+}
+
+function parseSummary(summary) {
+    const match = /^Showing (\d+) of (\d+) issues$/.exec(summary || "");
+    if (!match) {
+        return { visible: -1, total: -1 };
+    }
+    return { visible: Number(match[1]), total: Number(match[2]) };
 }
 
 function sumBy(values, pick) {

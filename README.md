@@ -114,6 +114,15 @@ goxc package ./examples/context --compiler=tinygo
 goxc serve ./examples/context --port=8080
 ```
 
+The virtualized collections example demonstrates framework-level fixed-height
+list and table virtualization with 10,000 logical rows but a bounded mounted
+DOM:
+
+```bash
+goxc package ./examples/virtualized --compiler=tinygo
+goxc serve ./examples/virtualized --port=8080
+```
+
 ## GOX component model
 
 Lowercase tags create HTML elements:
@@ -222,12 +231,14 @@ Browser props accept both lowercase and exported-style common names, including
 func()
 func(gf.Event)
 func(gf.InputEvent)
+func(gf.ScrollEvent)
 ```
 
 `gf.Event` provides `PreventDefault` and `StopPropagation`.
-`gf.InputEvent.Value()` supports controlled inputs. `gf.UseState` slots belong
-to the component instance currently rendering. State `Set` calls mark that
-owner dirty and are coalesced into one browser animation-frame update.
+`gf.InputEvent.Value()` supports controlled inputs. `gf.ScrollEvent.ScrollTop()`
+supports fixed-height virtualized collections. `gf.UseState` slots belong to
+the component instance currently rendering. State `Set` calls mark that owner
+dirty and are coalesced into one browser animation-frame update.
 `gf.UseReducer` uses the same slots, but dispatch reads the latest slot state
 at event time before applying a pure reducer action.
 
@@ -273,6 +284,12 @@ child are both dirty in the same batch, ancestor pruning keeps only the parent
 update. Descendant components encountered inside an updated parent subtree
 rerender. For selective subtree bailouts, define `MemoEqual` on props to opt
 in to explicit component memoization and skip stable re-renders.
+
+Large fixed-height collections should use `gf.VirtualList` or
+`gf.VirtualTable` instead of rendering hundreds of hidden or offscreen rows.
+Virtualization keeps the mounted DOM bounded to the visible window plus
+overscan; it is separate from memoization, which reduces render work for
+mounted components. See [virtualized collections](docs/virtualization.md).
 
 Duplicate sibling keys are a user error. Production builds keep the smallest
 behavior and do not diagnose them; `goframe_debug` builds record and warn about
@@ -534,9 +551,12 @@ Measured on June 16, 2026 with Go 1.24.4 and TinyGo 0.41.1:
 | Todo demo, TinyGo `bundle.wasm` | 109,483 | 106.9 KiB |
 | Todo demo, TinyGo `bundle.wasm.br` | 34,885 | 34.1 KiB |
 | Todo demo, TinyGo `bundle.wasm.gz` | 42,003 | 41.0 KiB |
-| Dashboard pressure test, TinyGo `bundle.wasm` | 146,832 | 143.4 KiB |
-| Dashboard pressure test, TinyGo `bundle.wasm.br` | 44,317 | 43.3 KiB |
-| Dashboard pressure test, TinyGo `bundle.wasm.gz` | 54,673 | 53.4 KiB |
+| Dashboard pressure test, TinyGo `bundle.wasm` | 162,773 | 159.0 KiB |
+| Dashboard pressure test, TinyGo `bundle.wasm.br` | 49,075 | 47.9 KiB |
+| Dashboard pressure test, TinyGo `bundle.wasm.gz` | 60,187 | 58.8 KiB |
+| Virtualized collections, TinyGo `bundle.wasm` | 118,546 | 115.8 KiB |
+| Virtualized collections, TinyGo `bundle.wasm.br` | 37,076 | 36.2 KiB |
+| Virtualized collections, TinyGo `bundle.wasm.gz` | 45,134 | 44.1 KiB |
 | Go `wasm_exec.js` | 16,992 | 16.6 KiB |
 | TinyGo `wasm_exec.js` | 16,715 | 16.3 KiB |
 
@@ -550,6 +570,9 @@ realistic 300-row interactive app.
 MVP 13 adds content-hashed release assets for cache-safe delivery. MVP 13.1
 keeps the app source tree clean by moving generated, build, and package
 outputs under `.goframe/`; use `goxc export` when you want a visible `dist/`.
+MVP 17 adds fixed-height virtualized list and table primitives; the dashboard
+now keeps physical issue rows bounded while preserving the 300-row logical
+fixture.
 
 ## Legacy CLI
 
@@ -589,6 +612,9 @@ required.
 - Memoization is explicit and opt-in today:
   components can implement `MemoEqual` on their props type to skip renders when
   prop shapes are unchanged and the component is otherwise clean.
+- Virtualized collections require fixed item/row heights and stable keys. They
+  bound mounted DOM work, but do not yet provide dynamic measurement, infinite
+  loading, or advanced keyboard navigation.
 - Duplicate key diagnostics are debug-only and do not run in production builds.
 - GOX has JSX-like render expressions for `condition && <Node />` and
   `condition ? <A /> : <B />`, but no template-block `if`/`for`, spread props,
@@ -606,12 +632,14 @@ required.
 - [Runtime model](docs/runtime-model.md)
 - [Lifecycle and effects](docs/effects.md)
 - [Context selectors](docs/context.md)
+- [Virtualized collections](docs/virtualization.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 - [Future GoFrame Player vision](docs/player-vision.md)
 - [Counter example](examples/counter/README.md)
 - [Components example](examples/components/README.md)
 - [Todo example](examples/todo/README.md)
 - [Dashboard pressure-test example](examples/dashboard/README.md)
+- [Virtualized collections example](examples/virtualized/README.md)
 
 ## Development
 

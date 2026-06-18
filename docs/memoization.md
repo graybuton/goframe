@@ -61,7 +61,9 @@ other compared prop tracks that data.
   value changes, but memoization still requires explicit props `MemoEqual`.
 - No stable event callback hook yet; reducer dispatch covers state transitions
   that can be represented as pure actions.
-- No virtualization or router/Player integration in this stage.
+- Virtualization is a separate tool. Use `gf.VirtualList` or `gf.VirtualTable`
+  when offscreen collection items should not be mounted at all.
+- No router/Player integration in this stage.
 
 ## Interaction with keys and identity
 

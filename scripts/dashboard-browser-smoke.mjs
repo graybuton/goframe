@@ -14,6 +14,8 @@ const profile = await mkdtemp(join(tmpdir(), "goframe-dashboard-smoke-"));
 const expectedApp = new URL(appURL);
 const timings = [];
 const performanceReports = [];
+const dashboardLogicalRows = 300;
+const maxMountedRows = 70;
 const componentNames = [
     "App",
     "Header",
@@ -26,6 +28,8 @@ const componentNames = [
     "SearchBox",
     "IssueWorkspace",
     "IssueTable",
+    "VirtualTable",
+    "IssueTableHeader",
     "IssueRow",
     "DetailPanel",
     "EmptyDetail",
@@ -66,8 +70,7 @@ try {
     await navigateToApp(client, withSmokeParam(appURL, "clean"));
     await waitForAppPage(client, expectedApp, "post-clean navigation");
 
-    assertDeepEqual(
-        await client.evaluate(`(() => {
+    const initialState = await client.evaluate(`(() => {
             window.__dashboardHeader = document.querySelector("[data-testid='dashboard-header']");
             window.__dashboardSearch = document.querySelector("#dashboard-search");
             window.__dashboardMetrics = document.querySelector("[data-testid='metrics-grid']");
@@ -85,20 +88,33 @@ try {
                 appRenders: window.goframeComponentRenderCounts.App,
                 headerRenders: window.goframeComponentRenderCounts.Header,
             };
-        })()`),
+        })()`);
+    assertMountedRowsBounded(initialState.rows, dashboardLogicalRows, "dashboard initial mounted rows");
+    assertDeepEqual(
+        {
+            header: initialState.header,
+            search: initialState.search,
+            metrics: initialState.metrics,
+            table: initialState.table,
+            detail: initialState.detail,
+            summary: initialState.summary,
+            appRenders: initialState.appRenders,
+            headerRenders: initialState.headerRenders,
+        },
         {
             header: true,
             search: true,
             metrics: true,
             table: true,
             detail: true,
-            rows: 300,
             summary: "Showing 300 of 300 issues",
             appRenders: 1,
             headerRenders: 1,
         },
         "dashboard initial render",
     );
+    await assertDashboardTableLayout(client, "initial");
+    await assertVirtualTableSpacerStability(client, "initial");
 
     assertDeepEqual(
         await client.evaluate(installDashboardAuditExpression(componentNames)),
@@ -129,22 +145,22 @@ try {
             headerRenders: window.goframeComponentRenderCounts.Header,
         };
     })()`);
-    if (!(searchState.rows > 0 && searchState.rows < 300)) {
+    const searchVisible = parseSummary(searchState.summary).visible;
+    assertMountedRowsBounded(searchState.rows, searchVisible, "dashboard search mounted rows");
+    if (!(searchVisible > 0 && searchVisible < 300)) {
         throw new Error(`APP FAILURE: search should narrow rows: ${JSON.stringify(searchState)}`);
     }
     assertDeepEqual(
         {
-            summary: searchState.summary,
             headerSame: searchState.headerSame,
             searchSame: searchState.searchSame,
             metricsVisible: searchState.metricsVisible,
             headerRenders: searchState.headerRenders,
         },
         {
-            summary: `Showing ${searchState.rows} of 300 issues`,
             headerSame: true,
             searchSame: true,
-            metricsVisible: searchState.rows,
+            metricsVisible: searchVisible,
             headerRenders: 1,
         },
         "dashboard search updates visible rows without replacing header/search",
@@ -188,11 +204,152 @@ try {
             window.__dashboardRow1 = document.querySelector("#issue-row-1");
             const before = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
             window.__dashboardBeforeSort = before;
+            window.__dashboardBeforeSortNodes = {};
+            for (const node of document.querySelectorAll(".issue-row")) {
+                window.__dashboardBeforeSortNodes[node.id] = node;
+            }
             return { rows: document.querySelectorAll(".issue-row").length, row1: Boolean(window.__dashboardRow1) };
         })()`),
-        (value) => value.rows === 300 && value.row1,
-        "APP FAILURE: dashboard reset before sort did not restore 300 visible rows",
+        (value) => value.rows > 0 && value.rows <= maxMountedRows && value.row1,
+        "APP FAILURE: dashboard reset before sort did not restore bounded mounted rows",
     );
+
+    const withinRowScrollBefore = await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+        window.__dashboardBeforeWithinRowScroll = [...document.querySelectorAll(".issue-row")].map((node) => node.id);
+        return window.__dashboardBeforeWithinRowScroll;
+    })()`);
+    await wait(120);
+    await assertVirtualTableSpacerStability(client, "before within-row scroll");
+    await startScenario(client, "table-scroll-within-row");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 10;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(120);
+    const withinRowScrollReport = await finishScenario(client, "table-scroll-within-row");
+    const withinRowScroll = await client.evaluate(`(() => ({
+        rowIDs: [...document.querySelectorAll(".issue-row")].map((node) => node.id),
+    }))()`);
+    assertWithinRowScrollReport(withinRowScrollReport, withinRowScrollBefore, withinRowScroll);
+    await assertVirtualTableSpacerStability(client, "within-row scroll");
+
+    const insideBufferBefore = await captureVirtualTableDom(client, "__dashboardInsideBufferBefore");
+    await startScenario(client, "table-scroll-inside-buffer");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 48 * 4;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(120);
+    const insideBufferReport = await finishScenario(client, "table-scroll-inside-buffer");
+    const insideBufferAfter = await readVirtualTableDom(client, "__dashboardInsideBufferBefore");
+    assertInsideBufferScrollReport(insideBufferReport, insideBufferBefore, insideBufferAfter);
+    await assertVirtualTableSpacerStability(client, "inside-buffer scroll");
+
+    const beyondBufferBefore = await captureVirtualTableDom(client, "__dashboardBeyondBufferBefore");
+    await startScenario(client, "table-scroll-beyond-buffer");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 48 * 20;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    const beyondBufferReport = await finishScenario(client, "table-scroll-beyond-buffer");
+    const beyondBufferAfter = await readVirtualTableDom(client, "__dashboardBeyondBufferBefore");
+    assertBeyondBufferScrollReport(beyondBufferReport, beyondBufferBefore, beyondBufferAfter);
+    await assertVirtualTableSpacerStability(client, "beyond-buffer scroll");
+
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    const continuousBefore = await captureVirtualTableDom(client, "__dashboardContinuousBefore");
+    await startScenario(client, "table-continuous-scroll-buffered");
+    const continuousScrollSteps = await client.evaluate(`(async () => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        let steps = 0;
+        for (let top = 0; top <= 48 * 80; top += 12) {
+            viewport.scrollTop = top;
+            viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+            steps++;
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+        return steps;
+    })()`);
+    await wait(240);
+    const continuousReport = await finishScenario(client, "table-continuous-scroll-buffered");
+    const continuousAfter = await readVirtualTableDom(client, "__dashboardContinuousBefore");
+    assertContinuousScrollReport(continuousReport, continuousScrollSteps, continuousBefore, continuousAfter);
+    await assertVirtualTableSpacerStability(client, "continuous buffered scroll");
+
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    await assertVirtualTableSpacerStability(client, "before cross-row scroll");
+
+    await startScenario(client, "table-scroll");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        window.__dashboardBeforeScroll = [...document.querySelectorAll(".issue-row")].map((node) => node.id);
+        viewport.scrollTop = 48 * 80;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    const scrollReport = await finishScenario(client, "table-scroll");
+    const scrolled = await client.evaluate(`(() => {
+        const after = [...document.querySelectorAll(".issue-row")].map((node) => node.id);
+        const target = after[2] || after[0] || "";
+        window.__dashboardScrolledTarget = target.replace("issue-row-", "");
+        return {
+            rows: after.length,
+            changed: JSON.stringify(after) !== JSON.stringify(window.__dashboardBeforeScroll),
+            target: window.__dashboardScrolledTarget,
+        };
+    })()`);
+    assertMountedRowsBounded(scrolled.rows, dashboardLogicalRows, "dashboard scrolled mounted rows");
+    if (!scrolled.changed || !scrolled.target) {
+        throw new Error(`APP FAILURE: dashboard scroll should change visible row window: ${JSON.stringify(scrolled)}`);
+    }
+    await assertVirtualTableSpacerStability(client, "cross-row scroll");
+    await client.evaluate(`(() => {
+        const target = document.querySelector("#issue-row-" + window.__dashboardScrolledTarget + " .row-link");
+        target.click();
+    })()`);
+    await wait(120);
+    const scrolledSelection = await client.evaluate(`(() => ({
+        detail: document.querySelector("[data-testid='detail-panel']")?.textContent.includes(window.__dashboardScrolledTarget),
+        rows: document.querySelectorAll(".issue-row").length,
+    }))()`);
+    assertMountedRowsBounded(scrolledSelection.rows, dashboardLogicalRows, "dashboard scrolled selection mounted rows");
+    if (!scrolledSelection.detail) {
+        throw new Error(`APP FAILURE: selecting after scroll did not update detail: ${JSON.stringify(scrolledSelection)}`);
+    }
+    console.log("dashboard virtual scroll selection updates detail: ok");
+
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    await assertVirtualTableSpacerStability(client, "scroll back to top");
+    await client.evaluate(`(() => {
+        const before = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
+        window.__dashboardBeforeSort = before;
+        window.__dashboardBeforeSortNodes = {};
+        for (const node of document.querySelectorAll(".issue-row")) {
+            window.__dashboardBeforeSortNodes[node.id] = node;
+        }
+    })()`);
 
     await startScenario(client, "sort-priority");
     const sortStart = Date.now();
@@ -201,18 +358,21 @@ try {
     const sortReport = await finishScenario(client, "sort-priority");
     const sorted = await client.evaluate(`(() => {
         const after = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
+        const overlap = after.find((id) => window.__dashboardBeforeSort.includes(id));
         return {
             rows: document.querySelectorAll(".issue-row").length,
-            row1Same: window.__dashboardRow1 === document.querySelector("#issue-row-1"),
             changed: JSON.stringify(after) !== JSON.stringify(window.__dashboardBeforeSort),
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
+            overlapPreserved: overlap ? window.__dashboardBeforeSortNodes[overlap] === document.querySelector("#" + overlap) : true,
         };
     })()`);
+    assertMountedRowsBounded(sorted.rows, dashboardLogicalRows, "dashboard sorted mounted rows");
     assertDeepEqual(
-        sorted,
-        { rows: 300, row1Same: true, changed: true, headerSame: true },
-        "dashboard sort reorders keyed rows without replacing survivors",
+        { changed: sorted.changed, headerSame: sorted.headerSame, overlapPreserved: sorted.overlapPreserved },
+        { changed: true, headerSame: true, overlapPreserved: true },
+        "dashboard sort updates virtual row window without replacing visible survivors",
     );
+    await assertVirtualTableSpacerStability(client, "sort");
 
     await startScenario(client, "status-blocked");
     await setSelectValue(client, "#status-filter", "blocked");
@@ -225,14 +385,18 @@ try {
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
         };
     })()`);
-    if (!(filtered.rows > 0 && filtered.rows < 300)) {
+    const filteredVisible = parseSummary(filtered.summary).visible;
+    assertMountedRowsBounded(filtered.rows, filteredVisible, "dashboard status mounted rows");
+    if (!(filteredVisible > 0 && filteredVisible < 300)) {
         throw new Error(`APP FAILURE: status filter should narrow rows: ${JSON.stringify(filtered)}`);
     }
     assertDeepEqual(
         { summary: filtered.summary, headerSame: filtered.headerSame },
-        { summary: `Showing ${filtered.rows} of 300 issues`, headerSame: true },
+        { summary: `Showing ${filteredVisible} of 300 issues`, headerSame: true },
         "dashboard status filter updates table predictably",
     );
+    await assertDashboardTableLayout(client, "status filter");
+    await assertVirtualTableSpacerStability(client, "status filter");
 
     await startScenario(client, "reset-before-simulate");
     await clickButtonByText(client, "Reset");
@@ -283,7 +447,7 @@ try {
     await clickButtonByText(client, "Reset");
     await wait(120);
     const resetReport = await finishScenario(client, "reset-final");
-    assertDeepEqual(
+    windowlessAssert(
         await client.evaluate(`(() => ({
             rows: document.querySelectorAll(".issue-row").length,
             summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim(),
@@ -291,15 +455,17 @@ try {
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
             searchSame: window.__dashboardSearch === document.querySelector("#dashboard-search"),
         }))()`),
-        {
-            rows: 300,
-            summary: "Showing 300 of 300 issues",
-            title: "GoFrame Dashboard · 300 visible",
-            headerSame: true,
-            searchSame: true,
+        (value) => {
+            assertMountedRowsBounded(value.rows, dashboardLogicalRows, "dashboard reset mounted rows");
+            return value.summary === "Showing 300 of 300 issues" &&
+                value.title === "GoFrame Dashboard · 300 visible" &&
+                value.headerSame &&
+                value.searchSame;
         },
         "dashboard reset restores deterministic view",
     );
+    await assertDashboardTableLayout(client, "reset");
+    await assertVirtualTableSpacerStability(client, "reset");
 
     client.close();
     console.log(`Dashboard timing report: ${JSON.stringify(timings)}`);
@@ -308,6 +474,11 @@ try {
         searchReport,
         selectReport,
         clearSearchReport,
+        withinRowScrollReport,
+        insideBufferReport,
+        beyondBufferReport,
+        continuousReport,
+        scrollReport,
         sortReport,
         statusReport,
         resetBeforeSimulateReport,
@@ -421,6 +592,245 @@ function assertFocusOnlyReport(report) {
         throw new Error(`APP FAILURE: focus-only should not trigger runtime work: ${JSON.stringify(report)}`);
     }
     console.log("dashboard focus-only does not trigger runtime work: ok");
+}
+
+function parseSummary(summary) {
+    const match = /^Showing (\d+) of (\d+) issues$/.exec(summary || "");
+    if (!match) {
+        throw new Error(`APP FAILURE: unexpected dashboard summary: ${summary}`);
+    }
+    return { visible: Number(match[1]), total: Number(match[2]) };
+}
+
+function assertMountedRowsBounded(rows, logicalRows, label) {
+    const expectedLimit = Math.min(maxMountedRows, Math.max(0, logicalRows));
+    if (rows < 0 || rows > expectedLimit || (logicalRows > 0 && rows === 0)) {
+        throw new Error(`APP FAILURE: ${label}: mounted rows ${rows}, logical rows ${logicalRows}, limit ${expectedLimit}`);
+    }
+}
+
+async function assertDashboardTableLayout(client, label) {
+    const layout = await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        const table = viewport?.querySelector("table");
+        const headerCells = table ? [...table.querySelectorAll("thead th")] : [];
+        const firstRow = table?.querySelector("tbody tr.issue-row");
+        const firstRowCells = firstRow ? [...firstRow.querySelectorAll("td")] : [];
+        const rowLink = firstRow?.querySelector(".row-link");
+        const bounds = (node) => {
+            const rect = node.getBoundingClientRect();
+            return { width: Math.round(rect.width), height: Math.round(rect.height) };
+        };
+        return {
+            viewportWidth: viewport ? Math.round(viewport.getBoundingClientRect().width) : 0,
+            tableWidth: table ? Math.round(table.getBoundingClientRect().width) : 0,
+            headerCellCount: headerCells.length,
+            firstRowCellCount: firstRowCells.length,
+            headerWidths: headerCells.map((cell) => bounds(cell).width),
+            firstRowWidths: firstRowCells.map((cell) => bounds(cell).width),
+            rowLinkWidth: rowLink ? bounds(rowLink).width : 0,
+        };
+    })()`);
+    const failures = [];
+    if (layout.headerCellCount !== 7) failures.push(`header cells=${layout.headerCellCount}`);
+    if (layout.firstRowCellCount !== 7) failures.push(`row cells=${layout.firstRowCellCount}`);
+    if (!(layout.viewportWidth > 0 && layout.tableWidth >= layout.viewportWidth * 0.95)) {
+        failures.push(`table width ${layout.tableWidth}, viewport width ${layout.viewportWidth}`);
+    }
+    for (const [index, width] of layout.headerWidths.entries()) {
+        if (width <= 30) failures.push(`header width[${index}]=${width}`);
+    }
+    if ((layout.firstRowWidths[0] ?? 0) <= 100) {
+        failures.push(`issue column width=${layout.firstRowWidths[0] ?? 0}`);
+    }
+    if ((layout.firstRowWidths[6] ?? 0) <= 50) {
+        failures.push(`action column width=${layout.firstRowWidths[6] ?? 0}`);
+    }
+    if (layout.rowLinkWidth <= 100) {
+        failures.push(`row link width=${layout.rowLinkWidth}`);
+    }
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: dashboard table layout collapsed during ${label}: ${failures.join("; ")} ${JSON.stringify(layout)}`);
+    }
+    console.log(`dashboard table layout ${label}: ok`);
+}
+
+async function assertVirtualTableSpacerStability(client, label) {
+    const state = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const spacers = tbody ? [...tbody.querySelectorAll(".gf-virtual-table-spacer")] : [];
+        if (top && !window.__dashboardSpacerTop) window.__dashboardSpacerTop = top;
+        if (bottom && !window.__dashboardSpacerBottom) window.__dashboardSpacerBottom = bottom;
+        return {
+            spacerCount: spacers.length,
+            topExists: Boolean(top),
+            bottomExists: Boolean(bottom),
+            topSame: Boolean(top && window.__dashboardSpacerTop === top),
+            bottomSame: Boolean(bottom && window.__dashboardSpacerBottom === bottom),
+            childCount: tbody?.children.length ?? 0,
+            rowCount: document.querySelectorAll(".issue-row").length,
+        };
+    })()`);
+    const failures = [];
+    if (state.spacerCount !== 2) failures.push(`spacer count=${state.spacerCount}`);
+    if (!state.topExists) failures.push("top spacer missing");
+    if (!state.bottomExists) failures.push("bottom spacer missing");
+    if (!state.topSame) failures.push("top spacer node identity changed");
+    if (!state.bottomSame) failures.push("bottom spacer node identity changed");
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, `dashboard spacer stability ${label} mounted rows`);
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: virtual table spacers unstable during ${label}: ${failures.join("; ")} ${JSON.stringify(state)}`);
+    }
+    console.log(`dashboard virtual table spacers ${label}: ok`);
+}
+
+function assertWithinRowScrollReport(report, beforeState, state) {
+    const before = JSON.stringify(beforeState);
+    const current = JSON.stringify(state.rowIDs);
+    if (before !== current) {
+        throw new Error(`APP FAILURE: within-row scroll changed mounted row IDs: before ${before}, after ${current}`);
+    }
+    if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
+        throw new Error(`APP FAILURE: within-row scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+        report.operations.insertBefore !== 0 || report.operations.appendChild !== 0) {
+        throw new Error(`APP FAILURE: within-row scroll should not churn DOM: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard within-row scroll no-op summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations })}`);
+}
+
+async function captureVirtualTableDom(client, key) {
+    return await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const rows = [...document.querySelectorAll(".issue-row")];
+        window[${JSON.stringify(key)}] = {
+            top,
+            bottom,
+            rowIDs: rows.map((node) => node.id),
+            childCount: tbody?.children.length ?? 0,
+        };
+        return {
+            rowIDs: rows.map((node) => node.id),
+            rowCount: rows.length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+            topExists: Boolean(top),
+            bottomExists: Boolean(bottom),
+        };
+    })()`);
+}
+
+async function readVirtualTableDom(client, key) {
+    return await client.evaluate(`(() => {
+        const before = window[${JSON.stringify(key)}] || {};
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const rows = [...document.querySelectorAll(".issue-row")];
+        return {
+            rowIDs: rows.map((node) => node.id),
+            rowCount: rows.length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+            topSame: Boolean(top && before.top === top),
+            bottomSame: Boolean(bottom && before.bottom === bottom),
+            rowIDsSame: JSON.stringify(before.rowIDs || []) === JSON.stringify(rows.map((node) => node.id)),
+            childCountSame: before.childCount === (tbody?.children.length ?? 0),
+        };
+    })()`);
+}
+
+function assertInsideBufferScrollReport(report, beforeState, state) {
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, "dashboard inside-buffer mounted rows");
+    if (!state.topSame || !state.bottomSame || state.spacerCount !== 2) {
+        throw new Error(`APP FAILURE: inside-buffer scroll changed spacer identity: ${JSON.stringify(state)}`);
+    }
+    if (!state.rowIDsSame || !state.childCountSame || beforeState.childCount !== state.childCount) {
+        throw new Error(`APP FAILURE: inside-buffer scroll changed mounted rows: before ${JSON.stringify(beforeState)}, after ${JSON.stringify(state)}`);
+    }
+    if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
+        throw new Error(`APP FAILURE: inside-buffer scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+        report.operations.insertBefore !== 0 || report.operations.appendChild !== 0 ||
+        report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
+        throw new Error(`APP FAILURE: inside-buffer scroll should not churn DOM/listeners: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard inside-buffer scroll no-op summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations })}`);
+}
+
+function assertBeyondBufferScrollReport(report, beforeState, state) {
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, "dashboard beyond-buffer mounted rows");
+    if (!state.topSame || !state.bottomSame || state.spacerCount !== 2) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll changed spacer identity: ${JSON.stringify(state)}`);
+    }
+    if (state.rowIDsSame) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll should update mounted row window: before ${JSON.stringify(beforeState)}, after ${JSON.stringify(state)}`);
+    }
+    if (report.renderDeltas.VirtualTable <= 0) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll should render VirtualTable: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    if (report.operations.addEventListener !== report.operations.removeEventListener) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll listener net changed: ${JSON.stringify(report.operations)}`);
+    }
+    const rowCount = Math.max(beforeState.rowCount, state.rowCount, 1);
+    const changedRows = Math.max(1, countRowWindowChanges(beforeState.rowIDs, state.rowIDs));
+    const created = report.operations.createElement + report.operations.createTextNode;
+    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    const createdLimit = rowCount * 16;
+    const insertedLimit = rowCount * 16;
+    const removedLimit = rowCount * 4;
+    const listenerLimit = rowCount * 2;
+    if (created > createdLimit || inserted > insertedLimit || report.operations.removeChild > removedLimit ||
+        report.operations.addEventListener > listenerLimit || report.operations.removeEventListener > listenerLimit) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll DOM churn is unbounded: ${JSON.stringify({
+            operations: report.operations,
+            rowCount,
+            changedRows,
+            limits: { createdLimit, insertedLimit, removedLimit, listenerLimit },
+        })}`);
+    }
+    console.log(`dashboard beyond-buffer scroll bounded summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations, rowCount, changedRows, limits: { createdLimit, insertedLimit, removedLimit, listenerLimit }, beforeRows: beforeState.rowCount, afterRows: state.rowCount })}`);
+}
+
+function countRowWindowChanges(beforeIDs, afterIDs) {
+    const before = new Set(beforeIDs || []);
+    let changed = 0;
+    for (const id of afterIDs || []) {
+        if (!before.has(id)) {
+            changed++;
+        }
+    }
+    return changed;
+}
+
+function assertContinuousScrollReport(report, scrollSteps, beforeState, state) {
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, "dashboard continuous-scroll mounted rows");
+    if (!state.topSame || !state.bottomSame || state.spacerCount !== 2) {
+        throw new Error(`APP FAILURE: continuous scroll changed spacer identity: ${JSON.stringify(state)}`);
+    }
+    const maxTableRenders = Math.ceil(scrollSteps / 4);
+    if (report.renderDeltas.VirtualTable > maxTableRenders) {
+        throw new Error(`APP FAILURE: continuous scroll rendered VirtualTable too often: renders=${report.renderDeltas.VirtualTable}, steps=${scrollSteps}, report=${JSON.stringify(report)}`);
+    }
+    if (report.renderDeltas.IssueRow > maxMountedRows * maxTableRenders) {
+        throw new Error(`APP FAILURE: continuous scroll rendered IssueRow too often: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    const created = report.operations.createElement + report.operations.createTextNode;
+    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    if (created > maxMountedRows * maxTableRenders || inserted > maxMountedRows * maxTableRenders ||
+        report.operations.removeChild > maxMountedRows * maxTableRenders) {
+        throw new Error(`APP FAILURE: continuous scroll DOM churn is unbounded: ${JSON.stringify(report.operations)}`);
+    }
+    if (report.operations.addEventListener !== report.operations.removeEventListener) {
+        throw new Error(`APP FAILURE: continuous scroll listener net changed: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard continuous buffered scroll summary: ${JSON.stringify({ scrollSteps, tableRenders: report.renderDeltas.VirtualTable, rowRenders: report.renderDeltas.IssueRow, operations: report.operations, beforeRows: beforeState.rowCount, afterRows: state.rowCount })}`);
 }
 
 async function waitForPage(port) {

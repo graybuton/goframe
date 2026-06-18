@@ -1,0 +1,211 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <VirtualizedApp />
+}
+
+type VirtualizedAppProps struct{}
+
+func VirtualizedApp(props VirtualizedAppProps) gf.Node {
+	items, dispatch := gf.UseReducer(makeDemoItems(virtualizedItemCount), reduceDemoItems)
+	selectedID, setSelectedID := gf.UseState(1)
+	selected, found := findDemoItem(items, selectedID)
+
+	toggle := func(id int) {
+		dispatch(DemoAction{Kind: DemoActionToggle, ID: id})
+	}
+	reset := func() {
+		dispatch(DemoAction{Kind: DemoActionReset})
+		setSelectedID(1)
+	}
+
+	return (
+		<main class="virtual-page">
+			<header class="hero" data-testid="virtualized-header">
+				<p class="eyebrow">GoFrame virtualized collections</p>
+				<h1>10,000 logical rows, bounded DOM</h1>
+				<p data-testid="logical-count">{len(items)} logical items</p>
+			</header>
+
+			<section class="toolbar">
+				<button Type="button" id="reset-demo" OnClick={reset}>Reset demo data</button>
+				<p data-testid="selection-summary">
+					{found ? (
+						<>Selected #{selected.ID} · {enabledLabel(selected.Enabled)} · score {selected.Score}</>
+					) : (
+						<>No selection</>
+					)}
+				</p>
+			</section>
+
+			<section class="virtual-grid">
+				<VirtualListPanel
+					Items={items}
+					SelectedID={selectedID}
+					OnSelect={setSelectedID}
+					OnToggle={toggle}
+				/>
+				<VirtualTablePanel
+					Items={items}
+					SelectedID={selectedID}
+					OnSelect={setSelectedID}
+					OnToggle={toggle}
+				/>
+			</section>
+		</main>
+	)
+}
+
+type VirtualListPanelProps struct {
+	Items []DemoItem
+	SelectedID int
+	OnSelect func(id int)
+	OnToggle func(id int)
+}
+
+func VirtualListPanel(props VirtualListPanelProps) gf.Node {
+	return (
+		<section class="panel">
+			<h2>VirtualList</h2>
+			{gf.VirtualList[DemoItem](gf.VirtualListProps[DemoItem]{
+				Items: props.Items,
+				Height: virtualListHeight,
+				ItemHeight: virtualListItemHeight,
+				Overscan: virtualOverscan,
+				Key: func(item DemoItem, index int) string {
+					return gf.ToString(item.ID)
+				},
+				RenderItem: func(item gf.VirtualItem[DemoItem]) gf.Node {
+					value := item.Item
+					return <VirtualListItem
+						Key={item.Key}
+						Item={value}
+						Selected={value.ID == props.SelectedID}
+						OnSelect={props.OnSelect}
+						OnToggle={props.OnToggle}
+					/>
+				},
+				Class: "demo-list",
+				TestID: "virtual-list",
+			})}
+		</section>
+	)
+}
+
+type VirtualListItemProps struct {
+	Item DemoItem
+	Selected bool
+	OnSelect func(id int)
+	OnToggle func(id int)
+}
+
+func VirtualListItem(props VirtualListItemProps) gf.Node {
+	className := "list-card"
+	if props.Selected {
+		className += " selected"
+	}
+	return (
+		<div class={className} data-testid={"virtual-list-item-"+gf.ToString(props.Item.ID)}>
+			<button Type="button" class="item-main" OnClick={func() {
+				props.OnSelect(props.Item.ID)
+			}}>
+				<strong>#{props.Item.ID} {props.Item.Name}</strong>
+				<span>{props.Item.Group} · score {props.Item.Score}</span>
+			</button>
+			<button Type="button" class="tiny" OnClick={func() {
+				props.OnToggle(props.Item.ID)
+			}}>{enabledLabel(props.Item.Enabled)}</button>
+		</div>
+	)
+}
+
+type VirtualTablePanelProps struct {
+	Items []DemoItem
+	SelectedID int
+	OnSelect func(id int)
+	OnToggle func(id int)
+}
+
+func VirtualTablePanel(props VirtualTablePanelProps) gf.Node {
+	return (
+		<section class="panel">
+			<h2>VirtualTable</h2>
+			{gf.VirtualTable[DemoItem](gf.VirtualTableProps[DemoItem]{
+				Items: props.Items,
+				Height: virtualTableHeight,
+				RowHeight: virtualTableRowHeight,
+				Overscan: virtualOverscan,
+				ColumnCount: virtualTableColumnCount,
+				Key: func(item DemoItem, index int) string {
+					return gf.ToString(item.ID)
+				},
+				Header: func() gf.Node {
+					return <VirtualTableHeader />
+				},
+				RenderRow: func(row gf.VirtualRow[DemoItem]) gf.Node {
+					item := row.Item
+					return <VirtualTableRow
+						Key={row.Key}
+						Item={item}
+						Selected={item.ID == props.SelectedID}
+						Style={row.RowStyle}
+						OnSelect={props.OnSelect}
+						OnToggle={props.OnToggle}
+					/>
+				},
+				Class: "demo-table",
+				TestID: "virtual-table",
+			})}
+		</section>
+	)
+}
+
+type VirtualTableHeaderProps struct{}
+
+func VirtualTableHeader(props VirtualTableHeaderProps) gf.Node {
+	return (
+		<thead>
+			<tr>
+				<th>Item</th>
+				<th>Group</th>
+				<th>Score</th>
+				<th>Status</th>
+				<th>Action</th>
+			</tr>
+		</thead>
+	)
+}
+
+type VirtualTableRowProps struct {
+	Item DemoItem
+	Selected bool
+	Style string
+	OnSelect func(id int)
+	OnToggle func(id int)
+}
+
+func VirtualTableRow(props VirtualTableRowProps) gf.Node {
+	className := "virtual-row"
+	if props.Selected {
+		className += " selected"
+	}
+	return (
+		<tr class={className} style={props.Style} data-testid={"virtual-row-"+gf.ToString(props.Item.ID)}>
+			<td>
+				<button Type="button" class="row-link" OnClick={func() {
+					props.OnSelect(props.Item.ID)
+				}}>#{props.Item.ID} {props.Item.Name}</button>
+			</td>
+			<td>{props.Item.Group}</td>
+			<td>{props.Item.Score}</td>
+			<td>{enabledLabel(props.Item.Enabled)}</td>
+			<td>
+				<button Type="button" class="tiny" OnClick={func() {
+					props.OnToggle(props.Item.ID)
+				}}>Toggle</button>
+			</td>
+		</tr>
+	)
+}
