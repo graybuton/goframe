@@ -14,6 +14,8 @@ const profile = await mkdtemp(join(tmpdir(), "goframe-dashboard-smoke-"));
 const expectedApp = new URL(appURL);
 const timings = [];
 const performanceReports = [];
+const dashboardLogicalRows = 300;
+const maxMountedRows = 70;
 const componentNames = [
     "App",
     "Header",
@@ -26,6 +28,8 @@ const componentNames = [
     "SearchBox",
     "IssueWorkspace",
     "IssueTable",
+    "VirtualTable",
+    "IssueTableHeader",
     "IssueRow",
     "DetailPanel",
     "EmptyDetail",
@@ -66,8 +70,7 @@ try {
     await navigateToApp(client, withSmokeParam(appURL, "clean"));
     await waitForAppPage(client, expectedApp, "post-clean navigation");
 
-    assertDeepEqual(
-        await client.evaluate(`(() => {
+    const initialState = await client.evaluate(`(() => {
             window.__dashboardHeader = document.querySelector("[data-testid='dashboard-header']");
             window.__dashboardSearch = document.querySelector("#dashboard-search");
             window.__dashboardMetrics = document.querySelector("[data-testid='metrics-grid']");
@@ -85,14 +88,25 @@ try {
                 appRenders: window.goframeComponentRenderCounts.App,
                 headerRenders: window.goframeComponentRenderCounts.Header,
             };
-        })()`),
+        })()`);
+    assertMountedRowsBounded(initialState.rows, dashboardLogicalRows, "dashboard initial mounted rows");
+    assertDeepEqual(
+        {
+            header: initialState.header,
+            search: initialState.search,
+            metrics: initialState.metrics,
+            table: initialState.table,
+            detail: initialState.detail,
+            summary: initialState.summary,
+            appRenders: initialState.appRenders,
+            headerRenders: initialState.headerRenders,
+        },
         {
             header: true,
             search: true,
             metrics: true,
             table: true,
             detail: true,
-            rows: 300,
             summary: "Showing 300 of 300 issues",
             appRenders: 1,
             headerRenders: 1,
@@ -129,22 +143,22 @@ try {
             headerRenders: window.goframeComponentRenderCounts.Header,
         };
     })()`);
-    if (!(searchState.rows > 0 && searchState.rows < 300)) {
+    const searchVisible = parseSummary(searchState.summary).visible;
+    assertMountedRowsBounded(searchState.rows, searchVisible, "dashboard search mounted rows");
+    if (!(searchVisible > 0 && searchVisible < 300)) {
         throw new Error(`APP FAILURE: search should narrow rows: ${JSON.stringify(searchState)}`);
     }
     assertDeepEqual(
         {
-            summary: searchState.summary,
             headerSame: searchState.headerSame,
             searchSame: searchState.searchSame,
             metricsVisible: searchState.metricsVisible,
             headerRenders: searchState.headerRenders,
         },
         {
-            summary: `Showing ${searchState.rows} of 300 issues`,
             headerSame: true,
             searchSame: true,
-            metricsVisible: searchState.rows,
+            metricsVisible: searchVisible,
             headerRenders: 1,
         },
         "dashboard search updates visible rows without replacing header/search",
@@ -188,11 +202,68 @@ try {
             window.__dashboardRow1 = document.querySelector("#issue-row-1");
             const before = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
             window.__dashboardBeforeSort = before;
+            window.__dashboardBeforeSortNodes = {};
+            for (const node of document.querySelectorAll(".issue-row")) {
+                window.__dashboardBeforeSortNodes[node.id] = node;
+            }
             return { rows: document.querySelectorAll(".issue-row").length, row1: Boolean(window.__dashboardRow1) };
         })()`),
-        (value) => value.rows === 300 && value.row1,
-        "APP FAILURE: dashboard reset before sort did not restore 300 visible rows",
+        (value) => value.rows > 0 && value.rows <= maxMountedRows && value.row1,
+        "APP FAILURE: dashboard reset before sort did not restore bounded mounted rows",
     );
+
+    await startScenario(client, "table-scroll");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        window.__dashboardBeforeScroll = [...document.querySelectorAll(".issue-row")].map((node) => node.id);
+        viewport.scrollTop = 48 * 80;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    const scrollReport = await finishScenario(client, "table-scroll");
+    const scrolled = await client.evaluate(`(() => {
+        const after = [...document.querySelectorAll(".issue-row")].map((node) => node.id);
+        const target = after[2] || after[0] || "";
+        window.__dashboardScrolledTarget = target.replace("issue-row-", "");
+        return {
+            rows: after.length,
+            changed: JSON.stringify(after) !== JSON.stringify(window.__dashboardBeforeScroll),
+            target: window.__dashboardScrolledTarget,
+        };
+    })()`);
+    assertMountedRowsBounded(scrolled.rows, dashboardLogicalRows, "dashboard scrolled mounted rows");
+    if (!scrolled.changed || !scrolled.target) {
+        throw new Error(`APP FAILURE: dashboard scroll should change visible row window: ${JSON.stringify(scrolled)}`);
+    }
+    await client.evaluate(`(() => {
+        const target = document.querySelector("#issue-row-" + window.__dashboardScrolledTarget + " .row-link");
+        target.click();
+    })()`);
+    await wait(120);
+    const scrolledSelection = await client.evaluate(`(() => ({
+        detail: document.querySelector("[data-testid='detail-panel']")?.textContent.includes(window.__dashboardScrolledTarget),
+        rows: document.querySelectorAll(".issue-row").length,
+    }))()`);
+    assertMountedRowsBounded(scrolledSelection.rows, dashboardLogicalRows, "dashboard scrolled selection mounted rows");
+    if (!scrolledSelection.detail) {
+        throw new Error(`APP FAILURE: selecting after scroll did not update detail: ${JSON.stringify(scrolledSelection)}`);
+    }
+    console.log("dashboard virtual scroll selection updates detail: ok");
+
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    await client.evaluate(`(() => {
+        const before = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
+        window.__dashboardBeforeSort = before;
+        window.__dashboardBeforeSortNodes = {};
+        for (const node of document.querySelectorAll(".issue-row")) {
+            window.__dashboardBeforeSortNodes[node.id] = node;
+        }
+    })()`);
 
     await startScenario(client, "sort-priority");
     const sortStart = Date.now();
@@ -201,17 +272,19 @@ try {
     const sortReport = await finishScenario(client, "sort-priority");
     const sorted = await client.evaluate(`(() => {
         const after = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
+        const overlap = after.find((id) => window.__dashboardBeforeSort.includes(id));
         return {
             rows: document.querySelectorAll(".issue-row").length,
-            row1Same: window.__dashboardRow1 === document.querySelector("#issue-row-1"),
             changed: JSON.stringify(after) !== JSON.stringify(window.__dashboardBeforeSort),
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
+            overlapPreserved: overlap ? window.__dashboardBeforeSortNodes[overlap] === document.querySelector("#" + overlap) : true,
         };
     })()`);
+    assertMountedRowsBounded(sorted.rows, dashboardLogicalRows, "dashboard sorted mounted rows");
     assertDeepEqual(
-        sorted,
-        { rows: 300, row1Same: true, changed: true, headerSame: true },
-        "dashboard sort reorders keyed rows without replacing survivors",
+        { changed: sorted.changed, headerSame: sorted.headerSame, overlapPreserved: sorted.overlapPreserved },
+        { changed: true, headerSame: true, overlapPreserved: true },
+        "dashboard sort updates virtual row window without replacing visible survivors",
     );
 
     await startScenario(client, "status-blocked");
@@ -225,12 +298,14 @@ try {
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
         };
     })()`);
-    if (!(filtered.rows > 0 && filtered.rows < 300)) {
+    const filteredVisible = parseSummary(filtered.summary).visible;
+    assertMountedRowsBounded(filtered.rows, filteredVisible, "dashboard status mounted rows");
+    if (!(filteredVisible > 0 && filteredVisible < 300)) {
         throw new Error(`APP FAILURE: status filter should narrow rows: ${JSON.stringify(filtered)}`);
     }
     assertDeepEqual(
         { summary: filtered.summary, headerSame: filtered.headerSame },
-        { summary: `Showing ${filtered.rows} of 300 issues`, headerSame: true },
+        { summary: `Showing ${filteredVisible} of 300 issues`, headerSame: true },
         "dashboard status filter updates table predictably",
     );
 
@@ -283,7 +358,7 @@ try {
     await clickButtonByText(client, "Reset");
     await wait(120);
     const resetReport = await finishScenario(client, "reset-final");
-    assertDeepEqual(
+    windowlessAssert(
         await client.evaluate(`(() => ({
             rows: document.querySelectorAll(".issue-row").length,
             summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim(),
@@ -291,12 +366,12 @@ try {
             headerSame: window.__dashboardHeader === document.querySelector("[data-testid='dashboard-header']"),
             searchSame: window.__dashboardSearch === document.querySelector("#dashboard-search"),
         }))()`),
-        {
-            rows: 300,
-            summary: "Showing 300 of 300 issues",
-            title: "GoFrame Dashboard · 300 visible",
-            headerSame: true,
-            searchSame: true,
+        (value) => {
+            assertMountedRowsBounded(value.rows, dashboardLogicalRows, "dashboard reset mounted rows");
+            return value.summary === "Showing 300 of 300 issues" &&
+                value.title === "GoFrame Dashboard · 300 visible" &&
+                value.headerSame &&
+                value.searchSame;
         },
         "dashboard reset restores deterministic view",
     );
@@ -308,6 +383,7 @@ try {
         searchReport,
         selectReport,
         clearSearchReport,
+        scrollReport,
         sortReport,
         statusReport,
         resetBeforeSimulateReport,
@@ -421,6 +497,21 @@ function assertFocusOnlyReport(report) {
         throw new Error(`APP FAILURE: focus-only should not trigger runtime work: ${JSON.stringify(report)}`);
     }
     console.log("dashboard focus-only does not trigger runtime work: ok");
+}
+
+function parseSummary(summary) {
+    const match = /^Showing (\d+) of (\d+) issues$/.exec(summary || "");
+    if (!match) {
+        throw new Error(`APP FAILURE: unexpected dashboard summary: ${summary}`);
+    }
+    return { visible: Number(match[1]), total: Number(match[2]) };
+}
+
+function assertMountedRowsBounded(rows, logicalRows, label) {
+    const expectedLimit = Math.min(maxMountedRows, Math.max(0, logicalRows));
+    if (rows < 0 || rows > expectedLimit || (logicalRows > 0 && rows === 0)) {
+        throw new Error(`APP FAILURE: ${label}: mounted rows ${rows}, logical rows ${logicalRows}, limit ${expectedLimit}`);
+    }
 }
 
 async function waitForPage(port) {

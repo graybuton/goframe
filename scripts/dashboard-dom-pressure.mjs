@@ -18,6 +18,10 @@ const cycles = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_CYCLES ?? "20");
 const settleFrames = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_SETTLE_FRAMES ?? "2");
 const postIdleMs = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_POST_IDLE_MS ?? "3000");
 const profile = await mkdtemp(join(tmpdir(), "goframe-dashboard-pressure-"));
+const expectedAllRows = 300;
+const maxMountedRows = 70;
+const maxAllCreateNodes = 2500;
+const maxAllEventAdds = 160;
 const componentNames = [
     "App",
     "Header",
@@ -30,6 +34,8 @@ const componentNames = [
     "SearchBox",
     "IssueWorkspace",
     "IssueTable",
+    "VirtualTable",
+    "IssueTableHeader",
     "IssueRow",
     "DetailPanel",
     "EmptyDetail",
@@ -66,8 +72,8 @@ try {
     await client.evaluate(installPressureAuditExpression(componentNames));
 
     const initial = await samplePage(client, "initial", 0, "all");
-    if (initial.rows !== 300) {
-        throw new Error(`APP FAILURE: dashboard should start with 300 rows, got ${initial.rows}`);
+    if (initial.logicalRows !== expectedAllRows || initial.rows <= 0 || initial.rows > maxMountedRows) {
+        throw new Error(`APP FAILURE: dashboard should start with ${expectedAllRows} logical rows and bounded mounted rows: ${JSON.stringify(initial)}`);
     }
 
     const records = [];
@@ -305,6 +311,8 @@ async function runTransition(client, cycle, status, label) {
         status,
         durationMs: audit.durationMs,
         rows: audit.rows,
+        logicalRows: audit.logicalRows,
+        totalRows: audit.totalRows,
         summary: audit.summary,
         liveDOMNodes: audit.liveDOMNodes,
         allNodesAfterGC: afterGC.liveDOMNodes,
@@ -349,6 +357,9 @@ async function samplePage(client, label, cycle, status) {
         liveDOMNodes: document.querySelectorAll("*").length,
         summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
     }))()`);
+    const parsed = parseSummary(page.summary);
+    page.logicalRows = parsed.visible;
+    page.totalRows = parsed.total;
     return { ...page, metrics: await performanceMetrics(client) };
 }
 
@@ -516,12 +527,16 @@ function installPressureAuditExpression(names) {
                 for (const key of Object.keys(operations)) {
                     opDeltas[key] = operations[key] - this.operationBaseline[key];
                 }
+                const summary = document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "";
+                const match = /^Showing (\\d+) of (\\d+) issues$/.exec(summary);
                 return {
                     label,
                     durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
                     rows: document.querySelectorAll(".issue-row").length,
+                    logicalRows: match ? Number(match[1]) : -1,
+                    totalRows: match ? Number(match[2]) : -1,
                     liveDOMNodes: document.querySelectorAll("*").length,
-                    summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+                    summary,
                     netListeners,
                     operations: opDeltas,
                     renderDeltas,
@@ -630,6 +645,7 @@ function printRecords(records) {
         to: record.transition,
         ms: record.durationMs,
         rows: record.rows,
+        logical: record.logicalRows,
         liveDOM: record.liveDOMNodes,
         cdpNodesGC: record.cdpNodesAfterGC,
         jsListenersGC: record.jsEventListenersAfterGC,
@@ -658,11 +674,28 @@ function analyzeRecords(records, finalIdle) {
     const warnings = [];
     const allRecords = records.filter((record) => record.status === "all");
     const openRecords = records.filter((record) => record.status === "open");
-    const expectedAllRows = 300;
 
     for (const record of allRecords) {
-        if (record.rows !== expectedAllRows) {
-            failures.push(`cycle ${record.cycle} All rows=${record.rows}, want ${expectedAllRows}`);
+        if (record.logicalRows !== expectedAllRows) {
+            failures.push(`cycle ${record.cycle} All logical rows=${record.logicalRows}, want ${expectedAllRows}`);
+        }
+        if (record.rows <= 0 || record.rows > maxMountedRows) {
+            failures.push(`cycle ${record.cycle} All mounted rows=${record.rows}, limit ${maxMountedRows}`);
+        }
+        const createdNodes = record.operations.createElement + record.operations.createTextNode + record.operations.createComment;
+        if (createdNodes > maxAllCreateNodes) {
+            failures.push(`cycle ${record.cycle} All created DOM nodes=${createdNodes}, limit ${maxAllCreateNodes}`);
+        }
+        if (record.operations.addEventListener > maxAllEventAdds) {
+            failures.push(`cycle ${record.cycle} All addEventListener delta=${record.operations.addEventListener}, limit ${maxAllEventAdds}`);
+        }
+    }
+    for (const record of openRecords) {
+        if (record.logicalRows <= 0 || record.logicalRows >= expectedAllRows) {
+            failures.push(`cycle ${record.cycle} Open logical rows=${record.logicalRows}, expected filtered subset`);
+        }
+        if (record.rows <= 0 || record.rows > maxMountedRows) {
+            failures.push(`cycle ${record.cycle} Open mounted rows=${record.rows}, limit ${maxMountedRows}`);
         }
     }
 
@@ -684,14 +717,19 @@ function analyzeRecords(records, finalIdle) {
     const averageAllLayout = average(allRecords.map((record) => record.performanceDeltas.LayoutDuration));
     const averageAllScript = average(allRecords.map((record) => record.performanceDeltas.ScriptDuration));
     const averageAllRender = average(allRecords.map((record) => record.runtimeRenderMs));
+    if (averageAllDuration > 150) {
+        warnings.push(`average All transition duration ${round(averageAllDuration)}ms remains high despite bounded DOM.`);
+    }
 
     return {
         failures,
         warnings,
         summary: {
             cycles,
-            allRows: expectedAllRows,
-            openRows: openRecords[0]?.rows ?? 0,
+            allRowsLogical: expectedAllRows,
+            allRowsMountedMax: Math.max(...allRecords.map((record) => record.rows)),
+            openRowsLogical: openRecords[0]?.logicalRows ?? 0,
+            openRowsMountedMax: Math.max(...openRecords.map((record) => record.rows)),
             averageAllDuration: round(averageAllDuration),
             averageAllCreateNodes: round(averageAllCreate),
             averageAllRemoveNodes: round(averageAllRemove),
@@ -742,6 +780,14 @@ function average(values) {
 function drift(values) {
     if (values.length === 0) return 0;
     return Math.max(...values) - Math.min(...values);
+}
+
+function parseSummary(summary) {
+    const match = /^Showing (\d+) of (\d+) issues$/.exec(summary || "");
+    if (!match) {
+        return { visible: -1, total: -1 };
+    }
+    return { visible: Number(match[1]), total: Number(match[2]) };
 }
 
 function sumBy(values, pick) {
