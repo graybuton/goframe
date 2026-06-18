@@ -4,6 +4,8 @@ This repository keeps local scripts and GitHub Actions aligned. The goal is to
 make runtime, GOX, WASM size, browser smoke, and VS Code extension regressions
 visible before merge.
 
+All workflows request read-only repository contents permissions by default.
+
 ## Workflows
 
 ### Core

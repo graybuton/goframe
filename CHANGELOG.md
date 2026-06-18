@@ -30,6 +30,8 @@
 - Fixed-height `VirtualList` and `VirtualTable` primitives, dashboard table
   virtualization, and a focused virtualized collections example plus smoke
   coverage.
+- Foundation Audit IV documentation.
+- Read-only GitHub Actions workflow permissions.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
