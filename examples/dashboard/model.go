@@ -30,6 +30,9 @@ const (
 )
 
 const dashboardItemCount = 300
+const dashboardTableHeight = 560
+const dashboardRowHeight = 48
+const dashboardRowOverscan = 8
 
 type Issue struct {
 	ID         int

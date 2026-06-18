@@ -48,37 +48,55 @@ type IssueTableProps struct {
 }
 
 func IssueTable(props IssueTableProps) gf.Node {
+	return gf.VirtualTable[Issue](gf.VirtualTableProps[Issue]{
+		Items: props.Items,
+		Height: dashboardTableHeight,
+		RowHeight: dashboardRowHeight,
+		Overscan: dashboardRowOverscan,
+		Key: func(issue Issue, index int) string {
+			return gf.ToString(issue.ID)
+		},
+		Header: func() gf.Node {
+			return <IssueTableHeader />
+		},
+		RenderRow: func(row gf.VirtualRow[Issue]) gf.Node {
+			issue := row.Item
+			return <IssueRow
+				Key={row.Key}
+				Issue={issue}
+				Selected={issue.ID == props.SelectedID}
+				Style={row.RowStyle}
+				OnSelect={props.OnSelect}
+				OnToggle={props.OnToggle}
+			/>
+		},
+		Class: "issue-table",
+		TestID: "issue-table",
+	})
+}
+
+type IssueTableHeaderProps struct{}
+
+func IssueTableHeader(props IssueTableHeaderProps) gf.Node {
 	return (
-		<table class="issue-table" data-testid="issue-table">
-			<thead>
-				<tr>
-					<th>Issue</th>
-					<th>Status</th>
-					<th>Priority</th>
-					<th>Owner</th>
-					<th>Service</th>
-					<th>Events</th>
-					<th>Action</th>
-				</tr>
-			</thead>
-			<tbody>
-				{gf.Map(props.Items, func(issue Issue) gf.Node {
-					return <IssueRow
-						Key={issue.ID}
-						Issue={issue}
-						Selected={issue.ID == props.SelectedID}
-						OnSelect={props.OnSelect}
-						OnToggle={props.OnToggle}
-					/>
-				})}
-			</tbody>
-		</table>
+		<thead>
+			<tr>
+				<th>Issue</th>
+				<th>Status</th>
+				<th>Priority</th>
+				<th>Owner</th>
+				<th>Service</th>
+				<th>Events</th>
+				<th>Action</th>
+			</tr>
+		</thead>
 	)
 }
 
 type IssueRowProps struct {
 	Issue    Issue
 	Selected bool
+	Style    string
 	OnSelect  func(id int)
 	OnToggle  func(id int)
 }
@@ -92,6 +110,7 @@ func IssueRow(props IssueRowProps) gf.Node {
 		<tr
 			ID={"issue-row-"+gf.ToString(props.Issue.ID)}
 			class={className}
+			style={props.Style}
 			data-testid={"issue-row-"+gf.ToString(props.Issue.ID)}
 		>
 			<td>
@@ -123,6 +142,7 @@ func (props IssueRowProps) MemoEqual(next IssueRowProps) bool {
 		props.Issue.UpdatedAt == next.Issue.UpdatedAt &&
 		props.Issue.Events == next.Issue.Events &&
 		props.Selected == next.Selected &&
+		props.Style == next.Style &&
 		props.Issue.Title == next.Issue.Title &&
 		props.Issue.Owner == next.Issue.Owner &&
 		props.Issue.Service == next.Issue.Service

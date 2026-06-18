@@ -144,6 +144,7 @@ select:focus {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.92rem;
+    table-layout: fixed;
 }
 
 .issue-table th,
@@ -158,6 +159,26 @@ select:focus {
     color: #667789;
     font-size: 0.75rem;
     text-transform: uppercase;
+}
+
+.gf-virtual-table-viewport {
+    border: 1px solid #e0e7ee;
+    border-radius: 0.7rem;
+}
+
+.gf-virtual-table .issue-row {
+    height: 48px;
+}
+
+.gf-virtual-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: white;
+}
+
+.gf-virtual-table-spacer td {
+    background: transparent;
 }
 
 .issue-row-selected { background: #edf8fb; }
