@@ -90,13 +90,16 @@ try {
         records.push(await runTransition(client, cycle, "all", "All"));
     }
 
+    const continuousScrollRecord = await runContinuousScrollAudit(client);
+
     await wait(postIdleMs);
     await collectGarbage(client);
     const finalIdle = await samplePage(client, "post-idle-gc", cycles, "all");
 
     printRecords(records);
     printScrollRecords(scrollRecords);
-    const analysis = analyzeRecords(records, finalIdle);
+    printContinuousScrollRecord(continuousScrollRecord);
+    const analysis = analyzeRecords(records, finalIdle, continuousScrollRecord);
     printAnalysis(initial, finalIdle, analysis);
     if (analysis.failures.length > 0) {
         throw new Error(`APP FAILURE: dashboard DOM pressure leak guard failed:\n${analysis.failures.join("\n")}`);
@@ -371,6 +374,78 @@ async function runScrollStability(client, label, scrollTop) {
         spacerCount: spacerState.spacerCount,
         spacerTopStable: spacerState.topSame,
         spacerBottomStable: spacerState.bottomSame,
+    };
+}
+
+async function runContinuousScrollAudit(client) {
+    const label = "continuous-scroll-buffered";
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await settle(client);
+    const before = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        window.__dashboardPressureContinuousTop = top;
+        window.__dashboardPressureContinuousBottom = bottom;
+        return {
+            rows: document.querySelectorAll(".issue-row").length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+        };
+    })()`);
+    await client.evaluate(`window.__dashboardPressure.start(${JSON.stringify(label)})`);
+    const scrollSummary = await client.evaluate(`(async () => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        let steps = 0;
+        let maxRows = document.querySelectorAll(".issue-row").length;
+        for (let top = 0; top <= 48 * 80; top += 12) {
+            viewport.scrollTop = top;
+            viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+            steps++;
+            maxRows = Math.max(maxRows, document.querySelectorAll(".issue-row").length);
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            maxRows = Math.max(maxRows, document.querySelectorAll(".issue-row").length);
+        }
+        return { steps, maxRows };
+    })()`);
+    await settle(client);
+    const audit = await client.evaluate(`window.__dashboardPressure.finish(${JSON.stringify(label)})`);
+    const spacerState = await assertVirtualTableSpacerStability(client, label);
+    const after = await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        return {
+            rows: document.querySelectorAll(".issue-row").length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+            topSame: Boolean(top && window.__dashboardPressureContinuousTop === top),
+            bottomSame: Boolean(bottom && window.__dashboardPressureContinuousBottom === bottom),
+        };
+    })()`);
+    const mountedRowsMax = Math.max(before.rows, scrollSummary.maxRows, after.rows);
+    return {
+        label,
+        scrollSteps: scrollSummary.steps,
+        durationMs: audit.durationMs,
+        rows: audit.rows,
+        mountedRowsMax,
+        operations: audit.operations,
+        renderDeltas: audit.renderDeltas,
+        patchDeltas: audit.patchDeltas,
+        memoDeltas: audit.memoDeltas,
+        netListeners: audit.netListeners,
+        listenerNetDelta: audit.operations.addEventListener - audit.operations.removeEventListener,
+        renderScrollRatio: round(audit.renderDeltas.VirtualTable / scrollSummary.steps),
+        spacerCount: spacerState.spacerCount,
+        spacerTopStable: spacerState.topSame && after.topSame,
+        spacerBottomStable: spacerState.bottomSame && after.bottomSame,
+        childCountBefore: before.childCount,
+        childCountAfter: after.childCount,
     };
 }
 
@@ -805,7 +880,23 @@ function printScrollRecords(records) {
     })));
 }
 
-function analyzeRecords(records, finalIdle) {
+function printContinuousScrollRecord(record) {
+    console.log(`Dashboard DOM pressure continuous scroll: ${JSON.stringify({
+        scrollSteps: record.scrollSteps,
+        virtualTableRenders: record.renderDeltas.VirtualTable,
+        issueRowRenders: record.renderDeltas.IssueRow,
+        renderScrollRatio: record.renderScrollRatio,
+        createElement: record.operations.createElement,
+        removeChild: record.operations.removeChild,
+        insertBefore: record.operations.insertBefore,
+        appendChild: record.operations.appendChild,
+        listenerNetDelta: record.listenerNetDelta,
+        spacersStable: record.spacerCount === 2 && record.spacerTopStable && record.spacerBottomStable,
+        mountedRowsMax: record.mountedRowsMax,
+    })}`);
+}
+
+function analyzeRecords(records, finalIdle, continuousScrollRecord) {
     const failures = [];
     const warnings = [];
     const allRecords = records.filter((record) => record.status === "all");
@@ -863,6 +954,31 @@ function analyzeRecords(records, finalIdle) {
         warnings.push(`average All transition duration ${round(averageAllDuration)}ms remains high despite bounded DOM.`);
     }
 
+    if (continuousScrollRecord) {
+        const maxTableRenders = Math.ceil(continuousScrollRecord.scrollSteps / 4);
+        const createdNodes = continuousScrollRecord.operations.createElement +
+            continuousScrollRecord.operations.createTextNode +
+            continuousScrollRecord.operations.createComment;
+        const insertedNodes = continuousScrollRecord.operations.insertBefore +
+            continuousScrollRecord.operations.appendChild;
+        const maxChurn = maxMountedRows * maxTableRenders;
+        if (continuousScrollRecord.renderDeltas.VirtualTable > maxTableRenders) {
+            failures.push(`continuous scroll VirtualTable renders=${continuousScrollRecord.renderDeltas.VirtualTable}, scroll steps=${continuousScrollRecord.scrollSteps}, limit=${maxTableRenders}`);
+        }
+        if (continuousScrollRecord.mountedRowsMax <= 0 || continuousScrollRecord.mountedRowsMax > maxMountedRows) {
+            failures.push(`continuous scroll mounted rows max=${continuousScrollRecord.mountedRowsMax}, limit=${maxMountedRows}`);
+        }
+        if (continuousScrollRecord.spacerCount !== 2 || !continuousScrollRecord.spacerTopStable || !continuousScrollRecord.spacerBottomStable) {
+            failures.push(`continuous scroll spacer instability: count=${continuousScrollRecord.spacerCount}, top=${continuousScrollRecord.spacerTopStable}, bottom=${continuousScrollRecord.spacerBottomStable}`);
+        }
+        if (continuousScrollRecord.listenerNetDelta !== 0) {
+            failures.push(`continuous scroll listener net delta=${continuousScrollRecord.listenerNetDelta}`);
+        }
+        if (createdNodes > maxChurn || insertedNodes > maxChurn || continuousScrollRecord.operations.removeChild > maxChurn) {
+            failures.push(`continuous scroll DOM churn unbounded: create=${createdNodes}, insert=${insertedNodes}, remove=${continuousScrollRecord.operations.removeChild}, limit=${maxChurn}`);
+        }
+    }
+
     return {
         failures,
         warnings,
@@ -891,6 +1007,15 @@ function analyzeRecords(records, finalIdle) {
             postIdleJSHeapUsed: finalIdle.metrics.JSHeapUsedSize ?? 0,
             spacerTopStable: allRecords.every((record) => record.spacerTopStable),
             spacerBottomStable: allRecords.every((record) => record.spacerBottomStable),
+            continuousScrollSteps: continuousScrollRecord?.scrollSteps ?? 0,
+            continuousVirtualTableRenders: continuousScrollRecord?.renderDeltas.VirtualTable ?? 0,
+            continuousIssueRowRenders: continuousScrollRecord?.renderDeltas.IssueRow ?? 0,
+            continuousRenderScrollRatio: continuousScrollRecord?.renderScrollRatio ?? 0,
+            continuousSpacersStable: continuousScrollRecord ?
+                continuousScrollRecord.spacerCount === 2 && continuousScrollRecord.spacerTopStable && continuousScrollRecord.spacerBottomStable :
+                false,
+            continuousMountedRowsMax: continuousScrollRecord?.mountedRowsMax ?? 0,
+            continuousListenerNetDelta: continuousScrollRecord?.listenerNetDelta ?? 0,
         },
     };
 }

@@ -19,7 +19,7 @@ func TestCalculateVirtualRangeShortList(t *testing.T) {
 
 func TestCalculateVirtualRangeTop(t *testing.T) {
 	got := calculateVirtualRange(100, 100, 20, 2, 0)
-	want := VirtualRange{Start: 0, End: 7, TopSpacer: 0, BottomSpacer: 1860, TotalHeight: 2000}
+	want := VirtualRange{Start: 0, End: 9, TopSpacer: 0, BottomSpacer: 1820, TotalHeight: 2000}
 	if got != want {
 		t.Fatalf("range = %#v, want %#v", got, want)
 	}
@@ -35,7 +35,7 @@ func TestCalculateVirtualRangeMiddle(t *testing.T) {
 
 func TestCalculateVirtualRangeBottom(t *testing.T) {
 	got := calculateVirtualRange(100, 100, 20, 2, 5000)
-	want := VirtualRange{Start: 97, End: 100, TopSpacer: 1940, BottomSpacer: 0, TotalHeight: 2000}
+	want := VirtualRange{Start: 91, End: 100, TopSpacer: 1820, BottomSpacer: 0, TotalHeight: 2000}
 	if got != want {
 		t.Fatalf("range = %#v, want %#v", got, want)
 	}
@@ -59,7 +59,7 @@ func TestCalculateVirtualRangeNegativeOverscan(t *testing.T) {
 
 func TestCalculateVirtualRangeNegativeScroll(t *testing.T) {
 	got := calculateVirtualRange(10, 90, 30, 1, -100)
-	want := VirtualRange{Start: 0, End: 4, TopSpacer: 0, BottomSpacer: 180, TotalHeight: 300}
+	want := VirtualRange{Start: 0, End: 5, TopSpacer: 0, BottomSpacer: 150, TotalHeight: 300}
 	if got != want {
 		t.Fatalf("range = %#v, want %#v", got, want)
 	}
@@ -80,6 +80,57 @@ func TestVirtualVisibleStartChangesOnlyOnRowBoundary(t *testing.T) {
 	}
 	if got := virtualVisibleStart(100, 30, 30); got != 1 {
 		t.Fatalf("visible start at row boundary = %d, want 1", got)
+	}
+}
+
+func TestVirtualVisibleCountUsesCeilDivision(t *testing.T) {
+	if got := virtualVisibleCount(100, 20); got != 5 {
+		t.Fatalf("exact visible count = %d, want 5", got)
+	}
+	if got := virtualVisibleCount(101, 20); got != 6 {
+		t.Fatalf("ceil visible count = %d, want 6", got)
+	}
+}
+
+func TestVirtualRangeCoversVisibleInsideBuffer(t *testing.T) {
+	rangeInfo := VirtualRange{Start: 10, End: 19}
+	if !virtualRangeCoversVisible(rangeInfo, 12, 5) {
+		t.Fatalf("range %#v should cover visible start 12 count 5", rangeInfo)
+	}
+}
+
+func TestVirtualRangeCoversVisibleOutsideBuffer(t *testing.T) {
+	rangeInfo := VirtualRange{Start: 10, End: 19}
+	if virtualRangeCoversVisible(rangeInfo, 15, 5) {
+		t.Fatalf("range %#v should not cover visible start 15 count 5", rangeInfo)
+	}
+}
+
+func TestVirtualRangeStartForVisibleStartRecentersWithOverscan(t *testing.T) {
+	if got := virtualRangeStartForVisibleStart(100, 100, 20, 2, 22); got != 20 {
+		t.Fatalf("middle range start = %d, want 20", got)
+	}
+	if got := virtualRangeStartForVisibleStart(100, 100, 20, 2, 1); got != 0 {
+		t.Fatalf("top range start = %d, want 0", got)
+	}
+	if got := virtualRangeStartForVisibleStart(100, 100, 20, 2, 99); got != 91 {
+		t.Fatalf("bottom range start = %d, want 91", got)
+	}
+}
+
+func TestVirtualRangeStartAfterScrollInsideBufferKeepsRangeStart(t *testing.T) {
+	rangeInfo := calculateVirtualRangeFromStart(100, 100, 20, 2, 0)
+	got := virtualRangeStartAfterScroll(rangeInfo, 0, 100, 100, 20, 2, 80)
+	if got != 0 {
+		t.Fatalf("range start after covered scroll = %d, want 0", got)
+	}
+}
+
+func TestVirtualRangeStartAfterScrollBeyondBufferUpdatesRangeStart(t *testing.T) {
+	rangeInfo := calculateVirtualRangeFromStart(100, 100, 20, 2, 0)
+	got := virtualRangeStartAfterScroll(rangeInfo, 0, 100, 100, 20, 2, 100)
+	if got != 3 {
+		t.Fatalf("range start after uncovered scroll = %d, want 3", got)
 	}
 }
 
@@ -226,14 +277,14 @@ func TestVirtualTableKeepsZeroHeightSpacersMounted(t *testing.T) {
 	}
 	top := requireVNode(t, requireKeyedNode(t, children[0]).Node)
 	bottom := requireVNode(t, requireKeyedNode(t, children[3]).Node)
-	if got := top.Props["style"]; got != "height:0px;" {
-		t.Fatalf("top spacer style = %#v, want height:0px;", got)
+	if got := top.Props["style"]; got != "height:0px;overflow-anchor:none;" {
+		t.Fatalf("top spacer style = %#v, want height:0px;overflow-anchor:none;", got)
 	}
-	if got := bottom.Props["style"]; got != "height:0px;" {
-		t.Fatalf("bottom spacer style = %#v, want height:0px;", got)
+	if got := bottom.Props["style"]; got != "height:0px;overflow-anchor:none;" {
+		t.Fatalf("bottom spacer style = %#v, want height:0px;overflow-anchor:none;", got)
 	}
 	topCell := requireVNode(t, top.Children[0])
-	if got := topCell.Props["style"]; got != "height:0px;padding:0;border:0;line-height:0;font-size:0;" {
+	if got := topCell.Props["style"]; got != "height:0px;padding:0;border:0;line-height:0;font-size:0;overflow-anchor:none;" {
 		t.Fatalf("top spacer cell style = %#v, want zero-height style", got)
 	}
 }

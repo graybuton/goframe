@@ -80,8 +80,8 @@ func renderVirtualList[T any](props VirtualListProps[T]) Node {
 	if props.RenderItem == nil {
 		panic("goframe: VirtualList requires RenderItem")
 	}
-	visibleStart, setVisibleStart := UseState(0)
-	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.ItemHeight, props.Overscan, visibleStart)
+	rangeStart, setRangeStart := UseState(0)
+	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.ItemHeight, props.Overscan, rangeStart)
 
 	children := make([]Node, 0, rangeInfo.End-rangeInfo.Start)
 	for index := rangeInfo.Start; index < rangeInfo.End; index++ {
@@ -104,9 +104,9 @@ func renderVirtualList[T any](props VirtualListProps[T]) Node {
 		"class": joinVirtualClass("gf-virtual-list", props.Class),
 		"style": virtualViewportStyle(props.Height),
 		"OnScroll": func(event ScrollEvent) {
-			next := virtualVisibleStart(len(props.Items), props.ItemHeight, event.ScrollTop())
-			if next != visibleStart {
-				setVisibleStart(next)
+			next := virtualRangeStartAfterScroll(rangeInfo, rangeStart, len(props.Items), props.Height, props.ItemHeight, props.Overscan, event.ScrollTop())
+			if next != rangeStart {
+				setRangeStart(next)
 			}
 		},
 	}
@@ -117,7 +117,7 @@ func renderVirtualList[T any](props VirtualListProps[T]) Node {
 	return El("div", outerProps,
 		El("div", Props{
 			"class": "gf-virtual-list-spacer",
-			"style": "height:" + ToString(rangeInfo.TotalHeight) + "px;position:relative;",
+			"style": "height:" + ToString(rangeInfo.TotalHeight) + "px;position:relative;overflow-anchor:none;",
 		}, children...),
 	)
 }
@@ -127,8 +127,8 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 	if props.RenderRow == nil {
 		panic("goframe: VirtualTable requires RenderRow")
 	}
-	visibleStart, setVisibleStart := UseState(0)
-	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.RowHeight, props.Overscan, visibleStart)
+	rangeStart, setRangeStart := UseState(0)
+	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.RowHeight, props.Overscan, rangeStart)
 
 	bodyChildren := make([]Node, 0, rangeInfo.End-rangeInfo.Start+2)
 	if len(props.Items) == 0 {
@@ -166,9 +166,9 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 		"class": "gf-virtual-table-viewport",
 		"style": virtualViewportStyle(props.Height),
 		"OnScroll": func(event ScrollEvent) {
-			next := virtualVisibleStart(len(props.Items), props.RowHeight, event.ScrollTop())
-			if next != visibleStart {
-				setVisibleStart(next)
+			next := virtualRangeStartAfterScroll(rangeInfo, rangeStart, len(props.Items), props.Height, props.RowHeight, props.Overscan, event.ScrollTop())
+			if next != rangeStart {
+				setRangeStart(next)
 			}
 		},
 	}
@@ -190,10 +190,12 @@ func validateVirtualDimensions(name string, height int, itemHeight int, itemHeig
 }
 
 func calculateVirtualRange(length int, height int, itemHeight int, overscan int, scrollTop int) VirtualRange {
-	return calculateVirtualRangeFromStart(length, height, itemHeight, overscan, virtualVisibleStart(length, itemHeight, scrollTop))
+	visibleStart := virtualVisibleStart(length, itemHeight, scrollTop)
+	rangeStart := virtualRangeStartForVisibleStart(length, height, itemHeight, overscan, visibleStart)
+	return calculateVirtualRangeFromStart(length, height, itemHeight, overscan, rangeStart)
 }
 
-func calculateVirtualRangeFromStart(length int, height int, itemHeight int, overscan int, visibleStart int) VirtualRange {
+func calculateVirtualRangeFromStart(length int, height int, itemHeight int, overscan int, rangeStart int) VirtualRange {
 	validateVirtualDimensions("virtual range", height, itemHeight, "ItemHeight")
 	if length <= 0 {
 		return VirtualRange{}
@@ -201,23 +203,9 @@ func calculateVirtualRangeFromStart(length int, height int, itemHeight int, over
 	if overscan < 0 {
 		overscan = 0
 	}
-	visibleStart = clampInt(visibleStart, 0, length-1)
-	visibleCount := ceilDiv(height, itemHeight)
-	if visibleCount < 1 {
-		visibleCount = 1
-	}
-
-	start := visibleStart - overscan
-	if start < 0 {
-		start = 0
-	}
-	end := visibleStart + visibleCount + overscan
-	if end > length {
-		end = length
-	}
-	if end < start {
-		end = start
-	}
+	windowSize := virtualWindowSize(length, height, itemHeight, overscan)
+	start := clampInt(rangeStart, 0, length-windowSize)
+	end := start + windowSize
 
 	return VirtualRange{
 		Start:        start,
@@ -226,6 +214,63 @@ func calculateVirtualRangeFromStart(length int, height int, itemHeight int, over
 		BottomSpacer: (length - end) * itemHeight,
 		TotalHeight:  length * itemHeight,
 	}
+}
+
+func virtualVisibleCount(height int, itemHeight int) int {
+	if height <= 0 || itemHeight <= 0 {
+		return 0
+	}
+	count := ceilDiv(height, itemHeight)
+	if count < 1 {
+		return 1
+	}
+	return count
+}
+
+func virtualWindowSize(length int, height int, itemHeight int, overscan int) int {
+	if length <= 0 {
+		return 0
+	}
+	if overscan < 0 {
+		overscan = 0
+	}
+	windowSize := virtualVisibleCount(height, itemHeight) + 2*overscan
+	if windowSize < 1 {
+		windowSize = 1
+	}
+	if windowSize > length {
+		return length
+	}
+	return windowSize
+}
+
+func virtualRangeCoversVisible(rangeInfo VirtualRange, visibleStart int, visibleCount int) bool {
+	if visibleCount < 0 {
+		visibleCount = 0
+	}
+	visibleEnd := visibleStart + visibleCount
+	return visibleStart >= rangeInfo.Start && visibleEnd <= rangeInfo.End
+}
+
+func virtualRangeStartForVisibleStart(length int, height int, itemHeight int, overscan int, visibleStart int) int {
+	if length <= 0 {
+		return 0
+	}
+	if overscan < 0 {
+		overscan = 0
+	}
+	windowSize := virtualWindowSize(length, height, itemHeight, overscan)
+	visibleStart = clampInt(visibleStart, 0, length-1)
+	return clampInt(visibleStart-overscan, 0, length-windowSize)
+}
+
+func virtualRangeStartAfterScroll(rangeInfo VirtualRange, currentStart int, length int, height int, itemHeight int, overscan int, scrollTop int) int {
+	visibleStart := virtualVisibleStart(length, itemHeight, scrollTop)
+	visibleCount := virtualVisibleCount(height, itemHeight)
+	if virtualRangeCoversVisible(rangeInfo, visibleStart, visibleCount) {
+		return currentStart
+	}
+	return virtualRangeStartForVisibleStart(length, height, itemHeight, overscan, visibleStart)
 }
 
 func virtualVisibleStart(length int, itemHeight int, scrollTop int) int {
@@ -246,17 +291,17 @@ func virtualItemKey[T any](key func(T, int) string, item T, index int) string {
 }
 
 func virtualViewportStyle(height int) string {
-	return "height:" + ToString(height) + "px;overflow-y:auto;position:relative;"
+	return "height:" + ToString(height) + "px;overflow-y:auto;position:relative;overflow-anchor:none;"
 }
 
 func virtualTableSpacerRow(name string, height int, columnCount int) Node {
 	return El("tr", Props{
 		"class":       "gf-virtual-table-spacer gf-virtual-table-spacer-" + name,
 		"aria-hidden": "true",
-		"style":       "height:" + ToString(height) + "px;",
+		"style":       "height:" + ToString(height) + "px;overflow-anchor:none;",
 	}, El("td", Props{
 		"colspan": virtualTableColumnCount(columnCount),
-		"style":   "height:" + ToString(height) + "px;padding:0;border:0;line-height:0;font-size:0;",
+		"style":   "height:" + ToString(height) + "px;padding:0;border:0;line-height:0;font-size:0;overflow-anchor:none;",
 	}))
 }
 

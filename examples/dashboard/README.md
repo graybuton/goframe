@@ -114,7 +114,10 @@ columns: Issue, Status, Priority, Owner, Service, Events, and Action. This is
 real virtualization: offscreen rows are not hidden DOM nodes. The framework
 keeps top and bottom spacer rows keyed and mounted, including at `0px` height,
 so scroll/filter updates do not remount spacer `tr` nodes or match them against
-user rows.
+user rows. Scroll state is buffered by rendered range start: scrolling within
+the existing overscan buffer should not rerender `VirtualTable` or remount
+`IssueRow` nodes, and range updates happen only after the visible viewport
+leaves that buffer.
 
 For DOM pressure audits, run:
 
@@ -131,10 +134,12 @@ classic leak.
 With `gf.VirtualTable`, a typical debug run reports:
 
 - logical All count: 300 issues;
-- mounted issue rows: about 20, with a smoke bound of 70;
+- mounted issue rows: about 28, with a smoke bound of 70;
 - Open -> All average duration: about 47 ms in the local debug audit;
-- Open -> All created nodes: about 432;
+- Open -> All created nodes remain bounded;
 - virtual table spacer rows stable across filter and scroll cycles;
+- continuous table scroll renders `VirtualTable` much less often than scroll
+  events;
 - live DOM count stable across cycles;
 - net listener count stable across cycles.
 

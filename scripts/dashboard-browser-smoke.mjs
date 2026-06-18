@@ -237,6 +237,57 @@ try {
     assertWithinRowScrollReport(withinRowScrollReport, withinRowScrollBefore, withinRowScroll);
     await assertVirtualTableSpacerStability(client, "within-row scroll");
 
+    const insideBufferBefore = await captureVirtualTableDom(client, "__dashboardInsideBufferBefore");
+    await startScenario(client, "table-scroll-inside-buffer");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 48 * 4;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(120);
+    const insideBufferReport = await finishScenario(client, "table-scroll-inside-buffer");
+    const insideBufferAfter = await readVirtualTableDom(client, "__dashboardInsideBufferBefore");
+    assertInsideBufferScrollReport(insideBufferReport, insideBufferBefore, insideBufferAfter);
+    await assertVirtualTableSpacerStability(client, "inside-buffer scroll");
+
+    const beyondBufferBefore = await captureVirtualTableDom(client, "__dashboardBeyondBufferBefore");
+    await startScenario(client, "table-scroll-beyond-buffer");
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 48 * 20;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    const beyondBufferReport = await finishScenario(client, "table-scroll-beyond-buffer");
+    const beyondBufferAfter = await readVirtualTableDom(client, "__dashboardBeyondBufferBefore");
+    assertBeyondBufferScrollReport(beyondBufferReport, beyondBufferBefore, beyondBufferAfter);
+    await assertVirtualTableSpacerStability(client, "beyond-buffer scroll");
+
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    const continuousBefore = await captureVirtualTableDom(client, "__dashboardContinuousBefore");
+    await startScenario(client, "table-continuous-scroll-buffered");
+    const continuousScrollSteps = await client.evaluate(`(async () => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        let steps = 0;
+        for (let top = 0; top <= 48 * 80; top += 12) {
+            viewport.scrollTop = top;
+            viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+            steps++;
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+        return steps;
+    })()`);
+    await wait(240);
+    const continuousReport = await finishScenario(client, "table-continuous-scroll-buffered");
+    const continuousAfter = await readVirtualTableDom(client, "__dashboardContinuousBefore");
+    assertContinuousScrollReport(continuousReport, continuousScrollSteps, continuousBefore, continuousAfter);
+    await assertVirtualTableSpacerStability(client, "continuous buffered scroll");
+
     await startScenario(client, "table-scroll");
     await client.evaluate(`(() => {
         const viewport = document.querySelector("[data-testid='issue-table']");
@@ -416,6 +467,9 @@ try {
         selectReport,
         clearSearchReport,
         withinRowScrollReport,
+        insideBufferReport,
+        beyondBufferReport,
+        continuousReport,
         scrollReport,
         sortReport,
         statusReport,
@@ -638,6 +692,112 @@ function assertWithinRowScrollReport(report, beforeState, state) {
         throw new Error(`APP FAILURE: within-row scroll should not churn DOM: ${JSON.stringify(report.operations)}`);
     }
     console.log(`dashboard within-row scroll no-op summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations })}`);
+}
+
+async function captureVirtualTableDom(client, key) {
+    return await client.evaluate(`(() => {
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const rows = [...document.querySelectorAll(".issue-row")];
+        window[${JSON.stringify(key)}] = {
+            top,
+            bottom,
+            rowIDs: rows.map((node) => node.id),
+            childCount: tbody?.children.length ?? 0,
+        };
+        return {
+            rowIDs: rows.map((node) => node.id),
+            rowCount: rows.length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+            topExists: Boolean(top),
+            bottomExists: Boolean(bottom),
+        };
+    })()`);
+}
+
+async function readVirtualTableDom(client, key) {
+    return await client.evaluate(`(() => {
+        const before = window[${JSON.stringify(key)}] || {};
+        const tbody = document.querySelector("[data-testid='issue-table'] tbody");
+        const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
+        const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
+        const rows = [...document.querySelectorAll(".issue-row")];
+        return {
+            rowIDs: rows.map((node) => node.id),
+            rowCount: rows.length,
+            childCount: tbody?.children.length ?? 0,
+            spacerCount: tbody ? tbody.querySelectorAll(".gf-virtual-table-spacer").length : 0,
+            topSame: Boolean(top && before.top === top),
+            bottomSame: Boolean(bottom && before.bottom === bottom),
+            rowIDsSame: JSON.stringify(before.rowIDs || []) === JSON.stringify(rows.map((node) => node.id)),
+            childCountSame: before.childCount === (tbody?.children.length ?? 0),
+        };
+    })()`);
+}
+
+function assertInsideBufferScrollReport(report, beforeState, state) {
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, "dashboard inside-buffer mounted rows");
+    if (!state.topSame || !state.bottomSame || state.spacerCount !== 2) {
+        throw new Error(`APP FAILURE: inside-buffer scroll changed spacer identity: ${JSON.stringify(state)}`);
+    }
+    if (!state.rowIDsSame || !state.childCountSame || beforeState.childCount !== state.childCount) {
+        throw new Error(`APP FAILURE: inside-buffer scroll changed mounted rows: before ${JSON.stringify(beforeState)}, after ${JSON.stringify(state)}`);
+    }
+    if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
+        throw new Error(`APP FAILURE: inside-buffer scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+        report.operations.insertBefore !== 0 || report.operations.appendChild !== 0 ||
+        report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
+        throw new Error(`APP FAILURE: inside-buffer scroll should not churn DOM/listeners: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard inside-buffer scroll no-op summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations })}`);
+}
+
+function assertBeyondBufferScrollReport(report, beforeState, state) {
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, "dashboard beyond-buffer mounted rows");
+    if (!state.topSame || !state.bottomSame || state.spacerCount !== 2) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll changed spacer identity: ${JSON.stringify(state)}`);
+    }
+    if (state.rowIDsSame) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll should update mounted row window: before ${JSON.stringify(beforeState)}, after ${JSON.stringify(state)}`);
+    }
+    if (report.renderDeltas.VirtualTable <= 0) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll should render VirtualTable: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    const created = report.operations.createElement + report.operations.createTextNode;
+    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    if (created > 1200 || inserted > 160 || report.operations.removeChild > 160 ||
+        report.operations.addEventListener > 160 || report.operations.removeEventListener > 160) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll DOM churn is unbounded: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard beyond-buffer scroll bounded summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations, beforeRows: beforeState.rowCount, afterRows: state.rowCount })}`);
+}
+
+function assertContinuousScrollReport(report, scrollSteps, beforeState, state) {
+    assertMountedRowsBounded(state.rowCount, dashboardLogicalRows, "dashboard continuous-scroll mounted rows");
+    if (!state.topSame || !state.bottomSame || state.spacerCount !== 2) {
+        throw new Error(`APP FAILURE: continuous scroll changed spacer identity: ${JSON.stringify(state)}`);
+    }
+    const maxTableRenders = Math.ceil(scrollSteps / 4);
+    if (report.renderDeltas.VirtualTable > maxTableRenders) {
+        throw new Error(`APP FAILURE: continuous scroll rendered VirtualTable too often: renders=${report.renderDeltas.VirtualTable}, steps=${scrollSteps}, report=${JSON.stringify(report)}`);
+    }
+    if (report.renderDeltas.IssueRow > maxMountedRows * maxTableRenders) {
+        throw new Error(`APP FAILURE: continuous scroll rendered IssueRow too often: ${JSON.stringify(report.renderDeltas)}`);
+    }
+    const created = report.operations.createElement + report.operations.createTextNode;
+    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    if (created > maxMountedRows * maxTableRenders || inserted > maxMountedRows * maxTableRenders ||
+        report.operations.removeChild > maxMountedRows * maxTableRenders) {
+        throw new Error(`APP FAILURE: continuous scroll DOM churn is unbounded: ${JSON.stringify(report.operations)}`);
+    }
+    if (report.operations.addEventListener !== report.operations.removeEventListener) {
+        throw new Error(`APP FAILURE: continuous scroll listener net changed: ${JSON.stringify(report.operations)}`);
+    }
+    console.log(`dashboard continuous buffered scroll summary: ${JSON.stringify({ scrollSteps, tableRenders: report.renderDeltas.VirtualTable, rowRenders: report.renderDeltas.IssueRow, operations: report.operations, beforeRows: beforeState.rowCount, afterRows: state.rowCount })}`);
 }
 
 async function waitForPage(port) {

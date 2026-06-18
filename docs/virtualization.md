@@ -85,8 +85,10 @@ The current range model is intentionally fixed-height:
 ```text
 visibleStart = scrollTop / itemHeight
 visibleCount = ceil(height / itemHeight)
-start = max(0, visibleStart - overscan)
-end = min(len(items), visibleStart + visibleCount + overscan)
+windowSize = min(len(items), visibleCount + 2 * overscan)
+rangeStart = clamp(visibleStart - overscan, 0, len(items) - windowSize)
+start = rangeStart
+end = start + windowSize
 topSpacer = start * itemHeight
 bottomSpacer = (len(items) - end) * itemHeight
 ```
@@ -94,9 +96,17 @@ bottomSpacer = (len(items) - end) * itemHeight
 Negative overscan is treated as zero. Invalid `Height` or `ItemHeight` values
 panic with a focused runtime message.
 
-Scroll handling stores the first visible row, not every raw pixel offset. If a
-scroll event stays within the same row boundary, the component does not schedule
-another state update.
+Scroll handling stores the rendered range start, not every raw pixel offset or
+every first visible row. At the top and bottom edges, the range keeps a full
+`visible + 2*overscan` window whenever enough items exist, so missing overscan
+on one side is compensated on the other side.
+
+During scroll, GoFrame first checks whether the current visible rows are still
+inside the already-rendered range. If so, it leaves component state alone and
+the DOM window stays mounted. A new range is scheduled only after the visible
+viewport leaves that buffer. Virtualized viewports and spacer rows disable
+browser scroll anchoring with `overflow-anchor:none` so spacer height changes do
+not fight the user's scroll position.
 
 ## Keys
 
@@ -121,13 +131,15 @@ than a classic leak.
 
 After moving the issue table to `gf.VirtualTable`, the dashboard still has 300
 logical issues, but the mounted `.issue-row` count stays bounded. A typical
-debug pressure run reports about 20 mounted rows, around 432 created nodes for
+debug pressure run reports about 28 mounted rows, bounded created nodes for
 `Open -> All`, stable live DOM count, and stable net listener count.
 
 The pressure script gates the important invariants:
 
 - mounted rows remain bounded;
 - top and bottom spacer rows keep stable DOM identity;
+- scroll inside the overscan buffer does not rerender or churn table rows;
+- continuous scroll renders `VirtualTable` far less often than scroll events;
 - live DOM count stabilizes across cycles;
 - net listener count stabilizes across cycles;
 - `Open -> All` no longer creates thousands of row nodes.
