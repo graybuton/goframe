@@ -10,6 +10,7 @@ The app models an operations dashboard with deterministic issue data. It tests:
 - derived filtered/sorted views;
 - metric cards;
 - keyed table rows and reorder/filter behavior;
+- fixed-height table virtualization through `gf.VirtualTable`;
 - row selection and detail panel updates;
 - a small document-title effect;
 - multi-file GOX components in one Go package.
@@ -20,7 +21,7 @@ The app models an operations dashboard with deterministic issue data. It tests:
 - `components_layout.gox` contains layout primitives.
 - `components_metrics.gox` contains metric cards.
 - `components_filters.gox` contains controlled inputs/selects.
-- `components_table.gox` contains keyed table rows.
+- `components_table.gox` contains the virtualized keyed issue table.
 - `components_detail.gox` contains the selected issue panel.
 - `model.go`, `data.go`, and `filters.go` contain pure app logic.
 
@@ -73,7 +74,7 @@ scripts/size-budget.sh
 
 Expected TinyGo size is dashboard-sized but still below the MVP budget:
 
-- raw <= 150 KiB;
+- raw <= 165 KiB;
 - gzip <= 70 KiB;
 - brotli <= 52 KiB;
 - zstd <= 60 KiB, when zstd is available.
@@ -105,10 +106,10 @@ event handlers dispatch actions against the latest issue state instead of a
 slice captured by an older render. That removes the earlier `DataVersion`
 workaround and keeps row memoization useful for single-row data changes.
 
-Known remaining cost: without table virtualization, full-table actions such as
-search, status filtering, sorting, reset, and simulated dataset updates still
-visit or rerender many visible rows. That is an intentional baseline for future
-runtime optimization rather than a hidden runtime feature.
+The table uses `gf.VirtualTable` with fixed-height rows. The app still has 300
+logical issues and summaries still report the logical filtered count, but the
+mounted `.issue-row` elements stay bounded to the visible window plus overscan.
+This is real virtualization: offscreen rows are not hidden DOM nodes.
 
 For DOM pressure audits, run:
 
@@ -116,25 +117,31 @@ For DOM pressure audits, run:
 node --experimental-websocket scripts/dashboard-dom-pressure.mjs
 ```
 
-The pressure audit repeatedly switches the status filter from Open to All. On
-the current 300-row fixture, Open shows 72 rows and All restores 300 rows, so
-the All transition recreates 228 rows. In a debug TinyGo build that is roughly
-6,156 created DOM nodes and 456 event listeners reattached per All transition.
-The audit fails if the live DOM node count or net listener count grows across
-cycles. A stable live DOM count with growing DevTools/Performance `Nodes`
-should be treated as a detached-node/GC accounting signal to investigate, not
-as proof of a live DOM leak by itself.
+The pressure audit repeatedly switches the status filter from Open to All. The
+pre-virtualization baseline created roughly 6,156 DOM nodes and reattached
+about 456 event listeners for the All transition, while live DOM and net
+listener counts still stabilized. That proved DOM pressure rather than a
+classic leak.
 
-The expected next product-level answer to this pressure is row virtualization,
-not a hidden runtime heuristic. Virtualization is intentionally outside this
-example and outside the current runtime MVPs.
+With `gf.VirtualTable`, a typical debug run reports:
+
+- logical All count: 300 issues;
+- mounted issue rows: about 20, with a smoke bound of 70;
+- Open -> All average duration: about 47 ms in the local debug audit;
+- Open -> All created nodes: about 432;
+- live DOM count stable across cycles;
+- net listener count stable across cycles.
+
+Exact timing remains informational and machine-dependent. The hard invariant is
+bounded mounted rows plus stable live DOM/listener counts.
 
 ## Known Limitations
 
 - There is no router or URL state.
-- There is no context API, so state is passed through typed props.
-- There is no virtualization; all 300 rows are real DOM rows.
+- State is still mostly passed through typed props; the dashboard intentionally
+  remains a reducer/memoization/virtualization pressure test rather than a
+  context example.
+- Virtualization requires fixed row height. There is no dynamic measurement,
+  infinite loading, or advanced keyboard navigation yet.
 - GOX has no spread props, style objects, namespaces, or template loops.
 - Timing numbers printed by smoke are informational, not CI performance budgets.
-- There is no row virtualization, so full-table state changes still visit all
-  rendered rows.

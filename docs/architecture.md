@@ -167,11 +167,12 @@ TinyGo is the preferred lightweight experiment. It supports a smaller runtime
 surface but dramatically reduces the counter:
 
 ```text
-counter bundle.wasm     77,890 bytes
-components bundle.wasm  83,159 bytes
-todo bundle.wasm        109,483 bytes
-dashboard bundle.wasm   146,832 bytes
-context bundle.wasm     106,631 bytes
+counter bundle.wasm      81,233 bytes
+components bundle.wasm   86,608 bytes
+todo bundle.wasm        113,935 bytes
+dashboard bundle.wasm   162,773 bytes
+context bundle.wasm     111,440 bytes
+virtualized bundle.wasm 118,546 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -182,7 +183,8 @@ than Counter because it also demonstrates compact localStorage persistence.
 
 The repository includes `scripts/size-budget.sh` as a regression gate for raw,
 gzip, brotli, and optional zstd packaged TinyGo examples, including the
-dashboard-sized pressure-test example and the context selector example.
+dashboard-sized pressure-test example, the context selector example, and the
+virtualized collections example.
 `scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
 budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
 regression probes.
@@ -200,9 +202,11 @@ measure of platform value because it contains almost no application behavior.
 `examples/dashboard` is the first dashboard-sized pressure test. It keeps all
 components in one Go package because GOX does not yet support component
 namespaces, but splits layout, metrics, filters, table, and detail components
-across multiple GOX files. It renders 300 deterministic rows and exercises
+across multiple GOX files. It models 300 deterministic rows and exercises
 search, filters, sorting, keyed row identity, selection, metric updates, and a
-small document-title effect.
+small document-title effect. The table is physically virtualized with
+`gf.VirtualTable`, so the logical row count can stay dashboard-sized while the
+mounted DOM remains bounded.
 
 Future editor-sized experiments should measure startup, update time, memory,
 compressed transfer size, and development ergonomics before broader conclusions
@@ -220,6 +224,7 @@ The MVP runtime currently has:
 - reducer dispatch that applies actions to the latest component state slot;
 - scoped context providers with selector-based consumer dirtying;
 - component-scoped lifecycle/effect slots;
+- fixed-height `VirtualList` and `VirtualTable` collection primitives;
 - dirty component updates coalesced into one animation-frame flush;
 - direct dirty-owner subtree updates without root traversal;
 - dirty queue ancestor pruning when parent and child are dirty in the same
@@ -251,6 +256,8 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
   model.
 - Context is scoped and selector-based, but has no async/server bridge or
   custom non-comparable selector equality.
+- Virtualized collections are fixed-height only; there is no dynamic
+  measurement, infinite loading, or advanced keyboard navigation yet.
 - No automatic props memoization; descendants rerender with their parent unless
   components explicitly implement `MemoEqual` on their props and the framework can
   perform a deterministic memoized bailout.

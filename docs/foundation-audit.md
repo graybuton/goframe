@@ -201,7 +201,9 @@ TinyGo size budgets:
 | Counter | 95 KiB |
 | Components | 105 KiB |
 | Todo | 120 KiB |
-| Dashboard | 150 KiB |
+| Dashboard | 165 KiB |
+| Context | 110 KiB |
+| Virtualized | 120 KiB |
 
 Run:
 
@@ -216,15 +218,19 @@ Measured during the foundation audit:
 
 | Example | TinyGo WASM |
 |---|---:|
-| Counter | 77,890 B |
-| Components | 83,159 B |
-| Todo | 109,483 B |
-| Dashboard pressure test | 146,832 B |
+| Counter | 81,233 B |
+| Components | 86,608 B |
+| Todo | 113,935 B |
+| Dashboard pressure test | 162,773 B |
+| Context selectors | 111,440 B |
+| Virtualized collections | 118,546 B |
 
-Counter and Components show the approximate runtime cost of MVP 9 lifecycle
-hooks. Todo includes example-level localStorage persistence and compact string
-encoding, so its increase is not purely runtime overhead. Dashboard is a
-larger example-level pressure test with 300 rows and sorting/filtering logic.
+Counter and Components show the approximate runtime cost of the shared runtime
+surface. Todo includes example-level localStorage persistence and compact
+string encoding, so its increase is not purely runtime overhead. Dashboard is a
+larger example-level pressure test with 300 logical rows, sorting/filtering
+logic, context/reducer/memoization-era runtime costs, and fixed-height table
+virtualization.
 
 ## Performance Review
 
@@ -262,6 +268,9 @@ Performance risks that remain:
 - Parent rerender always rerenders component descendants it reaches.
 - Paint Flashing is still checked indirectly through DOM operations and
   MutationObserver records, not direct browser paint metrics.
+- Virtualized collections currently require fixed item/row heights. Dynamic
+  measurement, infinite loading, keyboard navigation, and richer table
+  accessibility remain future work.
 
 ## Security/Safety Review
 
@@ -340,6 +349,8 @@ Automated checks currently include:
 - Browser Todo smoke script.
 - Browser duplicate-key smoke script.
 - Browser dashboard smoke and dashboard pressure-test trace.
+- Browser context selector smoke.
+- Browser virtualized collections smoke.
 - Size budget script.
 - Pure runtime benchmark script.
 - Component identity decision document.
@@ -348,11 +359,10 @@ Automated checks currently include:
 
 Recommended next hardening steps before new product features:
 
-1. Use the dashboard pressure test to guide runtime optimization work with
-   before/after render, patch, and DOM operation metrics.
-2. Keep memoization, context, router, Player, SSR, hydration, and bundle
-   splitting out of scope until the current packaging/runtime gates stay green
-   through PR review.
+1. Keep using the dashboard pressure test to guide runtime optimization work
+   with before/after render, patch, DOM operation, and listener metrics.
+2. Keep router, Player, SSR, hydration, and bundle splitting out of scope until
+   the current packaging/runtime gates stay green through PR review.
 3. Decide whether component identity should include function identity or a
    generated stable type token before adding larger component lifecycle features.
 4. Add debug duplicate-key source locations only if diagnostics need to become
