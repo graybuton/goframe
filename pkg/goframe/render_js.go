@@ -325,6 +325,7 @@ func eventHandler(listener *mountedEvent) js.Func {
 		}
 		wrappedEvent := wrapEvent(rawEvent)
 		inputEvent := wrapInputEvent(rawEvent, wrappedEvent)
+		scrollEvent := wrapScrollEvent(rawEvent, wrappedEvent)
 		switch callback := listener.callback.(type) {
 		case func():
 			callback()
@@ -332,10 +333,12 @@ func eventHandler(listener *mountedEvent) js.Func {
 			callback(wrappedEvent)
 		case func(InputEvent):
 			callback(inputEvent)
+		case func(ScrollEvent):
+			callback(scrollEvent)
 		case func(js.Value):
 			callback(rawEvent)
 		default:
-			panic("goframe: event handler must be func(), func(goframe.Event), func(goframe.InputEvent), or func(js.Value)")
+			panic("goframe: event handler must be func(), func(goframe.Event), func(goframe.InputEvent), func(goframe.ScrollEvent), or func(js.Value)")
 		}
 		return nil
 	})
@@ -371,6 +374,26 @@ func wrapInputEvent(value js.Value, event Event) InputEvent {
 				return ""
 			}
 			return current.String()
+		},
+	}
+}
+
+func wrapScrollEvent(value js.Value, event Event) ScrollEvent {
+	return ScrollEvent{
+		Event: event,
+		scrollTop: func() int {
+			if value.IsUndefined() || value.IsNull() {
+				return 0
+			}
+			target := value.Get("target")
+			if target.IsUndefined() || target.IsNull() {
+				return 0
+			}
+			current := target.Get("scrollTop")
+			if current.IsUndefined() || current.IsNull() {
+				return 0
+			}
+			return current.Int()
 		},
 	}
 }

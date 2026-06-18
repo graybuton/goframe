@@ -34,3 +34,17 @@ func (event InputEvent) Value() string {
 	}
 	return event.value()
 }
+
+// ScrollEvent exposes the current scroll offset for scrollable elements.
+type ScrollEvent struct {
+	Event
+	scrollTop func() int
+}
+
+// ScrollTop returns the event target's vertical scroll offset in pixels.
+func (event ScrollEvent) ScrollTop() int {
+	if event.scrollTop == nil {
+		return 0
+	}
+	return event.scrollTop()
+}
