@@ -288,6 +288,14 @@ try {
     assertContinuousScrollReport(continuousReport, continuousScrollSteps, continuousBefore, continuousAfter);
     await assertVirtualTableSpacerStability(client, "continuous buffered scroll");
 
+    await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        viewport.scrollTop = 0;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+    })()`);
+    await wait(160);
+    await assertVirtualTableSpacerStability(client, "before cross-row scroll");
+
     await startScenario(client, "table-scroll");
     await client.evaluate(`(() => {
         const viewport = document.querySelector("[data-testid='issue-table']");
@@ -767,13 +775,38 @@ function assertBeyondBufferScrollReport(report, beforeState, state) {
     if (report.renderDeltas.VirtualTable <= 0) {
         throw new Error(`APP FAILURE: beyond-buffer scroll should render VirtualTable: ${JSON.stringify(report.renderDeltas)}`);
     }
+    if (report.operations.addEventListener !== report.operations.removeEventListener) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll listener net changed: ${JSON.stringify(report.operations)}`);
+    }
+    const rowCount = Math.max(beforeState.rowCount, state.rowCount, 1);
+    const changedRows = Math.max(1, countRowWindowChanges(beforeState.rowIDs, state.rowIDs));
     const created = report.operations.createElement + report.operations.createTextNode;
     const inserted = report.operations.insertBefore + report.operations.appendChild;
-    if (created > 1200 || inserted > 160 || report.operations.removeChild > 160 ||
-        report.operations.addEventListener > 160 || report.operations.removeEventListener > 160) {
-        throw new Error(`APP FAILURE: beyond-buffer scroll DOM churn is unbounded: ${JSON.stringify(report.operations)}`);
+    const createdLimit = rowCount * 16;
+    const insertedLimit = rowCount * 16;
+    const removedLimit = rowCount * 4;
+    const listenerLimit = rowCount * 2;
+    if (created > createdLimit || inserted > insertedLimit || report.operations.removeChild > removedLimit ||
+        report.operations.addEventListener > listenerLimit || report.operations.removeEventListener > listenerLimit) {
+        throw new Error(`APP FAILURE: beyond-buffer scroll DOM churn is unbounded: ${JSON.stringify({
+            operations: report.operations,
+            rowCount,
+            changedRows,
+            limits: { createdLimit, insertedLimit, removedLimit, listenerLimit },
+        })}`);
     }
-    console.log(`dashboard beyond-buffer scroll bounded summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations, beforeRows: beforeState.rowCount, afterRows: state.rowCount })}`);
+    console.log(`dashboard beyond-buffer scroll bounded summary: ${JSON.stringify({ renderDeltas: report.renderDeltas, operations: report.operations, rowCount, changedRows, limits: { createdLimit, insertedLimit, removedLimit, listenerLimit }, beforeRows: beforeState.rowCount, afterRows: state.rowCount })}`);
+}
+
+function countRowWindowChanges(beforeIDs, afterIDs) {
+    const before = new Set(beforeIDs || []);
+    let changed = 0;
+    for (const id of afterIDs || []) {
+        if (!before.has(id)) {
+            changed++;
+        }
+    }
+    return changed;
 }
 
 function assertContinuousScrollReport(report, scrollSteps, beforeState, state) {
