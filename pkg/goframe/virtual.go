@@ -43,6 +43,8 @@ type VirtualTableProps[T any] struct {
 	RowHeight int
 	Overscan  int
 
+	ColumnCount int
+
 	Key       func(item T, index int) string
 	Header    func() Node
 	RenderRow func(row VirtualRow[T]) Node
@@ -124,11 +126,11 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 	bodyChildren := make([]Node, 0, rangeInfo.End-rangeInfo.Start+2)
 	if len(props.Items) == 0 {
 		if props.Empty != nil {
-			bodyChildren = append(bodyChildren, virtualTableContentRow(props.Empty()))
+			bodyChildren = append(bodyChildren, virtualTableContentRow(props.Empty(), props.ColumnCount))
 		}
 	} else {
 		if rangeInfo.TopSpacer > 0 {
-			bodyChildren = append(bodyChildren, virtualTableSpacerRow("top", rangeInfo.TopSpacer))
+			bodyChildren = append(bodyChildren, virtualTableSpacerRow("top", rangeInfo.TopSpacer, props.ColumnCount))
 		}
 		for index := rangeInfo.Start; index < rangeInfo.End; index++ {
 			key := virtualItemKey(props.Key, props.Items[index], index)
@@ -141,7 +143,7 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 			bodyChildren = append(bodyChildren, Key(key, props.RenderRow(row)))
 		}
 		if rangeInfo.BottomSpacer > 0 {
-			bodyChildren = append(bodyChildren, virtualTableSpacerRow("bottom", rangeInfo.BottomSpacer))
+			bodyChildren = append(bodyChildren, virtualTableSpacerRow("bottom", rangeInfo.BottomSpacer, props.ColumnCount))
 		}
 	}
 
@@ -238,23 +240,30 @@ func virtualViewportStyle(height int) string {
 	return "height:" + ToString(height) + "px;overflow-y:auto;position:relative;"
 }
 
-func virtualTableSpacerRow(name string, height int) Node {
+func virtualTableSpacerRow(name string, height int, columnCount int) Node {
 	return El("tr", Props{
 		"class":       "gf-virtual-table-spacer gf-virtual-table-spacer-" + name,
 		"aria-hidden": "true",
 		"style":       "height:" + ToString(height) + "px;",
 	}, El("td", Props{
-		"colspan": "999",
+		"colspan": virtualTableColumnCount(columnCount),
 		"style":   "height:" + ToString(height) + "px;padding:0;border:0;",
 	}))
 }
 
-func virtualTableContentRow(content Node) Node {
+func virtualTableContentRow(content Node, columnCount int) Node {
 	return El("tr", Props{
 		"class": "gf-virtual-table-content",
 	}, El("td", Props{
-		"colspan": "999",
+		"colspan": virtualTableColumnCount(columnCount),
 	}, content))
+}
+
+func virtualTableColumnCount(value int) string {
+	if value <= 0 {
+		value = 1
+	}
+	return ToString(value)
 }
 
 func joinVirtualClass(base string, extra string) string {

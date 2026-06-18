@@ -19,6 +19,7 @@ const settleFrames = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_SETTLE_FRAMES
 const postIdleMs = Number(process.env.GOFRAME_DASHBOARD_PRESSURE_POST_IDLE_MS ?? "3000");
 const profile = await mkdtemp(join(tmpdir(), "goframe-dashboard-pressure-"));
 const expectedAllRows = 300;
+const expectedTableColumns = 7;
 const maxMountedRows = 70;
 const maxAllCreateNodes = 2500;
 const maxAllEventAdds = 160;
@@ -75,6 +76,7 @@ try {
     if (initial.logicalRows !== expectedAllRows || initial.rows <= 0 || initial.rows > maxMountedRows) {
         throw new Error(`APP FAILURE: dashboard should start with ${expectedAllRows} logical rows and bounded mounted rows: ${JSON.stringify(initial)}`);
     }
+    await assertDashboardTableLayout(client, "initial");
 
     const records = [];
     for (let cycle = 1; cycle <= cycles; cycle++) {
@@ -304,6 +306,9 @@ async function runTransition(client, cycle, status, label) {
     const metricsAfter = await performanceMetrics(client);
     await collectGarbage(client);
     const afterGC = await samplePage(client, label, cycle, status);
+    if (status === "all") {
+        await assertDashboardTableLayout(client, `${label} cycle ${cycle}`);
+    }
 
     return {
         cycle,
@@ -361,6 +366,47 @@ async function samplePage(client, label, cycle, status) {
     page.logicalRows = parsed.visible;
     page.totalRows = parsed.total;
     return { ...page, metrics: await performanceMetrics(client) };
+}
+
+async function assertDashboardTableLayout(client, label) {
+    const layout = await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        const table = viewport?.querySelector("table");
+        const headerCells = table ? [...table.querySelectorAll("thead th")] : [];
+        const firstRow = table?.querySelector("tbody tr.issue-row");
+        const firstRowCells = firstRow ? [...firstRow.querySelectorAll("td")] : [];
+        const rowLink = firstRow?.querySelector(".row-link");
+        return {
+            viewportWidth: viewport ? Math.round(viewport.getBoundingClientRect().width) : 0,
+            tableWidth: table ? Math.round(table.getBoundingClientRect().width) : 0,
+            headerCellCount: headerCells.length,
+            firstRowCellCount: firstRowCells.length,
+            headerWidths: headerCells.map((cell) => Math.round(cell.getBoundingClientRect().width)),
+            firstRowWidths: firstRowCells.map((cell) => Math.round(cell.getBoundingClientRect().width)),
+            rowLinkWidth: rowLink ? Math.round(rowLink.getBoundingClientRect().width) : 0,
+        };
+    })()`);
+    const failures = [];
+    if (layout.headerCellCount !== expectedTableColumns) failures.push(`header cells=${layout.headerCellCount}`);
+    if (layout.firstRowCellCount !== expectedTableColumns) failures.push(`row cells=${layout.firstRowCellCount}`);
+    if (!(layout.viewportWidth > 0 && layout.tableWidth >= layout.viewportWidth * 0.95)) {
+        failures.push(`table width ${layout.tableWidth}, viewport width ${layout.viewportWidth}`);
+    }
+    for (const [index, width] of layout.headerWidths.entries()) {
+        if (width <= 30) failures.push(`header width[${index}]=${width}`);
+    }
+    if ((layout.firstRowWidths[0] ?? 0) <= 100) {
+        failures.push(`issue column width=${layout.firstRowWidths[0] ?? 0}`);
+    }
+    if ((layout.firstRowWidths[6] ?? 0) <= 50) {
+        failures.push(`action column width=${layout.firstRowWidths[6] ?? 0}`);
+    }
+    if (layout.rowLinkWidth <= 100) {
+        failures.push(`row link width=${layout.rowLinkWidth}`);
+    }
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: dashboard table layout collapsed during ${label}: ${failures.join("; ")} ${JSON.stringify(layout)}`);
+    }
 }
 
 async function performanceMetrics(client) {

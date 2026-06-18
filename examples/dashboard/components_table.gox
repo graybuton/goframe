@@ -53,6 +53,7 @@ func IssueTable(props IssueTableProps) gf.Node {
 		Height: dashboardTableHeight,
 		RowHeight: dashboardRowHeight,
 		Overscan: dashboardRowOverscan,
+		ColumnCount: dashboardTableColumnCount,
 		Key: func(issue Issue, index int) string {
 			return gf.ToString(issue.ID)
 		},

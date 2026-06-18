@@ -137,6 +137,7 @@ func VirtualTablePanel(props VirtualTablePanelProps) gf.Node {
 				Height: virtualTableHeight,
 				RowHeight: virtualTableRowHeight,
 				Overscan: virtualOverscan,
+				ColumnCount: virtualTableColumnCount,
 				Key: func(item DemoItem, index int) string {
 					return gf.ToString(item.ID)
 				},

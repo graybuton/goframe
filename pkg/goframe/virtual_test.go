@@ -129,6 +129,38 @@ func TestVirtualTableCreatesComponentBoundary(t *testing.T) {
 	}
 }
 
+func TestVirtualTableColumnCount(t *testing.T) {
+	tests := []struct {
+		value int
+		want  string
+	}{
+		{value: 0, want: "1"},
+		{value: -1, want: "1"},
+		{value: 7, want: "7"},
+	}
+	for _, test := range tests {
+		if got := virtualTableColumnCount(test.value); got != test.want {
+			t.Fatalf("column count %d = %q, want %q", test.value, got, test.want)
+		}
+	}
+}
+
+func TestVirtualTableSpacerRowUsesColumnCount(t *testing.T) {
+	row := virtualTableSpacerRow("top", 48, 7).(VNode)
+	cell := row.Children[0].(VNode)
+	if got := cell.Props["colspan"]; got != "7" {
+		t.Fatalf("spacer colspan = %#v, want 7", got)
+	}
+}
+
+func TestVirtualTableContentRowUsesColumnCount(t *testing.T) {
+	row := virtualTableContentRow(Text("empty"), 7).(VNode)
+	cell := row.Children[0].(VNode)
+	if got := cell.Props["colspan"]; got != "7" {
+		t.Fatalf("content colspan = %#v, want 7", got)
+	}
+}
+
 func assertPanics(t *testing.T, fn func()) {
 	t.Helper()
 	defer func() {

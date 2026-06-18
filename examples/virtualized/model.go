@@ -7,6 +7,7 @@ const virtualListHeight = 360
 const virtualListItemHeight = 44
 const virtualTableHeight = 420
 const virtualTableRowHeight = 40
+const virtualTableColumnCount = 5
 const virtualOverscan = 8
 
 type DemoItem struct {

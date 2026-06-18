@@ -113,6 +113,7 @@ try {
         },
         "dashboard initial render",
     );
+    await assertDashboardTableLayout(client, "initial");
 
     assertDeepEqual(
         await client.evaluate(installDashboardAuditExpression(componentNames)),
@@ -308,6 +309,7 @@ try {
         { summary: `Showing ${filteredVisible} of 300 issues`, headerSame: true },
         "dashboard status filter updates table predictably",
     );
+    await assertDashboardTableLayout(client, "status filter");
 
     await startScenario(client, "reset-before-simulate");
     await clickButtonByText(client, "Reset");
@@ -375,6 +377,7 @@ try {
         },
         "dashboard reset restores deterministic view",
     );
+    await assertDashboardTableLayout(client, "reset");
 
     client.close();
     console.log(`Dashboard timing report: ${JSON.stringify(timings)}`);
@@ -512,6 +515,52 @@ function assertMountedRowsBounded(rows, logicalRows, label) {
     if (rows < 0 || rows > expectedLimit || (logicalRows > 0 && rows === 0)) {
         throw new Error(`APP FAILURE: ${label}: mounted rows ${rows}, logical rows ${logicalRows}, limit ${expectedLimit}`);
     }
+}
+
+async function assertDashboardTableLayout(client, label) {
+    const layout = await client.evaluate(`(() => {
+        const viewport = document.querySelector("[data-testid='issue-table']");
+        const table = viewport?.querySelector("table");
+        const headerCells = table ? [...table.querySelectorAll("thead th")] : [];
+        const firstRow = table?.querySelector("tbody tr.issue-row");
+        const firstRowCells = firstRow ? [...firstRow.querySelectorAll("td")] : [];
+        const rowLink = firstRow?.querySelector(".row-link");
+        const bounds = (node) => {
+            const rect = node.getBoundingClientRect();
+            return { width: Math.round(rect.width), height: Math.round(rect.height) };
+        };
+        return {
+            viewportWidth: viewport ? Math.round(viewport.getBoundingClientRect().width) : 0,
+            tableWidth: table ? Math.round(table.getBoundingClientRect().width) : 0,
+            headerCellCount: headerCells.length,
+            firstRowCellCount: firstRowCells.length,
+            headerWidths: headerCells.map((cell) => bounds(cell).width),
+            firstRowWidths: firstRowCells.map((cell) => bounds(cell).width),
+            rowLinkWidth: rowLink ? bounds(rowLink).width : 0,
+        };
+    })()`);
+    const failures = [];
+    if (layout.headerCellCount !== 7) failures.push(`header cells=${layout.headerCellCount}`);
+    if (layout.firstRowCellCount !== 7) failures.push(`row cells=${layout.firstRowCellCount}`);
+    if (!(layout.viewportWidth > 0 && layout.tableWidth >= layout.viewportWidth * 0.95)) {
+        failures.push(`table width ${layout.tableWidth}, viewport width ${layout.viewportWidth}`);
+    }
+    for (const [index, width] of layout.headerWidths.entries()) {
+        if (width <= 30) failures.push(`header width[${index}]=${width}`);
+    }
+    if ((layout.firstRowWidths[0] ?? 0) <= 100) {
+        failures.push(`issue column width=${layout.firstRowWidths[0] ?? 0}`);
+    }
+    if ((layout.firstRowWidths[6] ?? 0) <= 50) {
+        failures.push(`action column width=${layout.firstRowWidths[6] ?? 0}`);
+    }
+    if (layout.rowLinkWidth <= 100) {
+        failures.push(`row link width=${layout.rowLinkWidth}`);
+    }
+    if (failures.length > 0) {
+        throw new Error(`APP FAILURE: dashboard table layout collapsed during ${label}: ${failures.join("; ")} ${JSON.stringify(layout)}`);
+    }
+    console.log(`dashboard table layout ${label}: ok`);
 }
 
 async function waitForPage(port) {

@@ -109,7 +109,9 @@ workaround and keeps row memoization useful for single-row data changes.
 The table uses `gf.VirtualTable` with fixed-height rows. The app still has 300
 logical issues and summaries still report the logical filtered count, but the
 mounted `.issue-row` elements stay bounded to the visible window plus overscan.
-This is real virtualization: offscreen rows are not hidden DOM nodes.
+The table passes `ColumnCount: 7` so spacer rows preserve the real dashboard
+columns: Issue, Status, Priority, Owner, Service, Events, and Action. This is
+real virtualization: offscreen rows are not hidden DOM nodes.
 
 For DOM pressure audits, run:
 

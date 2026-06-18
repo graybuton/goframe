@@ -41,6 +41,7 @@ gf.VirtualTable[Issue](gf.VirtualTableProps[Issue]{
 	Height:    560,
 	RowHeight: 48,
 	Overscan:  8,
+	ColumnCount: 7,
 	Key: func(issue Issue, index int) string {
 		return gf.ToString(issue.ID)
 	},
@@ -65,6 +66,11 @@ gf.VirtualTable[Issue](gf.VirtualTableProps[Issue]{
 spacer rows above and below the mounted window to preserve the logical scroll
 height. `VirtualRow.RowStyle` should be applied to the rendered `<tr>` so row
 height stays consistent.
+
+Set `ColumnCount` to the number of rendered columns in the table. GoFrame uses
+that value as the `colspan` for spacer and empty rows. If `ColumnCount <= 0`,
+the runtime falls back to `1`; examples should not rely on that fallback unless
+the table really has one column.
 
 ## Range Calculation
 
