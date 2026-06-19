@@ -134,5 +134,6 @@ check_app "todo" "$(bundle_path todo)" 122880 40960 56320 49152 || status=1
 check_app "dashboard" "$(bundle_path dashboard)" 168960 53248 71680 61440 || status=1
 check_app "context" "$(bundle_path context)" 113664 36864 46080 40960 || status=1
 check_app "virtualized" "$(bundle_path virtualized)" 122880 40960 49152 44032 || status=1
+check_app "multipackage" "$(bundle_path multipackage)" 110592 43008 56320 49152 || status=1
 
 exit "$status"

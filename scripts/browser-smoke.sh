@@ -11,6 +11,7 @@ DUPLICATE_SMOKE_URL_BASE="${GOFRAME_DUPLICATE_KEY_SMOKE_URL:-http://127.0.0.1}"
 DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
 VIRTUALIZED_SMOKE_URL_BASE="${GOFRAME_VIRTUALIZED_SMOKE_URL:-http://127.0.0.1}"
+MULTIPACKAGE_SMOKE_URL_BASE="${GOFRAME_MULTIPACKAGE_SMOKE_URL:-http://127.0.0.1}"
 
 cd "$ROOT_DIR"
 export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
@@ -102,6 +103,11 @@ build_virtualized_smoke_url() {
 	echo "${VIRTUALIZED_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
+build_multipackage_smoke_url() {
+	local port="$1"
+	echo "${MULTIPACKAGE_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
 stop_server() {
 	local pid="${1:-}"
 	if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
@@ -174,7 +180,7 @@ require_command "$CHROME_BIN" "Set CHROME=/path/to/chrome if Chrome is installed
 echo "== Todo debug browser smoke =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 (
-	cd ./examples/todo/.goframe/work/dev
+	cd ./examples/todo/.goframe/work/dev/examples/todo
 	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
 		-o "$ROOT_DIR/examples/todo/.goframe/package/standalone/assets/bundle.wasm" .
 )
@@ -189,7 +195,7 @@ echo
 echo "== Duplicate key debug browser smoke =="
 "$GOXC" package ./scripts/fixtures/duplicate-keys --compiler=tinygo
 (
-	cd ./scripts/fixtures/duplicate-keys/.goframe/work/dev
+	cd ./scripts/fixtures/duplicate-keys/.goframe/work/dev/scripts/fixtures/duplicate-keys
 	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
 		-o "$ROOT_DIR/scripts/fixtures/duplicate-keys/.goframe/package/standalone/assets/bundle.wasm" .
 )
@@ -204,7 +210,7 @@ echo
 echo "== Dashboard debug browser smoke =="
 "$GOXC" package ./examples/dashboard --compiler=tinygo
 (
-	cd ./examples/dashboard/.goframe/work/dev
+	cd ./examples/dashboard/.goframe/work/dev/examples/dashboard
 	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
 		-o "$ROOT_DIR/examples/dashboard/.goframe/package/standalone/assets/bundle.wasm" .
 )
@@ -219,7 +225,7 @@ echo
 echo "== Context debug browser smoke =="
 "$GOXC" package ./examples/context --compiler=tinygo
 (
-	cd ./examples/context/.goframe/work/dev
+	cd ./examples/context/.goframe/work/dev/examples/context
 	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
 		-o "$ROOT_DIR/examples/context/.goframe/package/standalone/assets/bundle.wasm" .
 )
@@ -234,7 +240,7 @@ echo
 echo "== Virtualized debug browser smoke =="
 "$GOXC" package ./examples/virtualized --compiler=tinygo
 (
-	cd ./examples/virtualized/.goframe/work/dev
+	cd ./examples/virtualized/.goframe/work/dev/examples/virtualized
 	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
 		-o "$ROOT_DIR/examples/virtualized/.goframe/package/standalone/assets/bundle.wasm" .
 )
@@ -246,10 +252,26 @@ run_with_server ./examples/virtualized "$VIRTUALIZED_PORT" "$VIRTUALIZED_URL" \
 	node --experimental-websocket scripts/virtualized-browser-smoke.mjs
 
 echo
+echo "== Multipackage debug browser smoke =="
+"$GOXC" package ./examples/multipackage --compiler=tinygo
+(
+	cd ./examples/multipackage/.goframe/work/dev/examples/multipackage
+	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+		-o "$ROOT_DIR/examples/multipackage/.goframe/package/standalone/assets/bundle.wasm" .
+)
+
+MULTIPACKAGE_PORT="$(resolve_port "${GOFRAME_MULTIPACKAGE_SMOKE_PORT:-}")"
+export GOFRAME_MULTIPACKAGE_CHROME_DEBUG_PORT="${GOFRAME_MULTIPACKAGE_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+MULTIPACKAGE_URL="$(build_multipackage_smoke_url "$MULTIPACKAGE_PORT")"
+run_with_server ./examples/multipackage "$MULTIPACKAGE_PORT" "$MULTIPACKAGE_URL" \
+	node --experimental-websocket scripts/multipackage-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
 "$GOXC" package ./examples/context --compiler=tinygo
 "$GOXC" package ./examples/virtualized --compiler=tinygo
+"$GOXC" package ./examples/multipackage --compiler=tinygo
 
 echo "browser smoke: ok"
