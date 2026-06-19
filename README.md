@@ -133,6 +133,14 @@ goxc package ./examples/multipackage --compiler=tinygo
 goxc serve ./examples/multipackage --port=8080
 ```
 
+The child-entry example demonstrates a Go-first `cmd/app + internal/...`
+layout with `"entry": "./cmd/app"`:
+
+```bash
+goxc package ./examples/cmdapp --compiler=tinygo
+goxc serve ./examples/cmdapp --port=8080
+```
+
 ## GOX component model
 
 Lowercase tags create HTML elements:
@@ -542,8 +550,9 @@ early.
 CLI flags override manifest compiler and output choices. The `output` field is
 kept as a legacy/export convention; normal package output is written under the
 hidden `.goframe/package/standalone` workspace. The hidden workspace builder
-supports `"entry": "."` apps with child packages below the app root. Child
-entry packages such as `"./cmd/app"` remain future toolchain work.
+supports `"entry": "."` apps and child entry packages such as `"./cmd/app"`,
+`"cmd/app"`, `"./src/app"`, and `"app"` when they stay inside the app root.
+GOX discovery remains app-root-wide.
 
 ## Size experiment
 
@@ -658,6 +667,7 @@ required.
 - [Todo example](examples/todo/README.md)
 - [Dashboard pressure-test example](examples/dashboard/README.md)
 - [Multi-package GOX example](examples/multipackage/README.md)
+- [Child entry package example](examples/cmdapp/README.md)
 - [Virtualized collections example](examples/virtualized/README.md)
 
 ## Development

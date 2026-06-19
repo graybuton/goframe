@@ -40,5 +40,5 @@ for example:
 github.com/graybuton/goframe/examples/multipackage/internal/ui.Header
 ```
 
-MVP 20 supports `entry: "."` with packages under the app root. Child entry
-packages such as `entry: "./cmd/app"` remain future work.
+`entry: "."` remains supported for apps with packages under the app root. For
+a child-entry layout such as `entry: "./cmd/app"`, see `examples/cmdapp`.

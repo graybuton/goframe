@@ -1,13 +1,13 @@
 # Multi-package GOX Workspace
 
-MVP 20 adds the first `goxc` path for applications with more than one Go
-package. This is toolchain support, not a router, namespace system, or app
-framework convention.
+MVP 20 added the first `goxc` path for applications with more than one Go
+package. MVP 22 extends that path so the executable entry package can live in
+a child directory such as `./cmd/app`. This is toolchain support, not a
+router, namespace system, or app framework convention.
 
 ## Supported Layout
 
-The supported MVP 20 layout is an application root with `entry: "."` and any
-number of child packages below that root:
+The app-root entry layout remains supported:
 
 ```text
 app/
@@ -22,8 +22,35 @@ app/
     └── model.go
 ```
 
-Child entry packages such as `entry: "./cmd/app"` are not implemented yet.
-`goxc` rejects them with a clear error.
+Child entry packages are also supported when they are relative package
+directories inside the app root:
+
+```json
+{
+  "entry": "./cmd/app"
+}
+```
+
+The recommended Go-first layout is:
+
+```text
+app/
+├── goframe.json
+├── index.html
+├── styles.css
+├── cmd/app/
+│   ├── main.go
+│   └── app.gox
+└── internal/
+    ├── ui/
+    │   └── layout.gox
+    └── features/
+        └── tasks/list.gox
+```
+
+Generic child entry paths such as `./app` or `./src/app` work as ordinary Go
+package directories. Frontend-flavored layouts such as `src/app` are allowed,
+but the Go-first recommendation is `cmd/app` plus `internal/...`.
 
 ## Workspace Strategy
 
@@ -43,6 +70,22 @@ examples/multipackage/.goframe/work/dev/
 The authored source tree remains clean. Generated files are written under
 `.goframe/gen` for `goxc generate` and under `.goframe/work/<profile>` for
 build/package materialization.
+
+For a child entry app, the workspace still mirrors the app root and then builds
+the selected child package:
+
+```text
+examples/cmdapp/.goframe/work/dev/
+├── go.mod
+├── pkg/goframe/
+└── examples/cmdapp/
+    ├── cmd/app/app.gox.go
+    └── internal/ui/layout.gox.go
+```
+
+The build package is `examples/cmdapp/.goframe/work/dev/examples/cmdapp/cmd/app`.
+GOX discovery remains app-root-wide so imported internal packages get their
+generated files too.
 
 This model is intentionally used instead of a Go overlay because TinyGo
 support for overlays is not part of the current baseline.
@@ -65,6 +108,16 @@ component:   Header
 component id github.com/graybuton/goframe/examples/multipackage/internal/ui.Header
 ```
 
+For a child entry package:
+
+```text
+package dir: examples/cmdapp/cmd/app
+component id github.com/graybuton/goframe/examples/cmdapp/cmd/app.Header
+
+package dir: examples/cmdapp/internal/ui
+component id github.com/graybuton/goframe/examples/cmdapp/internal/ui.Header
+```
+
 If no module path can be determined, generation falls back to the package-name
 identity path used by `GenerateNamed`.
 
@@ -82,7 +135,7 @@ under `.goframe/work/<profile>` together.
 
 ## Cross-package Components
 
-GOX does not add namespace tags in MVP 20. This remains unsupported:
+GOX does not add namespace tags in MVP 22. This remains unsupported:
 
 ```gox
 <ui.Header />
@@ -104,6 +157,28 @@ call itself is not a runtime component boundary unless that package exposes one
 through its own local GOX-generated component calls or handwritten
 `gf.ComponentT` wrapper.
 
+## Entry Path Rules
+
+Allowed examples:
+
+```text
+.
+./cmd/app
+cmd/app
+./src/app
+src/app
+./app
+app
+```
+
+Rejected examples include empty paths, absolute paths, paths containing `..`,
+and tool-owned directories such as `.goframe`, `build`, `dist`,
+`node_modules`, and `.git`.
+
+The entry must point to a directory, not a file. Symlink behavior is still
+covered by the broader file safety policy rather than a full symlink-hardening
+claim.
+
 ## Commands
 
 The multi-package example supports:
@@ -117,9 +192,19 @@ goxc size ./examples/multipackage
 goxc serve ./examples/multipackage --port=8080
 ```
 
+The child-entry example supports:
+
+```bash
+goxc generate ./examples/cmdapp
+goxc build ./examples/cmdapp --compiler=go
+goxc package ./examples/cmdapp --compiler=go
+goxc package ./examples/cmdapp --compiler=tinygo
+goxc size ./examples/cmdapp
+goxc serve ./examples/cmdapp --port=8080
+```
+
 ## Current Limitations
 
-- `entry: "."` only.
 - No namespace tags.
 - No full multi-module monorepo story.
 - No router/layout convention.
@@ -130,5 +215,6 @@ goxc serve ./examples/multipackage --port=8080
 
 ## Example
 
-See `examples/multipackage` for a compact app with a root package,
-`internal/ui`, `internal/issues`, and ordinary shared Go helpers.
+See `examples/multipackage` for a compact `entry: "."` app with a root
+package, `internal/ui`, `internal/issues`, and ordinary shared Go helpers.
+See `examples/cmdapp` for a compact `entry: "./cmd/app"` app.

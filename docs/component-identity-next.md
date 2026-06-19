@@ -52,8 +52,9 @@ multi-package applications:
 - memoization and effects depend on instance reuse being correct;
 - keyed lists rely on component identity plus key, not key alone.
 
-These are smaller after MVP 20, but child entry packages, multi-module
-workspaces, and final public identity policy remain open.
+These are smaller after MVP 20 and MVP 22, but multi-module workspaces,
+reusable component package policy, and the final public identity policy remain
+open.
 
 ## Required Properties
 
@@ -131,8 +132,7 @@ Remaining cons:
 - `goxc` generated ids use import paths when known, but lower-level generation
   helpers can still emit package-name fallback ids;
 - token variable names include source-file context and are not public API;
-- child-entry and multi-module support still need additional package-token
-  decisions;
+- multi-module support still needs additional package-token decisions;
 - token lifetime and initialization must stay simple for TinyGo.
 
 ## Option D: Explicit User Tokens
@@ -200,16 +200,17 @@ A conservative path:
 
 MVP 19 prototypes compiler-generated component tokens while preserving legacy
 `gf.Component` compatibility. MVP 20 makes the `goxc` path import-path-aware
-when a nearest module path is known. That is enough for the first
-multi-package app workspace, but not a final answer for child entries,
-multi-module monorepos, or public component package policy.
+when a nearest module path is known. MVP 22 uses the same package-directory
+identity for child entry packages such as `./cmd/app`. That is enough for the
+current single-module app workspace, but not a final answer for multi-module
+monorepos or public component package policy.
 
 The current recommendation is:
 
 ```text
-entry "." apps: use generated ComponentT tokens with import-aware ids when known
+entry "." and child-entry apps: use generated ComponentT tokens with import-aware ids when known
 handwritten/raw Go: gf.Component remains compatible; ComponentT is available
-future workspace forms: require child-entry and multi-module identity design
+future workspace forms: require multi-module identity design
 ```
 
 ## Open Questions

@@ -250,8 +250,9 @@ Safety findings:
 
 - manifest paths are validated as relative child paths;
 - unknown manifest fields fail;
-- hidden workspace build supports `entry: "."` apps with child packages under
-  the app root and fails clearly for unsupported child entry packages;
+- hidden workspace build supported `entry: "."` apps with child packages under
+  the app root at the time of the audit; MVP 22 later added child entry package
+  support inside the app root;
 - package output uses staging before publishing;
 - explicit package destinations must be empty or GoFrame-owned;
 - export refuses non-empty non-GoFrame directories unless `--force` is used;

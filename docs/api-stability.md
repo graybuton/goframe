@@ -142,7 +142,7 @@ Not stable:
 - router design;
 - SSR/hydration;
 - Player/Engine or `.gfapp` format;
-- child-entry and multi-module app support;
+- multi-module app support;
 - final public component package identity policy;
 - dynamic virtualization measurement;
 - infinite loading;
@@ -156,8 +156,8 @@ Not stable:
 
 Before public preview, GoFrame should have:
 
-- a component identity decision for child-entry apps, multi-module workspaces,
-  and reusable component packages;
+- a component identity decision for multi-module workspaces and reusable
+  component packages;
 - a symlink/file safety test matrix;
 - clearer package manifest compatibility policy;
 - stable migration notes for GOX syntax changes;

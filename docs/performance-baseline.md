@@ -17,7 +17,8 @@ The baseline covers:
 - Go, race, vet, debug-tag, and GOX golden tests;
 - TinyGo raw, gzip, brotli, and zstd size budgets;
 - browser smoke behavior for Todo, duplicate keys, dashboard, context,
-  virtualized collections, and the multi-package example;
+  virtualized collections, the multi-package example, and the child-entry
+  example;
 - dashboard DOM pressure and listener stability;
 - pure runtime benchmark reports;
 - package, export, artifact, and module path safety gates.
@@ -145,6 +146,14 @@ MVP 20 measured size for the new example:
 |---|---:|---:|---:|---:|
 | multipackage | 89727 | 35422 | 29549 | 31831 |
 
+MVP 22 adds a child-entry package example. Existing example budgets remain
+authoritative in `scripts/size-budget.sh`; the new example is tracked with its
+own budget.
+
+| Example | Raw | gzip | br | zstd |
+|---|---:|---:|---:|---:|
+| cmdapp | 89786 | 35453 | 29569 | 31836 |
+
 ## Browser / DOM Baseline
 
 `scripts/browser-smoke.sh` currently covers:
@@ -159,6 +168,8 @@ MVP 20 measured size for the new example:
   selection/toggle after scroll, and listener net stability.
 - Multi-package GOX workspace loading, internal package component rendering,
   readable debug names, and a simple state interaction.
+- Child-entry package loading from `cmd/app`, internal package component
+  rendering, readable debug names, and a simple state interaction.
 
 Hard browser gates focus on correctness and structural invariants. Timing
 printed by smoke scripts is useful for trend spotting, but it is not a stable
