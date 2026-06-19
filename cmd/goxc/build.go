@@ -97,7 +97,7 @@ func buildApp(options buildOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	workDir, err := prepareBuildWorkspace(layout, manifest)
+	entryPath, err := prepareBuildWorkspace(layout, manifest)
 	if err != nil {
 		return "", fmt.Errorf("prepare build workspace: %w", err)
 	}
@@ -106,7 +106,6 @@ func buildApp(options buildOptions) (string, error) {
 		return "", fmt.Errorf("create build directory: %w", err)
 	}
 
-	entryPath := filepath.Join(workDir, manifest.Entry)
 	fmt.Printf("building %s with %s compiler\n", options.appDir, options.compiler)
 	if err := compileWASM(options.compiler, entryPath, outputPath); err != nil {
 		return "", err

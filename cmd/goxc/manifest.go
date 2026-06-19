@@ -51,6 +51,9 @@ func loadManifest(appDir string) (projectManifest, error) {
 	if manifest.Name == "" {
 		manifest.Name = filepath.Base(filepath.Clean(appDir))
 	}
+	if err := rejectExplicitEmptyEntry(content); err != nil {
+		return projectManifest{}, err
+	}
 	if manifest.Entry == "" {
 		manifest.Entry = "."
 	}
@@ -67,9 +70,11 @@ func loadManifest(appDir string) (projectManifest, error) {
 		manifest.Assets = []string{"index.html"}
 	}
 
-	if !safeRelativePath(manifest.Entry) {
-		return projectManifest{}, fmt.Errorf("entry %q in %s must be a relative path inside the application", manifest.Entry, manifestName)
+	entry, err := cleanManifestEntry(manifest.Entry)
+	if err != nil {
+		return projectManifest{}, fmt.Errorf("entry %q in %s %s", manifest.Entry, manifestName, err)
 	}
+	manifest.Entry = entry
 	for name, value := range map[string]string{
 		"output": manifest.Output,
 		"wasm":   manifest.WASM,
@@ -87,6 +92,66 @@ func loadManifest(appDir string) (projectManifest, error) {
 		}
 	}
 	return manifest, nil
+}
+
+func rejectExplicitEmptyEntry(content []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(content, &raw); err != nil {
+		return err
+	}
+	value, ok := raw["entry"]
+	if !ok {
+		return nil
+	}
+	var entry string
+	if err := json.Unmarshal(value, &entry); err != nil {
+		return nil
+	}
+	if entry == "" {
+		return fmt.Errorf("entry %q in %s must be a relative child package inside the application", entry, manifestName)
+	}
+	return nil
+}
+
+func cleanManifestEntry(entry string) (string, error) {
+	if entry == "." {
+		return ".", nil
+	}
+	if entry == "" || filepath.IsAbs(entry) {
+		return "", fmt.Errorf("must be a relative child package inside the application")
+	}
+	rawParts := strings.Split(filepath.ToSlash(entry), "/")
+	for _, part := range rawParts {
+		if part == ".." {
+			return "", fmt.Errorf("must be a relative child package inside the application")
+		}
+	}
+	entry = filepath.Clean(entry)
+	if entry == "." {
+		return ".", nil
+	}
+	parts := strings.Split(filepath.ToSlash(entry), "/")
+	for _, part := range parts {
+		if part == ".." {
+			return "", fmt.Errorf("must be a relative child package inside the application")
+		}
+	}
+	if strings.HasPrefix(entry, ".."+string(filepath.Separator)) || entry == ".." {
+		return "", fmt.Errorf("must be a relative child package inside the application")
+	}
+	if isToolOwnedEntryRoot(parts[0]) {
+		return "", fmt.Errorf("points to a GoFrame-owned or tool-owned directory")
+	}
+	return filepath.ToSlash(entry), nil
+}
+
+func isToolOwnedEntryRoot(root string) bool {
+	switch root {
+	case defaultWorkspaceName, "build", "dist", "node_modules", ".git", ".goxc-tmp":
+		return true
+	default:
+		return false
+	}
 }
 
 func safeChildPath(path string) bool {

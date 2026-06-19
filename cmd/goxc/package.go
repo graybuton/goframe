@@ -189,7 +189,7 @@ func packageApp(options packageOptions) error {
 			return err
 		}
 	}
-	workDir, err := prepareBuildWorkspace(layout, manifest)
+	entryPath, err := prepareBuildWorkspace(layout, manifest)
 	if err != nil {
 		return fmt.Errorf("prepare package workspace: %w", err)
 	}
@@ -202,7 +202,6 @@ func packageApp(options packageOptions) error {
 
 	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
 	tempWASM := filepath.Join(tempDir, wasmLogicalName)
-	entryPath := filepath.Join(workDir, manifest.Entry)
 	fmt.Printf("packaging %s with %s compiler\n", options.appDir, options.compiler)
 	if err := compileWASM(options.compiler, entryPath, tempWASM); err != nil {
 		return err
