@@ -165,6 +165,44 @@ func TestManifestRejectsEscapingPaths(t *testing.T) {
 	}
 }
 
+func TestManifestRejectsUnsafeEntryPaths(t *testing.T) {
+	tests := []string{
+		`{"entry":""}`,
+		`{"entry":"/abs/path"}`,
+		`{"entry":"cmd/../outside"}`,
+		`{"entry":".goframe/work"}`,
+		`{"entry":"build"}`,
+		`{"entry":"dist"}`,
+		`{"entry":"node_modules"}`,
+		`{"entry":".git"}`,
+	}
+	for _, content := range tests {
+		t.Run(content, func(t *testing.T) {
+			appDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadManifest(appDir); err == nil {
+				t.Fatalf("loadManifest() accepted unsafe entry path from %s", content)
+			}
+		})
+	}
+}
+
+func TestLoadManifestNormalizesChildEntry(t *testing.T) {
+	appDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"entry":"./cmd/app"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := loadManifest(appDir)
+	if err != nil {
+		t.Fatalf("loadManifest(child entry) error: %v", err)
+	}
+	if manifest.Entry != "cmd/app" {
+		t.Fatalf("manifest entry = %q, want cmd/app", manifest.Entry)
+	}
+}
+
 func TestManifestRejectsUnknownFields(t *testing.T) {
 	appDir := t.TempDir()
 	content := []byte(`{"compielr":"tinygo"}`)

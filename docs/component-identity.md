@@ -99,14 +99,14 @@ Remaining cons:
 - lower-level generation helpers can still fall back to package name plus
   component name;
 - token variable names are generated-code details;
-- child-entry and multi-module workspace support still need more identity
-  design;
+- multi-module workspace support still needs more identity design;
 - may increase bundle size if token metadata grows.
 
 Recommendation: keep the token path as the generated default while retaining
 `gf.Component` as compatibility API. MVP 20's import-aware `goxc` ids cover
-`entry: "."` apps with child packages, but they are not a complete
-multi-module or child-entry identity policy.
+`entry: "."` apps with child packages, and MVP 22 applies the same model to
+child entry packages such as `./cmd/app`. They are not a complete multi-module
+identity policy.
 
 ## Alternative C: Function Identity
 
@@ -129,8 +129,8 @@ Use generated typed identity for GOX, with these hardening rules:
 - use keys for reordered lists;
 - treat duplicate keys as a bug;
 - keep duplicate-key diagnostics in `goframe_debug` builds only;
-- revisit child-entry, multi-module, and reusable component package identity
-  before claiming a public package ecosystem.
+- revisit multi-module and reusable component package identity before claiming
+  a public package ecosystem.
 
 ## Migration Plan For Tokens
 

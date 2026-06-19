@@ -12,6 +12,7 @@ DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
 VIRTUALIZED_SMOKE_URL_BASE="${GOFRAME_VIRTUALIZED_SMOKE_URL:-http://127.0.0.1}"
 MULTIPACKAGE_SMOKE_URL_BASE="${GOFRAME_MULTIPACKAGE_SMOKE_URL:-http://127.0.0.1}"
+CMDAPP_SMOKE_URL_BASE="${GOFRAME_CMDAPP_SMOKE_URL:-http://127.0.0.1}"
 
 cd "$ROOT_DIR"
 export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
@@ -106,6 +107,11 @@ build_virtualized_smoke_url() {
 build_multipackage_smoke_url() {
 	local port="$1"
 	echo "${MULTIPACKAGE_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_cmdapp_smoke_url() {
+	local port="$1"
+	echo "${CMDAPP_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 stop_server() {
@@ -267,11 +273,27 @@ run_with_server ./examples/multipackage "$MULTIPACKAGE_PORT" "$MULTIPACKAGE_URL"
 	node --experimental-websocket scripts/multipackage-browser-smoke.mjs
 
 echo
+echo "== Cmdapp debug browser smoke =="
+"$GOXC" package ./examples/cmdapp --compiler=tinygo
+(
+	cd ./examples/cmdapp/.goframe/work/dev/examples/cmdapp/cmd/app
+	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+		-o "$ROOT_DIR/examples/cmdapp/.goframe/package/standalone/assets/bundle.wasm" .
+)
+
+CMDAPP_PORT="$(resolve_port "${GOFRAME_CMDAPP_SMOKE_PORT:-}")"
+export GOFRAME_CMDAPP_CHROME_DEBUG_PORT="${GOFRAME_CMDAPP_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+CMDAPP_URL="$(build_cmdapp_smoke_url "$CMDAPP_PORT")"
+run_with_server ./examples/cmdapp "$CMDAPP_PORT" "$CMDAPP_URL" \
+	node --experimental-websocket scripts/cmdapp-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
 "$GOXC" package ./examples/context --compiler=tinygo
 "$GOXC" package ./examples/virtualized --compiler=tinygo
 "$GOXC" package ./examples/multipackage --compiler=tinygo
+"$GOXC" package ./examples/cmdapp --compiler=tinygo
 
 echo "browser smoke: ok"

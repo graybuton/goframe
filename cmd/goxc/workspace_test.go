@@ -7,18 +7,6 @@ import (
 	"testing"
 )
 
-func TestPrepareBuildWorkspaceRejectsUnsupportedEntry(t *testing.T) {
-	_, err := prepareBuildWorkspace(BuildLayout{}, projectManifest{Entry: "cmd/app"})
-	if err == nil {
-		t.Fatal("prepareBuildWorkspace() accepted unsupported entry")
-	}
-	for _, want := range []string{"entry", "not supported", `"."`, "multi-package"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q does not mention %q", err, want)
-		}
-	}
-}
-
 func TestWriteWorkspaceGoModFailsWithoutRepoRootOrVersion(t *testing.T) {
 	oldFind := findRepositoryRootForWorkspace
 	oldVersion := goframeModuleVersionForBuild
@@ -181,6 +169,143 @@ func View() gf.Node {
 	}
 }
 
+func TestCleanManifestEntryAcceptsChildEntries(t *testing.T) {
+	tests := map[string]string{
+		".":         ".",
+		"./cmd/app": "cmd/app",
+		"cmd/app":   "cmd/app",
+		"./src/app": "src/app",
+		"src/app":   "src/app",
+		"./app":     "app",
+		"app":       "app",
+	}
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := cleanManifestEntry(input)
+			if err != nil {
+				t.Fatalf("cleanManifestEntry(%q) error: %v", input, err)
+			}
+			if got != want {
+				t.Fatalf("cleanManifestEntry(%q) = %q, want %q", input, got, want)
+			}
+		})
+	}
+}
+
+func TestCleanManifestEntryRejectsUnsafeEntries(t *testing.T) {
+	tests := []string{
+		"",
+		"/abs/path",
+		"../outside",
+		"./../outside",
+		"cmd/../outside",
+		".goframe/work",
+		"./.goframe/work",
+		"build",
+		"dist",
+		"node_modules",
+		".git",
+	}
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			if _, err := cleanManifestEntry(input); err == nil {
+				t.Fatalf("cleanManifestEntry(%q) returned nil error", input)
+			}
+		})
+	}
+}
+
+func TestResolveEntryPackageDirRejectsFile(t *testing.T) {
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, "cmd/app/main.go", "package main\n")
+	if _, err := resolveEntryPackageDir(appDir, "cmd/app/main.go"); err == nil {
+		t.Fatal("resolveEntryPackageDir() accepted a file entry")
+	}
+}
+
+func TestPrepareBuildWorkspaceAcceptsChildEntry(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "go.mod", "module github.com/example/root\n\ngo 1.22\n")
+	appDir := filepath.Join(root, "apps", "demo")
+	writeTestFile(t, appDir, "cmd/app/main.go", "package main\n")
+	writeTestFile(t, appDir, "cmd/app/app.gox", `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func AppShell() gf.Node {
+	return <main>Demo</main>
+}
+`)
+	writeTestFile(t, appDir, "internal/ui/layout.gox", `package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Layout() gf.Node {
+	return <section>UI</section>
+}
+`)
+
+	layout := BuildLayout{
+		AppDir:  appDir,
+		WorkDir: filepath.Join(t.TempDir(), "work"),
+	}
+	entryDir, err := prepareBuildWorkspace(layout, projectManifest{Entry: "cmd/app"})
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspace(child entry) error: %v", err)
+	}
+	wantEntry := filepath.Join(layout.WorkDir, "apps", "demo", "cmd", "app")
+	if entryDir != wantEntry {
+		t.Fatalf("entry dir = %q, want %q", entryDir, wantEntry)
+	}
+	for _, path := range []string{
+		"apps/demo/cmd/app/app.gox.go",
+		"apps/demo/internal/ui/layout.gox.go",
+	} {
+		if _, err := os.Stat(filepath.Join(layout.WorkDir, path)); err != nil {
+			t.Fatalf("workspace generated file %s missing: %v", path, err)
+		}
+	}
+}
+
+func TestPrepareBuildWorkspaceAcceptsGenericSrcEntry(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "go.mod", "module github.com/example/root\n\ngo 1.22\n")
+	appDir := filepath.Join(root, "apps", "demo")
+	writeTestFile(t, appDir, "src/app/main.go", "package main\n")
+	writeTestFile(t, appDir, "src/app/app.gox", `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <main>src app</main>
+}
+`)
+	writeTestFile(t, appDir, "src/components/button.gox", `package components
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Button() gf.Node {
+	return <button>Button</button>
+}
+`)
+
+	layout := BuildLayout{
+		AppDir:  appDir,
+		WorkDir: filepath.Join(t.TempDir(), "work"),
+	}
+	entryDir, err := prepareBuildWorkspace(layout, projectManifest{Entry: "./src/app"})
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspace(src entry) error: %v", err)
+	}
+	wantEntry := filepath.Join(layout.WorkDir, "apps", "demo", "src", "app")
+	if entryDir != wantEntry {
+		t.Fatalf("entry dir = %q, want %q", entryDir, wantEntry)
+	}
+	if _, err := os.Stat(filepath.Join(layout.WorkDir, "apps/demo/src/components/button.gox.go")); err != nil {
+		t.Fatalf("workspace did not generate non-entry package GOX file: %v", err)
+	}
+}
+
 func TestWriteWorkspaceGoModUsesRootModulePath(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/example/root\n\ngo 1.22\n"), 0o644); err != nil {
@@ -211,5 +336,16 @@ func TestWriteWorkspaceGoModUsesRootModulePath(t *testing.T) {
 		if !strings.Contains(string(content), want) {
 			t.Fatalf("workspace go.mod missing %q:\n%s", want, content)
 		}
+	}
+}
+
+func writeTestFile(t *testing.T, root, relative, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

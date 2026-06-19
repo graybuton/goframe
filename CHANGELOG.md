@@ -43,6 +43,10 @@
 - GOX diagnostic hardening with structured source diagnostics, clearer
   unsupported namespace/spread errors, stricter parser-side validation for
   empty expressions and `Key`, and multi-package source-path error coverage.
+- Child entry package support for `goxc`, including `"entry": "./cmd/app"` and
+  other relative child package directories, app-root-wide GOX generation,
+  import-aware component identities, and a focused `cmdapp` example plus
+  browser smoke.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

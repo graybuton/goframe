@@ -1,0 +1,29 @@
+package tasks
+
+import (
+	shared "github.com/graybuton/goframe/examples/cmdapp/internal/shared"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func TaskList(props TaskListProps) gf.Node {
+	return (
+		<section class="task-list" data-testid="cmdapp-task-list">
+			<h2>{shared.FormatCount(len(props.Items))}</h2>
+			<ul>
+				{gf.Map(props.Items, func(task Task) gf.Node {
+					return <TaskRow Key={task.ID} Task={task} />
+				})}
+			</ul>
+		</section>
+	)
+}
+
+func TaskRow(props TaskRowProps) gf.Node {
+	return (
+		<li class="task-row" data-testid="cmdapp-task-row">
+			<strong>{props.Task.ID}</strong>
+			<span>{props.Task.Title}</span>
+			<small>{shared.FormatPriority(props.Task.Priority)}</small>
+		</li>
+	)
+}

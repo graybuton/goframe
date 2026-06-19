@@ -141,11 +141,13 @@ CLI flags override manifest defaults. Paths in the manifest must remain inside
 the application directory. Unknown manifest fields are rejected so typos fail
 early instead of silently falling back to defaults.
 
-The hidden workspace builder supports `"entry": "."` apps with child packages
-under the app root. During build/package it materializes a module-root mirror
-under `.goframe/work/<profile>` so generated `.gox.go` files can sit beside
-the corresponding package sources without polluting the authored tree. Child
-entry packages such as `"./cmd/app"` remain future toolchain work.
+The hidden workspace builder supports `"entry": "."` apps and child entry
+packages such as `"./cmd/app"`, `"cmd/app"`, `"./src/app"`, and `"app"` when
+they stay inside the app root. During build/package it materializes a
+module-root mirror under `.goframe/work/<profile>` so generated `.gox.go`
+files can sit beside the corresponding package sources without polluting the
+authored tree. GOX discovery remains app-root-wide even when the executable
+entry is a child package.
 
 ## Build targets
 
@@ -177,6 +179,7 @@ dashboard bundle.wasm   162,773 bytes
 context bundle.wasm     111,440 bytes
 virtualized bundle.wasm 118,546 bytes
 multipackage bundle.wasm 89,727 bytes
+cmdapp bundle.wasm       89,786 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -188,7 +191,8 @@ than Counter because it also demonstrates compact localStorage persistence.
 The repository includes `scripts/size-budget.sh` as a regression gate for raw,
 gzip, brotli, and optional zstd packaged TinyGo examples, including the
 dashboard-sized pressure-test example, the context selector example, and the
-virtualized collections and multi-package workspace examples.
+virtualized collections, multi-package workspace, and child-entry workspace
+examples.
 `scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
 budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
 regression probes.

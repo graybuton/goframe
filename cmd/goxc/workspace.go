@@ -16,8 +16,9 @@ var (
 )
 
 func prepareBuildWorkspace(layout BuildLayout, manifest projectManifest) (string, error) {
-	if manifest.Entry != "." {
-		return "", fmt.Errorf("entry %q is not supported by the hidden workspace builder yet; MVP 20 supports multi-package apps under entry %q", manifest.Entry, ".")
+	entry, err := resolveEntryPackageDir(layout.AppDir, manifest.Entry)
+	if err != nil {
+		return "", err
 	}
 	if err := refreshDirectory(layout.WorkDir); err != nil {
 		return "", err
@@ -38,7 +39,43 @@ func prepareBuildWorkspace(layout BuildLayout, manifest projectManifest) (string
 	if err := writeWorkspaceGoMod(layout.WorkDir, layout.AppDir); err != nil {
 		return "", err
 	}
-	return filepath.Join(appWorkDir, manifest.Entry), nil
+	entryRelative, err := filepath.Rel(layout.AppDir, entry)
+	if err != nil {
+		return "", fmt.Errorf("resolve entry workspace path: %w", err)
+	}
+	return filepath.Join(appWorkDir, entryRelative), nil
+}
+
+func resolveEntryPackageDir(appDir, entry string) (string, error) {
+	originalEntry := entry
+	entry, err := cleanManifestEntry(entry)
+	if err != nil {
+		return "", fmt.Errorf("entry %q %s", originalEntry, err)
+	}
+	appDir, err = filepath.Abs(appDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve application directory: %w", err)
+	}
+	entryDir := appDir
+	if entry != "." {
+		entryDir = filepath.Join(appDir, filepath.FromSlash(entry))
+	}
+	relative, err := filepath.Rel(appDir, entryDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve entry %q: %w", entry, err)
+	}
+	relative = filepath.ToSlash(filepath.Clean(relative))
+	if relative == ".." || strings.HasPrefix(relative, "../") {
+		return "", fmt.Errorf("entry %q must be a relative child package inside the app root", entry)
+	}
+	info, err := os.Stat(entryDir)
+	if err != nil {
+		return "", fmt.Errorf("entry %q does not exist or is not readable: %w", entry, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("entry %q points to a file; entry must be a Go package directory", entry)
+	}
+	return entryDir, nil
 }
 
 func refreshDirectory(directory string) error {

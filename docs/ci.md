@@ -29,8 +29,8 @@ It checks:
 and manually through `workflow_dispatch`.
 
 It installs Go, TinyGo `0.41.1`, brotli, and zstd. Then it packages the
-counter, components, todo, dashboard, context, virtualized, and multipackage
-examples with TinyGo. It also runs a release-style package pass with
+counter, components, todo, dashboard, context, virtualized, multipackage, and
+cmdapp examples with TinyGo. It also runs a release-style package pass with
 `--asset-hash --preload --compress=gzip,br` before checking:
 
 ```bash
@@ -60,7 +60,7 @@ storage cleanup, checks WASM MIME type, and separates harness failures from app
 failures. It currently covers Todo reconciliation, duplicate-key debug
 diagnostics, dashboard-sized filtering/sorting/selection behavior, context
 selector rerender isolation, virtualized collection scroll/selection/toggle
-behavior, and a multi-package GOX workspace smoke.
+behavior, a multi-package GOX workspace smoke, and a child-entry package smoke.
 
 GOX diagnostic golden tests intentionally assert filenames, line/column
 prefixes, specific unsupported-syntax messages, and source snippets. They are
