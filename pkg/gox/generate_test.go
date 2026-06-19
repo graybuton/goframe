@@ -133,6 +133,67 @@ func View() gf.Node {
 	}
 }
 
+func TestGenerateWithOptionsUsesPackageIdentity(t *testing.T) {
+	source := []byte(`package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <Button Label="Save" />
+}
+`)
+
+	generated, err := GenerateWithOptions(source, GenerateOptions{
+		Filename:        "internal/ui/view.gox",
+		PackageIdentity: "github.com/example/app/internal/ui",
+	})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions() error: %v", err)
+	}
+	text := string(generated)
+	if !strings.Contains(text, `gf.NewComponentType("github.com/example/app/internal/ui.Button", "Button")`) {
+		t.Fatalf("generated source does not use package identity:\n%s", text)
+	}
+	if strings.Contains(text, `gf.NewComponentType("ui.Button", "Button")`) {
+		t.Fatalf("generated source fell back to package name identity:\n%s", text)
+	}
+}
+
+func TestGenerateWithOptionsDifferentPackageIdentities(t *testing.T) {
+	source := []byte(`package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <Header />
+}
+`)
+
+	first, err := GenerateWithOptions(source, GenerateOptions{
+		Filename:        "internal/ui/header.gox",
+		PackageIdentity: "github.com/example/app/internal/ui",
+	})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions(first) error: %v", err)
+	}
+	second, err := GenerateWithOptions(source, GenerateOptions{
+		Filename:        "internal/other/header.gox",
+		PackageIdentity: "github.com/example/app/internal/other",
+	})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions(second) error: %v", err)
+	}
+	if string(first) == string(second) {
+		t.Fatalf("different package identities produced identical output:\n%s", first)
+	}
+	if !strings.Contains(string(first), `github.com/example/app/internal/ui.Header`) {
+		t.Fatalf("first output missing ui identity:\n%s", first)
+	}
+	if !strings.Contains(string(second), `github.com/example/app/internal/other.Header`) {
+		t.Fatalf("second output missing other identity:\n%s", second)
+	}
+}
+
 func TestParseElementReportsMismatchedTag(t *testing.T) {
 	_, _, err := ParseElement("<div><span></div>")
 	if err == nil || !strings.Contains(err.Error(), "expected closing tag </span>, got </div>") {
