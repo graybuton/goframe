@@ -423,7 +423,7 @@ Before the next runtime feature:
 1. Keep Foundation Audit IV green through CI after PR.
 2. Add CI `shellcheck` if the project wants shell portability enforcement.
 3. Decide whether symlink policy needs explicit documentation and tests.
-4. Consider a design note for compiler-generated component identity before
-   larger component systems.
+4. Continue the MVP 19 component identity prototype into a package-aware
+   identity design before larger component systems.
 5. Keep dynamic virtualization measurement, accessibility hardening, and stable
    callback hooks as separate design tasks rather than audit cleanup.

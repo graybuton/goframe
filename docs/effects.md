@@ -102,7 +102,7 @@ paths:
 - a conditional component disappears;
 - a keyed component is removed from a list;
 - a component key changes;
-- a component name changes;
+- a component identity changes;
 - a fragment subtree containing a component is removed;
 - a mounted application is replaced.
 

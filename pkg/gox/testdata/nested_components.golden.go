@@ -4,6 +4,11 @@ package demo
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_nested_components_Card   = gf.NewComponentType("demo.Card", "Card")
+	_goxComponent_nested_components_Button = gf.NewComponentType("demo.Button", "Button")
+)
+
 type CardProps struct {
 	Children []gf.Node
 }
@@ -25,9 +30,9 @@ func Button(props ButtonProps) gf.Node {
 }
 
 func View() gf.Node {
-	return gf.Component("Card", CardProps{
+	return gf.ComponentT(_goxComponent_nested_components_Card, CardProps{
 		Children: []gf.Node{
-			gf.Component("Button", ButtonProps{
+			gf.ComponentT(_goxComponent_nested_components_Button, ButtonProps{
 				Label: "Nested",
 			}, Button),
 		},

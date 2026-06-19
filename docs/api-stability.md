@@ -55,6 +55,8 @@ Runtime:
 - `gf.Key`
 - `gf.Component`
 - `gf.C`
+- `gf.NewComponentType`
+- `gf.ComponentT`
 - `gf.UseState`
 - `gf.UseReducer`
 - `gf.UseEffect`
@@ -92,7 +94,7 @@ exact shapes can still change before public preview.
 - Context topology behavior and selector limitations.
 - Virtualization details such as fixed-height range buffering and table spacer
   structure.
-- Component identity model.
+- Component identity id format for generated GOX component tokens.
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands and snippets.
@@ -140,8 +142,7 @@ Not stable:
 - SSR/hydration;
 - Player/Engine or `.gfapp` format;
 - multi-package app support;
-- component identity beyond name/key/position;
-- generated component tokens;
+- final component identity scheme for multi-package apps;
 - dynamic virtualization measurement;
 - infinite loading;
 - advanced accessibility/keyboard model for tables;

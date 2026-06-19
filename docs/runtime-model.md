@@ -25,17 +25,26 @@ five costs outside the dirty component subtree.
 
 ## ComponentNode
 
-GOX capitalized tags generate `gf.Component` nodes:
+GOX capitalized tags generate typed `gf.ComponentT` nodes:
 
 ```go
-gf.Component("Header", HeaderProps{
+var _goxComponent_app_Header = gf.NewComponentType("main.Header", "Header")
+
+gf.ComponentT(_goxComponent_app_Header, HeaderProps{
 	Title: "Demo",
 }, Header)
 ```
 
-A `ComponentNode` stores the component name, props, and deferred render
-function. The function is not called until the runtime mounts or rerenders the
-component. Lowercase tags still generate `gf.El`.
+`gf.ComponentT` receives a `ComponentType` identity token plus props and a
+deferred render function. The debug name remains human-readable for probes,
+but the runtime reuse decision uses the typed identity token. The function is
+not called until the runtime mounts or rerenders the component. Lowercase tags
+still generate `gf.El`.
+
+The legacy `gf.Component(name, props, render)` helper remains supported for
+handwritten Go and older generated code. Its identity is namespaced separately
+from typed identities, so `gf.Component("Header", ...)` does not accidentally
+reuse `gf.ComponentT(gf.NewComponentType("Header", "Header"), ...)`.
 
 Direct Go calls such as `Header(HeaderProps{...})` remain valid, but they
 execute immediately and do not create component identity or a separate state
@@ -47,7 +56,7 @@ Each mounted component boundary owns a component instance:
 
 ```text
 component instance
-  -> component name and optional key
+  -> component identity, debug name, and optional key
   -> latest props
   -> component-scoped state slots
   -> context provider values and selector subscriptions
@@ -55,13 +64,18 @@ component instance
   -> mounted child subtree
 ```
 
-An instance is reused when the component name matches and its sibling identity
-matches. Unkeyed components use position. `gf.Key` or `gf.WithKey` gives a
-component stable keyed identity across sibling reorder and removal. Changing a
-component name or key creates a new instance and unmounts the old subtree.
+An instance is reused when the component identity matches and its sibling
+identity matches. Unkeyed components use position. `gf.Key` or `gf.WithKey`
+gives a component stable keyed identity across sibling reorder and removal.
+Changing a component identity or key creates a new instance and unmounts the
+old subtree.
 
-Component names should be unique for distinct component implementations. MVP 8
-does not compare Go function identities.
+GOX-generated identity currently uses the Go package name plus component name,
+such as `main.Header`. This is a prototype path for component identity v2. It
+does not claim full multi-package application support yet; a future design must
+decide whether identity should use import paths, generated package tokens, or
+another package-aware scheme. The runtime does not compare Go function
+identities.
 
 Component boundaries use stable start and end comment anchors. Their mounted
 range therefore remains valid even if a component changes its rendered root
@@ -208,7 +222,7 @@ Component subtree updates reuse the MVP 7 mounted DOM patcher:
 - unkeyed children patch by position;
 - keyed children reuse and move mounted DOM ranges;
 - fragments and component boundaries use start and end comment anchors;
-- incompatible node kinds, tags, component names, or keys are replaced.
+- incompatible node kinds, tags, component identities, or keys are replaced.
 
 Stable input DOM identity means controlled typing normally preserves focus and
 cursor position. Stable-ID focus restoration remains a replacement fallback.
@@ -355,7 +369,8 @@ The dependency-free headless Chrome probe verifies:
 - virtualized collections are fixed-height only and do not include dynamic
   measurement, infinite loading, or keyboard navigation;
 - no error boundaries;
-- component identity uses the declared component name, not Go function identity;
+- GOX-generated component identity uses a typed token derived from package name
+  and component name, while legacy `gf.Component` still uses string identity;
 - explicit opt-in props memoization via `MemoEqual`; components still rerender
   by default when props are not memoized.
 - dirty component scheduling has no priorities, interruption, or concurrency;

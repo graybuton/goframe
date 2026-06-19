@@ -49,7 +49,8 @@ and TinyGo compilers can consume.
 The MVP component model deliberately delegates type checking to Go:
 
 - lowercase tags generate `gf.El`;
-- capitalized tags generate `gf.Component` boundaries using `<Name>Props`;
+- capitalized tags generate `gf.ComponentT` boundaries using generated
+  `gf.ComponentType` tokens and `<Name>Props`;
 - component children populate `Children []gf.Node`;
 - fragments generate `gf.Fragment`;
 - child expressions generate `gf.Child`.
@@ -244,8 +245,9 @@ The MVP runtime currently has:
 
 Direct function calls remain possible but do not create a component boundary.
 The single-thread assumption must be revisited before worker-driven updates.
-See [component identity](component-identity.md) for the current name/key/position
-strategy and the generated-token migration option.
+See [component identity](component-identity.md) for the typed generated-token
+strategy, legacy string identity compatibility, and remaining package-aware
+identity questions.
 See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
 
 ## Limitations

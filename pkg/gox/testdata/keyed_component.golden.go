@@ -4,6 +4,10 @@ package demo
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_keyed_component_Item = gf.NewComponentType("demo.Item", "Item")
+)
+
 type ItemProps struct {
 	Label string
 }
@@ -15,7 +19,7 @@ func Item(props ItemProps) gf.Node {
 }
 
 func View() gf.Node {
-	return gf.Key("item-1", gf.Component("Item", ItemProps{
+	return gf.Key("item-1", gf.ComponentT(_goxComponent_keyed_component_Item, ItemProps{
 		Label: "One",
 	}, Item))
 }

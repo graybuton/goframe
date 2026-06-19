@@ -2,30 +2,39 @@
 
 ## Current Model
 
-GoFrame currently reuses component instances by:
+GoFrame's legacy path reuses component instances by:
 
 ```text
 component name + key/position
 ```
 
-GOX capitalized tags generate a string name:
+Older handwritten code and older generated output can still use a string name:
 
 ```go
 gf.Component("Header", HeaderProps{}, Header)
 ```
 
+MVP 19 adds a typed identity path:
+
+```go
+var _goxComponent_app_Header = gf.NewComponentType("main.Header", "Header")
+
+gf.ComponentT(_goxComponent_app_Header, HeaderProps{}, Header)
+```
+
 The runtime preserves state, effects, context subscriptions, and memoization
-metadata when the component name and sibling identity match. Keys override
-positional matching for reorderable siblings.
+metadata when the component identity and sibling identity match. Keys override
+positional matching for reorderable siblings. The debug name remains readable,
+but it does not define typed identity.
 
 ## Why It Works Today
 
-The current examples keep all application components in one Go package and use
-unique component names. That makes string identity small, readable in debug
-output, and TinyGo-friendly.
+The current examples keep all application components in one Go package. MVP 19
+uses the Go package name plus component name for generated GOX component ids,
+for example `main.Header`.
 
-It also keeps generated code simple. Direct Go function calls remain ordinary
-calls, while `gf.Component` marks the runtime boundary.
+Direct Go function calls remain ordinary calls. `gf.Component` and
+`gf.ComponentT` mark runtime component boundaries.
 
 ## Where It Becomes Risky
 
@@ -33,7 +42,7 @@ String names become risky when the project grows toward reusable packages or
 multi-package applications:
 
 - different packages can define components with the same name;
-- generated GOX code currently does not encode package identity;
+- generated GOX code currently encodes package name, not full import path;
 - moving a component between packages could accidentally preserve or reset
   state incorrectly depending on the generated name;
 - direct function calls and `gf.Component` boundaries remain behaviorally
@@ -100,10 +109,10 @@ Cons:
 
 ## Option C: Compiler-Generated Component Tokens
 
-GOX could generate stable package-aware tokens:
+GOX now generates prototype component tokens:
 
 ```go
-var _goxHeaderType = gf.ComponentType("main.Header")
+var _goxHeaderType = gf.NewComponentType("main.Header", "Header")
 
 gf.ComponentT(_goxHeaderType, HeaderProps{}, Header)
 ```
@@ -115,11 +124,11 @@ Pros:
 - avoids function identity and reflection;
 - gives the compiler a future place for metadata.
 
-Cons:
+Remaining cons:
 
-- requires a new runtime entry point;
-- changes generated code;
-- needs migration and size measurements;
+- current generated ids use package name rather than full import path;
+- token variable names include source-file context and are not public API;
+- full multi-package support still needs an import-path/package-token decision;
 - token lifetime and initialization must stay simple for TinyGo.
 
 ## Option D: Explicit User Tokens
@@ -185,15 +194,17 @@ A conservative path:
 
 ## Recommendation
 
-Do not implement generated identity in MVP 18. Before multi-package app
-support, prototype compiler-generated or package-aware identity and compare
-runtime size, generated code size, and migration cost.
+MVP 19 prototypes compiler-generated component tokens while preserving legacy
+`gf.Component` compatibility. Before multi-package app support, GoFrame still
+needs a package-aware identity decision that is stronger than package-name-only
+ids for `main` packages and reusable libraries.
 
 The current recommendation is:
 
 ```text
-single-package apps: keep name + key
-multi-package apps: require package-aware or compiler-generated identity first
+single-package apps: use generated ComponentT tokens
+handwritten/raw Go: gf.Component remains compatible; ComponentT is available
+multi-package apps: require package-aware identity before support is claimed
 ```
 
 ## Open Questions

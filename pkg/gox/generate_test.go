@@ -73,6 +73,66 @@ func App() gf.Node {
 	}
 }
 
+func TestCodegenComponentUsesInlineComponentType(t *testing.T) {
+	node, _, err := ParseElement(`<Button Label="Save" />`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := Codegen(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		`gf.ComponentT(gf.NewComponentType("gox.Button", "Button"), ButtonProps{`,
+		`Label: "Save"`,
+		`}, Button)`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated component does not contain %q:\n%s", want, generated)
+		}
+	}
+}
+
+func TestGenerateDeclaresComponentTypeOncePerTag(t *testing.T) {
+	source := []byte(`package demo
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type ButtonProps struct { Label string }
+
+func Button(props ButtonProps) gf.Node {
+	return <button>{props.Label}</button>
+}
+
+func View() gf.Node {
+	return (
+		<div>
+			<Button Label="One" />
+			<Button Label="Two" />
+		</div>
+	)
+}
+`)
+
+	generated, err := GenerateNamed("testdata/repeated_button.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	if got := strings.Count(text, `gf.NewComponentType("demo.Button", "Button")`); got != 1 {
+		t.Fatalf("component type declarations = %d, want 1:\n%s", got, text)
+	}
+	if got := strings.Count(text, `gf.ComponentT(_goxComponent_repeated_button_Button`); got != 2 {
+		t.Fatalf("ComponentT uses = %d, want 2:\n%s", got, text)
+	}
+	if typeIndex := strings.Index(text, `_goxComponent_repeated_button_Button = gf.NewComponentType`); typeIndex < 0 {
+		t.Fatalf("missing component type declaration:\n%s", text)
+	} else if importIndex := strings.Index(text, `import gf "github.com/graybuton/goframe/pkg/goframe"`); importIndex < 0 || typeIndex < importIndex {
+		t.Fatalf("component type declaration should be after import:\n%s", text)
+	}
+}
+
 func TestParseElementReportsMismatchedTag(t *testing.T) {
 	_, _, err := ParseElement("<div><span></div>")
 	if err == nil || !strings.Contains(err.Error(), "expected closing tag </span>, got </div>") {

@@ -4,6 +4,10 @@ package demo
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_component_children_Card = gf.NewComponentType("demo.Card", "Card")
+)
+
 type CardProps struct {
 	Title    string
 	Children []gf.Node
@@ -21,7 +25,7 @@ func Card(props CardProps) gf.Node {
 }
 
 func View() gf.Node {
-	return gf.Component("Card", CardProps{
+	return gf.ComponentT(_goxComponent_component_children_Card, CardProps{
 		Title: "Stats",
 		Children: []gf.Node{
 			gf.El("p", nil,

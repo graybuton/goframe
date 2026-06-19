@@ -4,6 +4,10 @@ package demo
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_component_props_Button = gf.NewComponentType("demo.Button", "Button")
+)
+
 type ButtonProps struct {
 	Label   string
 	OnClick func()
@@ -18,7 +22,7 @@ func Button(props ButtonProps) gf.Node {
 }
 
 func View() gf.Node {
-	return gf.Component("Button", ButtonProps{
+	return gf.ComponentT(_goxComponent_component_props_Button, ButtonProps{
 		Label:   "Increment",
 		OnClick: func() {},
 	}, Button)

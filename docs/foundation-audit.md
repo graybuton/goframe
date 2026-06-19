@@ -57,7 +57,8 @@ pseudo-prop, and keeps low-level constructors as generated-code primitives.
 The current separation of responsibilities is good for an MVP platform:
 
 - Runtime code does not import the GOX compiler or CLI.
-- GOX codegen knows the public runtime API (`gf.El`, `gf.Component`, `gf.Child`)
+- GOX codegen knows the public runtime API (`gf.El`, `gf.ComponentT`,
+  `gf.Child`)
   but does not know browser DOM implementation details.
 - CLI code owns build/package/serve concerns and keeps compression out of
   `build`.
@@ -66,8 +67,9 @@ The current separation of responsibilities is good for an MVP platform:
 
 Temporary decisions to keep visible:
 
-- Component identity is based on component name plus key/position, not Go
-  function identity.
+- Generated component identity uses explicit component type tokens plus
+  key/position; legacy handwritten `gf.Component` still uses string identity.
+  Neither path uses Go function identity.
 - Direct function component calls are valid Go but do not create runtime
   component identity.
 - State slots are component-scoped but still positional.
@@ -123,7 +125,8 @@ Runtime risks that remain:
 GOX remains deliberately small:
 
 - Lowercase tags generate `gf.El`.
-- Capitalized tags generate `gf.Component`.
+- Capitalized tags generate `gf.ComponentT` with generated component type
+  tokens.
 - Props follow `<ComponentName>Props`.
 - Children become `Children: []gf.Node{...}`.
 - Expressions become `gf.Child(expr)`.

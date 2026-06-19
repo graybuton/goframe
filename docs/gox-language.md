@@ -59,7 +59,9 @@ func Button(props ButtonProps) gf.Node {
 Generated component node:
 
 ```go
-gf.Component("Button", ButtonProps{
+var _goxComponent_app_Button = gf.NewComponentType("main.Button", "Button")
+
+gf.ComponentT(_goxComponent_app_Button, ButtonProps{
     Label:   "Increment",
     OnClick: increment,
 }, Button)
@@ -73,14 +75,16 @@ without attributes:
 ```
 
 ```go
-gf.Component("Status", StatusProps{}, Status)
+gf.ComponentT(_goxComponent_app_Status, StatusProps{}, Status)
 ```
 
 Component prop names must be valid Go field names. Go's type checker reports
 unknown fields and incompatible prop values after generation.
 
 The boundary gives the runtime a component instance, scoped state slots, and a
-mounted subtree that can be updated independently of ancestors and siblings. Calling
+mounted subtree that can be updated independently of ancestors and siblings.
+Generated GOX code uses `gf.NewComponentType`/`gf.ComponentT` so the runtime has
+an explicit identity token separate from the short debug name. Calling
 `Button(ButtonProps{...})` directly is still valid Go, but it is an ordinary
 function call without separate component identity.
 
@@ -104,7 +108,7 @@ type CardProps struct {
 Generated shape:
 
 ```go
-gf.Component("Card", CardProps{
+gf.ComponentT(_goxComponent_app_Card, CardProps{
     Title: "Stats",
     Children: []gf.Node{
         gf.El("p", nil,
@@ -214,7 +218,7 @@ two JSX-like render expressions inside child expression braces.
 Generated shape:
 
 ```go
-gf.If(ready, gf.Component("ReadyView", ReadyViewProps{}, ReadyView))
+gf.If(ready, gf.ComponentT(_goxComponent_app_ReadyView, ReadyViewProps{}, ReadyView))
 ```
 
 Ordinary Go boolean expressions remain ordinary child expressions when the
@@ -243,8 +247,8 @@ Generated shape:
 ```go
 gf.IfElse(
     len(items) == 0,
-    gf.Component("EmptyState", EmptyStateProps{}, EmptyState),
-    gf.Component("ItemList", ItemListProps{Items: items}, ItemList),
+    gf.ComponentT(_goxComponent_app_EmptyState, EmptyStateProps{}, EmptyState),
+    gf.ComponentT(_goxComponent_app_ItemList, ItemListProps{Items: items}, ItemList),
 )
 ```
 
@@ -288,12 +292,12 @@ Generated code wraps the node:
 
 ```go
 gf.Key(gf.ToString(todo.ID),
-    gf.Component("TodoItem", TodoItemProps{Todo: todo}, TodoItem),
+    gf.ComponentT(_goxComponent_app_TodoItem, TodoItemProps{Todo: todo}, TodoItem),
 )
 ```
 
 Keys provide stable sibling identity to the minimal DOM patch and component
-layers. A key around a `gf.Component` preserves that component instance,
+layers. A key around a generated component boundary preserves that component instance,
 scoped state, and compatible mounted DOM range across removal and reorder.
 
 ## Events and controlled inputs

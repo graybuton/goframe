@@ -117,6 +117,23 @@ TinyGo packaged WASM sizes:
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.
 
+MVP 19 component identity v2 added explicit generated component tokens. After
+trimming the runtime identity representation, the measured TinyGo size impact
+remained small but pushed the context raw bundle 56 B past its previous 110 KiB
+budget. The context raw budget was therefore moved to 111 KiB while compressed
+budgets stayed unchanged.
+
+MVP 19 measured sizes:
+
+| Example | Raw | gzip | br | zstd |
+|---|---:|---:|---:|---:|
+| counter | 82097 | 32854 | 27459 | 29666 |
+| components | 87609 | 34584 | 28768 | 30945 |
+| todo | 115033 | 44236 | 36835 | 39763 |
+| dashboard | 165558 | 61887 | 50065 | 54160 |
+| context | 112696 | 42437 | 34935 | 37622 |
+| virtualized | 120917 | 46609 | 38128 | 41346 |
+
 ## Browser / DOM Baseline
 
 `scripts/browser-smoke.sh` currently covers:
