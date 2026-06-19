@@ -1,2 +1,2 @@
-testdata/errors/duplicate_key.gox:6:9: gox: duplicate Key prop
-  return <p Key={id} Key="again">Broken</p>
+testdata/errors/duplicate_key.gox:6:21: gox: duplicate Key prop
+  <p Key={id} Key="again">Broken</p>

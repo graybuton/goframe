@@ -23,6 +23,11 @@ type codegenContext struct {
 	declareComponentTypes bool
 	componentTypes        map[string]string
 	componentOrder        []string
+	diagnosticFilename    string
+	diagnosticSource      string
+	diagnosticLine        int
+	diagnosticColumn      int
+	positions             map[Node]int
 }
 
 func newCodegenContext(componentIdentity string, sourceName string, declareComponentTypes bool) *codegenContext {
@@ -39,6 +44,36 @@ func newCodegenContext(componentIdentity string, sourceName string, declareCompo
 		declareComponentTypes: declareComponentTypes,
 		componentTypes:        make(map[string]string),
 	}
+}
+
+func (ctx *codegenContext) withDiagnostics(filename, source string, line, column int, positions map[Node]int) {
+	ctx.diagnosticFilename = filename
+	ctx.diagnosticSource = source
+	ctx.diagnosticLine = line
+	ctx.diagnosticColumn = column
+	ctx.positions = positions
+}
+
+func (ctx *codegenContext) errorAtNode(node Node, err error) error {
+	if err == nil {
+		return nil
+	}
+	if diagnostic, ok := asDiagnosticError(err); ok && diagnostic.Diagnostic.Filename == ctx.diagnosticFilename {
+		return err
+	}
+	if ctx.diagnosticFilename == "" || ctx.diagnosticSource == "" || ctx.positions == nil {
+		return err
+	}
+	offset, ok := ctx.positions[node]
+	if !ok {
+		return err
+	}
+	line, column := lineColumn(ctx.diagnosticSource, offset)
+	if line == 1 {
+		column += ctx.diagnosticColumn - 1
+	}
+	line += ctx.diagnosticLine - 1
+	return diagnosticError(ctx.diagnosticFilename, line, column, diagnosticMessage(err), sourceLine(ctx.diagnosticSource, offset))
 }
 
 func (ctx *codegenContext) codegen(node Node) (string, error) {
@@ -82,11 +117,11 @@ func (ctx *codegenContext) writeNode(output *bytes.Buffer, node Node, depth int)
 	switch node := node.(type) {
 	case *Element:
 		if isComponent(node.Tag) {
-			return ctx.writeComponent(output, node, depth)
+			return ctx.errorAtNode(node, ctx.writeComponent(output, node, depth))
 		}
-		return ctx.writeElement(output, node, depth)
+		return ctx.errorAtNode(node, ctx.writeElement(output, node, depth))
 	case *Fragment:
-		return ctx.writeFragment(output, node.Children, depth)
+		return ctx.errorAtNode(node, ctx.writeFragment(output, node.Children, depth))
 	case *Text:
 		value := normalizeText(node.Value)
 		if value == "" {
@@ -99,7 +134,7 @@ func (ctx *codegenContext) writeNode(output *bytes.Buffer, node Node, depth int)
 		if code == "" {
 			return fmt.Errorf("gox: empty child expression")
 		}
-		return ctx.writeChildExpression(output, code, depth)
+		return ctx.errorAtNode(node, ctx.writeChildExpression(output, code, depth))
 	default:
 		return fmt.Errorf("gox: unsupported AST node %T", node)
 	}

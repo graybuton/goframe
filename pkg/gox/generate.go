@@ -55,12 +55,16 @@ func GenerateWithOptions(source []byte, options GenerateOptions) ([]byte, error)
 		}
 
 		line, column := lineColumn(input, start)
-		element, consumed, err := parseElementAt(input[start:], options.Filename, line, column)
+		element, consumed, positions, err := parseElementAtWithPositions(input[start:], options.Filename, line, column)
 		if err != nil {
 			return nil, err
 		}
+		ctx.withDiagnostics(options.Filename, input[start:], line, column, positions)
 		code, err := ctx.codegen(element)
 		if err != nil {
+			if _, ok := asDiagnosticError(err); ok {
+				return nil, err
+			}
 			return nil, diagnosticError(options.Filename, line, column, err.Error(), sourceLine(input, start))
 		}
 

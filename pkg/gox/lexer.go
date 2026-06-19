@@ -255,10 +255,3 @@ func sourceLine(input string, offset int) string {
 	}
 	return strings.TrimSpace(input[start:end])
 }
-
-func diagnosticError(filename string, line, column int, message, snippet string) error {
-	if snippet == "" {
-		return fmt.Errorf("%s:%d:%d: %s", filename, line, column, message)
-	}
-	return fmt.Errorf("%s:%d:%d: %s\n  %s", filename, line, column, message, snippet)
-}

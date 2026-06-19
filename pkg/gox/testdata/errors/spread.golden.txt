@@ -1,2 +1,2 @@
-testdata/errors/spread.gox:4:15: spread props are not supported yet: {...props}
+testdata/errors/spread.gox:4:15: spread props are not supported; pass explicit props instead: {...props}
   <main {...props}></main>
