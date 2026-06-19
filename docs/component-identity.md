@@ -1,11 +1,13 @@
 # Component Identity
 
-This document records the current component identity strategy and the options
-considered during Foundation Hardening II.
+This document records the component identity strategy and the options
+considered during Foundation Hardening II through MVP 19.
 
 ## Current Model
 
-`goframe` currently identifies component instances by:
+`goframe` has two compatible component identity paths.
+
+Legacy handwritten components identify instances by:
 
 ```text
 component name + key/position
@@ -19,9 +21,19 @@ gf.Component("Header", HeaderProps{
 }, Header)
 ```
 
+Generated GOX now uses explicit component identity tokens:
+
+```go
+var _goxComponent_app_Header = gf.NewComponentType("main.Header", "Header")
+
+gf.ComponentT(_goxComponent_app_Header, HeaderProps{
+	Title: "Demo",
+}, Header)
+```
+
 The mounted runtime reuses an existing component instance when:
 
-- the component name is the same;
+- the component identity is the same;
 - the key is the same when a key is present;
 - otherwise the sibling position is the same.
 
@@ -63,10 +75,10 @@ This remains the current strategy.
 
 ## Alternative B: Generated Stable Type Token
 
-GOX codegen could generate package-aware component tokens:
+GOX codegen now emits prototype component tokens:
 
 ```go
-var _goxComponentHeader = gf.ComponentType("main.Header")
+var _goxComponentHeader = gf.NewComponentType("main.Header", "Header")
 
 gf.ComponentT(_goxComponentHeader, HeaderProps{
 	Title: "Demo",
@@ -80,16 +92,16 @@ Pros:
 - does not require comparing Go function values;
 - can preserve readable names for debug output.
 
-Cons:
+Remaining cons:
 
-- changes generated code;
-- introduces another public or semi-public runtime API;
-- needs a migration story from `gf.Component`;
+- current ids use package name plus component name, not full import path;
+- token variable names are generated-code details;
+- full multi-package support still needs a package-aware identity decision;
 - may increase bundle size if token metadata grows.
 
-Recommendation: this is the most promising next identity improvement, but it
-should be introduced as an optional, non-breaking foundation after current
-regression gates are stable.
+Recommendation: keep the MVP 19 token path as the generated default while
+retaining `gf.Component` as compatibility API. Do not claim multi-package
+component identity until package-aware ids are designed.
 
 ## Alternative C: Function Identity
 
@@ -106,31 +118,29 @@ bad fits for this project:
 
 ## Recommendation
 
-Stay with name/key/position for now, with these hardening rules:
+Use generated typed identity for GOX, with these hardening rules:
 
-- keep component names stable and unique within an application;
+- keep generated identity ids stable within an application;
 - use keys for reordered lists;
 - treat duplicate keys as a bug;
 - keep duplicate-key diagnostics in `goframe_debug` builds only;
-- revisit generated stable type tokens before adding reusable component package
+- revisit package-aware identity before adding reusable component package
   workflows.
 
 ## Migration Plan For Tokens
 
-If generated type tokens become necessary:
+The current migration path:
 
-1. Add a small optional token API while keeping `gf.Component`:
+1. Keep the optional token API while keeping `gf.Component`:
 
    ```go
-   type ComponentType struct {
-   	name string
-   }
+   gf.NewComponentType("main.Header", "Header")
    ```
 
-2. Add `gf.ComponentT` or a compatible overload-style helper.
-3. Update GOX codegen to emit tokens behind a feature gate or versioned mode.
-4. Keep string-based `gf.Component` as a compatibility API.
-5. Measure TinyGo sizes before making token codegen the default.
+2. Use `gf.ComponentT` in generated GOX output.
+3. Keep string-based `gf.Component` as a compatibility API.
+4. Measure TinyGo sizes after token codegen changes.
+5. Design import-path or compiler package tokens before multi-package apps.
 
 ## Size Considerations
 

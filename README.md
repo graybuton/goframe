@@ -149,7 +149,9 @@ type ButtonProps struct {
 The generated Go keeps the component visible to the runtime:
 
 ```go
-gf.Component("Button", ButtonProps{
+var _goxComponent_app_Button = gf.NewComponentType("main.Button", "Button")
+
+gf.ComponentT(_goxComponent_app_Button, ButtonProps{
 	Label:   "Increment",
 	OnClick: increment,
 }, Button)
@@ -217,9 +219,9 @@ gf.Map(items, func(item Item) gf.Node { ... })
 gf.MapIndexed(items, func(index int, item Item) gf.Node { ... })
 ```
 
-Low-level helpers such as `gf.Component`, `gf.El`, `gf.Child`, `gf.Key`,
-`gf.If`, `gf.IfElse`, `gf.For`, and `gf.ForIndexed` remain exported because
-generated `.gox.go` files use the public runtime package. Treat them as
+Low-level helpers such as `gf.Component`, `gf.ComponentT`, `gf.El`, `gf.Child`,
+`gf.Key`, `gf.If`, `gf.IfElse`, `gf.For`, and `gf.ForIndexed` remain exported
+because generated `.gox.go` files use the public runtime package. Treat them as
 runtime/compiler primitives unless you are writing generated-code-like Go by
 hand. In normal projects, `.gox.go` files live under `.goframe/gen` or an
 explicit `--out` directory and should not be committed.

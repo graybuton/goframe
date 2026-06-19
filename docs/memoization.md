@@ -18,7 +18,7 @@ func (props MyRowProps) MemoEqual(next MyRowProps) bool {
 
 Then `goframe` may skip rerendering that component when all of the following are true:
 
-- component name/key identity matches
+- component identity/key matches
 - the previous and next props satisfy `MemoEqual`
 - the component instance is not dirty from its own local state/effects
 - no dirty descendant is waiting inside the component subtree
@@ -68,8 +68,8 @@ other compared prop tracks that data.
 ## Interaction with keys and identity
 
 Memoized skip applies within the same component identity boundary:
-component name + key + same instance. Key or component identity changes still
-remount/recreate as normal.
+component identity + key + same instance. Key or component identity changes
+still remount/recreate as normal.
 
 ## Dirty descendants
 
