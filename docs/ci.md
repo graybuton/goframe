@@ -126,6 +126,12 @@ Browser smoke:
 scripts/browser-smoke.sh
 ```
 
+Dashboard DOM pressure:
+
+```bash
+node --experimental-websocket scripts/dashboard-dom-pressure.mjs
+```
+
 VS Code extension:
 
 ```bash
@@ -167,6 +173,29 @@ scripts/perf-report.sh
 ```
 
 Update budgets only when the increase is intentional and documented.
+
+## Performance Baseline
+
+The current runtime and browser baseline is documented in
+`docs/performance-baseline.md`.
+
+Not every metric is a hard CI budget. Timing metrics are used for trend
+analysis unless explicitly listed as hard gates. Hard gates focus on stable
+invariants such as:
+
+- Go, race, vet, debug-tag, and GOX golden tests;
+- source import, artifact, and module path gates;
+- raw and compressed TinyGo size budgets;
+- browser smoke correctness failures;
+- dashboard mounted row bounds;
+- live DOM and net listener stability;
+- virtual table spacer stability;
+- no-op scroll scenarios that must not render or mutate DOM.
+
+Informational metrics include exact interaction milliseconds, exact
+Layout/Paint duration, exact CDP `Nodes` drift, and exact benchmark `ns/op`.
+These should trigger investigation when they move sharply, but they are not
+hard CI budgets yet.
 
 ## Browser Smoke Failures
 

@@ -10,6 +10,7 @@ an architectural direction rather than an implemented product.
 
 > Status: experimental MVP. APIs, GOX syntax, manifests, and toolchain behavior
 > may change.
+> Some APIs are public-candidate, but GoFrame is not production-ready yet.
 
 ## Project layers
 
@@ -628,7 +629,11 @@ required.
 - [Architecture and toolchain boundaries](docs/architecture.md)
 - [Foundation audit](docs/foundation-audit.md)
 - [Foundation Audit IV](docs/foundation-audit-iv.md)
+- [Performance baseline](docs/performance-baseline.md)
+- [API stability tiers](docs/api-stability.md)
 - [Component identity strategy](docs/component-identity.md)
+- [Component identity next steps](docs/component-identity-next.md)
+- [Symlink and file safety policy](docs/security-symlink-policy.md)
 - [GOX language and component model](docs/gox-language.md)
 - [Runtime model](docs/runtime-model.md)
 - [Lifecycle and effects](docs/effects.md)

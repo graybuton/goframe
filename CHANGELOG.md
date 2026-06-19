@@ -32,6 +32,9 @@
   coverage.
 - Foundation Audit IV documentation.
 - Read-only GitHub Actions workflow permissions.
+- MVP 18 runtime and benchmark baseline documentation, including performance
+  hard/informational gate policy, API stability tiers, component identity next
+  steps, and symlink/file safety policy.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
