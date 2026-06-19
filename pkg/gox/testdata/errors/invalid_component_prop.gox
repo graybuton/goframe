@@ -1,0 +1,5 @@
+package demo
+
+func View() any {
+	return <Button bad-prop="x" />
+}
