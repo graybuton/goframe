@@ -1,0 +1,2 @@
+testdata/errors/empty_attr_expression.gox:4:23: gox: empty expression for attribute "Label"
+  <Button Label={} />

@@ -1,0 +1,2 @@
+testdata/errors/empty_child_expression.gox:4:15: gox: empty child expression
+  <main>{}</main>

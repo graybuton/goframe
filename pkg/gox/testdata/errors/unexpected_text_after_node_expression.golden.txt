@@ -1,0 +1,2 @@
+testdata/errors/unexpected_text_after_node_expression.gox:6:15: gox: unexpected text after GOX node expression
+  <main>{show ? <p>Yes</p> nope : <p>No</p>}</main>

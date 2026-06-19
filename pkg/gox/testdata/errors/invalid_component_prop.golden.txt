@@ -1,0 +1,2 @@
+testdata/errors/invalid_component_prop.gox:4:17: component prop "bad-prop" must be a Go field name
+  <Button bad-prop="x" />

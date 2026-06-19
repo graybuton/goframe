@@ -7,7 +7,8 @@ import (
 
 // Parser builds a small GOX element tree from lexer tokens.
 type Parser struct {
-	lexer *Lexer
+	lexer     *Lexer
+	positions map[Node]int
 }
 
 // ParseElement parses one root GOX node and returns the number of consumed
@@ -17,20 +18,28 @@ func ParseElement(input string) (Node, int, error) {
 }
 
 func parseElementAt(input, filename string, line, column int) (Node, int, error) {
-	parser := &Parser{lexer: newLexerAt(input, filename, line, column)}
+	node, consumed, _, err := parseElementAtWithPositions(input, filename, line, column)
+	return node, consumed, err
+}
+
+func parseElementAtWithPositions(input, filename string, line, column int) (Node, int, map[Node]int, error) {
+	parser := &Parser{
+		lexer:     newLexerAt(input, filename, line, column),
+		positions: map[Node]int{},
+	}
 	start, err := parser.lexer.next()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	if start.kind != tokenOpenTag {
-		return nil, 0, parser.unexpected(start, "opening tag")
+		return nil, 0, nil, parser.unexpected(start, "opening tag")
 	}
 
 	node, err := parser.parseOpenedNode()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	return node, parser.lexer.pos, nil
+	return node, parser.lexer.pos, parser.positions, nil
 }
 
 func (parser *Parser) parseOpenedNode() (Node, error) {
@@ -40,6 +49,7 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 	}
 	if name.kind == tokenTagEnd {
 		fragment := &Fragment{}
+		parser.positions[fragment] = name.offset
 		children, err := parser.parseChildren("")
 		if err != nil {
 			return nil, err
@@ -51,13 +61,16 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 		return nil, parser.unexpected(name, "tag name or > for fragment")
 	}
 	if strings.ContainsAny(name.value, ".:") {
-		return nil, parser.lexer.errorAt(name.offset, "namespace component tags are not supported yet: <%s>", name.value)
+		return nil, parser.lexer.errorAt(name.offset, "namespace tags are not supported; use ordinary Go imports and function calls for cross-package composition: <%s>", name.value)
 	}
-	if isComponent(name.value) && !validGoIdentifier(name.value) {
+	component := isComponent(name.value)
+	if component && !validGoIdentifier(name.value) {
 		return nil, parser.lexer.errorAt(name.offset, "invalid component tag <%s>; component names must be Go identifiers", name.value)
 	}
 
 	element := &Element{Tag: name.value}
+	parser.positions[element] = name.offset
+	seenKey := false
 	for {
 		next, err := parser.lexer.next()
 		if err != nil {
@@ -75,6 +88,15 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 		case tokenSelfClose:
 			return element, nil
 		case tokenIdentifier:
+			if component && next.value != "Key" && !validGoIdentifier(next.value) {
+				return nil, parser.lexer.errorAt(next.offset, "component prop %q must be a Go field name", next.value)
+			}
+			if next.value == "Key" {
+				if seenKey {
+					return nil, parser.lexer.errorAt(next.offset, "gox: duplicate Key prop")
+				}
+				seenKey = true
+			}
 			attribute, err := parser.parseAttribute(next)
 			if err != nil {
 				return nil, err
@@ -82,7 +104,7 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 			element.Attributes = append(element.Attributes, attribute)
 		case tokenExpression:
 			if strings.HasPrefix(strings.TrimSpace(next.value), "...") {
-				return nil, parser.lexer.errorAt(next.offset, "spread props are not supported yet: {%s}", strings.TrimSpace(next.value))
+				return nil, parser.lexer.errorAt(next.offset, "spread props are not supported; pass explicit props instead: {%s}", strings.TrimSpace(next.value))
 			}
 			return nil, parser.unexpected(next, "attribute, >, or />")
 		default:
@@ -97,6 +119,9 @@ func (parser *Parser) parseAttribute(name token) (Attribute, error) {
 		return Attribute{}, err
 	}
 	if next.kind != tokenEquals {
+		if name.value == "Key" {
+			return Attribute{}, parser.lexer.errorAt(name.offset, "gox: Key requires a value")
+		}
 		return Attribute{}, parser.unexpected(next, "= after attribute "+name.value)
 	}
 
@@ -108,6 +133,12 @@ func (parser *Parser) parseAttribute(name token) (Attribute, error) {
 	case tokenString:
 		return Attribute{Name: name.value, Value: StringValue{Value: value.value}}, nil
 	case tokenExpression:
+		if strings.TrimSpace(value.value) == "" {
+			if name.value == "Key" {
+				return Attribute{}, parser.lexer.errorAt(value.offset, "gox: Key requires a value")
+			}
+			return Attribute{}, parser.lexer.errorAt(value.offset, "gox: empty expression for attribute %q", name.value)
+		}
 		return Attribute{Name: name.value, Value: ExpressionValue{Code: value.value}}, nil
 	default:
 		return Attribute{}, parser.unexpected(value, "quoted string or Go expression")
@@ -124,9 +155,16 @@ func (parser *Parser) parseChildren(expectedTag string) ([]Node, error) {
 
 		switch next.kind {
 		case tokenText:
-			children = append(children, &Text{Value: next.value})
+			child := &Text{Value: next.value}
+			parser.positions[child] = next.offset
+			children = append(children, child)
 		case tokenExpression:
-			children = append(children, &Expression{Code: next.value})
+			if strings.TrimSpace(next.value) == "" {
+				return nil, parser.lexer.errorAt(next.offset, "gox: empty child expression")
+			}
+			child := &Expression{Code: next.value}
+			parser.positions[child] = next.offset
+			children = append(children, child)
 		case tokenOpenTag:
 			child, err := parser.parseOpenedNode()
 			if err != nil {

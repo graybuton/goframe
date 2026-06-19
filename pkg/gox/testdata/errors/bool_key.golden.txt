@@ -1,0 +1,2 @@
+testdata/errors/bool_key.gox:4:12: gox: Key requires a value
+  <p Key>Broken</p>

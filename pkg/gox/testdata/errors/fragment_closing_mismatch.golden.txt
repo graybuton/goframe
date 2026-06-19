@@ -1,0 +1,2 @@
+testdata/errors/fragment_closing_mismatch.gox:4:17: expected closing tag </main>, got </>
+  <main></>

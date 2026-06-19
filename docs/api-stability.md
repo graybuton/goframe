@@ -91,6 +91,7 @@ exact shapes can still change before public preview.
 
 - GOX syntax surface.
 - GOX expression ergonomics.
+- GOX diagnostic wording beyond the filename/line/column/source-line contract.
 - Context topology behavior and selector limitations.
 - Virtualization details such as fixed-height range buffering and table spacer
   structure.

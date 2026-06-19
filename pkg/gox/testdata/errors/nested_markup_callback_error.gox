@@ -1,0 +1,9 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View(items []string) gf.Node {
+	return <main>{gf.Map(items, func(item string) gf.Node {
+		return <Item Label={item}></Wrong>
+	})}</main>
+}

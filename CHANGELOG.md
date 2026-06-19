@@ -40,6 +40,9 @@
 - Multi-package GOX workspace support for `entry: "."` apps, including hidden
   workspace materialization for child packages, import-path-aware generated
   component identities, and a focused multipackage example plus browser smoke.
+- GOX diagnostic hardening with structured source diagnostics, clearer
+  unsupported namespace/spread errors, stricter parser-side validation for
+  empty expressions and `Key`, and multi-package source-path error coverage.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

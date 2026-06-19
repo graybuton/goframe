@@ -1,2 +1,2 @@
-testdata/errors/non_node_ternary_branch.gox:6:9: gox: ternary render branches must be GOX nodes
-  return <main>{show ? "yes" : <p>No</p>}</main>
+testdata/errors/non_node_ternary_branch.gox:6:15: gox: ternary render branches must be GOX nodes
+  <main>{show ? "yes" : <p>No</p>}</main>

@@ -1,2 +1,2 @@
-testdata/errors/missing_ternary_colon.gox:6:9: gox: ternary render expression is missing ':'
-  return <main>{show ? <p>Yes</p>}</main>
+testdata/errors/missing_ternary_colon.gox:6:15: gox: ternary render expression is missing ':'
+  <main>{show ? <p>Yes</p>}</main>

@@ -1,6 +1,7 @@
 package gox
 
 import (
+	"errors"
 	"go/parser"
 	gotoken "go/token"
 	"strings"
@@ -239,5 +240,31 @@ func App() any {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not contain %q", err, want)
 		}
+	}
+}
+
+func TestGenerateNamedReturnsDiagnosticError(t *testing.T) {
+	source := []byte(`package main
+
+func App() any {
+	return <main>{}</main>
+}
+`)
+	_, err := GenerateNamed("examples/broken/app.gox", source)
+	if err == nil {
+		t.Fatal("GenerateNamed() returned nil error")
+	}
+	var diagnostic DiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("error %T is not DiagnosticError: %v", err, err)
+	}
+	if diagnostic.Diagnostic.Filename != "examples/broken/app.gox" {
+		t.Fatalf("diagnostic filename = %q", diagnostic.Diagnostic.Filename)
+	}
+	if diagnostic.Diagnostic.Line != 4 || diagnostic.Diagnostic.Column == 0 {
+		t.Fatalf("diagnostic location = %d:%d", diagnostic.Diagnostic.Line, diagnostic.Diagnostic.Column)
+	}
+	if !strings.Contains(diagnostic.Diagnostic.Message, "empty child expression") {
+		t.Fatalf("diagnostic message = %q", diagnostic.Diagnostic.Message)
 	}
 }
