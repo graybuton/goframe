@@ -70,12 +70,11 @@ gives a component stable keyed identity across sibling reorder and removal.
 Changing a component identity or key creates a new instance and unmounts the
 old subtree.
 
-GOX-generated identity currently uses the Go package name plus component name,
-such as `main.Header`. This is a prototype path for component identity v2. It
-does not claim full multi-package application support yet; a future design must
-decide whether identity should use import paths, generated package tokens, or
-another package-aware scheme. The runtime does not compare Go function
-identities.
+GOX-generated identity uses a typed component token. When `goxc` can determine
+the package import path, generated ids use import-path-aware identity such as
+`github.com/graybuton/goframe/examples/multipackage/internal/ui.Header`.
+Direct `GenerateNamed` calls can still fall back to package-name identity such
+as `main.Header`. The runtime does not compare Go function identities.
 
 Component boundaries use stable start and end comment anchors. Their mounted
 range therefore remains valid even if a component changes its rendered root
@@ -342,9 +341,9 @@ Warnings are written to `console.warn` and recorded in
 Build the instrumented Todo WASM and serve it on port `18080`:
 
 ```bash
-(cd ./examples/todo/.goframe/work/dev && \
+(cd ./examples/todo/.goframe/work/dev/examples/todo && \
   tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-    -o ../../package/standalone/assets/bundle.wasm .)
+    -o ../../../../package/standalone/assets/bundle.wasm .)
 goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```
@@ -369,8 +368,9 @@ The dependency-free headless Chrome probe verifies:
 - virtualized collections are fixed-height only and do not include dynamic
   measurement, infinite loading, or keyboard navigation;
 - no error boundaries;
-- GOX-generated component identity uses a typed token derived from package name
-  and component name, while legacy `gf.Component` still uses string identity;
+- GOX-generated component identity uses a typed token derived from package
+  import path when `goxc` knows it, with package-name fallback for lower-level
+  generation helpers. Legacy `gf.Component` still uses string identity.
 - explicit opt-in props memoization via `MemoEqual`; components still rerender
   by default when props are not memoized.
 - dirty component scheduling has no priorities, interruption, or concurrency;

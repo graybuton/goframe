@@ -29,9 +29,10 @@ but it does not define typed identity.
 
 ## Why It Works Today
 
-The current examples keep all application components in one Go package. MVP 19
-uses the Go package name plus component name for generated GOX component ids,
-for example `main.Header`.
+MVP 19 introduced typed component ids using package name plus component name,
+for example `main.Header`. MVP 20 extends the `goxc` path so package import
+paths are used when the module path is known, for example
+`github.com/graybuton/goframe/examples/multipackage/internal/ui.Header`.
 
 Direct Go function calls remain ordinary calls. `gf.Component` and
 `gf.ComponentT` mark runtime component boundaries.
@@ -42,7 +43,8 @@ String names become risky when the project grows toward reusable packages or
 multi-package applications:
 
 - different packages can define components with the same name;
-- generated GOX code currently encodes package name, not full import path;
+- generated GOX through `goxc` now encodes import path when known, while
+  lower-level `GenerateNamed` still falls back to package name;
 - moving a component between packages could accidentally preserve or reset
   state incorrectly depending on the generated name;
 - direct function calls and `gf.Component` boundaries remain behaviorally
@@ -50,8 +52,8 @@ multi-package applications:
 - memoization and effects depend on instance reuse being correct;
 - keyed lists rely on component identity plus key, not key alone.
 
-These are not current blockers, but they should be resolved before claiming
-multi-package app support.
+These are smaller after MVP 20, but child entry packages, multi-module
+workspaces, and final public identity policy remain open.
 
 ## Required Properties
 
@@ -84,8 +86,8 @@ Cons:
 - package moves are ambiguous;
 - large apps must rely on naming discipline.
 
-This is acceptable for the current single-package examples, but it should not
-be the final answer for multi-package apps.
+This is acceptable as legacy compatibility, but it should not be the final
+answer for package-heavy apps.
 
 ## Option B: Package-Aware Identity
 
@@ -126,9 +128,11 @@ Pros:
 
 Remaining cons:
 
-- current generated ids use package name rather than full import path;
+- `goxc` generated ids use import paths when known, but lower-level generation
+  helpers can still emit package-name fallback ids;
 - token variable names include source-file context and are not public API;
-- full multi-package support still needs an import-path/package-token decision;
+- child-entry and multi-module support still need additional package-token
+  decisions;
 - token lifetime and initialization must stay simple for TinyGo.
 
 ## Option D: Explicit User Tokens
@@ -195,16 +199,17 @@ A conservative path:
 ## Recommendation
 
 MVP 19 prototypes compiler-generated component tokens while preserving legacy
-`gf.Component` compatibility. Before multi-package app support, GoFrame still
-needs a package-aware identity decision that is stronger than package-name-only
-ids for `main` packages and reusable libraries.
+`gf.Component` compatibility. MVP 20 makes the `goxc` path import-path-aware
+when a nearest module path is known. That is enough for the first
+multi-package app workspace, but not a final answer for child entries,
+multi-module monorepos, or public component package policy.
 
 The current recommendation is:
 
 ```text
-single-package apps: use generated ComponentT tokens
+entry "." apps: use generated ComponentT tokens with import-aware ids when known
 handwritten/raw Go: gf.Component remains compatible; ComponentT is available
-multi-package apps: require package-aware identity before support is claimed
+future workspace forms: require child-entry and multi-module identity design
 ```
 
 ## Open Questions

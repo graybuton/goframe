@@ -37,6 +37,9 @@
   steps, and symlink/file safety policy.
 - Component identity v2 prototype with `gf.NewComponentType`, `gf.ComponentT`,
   generated GOX component tokens, and legacy `gf.Component` compatibility.
+- Multi-package GOX workspace support for `entry: "."` apps, including hidden
+  workspace materialization for child packages, import-path-aware generated
+  component identities, and a focused multipackage example plus browser smoke.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

@@ -38,8 +38,10 @@ Manifest fields such as `entry`, `output`, `wasm`, and `assets` are validated
 as relative child paths. Absolute paths, `..`, and paths escaping the
 application directory are rejected.
 
-`entry` currently supports only `"."` for the hidden workspace builder. This
-is a single-package app limitation, not a security feature.
+`entry` currently supports `"."` for the hidden workspace builder. Packages
+below the app root can participate in that app workspace. Child entry packages
+such as `"./cmd/app"` are still unsupported and fail clearly; this is a
+toolchain limitation, not a security feature.
 
 ## Workspace Paths
 
@@ -138,7 +140,7 @@ tool-owned output directories.
 - No production static server hardening beyond local development needs.
 - No signed package/export metadata.
 - No permission model for future Player or `.gfapp` bundles.
-- No multi-package app workspace model.
+- No child-entry or full multi-module workspace model.
 
 ## Recommended Future Tests
 
