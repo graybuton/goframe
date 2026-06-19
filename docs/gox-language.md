@@ -350,10 +350,31 @@ examples/app.gox:12:18: expected closing tag </div>, got </main>
 ```
 
 GOX also reports focused diagnostics for unclosed tags, invalid component
-names, spread props, and namespace tags.
+names, invalid component prop names, empty child/attribute expressions,
+duplicate or valueless `Key` pseudo-props, spread props, and namespace tags.
+Nested GOX markup inside callback return expressions is also reported against
+the original `.gox` file rather than only the generated `.goframe/work` output.
+
+Unsupported namespace tags remain unsupported. The diagnostic points users back
+to ordinary Go imports and function calls for cross-package composition:
+
+```text
+examples/app.gox:8:10: namespace tags are not supported; use ordinary Go imports and function calls for cross-package composition: <ui.Header>
+  <ui.Header />
+```
+
+Unsupported spread props remain unsupported. Pass explicit props instead:
+
+```text
+examples/app.gox:8:15: spread props are not supported; pass explicit props instead: {...props}
+  <Button {...props} />
+```
 
 Go type errors, such as a missing props struct or invalid field type, are
-reported by the selected Go or TinyGo compiler after generation.
+reported by the selected Go or TinyGo compiler after generation. Those errors
+may still mention the hidden `.goframe/work/<profile>` workspace because they
+come from the Go toolchain, but `goxc` generation failures prefer the original
+`.gox` source path.
 
 ## Current limitations
 

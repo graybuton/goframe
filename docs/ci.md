@@ -21,7 +21,7 @@ It checks:
 - `go test -race ./pkg/... ./cmd/...`;
 - `go vet ./...`;
 - `go test -tags=goframe_debug ./...`;
-- GOX golden tests.
+- GOX golden tests, including source-oriented error diagnostics.
 
 ### WASM Size
 
@@ -61,6 +61,11 @@ failures. It currently covers Todo reconciliation, duplicate-key debug
 diagnostics, dashboard-sized filtering/sorting/selection behavior, context
 selector rerender isolation, virtualized collection scroll/selection/toggle
 behavior, and a multi-package GOX workspace smoke.
+
+GOX diagnostic golden tests intentionally assert filenames, line/column
+prefixes, specific unsupported-syntax messages, and source snippets. They are
+part of the compiler/toolchain contract even though the broader GOX syntax
+surface remains experimental.
 
 ### VS Code Extension
 

@@ -68,6 +68,18 @@ component id github.com/graybuton/goframe/examples/multipackage/internal/ui.Head
 If no module path can be determined, generation falls back to the package-name
 identity path used by `GenerateNamed`.
 
+## Diagnostics
+
+GOX generation errors in child packages keep the original source path. For
+example, a broken `internal/ui/layout.gox` should report
+`examples/multipackage/internal/ui/layout.gox:line:column` instead of only a
+generated `.goframe/work/.../layout.gox.go` file.
+
+Lower-level Go or TinyGo type-checking errors can still mention the hidden
+workspace because the compiler is checking materialized generated Go files.
+When that happens, inspect the matching `.gox` source and the generated file
+under `.goframe/work/<profile>` together.
+
 ## Cross-package Components
 
 GOX does not add namespace tags in MVP 20. This remains unsupported:
