@@ -4,6 +4,10 @@ package main
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_key_pseudo_props_Row = gf.NewComponentType("main.Row", "Row")
+)
+
 type RowProps struct {
 	Label string
 }
@@ -22,7 +26,7 @@ func View(id int, label string) gf.Node {
 			),
 		),
 		gf.Key("static-row",
-			gf.Component("Row", RowProps{
+			gf.ComponentT(_goxComponent_key_pseudo_props_Row, RowProps{
 				Label: label,
 			}, Row),
 		),

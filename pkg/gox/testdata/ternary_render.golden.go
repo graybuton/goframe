@@ -4,6 +4,11 @@ package main
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_ternary_render_Empty = gf.NewComponentType("main.Empty", "Empty")
+	_goxComponent_ternary_render_List  = gf.NewComponentType("main.List", "List")
+)
+
 type EmptyProps struct{}
 
 func Empty(props EmptyProps) gf.Node {
@@ -22,7 +27,7 @@ func List(props ListProps) gf.Node {
 
 func View(items []string) gf.Node {
 	return gf.El("section", nil,
-		gf.IfElse(len(items) == 0, gf.Component("Empty", EmptyProps{}, Empty), gf.Component("List", ListProps{
+		gf.IfElse(len(items) == 0, gf.ComponentT(_goxComponent_ternary_render_Empty, EmptyProps{}, Empty), gf.ComponentT(_goxComponent_ternary_render_List, ListProps{
 			Items: items,
 		}, List)),
 	)

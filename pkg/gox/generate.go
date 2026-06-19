@@ -20,6 +20,7 @@ func Generate(source []byte) ([]byte, error) {
 // GenerateNamed transpiles GOX source and includes filename in diagnostics.
 func GenerateNamed(filename string, source []byte) ([]byte, error) {
 	input := string(source)
+	ctx := newCodegenContext(packageNameFromSource(input), filename, true)
 	var output bytes.Buffer
 	cursor := 0
 	searchFrom := 0
@@ -36,7 +37,7 @@ func GenerateNamed(filename string, source []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		code, err := Codegen(element)
+		code, err := ctx.codegen(element)
 		if err != nil {
 			return nil, diagnosticError(filename, line, column, err.Error(), sourceLine(input, start))
 		}
@@ -49,12 +50,16 @@ func GenerateNamed(filename string, source []byte) ([]byte, error) {
 		generated++
 	}
 	output.WriteString(input[cursor:])
+	generatedSource := output.String()
+	if declarations := ctx.declarations(); declarations != "" {
+		generatedSource = insertGeneratedDeclarations(generatedSource, declarations)
+	}
 
 	if generated == 0 {
 		return nil, fmt.Errorf("%s: no GOX markup elements found", filename)
 	}
 
-	formatted, err := format.Source(append([]byte(generatedHeader), output.Bytes()...))
+	formatted, err := format.Source(append([]byte(generatedHeader), []byte(generatedSource)...))
 	if err != nil {
 		return nil, fmt.Errorf("%s: generated Go source is invalid: %w", filename, err)
 	}
@@ -207,4 +212,87 @@ func nextNonSpace(input string, from int) int {
 		}
 	}
 	return -1
+}
+
+func packageNameFromSource(input string) string {
+	for _, line := range strings.Split(input, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "package ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && validGoIdentifier(fields[1]) {
+			return fields[1]
+		}
+	}
+	return "main"
+}
+
+func insertGeneratedDeclarations(input string, declarations string) string {
+	position := declarationInsertionPoint(input)
+	return input[:position] + "\n" + declarations + input[position:]
+}
+
+func declarationInsertionPoint(input string) int {
+	packageIndex := strings.Index(input, "package ")
+	if packageIndex < 0 {
+		return 0
+	}
+	packageLineEnd := strings.IndexByte(input[packageIndex:], '\n')
+	if packageLineEnd < 0 {
+		return len(input)
+	}
+	position := packageIndex + packageLineEnd + 1
+	importStart := skipWhitespace(input, position)
+	if !strings.HasPrefix(input[importStart:], "import") || !isKeywordBoundary(input, importStart+len("import")) {
+		return position
+	}
+
+	index := skipWhitespace(input, importStart+len("import"))
+	if index >= len(input) {
+		return len(input)
+	}
+	if input[index] == '(' {
+		depth := 0
+		for index < len(input) {
+			switch input[index] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					index++
+					return lineEnd(input, index)
+				}
+			}
+			index++
+		}
+		return len(input)
+	}
+	return lineEnd(input, index)
+}
+
+func skipWhitespace(input string, index int) int {
+	for index < len(input) && unicode.IsSpace(rune(input[index])) {
+		index++
+	}
+	return index
+}
+
+func isKeywordBoundary(input string, index int) bool {
+	if index >= len(input) {
+		return true
+	}
+	character := rune(input[index])
+	return !unicode.IsLetter(character) && !unicode.IsDigit(character) && character != '_'
+}
+
+func lineEnd(input string, index int) int {
+	for index < len(input) && input[index] != '\n' {
+		index++
+	}
+	if index < len(input) {
+		index++
+	}
+	return index
 }

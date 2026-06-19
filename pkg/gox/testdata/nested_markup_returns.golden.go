@@ -4,6 +4,10 @@ package main
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_nested_markup_returns_ItemRow = gf.NewComponentType("main.ItemRow", "ItemRow")
+)
+
 type Item struct {
 	ID     int
 	Label  string
@@ -27,7 +31,7 @@ func View(items []Item) gf.Node {
 				return gf.Fragment()
 			}
 			return gf.Key(gf.ToString(item.ID),
-				gf.Component("ItemRow", ItemRowProps{
+				gf.ComponentT(_goxComponent_nested_markup_returns_ItemRow, ItemRowProps{
 					Item: item,
 				}, ItemRow),
 			)

@@ -4,6 +4,10 @@ package demo
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
+var (
+	_goxComponent_component_helper_children_Card = gf.NewComponentType("demo.Card", "Card")
+)
+
 type CardProps struct {
 	Children []gf.Node
 }
@@ -15,7 +19,7 @@ func Card(props CardProps) gf.Node {
 }
 
 func View(show bool) gf.Node {
-	return gf.Component("Card", CardProps{
+	return gf.ComponentT(_goxComponent_component_helper_children_Card, CardProps{
 		Children: []gf.Node{
 			gf.Child(gf.If(show, gf.Text("Visible"))),
 		},
