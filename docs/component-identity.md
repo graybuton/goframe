@@ -1,7 +1,7 @@
 # Component Identity
 
 This document records the component identity strategy and the options
-considered during Foundation Hardening II through MVP 19.
+considered during Foundation Hardening II through MVP 20.
 
 ## Current Model
 
@@ -46,7 +46,7 @@ dirty update target.
 Name-based identity is compact and easy to debug, but it has limits:
 
 - two different component functions can use the same declared name;
-- package path is not part of identity;
+- package path is not part of legacy string identity;
 - the runtime does not know the Go function implementation behind a name;
 - renaming a component resets its identity;
 - duplicate sibling keys are still a user error, although debug builds now
@@ -94,14 +94,19 @@ Pros:
 
 Remaining cons:
 
-- current ids use package name plus component name, not full import path;
+- `goxc` generated ids use package import path plus component name when the
+  module path is known;
+- lower-level generation helpers can still fall back to package name plus
+  component name;
 - token variable names are generated-code details;
-- full multi-package support still needs a package-aware identity decision;
+- child-entry and multi-module workspace support still need more identity
+  design;
 - may increase bundle size if token metadata grows.
 
-Recommendation: keep the MVP 19 token path as the generated default while
-retaining `gf.Component` as compatibility API. Do not claim multi-package
-component identity until package-aware ids are designed.
+Recommendation: keep the token path as the generated default while retaining
+`gf.Component` as compatibility API. MVP 20's import-aware `goxc` ids cover
+`entry: "."` apps with child packages, but they are not a complete
+multi-module or child-entry identity policy.
 
 ## Alternative C: Function Identity
 
@@ -124,8 +129,8 @@ Use generated typed identity for GOX, with these hardening rules:
 - use keys for reordered lists;
 - treat duplicate keys as a bug;
 - keep duplicate-key diagnostics in `goframe_debug` builds only;
-- revisit package-aware identity before adding reusable component package
-  workflows.
+- revisit child-entry, multi-module, and reusable component package identity
+  before claiming a public package ecosystem.
 
 ## Migration Plan For Tokens
 

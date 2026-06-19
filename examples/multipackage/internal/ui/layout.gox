@@ -1,0 +1,19 @@
+package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Layout(props LayoutProps) gf.Node {
+	return (
+		<section class="layout-card" data-testid="ui-layout">
+			<Header Title={props.Title} />
+			<div class="layout-actions">
+				<button data-testid="increment" onClick={props.OnIncrement}>
+					Increment {props.Count}
+				</button>
+			</div>
+			<div class="layout-children" data-testid="layout-children">
+				{props.Children}
+			</div>
+		</section>
+	)
+}

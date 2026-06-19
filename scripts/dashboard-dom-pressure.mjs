@@ -134,7 +134,7 @@ async function prepareDashboardDebugPackage() {
         join(appDir, ".goframe/package/standalone/assets/bundle.wasm"),
         ".",
     ], {
-        cwd: join(appDir, ".goframe/work/dev"),
+        cwd: join(appDir, ".goframe/work/dev/examples/dashboard"),
     });
 }
 

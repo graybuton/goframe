@@ -88,6 +88,12 @@ an explicit identity token separate from the short debug name. Calling
 `Button(ButtonProps{...})` directly is still valid Go, but it is an ordinary
 function call without separate component identity.
 
+When `goxc` knows the package import path, generated component ids use that
+path plus the component name, for example
+`github.com/graybuton/goframe/examples/multipackage/internal/ui.Header`.
+Lower-level generation helpers can still fall back to package-name ids such as
+`main.Header`.
+
 ## Children
 
 A component receives nested markup through a `Children []gf.Node` field:

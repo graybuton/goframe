@@ -250,8 +250,8 @@ Safety findings:
 
 - manifest paths are validated as relative child paths;
 - unknown manifest fields fail;
-- hidden workspace build supports single-package `entry: "."` and fails
-  clearly otherwise;
+- hidden workspace build supports `entry: "."` apps with child packages under
+  the app root and fails clearly for unsupported child entry packages;
 - package output uses staging before publishing;
 - explicit package destinations must be empty or GoFrame-owned;
 - export refuses non-empty non-GoFrame directories unless `--force` is used;

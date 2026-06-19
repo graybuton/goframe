@@ -1,0 +1,42 @@
+package main
+
+import (
+	issues "github.com/graybuton/goframe/examples/multipackage/internal/issues"
+	ui "github.com/graybuton/goframe/examples/multipackage/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+type HeaderProps struct {
+	Subtitle string
+}
+
+func Header(props HeaderProps) gf.Node {
+	return (
+		<section class="root-header" data-testid="root-header">
+			<strong>Root Header</strong>
+			<span>{props.Subtitle}</span>
+		</section>
+	)
+}
+
+func App() gf.Node {
+	count, setCount := gf.UseState(0)
+
+	return (
+		<main class="multipackage-page">
+			<Header Subtitle={appSubtitle} />
+			{ui.Layout(ui.LayoutProps{
+				Title: "Multi-package GOX",
+				Count: count,
+				OnIncrement: func() {
+					setCount(count + 1)
+				},
+				Children: []gf.Node{
+					issues.IssueList(issues.IssueListProps{
+						Items: issues.DemoIssues(),
+					}),
+				},
+			})}
+		</main>
+	)
+}

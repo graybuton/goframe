@@ -90,9 +90,9 @@ The Todo reconciliation smoke test uses a separate instrumented build so debug
 probes do not increase production WASM:
 
 ```bash
-(cd ./examples/todo/.goframe/work/dev && \
+(cd ./examples/todo/.goframe/work/dev/examples/todo && \
   tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-    -o ../../package/standalone/assets/bundle.wasm .)
+    -o ../../../../package/standalone/assets/bundle.wasm .)
 goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```
@@ -122,6 +122,15 @@ DOM:
 ```bash
 goxc package ./examples/virtualized --compiler=tinygo
 goxc serve ./examples/virtualized --port=8080
+```
+
+The multi-package example demonstrates `goxc` building GOX files across a root
+package and internal child packages without writing generated `.gox.go` files
+into the source tree:
+
+```bash
+goxc package ./examples/multipackage --compiler=tinygo
+goxc serve ./examples/multipackage --port=8080
 ```
 
 ## GOX component model
@@ -533,8 +542,8 @@ early.
 CLI flags override manifest compiler and output choices. The `output` field is
 kept as a legacy/export convention; normal package output is written under the
 hidden `.goframe/package/standalone` workspace. The hidden workspace builder
-currently supports single-package applications with `"entry": "."`; multi-
-package entries are a future toolchain step.
+supports `"entry": "."` apps with child packages below the app root. Child
+entry packages such as `"./cmd/app"` remain future toolchain work.
 
 ## Size experiment
 
@@ -635,6 +644,7 @@ required.
 - [API stability tiers](docs/api-stability.md)
 - [Component identity strategy](docs/component-identity.md)
 - [Component identity next steps](docs/component-identity-next.md)
+- [Multi-package GOX workspace](docs/multi-package-workspace.md)
 - [Symlink and file safety policy](docs/security-symlink-policy.md)
 - [GOX language and component model](docs/gox-language.md)
 - [Runtime model](docs/runtime-model.md)
@@ -647,6 +657,7 @@ required.
 - [Components example](examples/components/README.md)
 - [Todo example](examples/todo/README.md)
 - [Dashboard pressure-test example](examples/dashboard/README.md)
+- [Multi-package GOX example](examples/multipackage/README.md)
 - [Virtualized collections example](examples/virtualized/README.md)
 
 ## Development

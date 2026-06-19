@@ -18,23 +18,23 @@ func Codegen(node Node) (string, error) {
 }
 
 type codegenContext struct {
-	packageName           string
+	componentIdentity     string
 	sourceName            string
 	declareComponentTypes bool
 	componentTypes        map[string]string
 	componentOrder        []string
 }
 
-func newCodegenContext(packageName string, sourceName string, declareComponentTypes bool) *codegenContext {
-	if packageName == "" {
-		packageName = "main"
+func newCodegenContext(componentIdentity string, sourceName string, declareComponentTypes bool) *codegenContext {
+	if componentIdentity == "" {
+		componentIdentity = "main"
 	}
 	sourceName = strings.TrimSuffix(filepath.Base(sourceName), filepath.Ext(sourceName))
 	if sourceName == "" || sourceName == "." {
 		sourceName = "gox"
 	}
 	return &codegenContext{
-		packageName:           packageName,
+		componentIdentity:     componentIdentity,
 		sourceName:            sanitizeIdentifierPart(sourceName),
 		declareComponentTypes: declareComponentTypes,
 		componentTypes:        make(map[string]string),
@@ -50,7 +50,7 @@ func (ctx *codegenContext) codegen(node Node) (string, error) {
 }
 
 func (ctx *codegenContext) componentTypeExpression(tag string) string {
-	id := ctx.packageName + "." + tag
+	id := ctx.componentIdentity + "." + tag
 	if !ctx.declareComponentTypes {
 		return fmt.Sprintf("gf.NewComponentType(%q, %q)", id, tag)
 	}
@@ -71,7 +71,7 @@ func (ctx *codegenContext) declarations() string {
 	output.WriteString("var (\n")
 	for _, tag := range ctx.componentOrder {
 		name := ctx.componentTypes[tag]
-		id := ctx.packageName + "." + tag
+		id := ctx.componentIdentity + "." + tag
 		fmt.Fprintf(&output, "\t%s = gf.NewComponentType(%q, %q)\n", name, id, tag)
 	}
 	output.WriteString(")\n")

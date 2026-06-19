@@ -1,0 +1,79 @@
+:root {
+    color-scheme: light;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+    margin: 0;
+    background: #f5f7fb;
+    color: #182033;
+}
+
+button {
+    font: inherit;
+    border: 0;
+    border-radius: 999px;
+    padding: 0.65rem 1rem;
+    background: #315fdc;
+    color: white;
+    cursor: pointer;
+}
+
+.multipackage-page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 32px;
+}
+
+.root-header,
+.ui-header,
+.layout-card,
+.issue-list {
+    border: 1px solid #dbe3f2;
+    border-radius: 18px;
+    background: white;
+    box-shadow: 0 16px 40px rgba(27, 39, 71, 0.08);
+}
+
+.root-header,
+.ui-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding: 16px 18px;
+}
+
+.layout-card {
+    padding: 20px;
+}
+
+.layout-actions {
+    margin-bottom: 18px;
+}
+
+.issue-list {
+    padding: 18px;
+}
+
+.issue-list h2 {
+    margin: 0 0 12px;
+}
+
+.issue-list ul {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.issue-row {
+    display: grid;
+    grid-template-columns: 80px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    border-radius: 12px;
+    background: #f8faff;
+}

@@ -212,9 +212,9 @@ old workspaces by removing legacy `build/` and adjacent generated `.gox.go`
 files. Legacy `dist/` is removed only if it looks like a GoFrame export; user
 directories are skipped instead of silently deleted.
 
-The materialized hidden workspace currently supports single-package apps with
-`"entry": "."`. If an app needs multi-package entry handling, goxc fails with a
-clear error instead of guessing.
+The materialized hidden workspace supports `"entry": "."` apps with child
+packages under the app root. Child entry packages such as `"./cmd/app"` are not
+implemented yet; goxc fails with a clear error instead of guessing.
 
 ## Cache Policy
 
