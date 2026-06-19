@@ -44,7 +44,7 @@ func sameNodeIdentity(oldNode, newNode Node) bool {
 		return ok
 	case ComponentNode:
 		newNode, ok := newNode.(ComponentNode)
-		return ok && oldNode.Name == newNode.Name
+		return ok && nodeComponentIdentity(oldNode) == nodeComponentIdentity(newNode)
 	default:
 		return false
 	}

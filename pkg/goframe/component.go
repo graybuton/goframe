@@ -7,11 +7,41 @@ type memoizedProps[P any] interface {
 	MemoEqual(next P) bool
 }
 
+type componentIdentity struct {
+	typed bool
+	id    string
+}
+
+// ComponentType is an explicit component identity token.
+//
+// It separates runtime identity from the human-readable debug name. Use
+// NewComponentType to create values; the zero value is not valid for
+// ComponentT.
+type ComponentType struct {
+	identity  componentIdentity
+	debugName string
+}
+
+// NewComponentType creates an explicit component identity token.
+func NewComponentType(id string, debugName string) ComponentType {
+	if id == "" {
+		panic("goframe: empty component id")
+	}
+	if debugName == "" {
+		debugName = id
+	}
+	return ComponentType{
+		identity:  typedComponentIdentity(id),
+		debugName: debugName,
+	}
+}
+
 // ComponentNode preserves a function component boundary until the runtime
 // creates or reuses its component instance.
 type ComponentNode struct {
 	Name      string
 	Props     any
+	identity  componentIdentity
 	render    func() Node
 	memoEqual func(any, any) bool
 }
@@ -20,6 +50,19 @@ func (ComponentNode) isNode() {}
 
 // Component creates a runtime-visible typed function component boundary.
 func Component[P any](name string, props P, render ComponentFunc[P]) Node {
+	return componentNode(name, legacyComponentIdentity(name), props, render)
+}
+
+// ComponentT creates a runtime-visible component boundary with an explicit
+// component identity token.
+func ComponentT[P any](componentType ComponentType, props P, render ComponentFunc[P]) Node {
+	if componentType.identity.id == "" {
+		panic("goframe: invalid component type")
+	}
+	return componentNode(componentType.debugName, componentType.identity, props, render)
+}
+
+func componentNode[P any](name string, identity componentIdentity, props P, render ComponentFunc[P]) Node {
 	var memoEqual func(any, any) bool
 	if _, ok := any(props).(memoizedProps[P]); ok {
 		memoEqual = memoizeProps[P]
@@ -27,6 +70,7 @@ func Component[P any](name string, props P, render ComponentFunc[P]) Node {
 	return ComponentNode{
 		Name:      name,
 		Props:     props,
+		identity:  identity,
 		memoEqual: memoEqual,
 		render: func() Node {
 			return render(props)
@@ -57,6 +101,7 @@ func C[P any](name string, props P, render ComponentFunc[P]) Node {
 
 type componentInstance struct {
 	name             string
+	identity         componentIdentity
 	key              string
 	parent           *componentInstance
 	node             ComponentNode
@@ -84,6 +129,7 @@ var currentComponent *componentInstance
 func newComponentInstance(node ComponentNode, key string, parent *componentInstance, schedule func(*componentInstance)) *componentInstance {
 	return &componentInstance{
 		name:           node.Name,
+		identity:       nodeComponentIdentity(node),
 		key:            key,
 		parent:         parent,
 		node:           node,
@@ -95,7 +141,7 @@ func newComponentInstance(node ComponentNode, key string, parent *componentInsta
 }
 
 func shouldSkipComponentRender(instance *componentInstance, nextNode ComponentNode, nextKey string) bool {
-	if instance == nil || instance.node.Name != nextNode.Name {
+	if instance == nil || instance.identity != nodeComponentIdentity(nextNode) {
 		return false
 	}
 	if instance.key != nextKey {
@@ -194,6 +240,28 @@ func ownerDebugName(owner *componentInstance) string {
 		return "<root>"
 	}
 	return "<" + owner.name + ">"
+}
+
+func legacyComponentIdentity(name string) componentIdentity {
+	return componentIdentity{
+		id: name,
+	}
+}
+
+func typedComponentIdentity(id string) componentIdentity {
+	return componentIdentity{
+		typed: true,
+		id:    id,
+	}
+}
+
+func nodeComponentIdentity(node ComponentNode) componentIdentity {
+	if node.identity.id != "" {
+		return node.identity
+	}
+	return componentIdentity{
+		id: node.Name,
+	}
 }
 
 func deactivateComponent(instance *componentInstance) {
