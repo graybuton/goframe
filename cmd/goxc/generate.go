@@ -66,7 +66,7 @@ func parseGenerateOptions(args []string) (generateOptions, error) {
 }
 
 func generatePath(options generateOptions, requireFiles bool) error {
-	files, err := gox.FindFiles(options.path)
+	files, err := findGOXFiles(options.path)
 	if err != nil {
 		return err
 	}
@@ -79,9 +79,16 @@ func generatePath(options generateOptions, requireFiles bool) error {
 	}
 
 	if options.inPlace {
+		appDir, err := generationAppDir(options.path)
+		if err != nil {
+			return err
+		}
 		fmt.Fprintln(os.Stderr, "warning: --in-place writes generated compiler output into the source tree; use only for debugging or legacy workflows")
 		for _, file := range files {
-			output, err := gox.GenerateFile(file)
+			output, err := gox.GenerateFileToWithOptions(file, file+".go", gox.GenerateOptions{
+				Filename:        file,
+				PackageIdentity: packageIdentityForFile(appDir, file),
+			})
 			if err != nil {
 				return err
 			}
@@ -109,7 +116,10 @@ func generatePath(options generateOptions, requireFiles bool) error {
 			return fmt.Errorf("resolve GOX source %s: %w", file, err)
 		}
 		output := filepath.Join(outputRoot, relative+".go")
-		output, err = gox.GenerateFileTo(file, output)
+		output, err = gox.GenerateFileToWithOptions(file, output, gox.GenerateOptions{
+			Filename:        file,
+			PackageIdentity: packageIdentityForFile(appDir, file),
+		})
 		if err != nil {
 			return err
 		}
