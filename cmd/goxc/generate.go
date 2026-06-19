@@ -90,7 +90,7 @@ func generatePath(options generateOptions, requireFiles bool) error {
 				PackageIdentity: packageIdentityForFile(appDir, file),
 			})
 			if err != nil {
-				return err
+				return fmt.Errorf("generate failed for %s: %w", file, err)
 			}
 			fmt.Printf("generated %s -> %s\n", file, output)
 		}
@@ -121,7 +121,7 @@ func generatePath(options generateOptions, requireFiles bool) error {
 			PackageIdentity: packageIdentityForFile(appDir, file),
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("generate failed for %s: %w", file, err)
 		}
 		fmt.Printf("generated %s -> %s\n", file, output)
 	}

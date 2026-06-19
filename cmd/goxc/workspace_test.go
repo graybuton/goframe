@@ -142,6 +142,45 @@ func View() gf.Node {
 	}
 }
 
+func TestGenerateIntoDirectoryReportsOriginalGOXSource(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/example/root\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appDir := filepath.Join(root, "apps", "demo")
+	sourceDir := filepath.Join(appDir, "internal", "ui")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(sourceDir, "layout.gox")
+	source := `package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <main><p>Broken</main>
+}
+`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := generateIntoDirectory(appDir, t.TempDir(), true)
+	if err == nil {
+		t.Fatal("generateIntoDirectory() returned nil error")
+	}
+	for _, want := range []string{
+		"generate failed for " + sourcePath,
+		sourcePath + ":6:",
+		"expected closing tag </p>, got </main>",
+		"<p>Broken</main>",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
 func TestWriteWorkspaceGoModUsesRootModulePath(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/example/root\n\ngo 1.22\n"), 0o644); err != nil {

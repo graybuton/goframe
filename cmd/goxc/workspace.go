@@ -100,7 +100,7 @@ func generateIntoDirectory(sourceRoot, destinationRoot string, requireFiles bool
 			Filename:        file,
 			PackageIdentity: packageIdentityForFile(sourceRoot, file),
 		}); err != nil {
-			return err
+			return fmt.Errorf("generate failed for %s: %w", file, err)
 		}
 	}
 	return nil
