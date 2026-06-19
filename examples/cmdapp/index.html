@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>goframe cmdapp</title>
+    <link rel="stylesheet" href="styles.css" />
+    <!-- goframe:preload -->
+    <!-- /goframe:preload -->
+</head>
+<body>
+    <div id="root">Loading...</div>
+
+    <script>
+        window.goframeComponentRenderCounts = {};
+        window.goframeComponentPatchCounts = {};
+        window.goframeComponentMemoSkips = {};
+        window.goframeComponentRenderProbe = (name) => {
+            window.goframeComponentRenderCounts[name] =
+                (window.goframeComponentRenderCounts[name] || 0) + 1;
+        };
+        window.goframeComponentPatchProbe = (name) => {
+            window.goframeComponentPatchCounts[name] =
+                (window.goframeComponentPatchCounts[name] || 0) + 1;
+        };
+        window.goframeComponentMemoSkipProbe = (name) => {
+            window.goframeComponentMemoSkips[name] =
+                (window.goframeComponentMemoSkips[name] || 0) + 1;
+        };
+    </script>
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+            .then((result) => go.run(result.instance))
+            .catch((error) => {
+                console.error("[goframe] startup failed", error);
+                document.getElementById("root").textContent = "Failed to start goframe. See console.";
+            });
+    </script>
+    <!-- /goframe:bootstrap -->
+</body>
+</html>

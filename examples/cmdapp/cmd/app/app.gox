@@ -1,0 +1,42 @@
+package main
+
+import (
+	tasks "github.com/graybuton/goframe/examples/cmdapp/internal/features/tasks"
+	ui "github.com/graybuton/goframe/examples/cmdapp/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+type HeaderProps struct {
+	Subtitle string
+}
+
+func Header(props HeaderProps) gf.Node {
+	return (
+		<section class="entry-header" data-testid="entry-header">
+			<strong>Entry Header</strong>
+			<span>{props.Subtitle}</span>
+		</section>
+	)
+}
+
+func App() gf.Node {
+	count, setCount := gf.UseState(0)
+
+	return (
+		<main class="cmdapp-page">
+			<Header Subtitle={appSubtitle} />
+			{ui.Layout(ui.LayoutProps{
+				Title: "Child entry GOX",
+				Count: count,
+				OnIncrement: func() {
+					setCount(count + 1)
+				},
+				Children: []gf.Node{
+					tasks.TaskList(tasks.TaskListProps{
+						Items: tasks.DemoTasks(),
+					}),
+				},
+			})}
+		</main>
+	)
+}

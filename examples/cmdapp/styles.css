@@ -1,0 +1,88 @@
+:root {
+    color-scheme: light;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+    margin: 0;
+    background: #f4f7fb;
+    color: #162033;
+}
+
+button {
+    font: inherit;
+    border: 0;
+    border-radius: 999px;
+    padding: 0.65rem 1rem;
+    background: #265bdc;
+    color: white;
+    cursor: pointer;
+}
+
+.cmdapp-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 32px;
+}
+
+.entry-header,
+.ui-header,
+.layout-card,
+.task-list {
+    border: 1px solid #dbe3f2;
+    border-radius: 18px;
+    background: white;
+    box-shadow: 0 16px 40px rgba(27, 39, 71, 0.08);
+}
+
+.entry-header,
+.ui-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding: 16px 18px;
+}
+
+.layout-card {
+    padding: 20px;
+}
+
+.layout-actions {
+    margin-bottom: 18px;
+}
+
+.layout-children {
+    display: grid;
+    gap: 16px;
+}
+
+.task-list {
+    padding: 18px;
+}
+
+.task-list h2 {
+    margin: 0 0 12px;
+}
+
+.task-list ul {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.task-row {
+    display: grid;
+    grid-template-columns: 80px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    border-radius: 12px;
+    background: #f8faff;
+}
+
+.task-row small {
+    color: #52627a;
+}
