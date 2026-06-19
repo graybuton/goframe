@@ -1,0 +1,29 @@
+package issues
+
+import (
+	shared "github.com/graybuton/goframe/examples/multipackage/internal/shared"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func IssueList(props IssueListProps) gf.Node {
+	return (
+		<section class="issue-list" data-testid="issue-list">
+			<h2>{shared.FormatCount(len(props.Items))}</h2>
+			<ul>
+				{gf.Map(props.Items, func(issue Issue) gf.Node {
+					return <IssueRow Key={issue.ID} Issue={issue} />
+				})}
+			</ul>
+		</section>
+	)
+}
+
+func IssueRow(props IssueRowProps) gf.Node {
+	return (
+		<li class="issue-row" data-testid="issue-row">
+			<strong>{props.Issue.ID}</strong>
+			<span>{props.Issue.Title}</span>
+			<small>{shared.FormatPriority(props.Issue.Priority)}</small>
+		</li>
+	)
+}

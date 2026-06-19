@@ -1,0 +1,11 @@
+{
+  "name": "multipackage",
+  "entry": ".",
+  "output": "dist",
+  "compiler": "tinygo",
+  "wasm": "bundle.wasm",
+  "assets": [
+    "index.html",
+    "styles.css"
+  ]
+}

@@ -1,0 +1,12 @@
+package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Header(props HeaderProps) gf.Node {
+	return (
+		<header class="ui-header" data-testid="ui-header">
+			<strong>UI Header</strong>
+			<span>{props.Title}</span>
+		</header>
+	)
+}
