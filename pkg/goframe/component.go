@@ -150,10 +150,24 @@ func shouldSkipComponentRender(instance *componentInstance, nextNode ComponentNo
 	if instance.memoEqual == nil || instance.dirty || instance.dirtyDescendants > 0 || !instance.active {
 		return false
 	}
+	return shouldSkipMemoizedProps(instance, nextNode)
+}
+
+func shouldSkipMemoizedProps(instance *componentInstance, nextNode ComponentNode) (skip bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseMemo,
+				Component: runtimeComponentName(instance),
+				Operation: "MemoEqual",
+			}, recovered)
+			skip = false
+		}
+	}()
 	return instance.memoEqual(instance.node.Props, nextNode.Props)
 }
 
-func renderComponentInstance(instance *componentInstance) Node {
+func renderComponentInstance(instance *componentInstance) (rendered Node) {
 	previous := currentComponent
 	currentComponent = instance
 	instance.stateIndex = 0
@@ -164,6 +178,18 @@ func renderComponentInstance(instance *componentInstance) Node {
 	clearComponentDirty(instance)
 	defer func() {
 		currentComponent = previous
+		if recovered := recover(); recovered != nil {
+			if isRuntimeInvariantPanic(recovered) {
+				panic(recovered)
+			}
+			finishComponentContextRender(instance)
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseRender,
+				Component: runtimeComponentName(instance),
+				Operation: "component render",
+			}, recovered)
+			rendered = Empty()
+		}
 	}()
 
 	reportComponentRender(instance.name)

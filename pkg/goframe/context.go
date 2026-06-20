@@ -92,7 +92,7 @@ func UseContextSelector[T any, S comparable](ctx *Context[T], selector func(T) S
 	if provider != nil {
 		value = provider.value.(T)
 	}
-	selected := selector(value)
+	selected := selectContextValue(instance, selector, value)
 	subscribeContext(instance, ctx.id, "UseContextSelector", provider, selected, ctx.defaultValue, func(slot *contextSubscription, raw any) bool {
 		next := selector(raw.(T))
 		previous, ok := slot.selected.(S)
@@ -103,6 +103,20 @@ func UseContextSelector[T any, S comparable](ctx *Context[T], selector func(T) S
 		return true
 	})
 	return selected
+}
+
+func selectContextValue[T any, S comparable](instance *componentInstance, selector func(T) S, value T) (selected S) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseContext,
+				Component: runtimeComponentName(instance),
+				Operation: "UseContextSelector",
+			}, recovered)
+			panic(recovered)
+		}
+	}()
+	return selector(value)
 }
 
 func ensureContextProvider[T any](instance *componentInstance, contextID int, value T) (*contextProvider, bool) {
@@ -277,7 +291,8 @@ func notifyContextSubscribers(provider *contextProvider, value any) {
 			releaseContextSubscription(slot)
 			continue
 		}
-		if slot.update(slot, value) {
+		changed, ok := updateContextSubscription(slot, value)
+		if ok && changed {
 			markComponentDirty(slot.owner)
 		}
 	}
@@ -316,9 +331,26 @@ func refreshContextSubscription(slot *contextSubscription) {
 	if provider != nil {
 		value = provider.value
 	}
-	slot.update(slot, value)
+	if _, ok := updateContextSubscription(slot, value); !ok {
+		return
+	}
 	setContextSubscriptionProvider(slot, provider)
 	markComponentDirty(slot.owner)
+}
+
+func updateContextSubscription(slot *contextSubscription, value any) (changed bool, ok bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseContext,
+				Component: runtimeComponentName(slot.owner),
+				Operation: slot.kind,
+			}, recovered)
+			changed = false
+			ok = false
+		}
+	}()
+	return slot.update(slot, value), true
 }
 
 func releaseContextSubscriptions(instance *componentInstance) {
