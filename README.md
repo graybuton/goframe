@@ -363,6 +363,7 @@ Start here:
 Runtime topics:
 
 - [Lifecycle and effects](docs/effects.md)
+- [Runtime error semantics](docs/runtime-errors.md)
 - [Explicit memoization](docs/memoization.md)
 - [Context selectors](docs/context.md)
 - [Virtualized collections](docs/virtualization.md)

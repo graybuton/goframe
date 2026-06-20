@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document records the measurable baseline after MVP 22. It is a decision
+This document records the measurable baseline after MVP 23. It is a decision
 aid for future runtime and tooling work, not a claim that GoFrame is
 production-ready.
 
@@ -68,8 +68,8 @@ CDP node drift as an investigation signal, not a failure by itself.
 
 ## Current Baseline
 
-Recorded during the public surface polish pass from local `main` at
-`v0.1.0-mvp22` (`2ba0c6e`).
+Recorded during the runtime error semantics pass from local `main` after the
+public surface polish baseline.
 
 Tool versions:
 
@@ -110,14 +110,14 @@ TinyGo packaged WASM sizes:
 
 | Example | Raw | gzip | br | zstd |
 |---|---:|---:|---:|---:|
-| counter | 82097 | 32854 | 27459 | 29666 |
-| components | 87745 | 34600 | 28860 | 30963 |
-| todo | 115337 | 44243 | 36941 | 39786 |
-| dashboard | 166248 | 61923 | 50078 | 54282 |
-| context | 113108 | 42477 | 34964 | 37677 |
-| virtualized | 121195 | 46624 | 38229 | 41371 |
-| multipackage | 89727 | 35413 | 29549 | 31831 |
-| cmdapp | 89786 | 35444 | 29569 | 31836 |
+| counter | 82885 | 33356 | 27739 | 29977 |
+| components | 88533 | 35020 | 29241 | 31375 |
+| todo | 116727 | 44793 | 37407 | 40340 |
+| dashboard | 167962 | 62645 | 50713 | 54906 |
+| context | 114656 | 43058 | 35370 | 38255 |
+| virtualized | 122478 | 47194 | 38732 | 41904 |
+| multipackage | 90515 | 35840 | 29836 | 32293 |
+| cmdapp | 90574 | 35864 | 29811 | 32307 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.

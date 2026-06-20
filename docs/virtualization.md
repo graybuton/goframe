@@ -78,6 +78,10 @@ reconciliation, while `VirtualRow.Key` remains the user-facing item key passed
 to `RenderRow`. This prevents spacer rows and user rows from matching each
 other during scroll, filter, and sort updates.
 
+If `Header`, `RenderRow`, or `Empty` panics, the runtime reports a render-phase
+error with a virtual-table operation label. `RenderRow` falls back to an empty
+content row with the configured `ColumnCount`, so the table tree remains valid.
+
 ## Range Calculation
 
 The current range model is intentionally fixed-height:
@@ -121,6 +125,9 @@ Key: func(item Item, index int) string {
 If `Key` is nil, `goframe` falls back to index-based keys. That is acceptable
 for static append-only lists, but it is not recommended for filtered, sorted,
 or mutable data. The dashboard uses issue IDs as virtual row keys.
+
+If `VirtualList.RenderItem` panics, the runtime reports a render-phase error
+and falls back to an empty item subtree for that slot.
 
 ## Dashboard Pressure
 

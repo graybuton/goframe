@@ -63,6 +63,13 @@ Selectors should be deterministic and side-effect-free. They may close over
 stable values, but they should not mutate state or depend on changing external
 state.
 
+If a selector panics during provider notification or provider topology refresh,
+GoFrame reports `gf.ErrorPhaseContext`, keeps the previous selected value, and
+does not mark the consumer dirty from that failed selector evaluation. If a
+selector panics during the consumer's own render before a stable previous value
+exists, the panic is reported as a context failure and then flows through normal
+component render error handling.
+
 ## Broad Consumers
 
 `UseContext(ctx)` returns the full nearest value. Because the runtime cannot
