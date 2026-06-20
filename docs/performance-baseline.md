@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document records the measurable baseline after MVP 17 and Foundation
-Audit IV. It is a decision aid for future runtime and tooling work, not a
-claim that GoFrame is production-ready.
+This document records the measurable baseline after MVP 22. It is a decision
+aid for future runtime and tooling work, not a claim that GoFrame is
+production-ready.
 
 The goal is to separate hard regression gates from noisy informational metrics
 so future changes can be judged by stable invariants instead of browser-feel
@@ -68,8 +68,8 @@ CDP node drift as an investigation signal, not a failure by itself.
 
 ## Current Baseline
 
-Recorded on `chore/runtime-benchmark-baseline` from local `main` at
-`f2192e9` after Foundation Audit IV.
+Recorded during the public surface polish pass from local `main` at
+`v0.1.0-mvp22` (`2ba0c6e`).
 
 Tool versions:
 
@@ -95,6 +95,7 @@ Baseline checks passed before documentation changes:
 - `go test ./examples/context`
 - `go test ./examples/virtualized`
 - `go test ./examples/multipackage`
+- `go test ./examples/cmdapp`
 - `scripts/check.sh`
 - `scripts/size-budget.sh`
 - `scripts/perf-report.sh`
@@ -109,50 +110,17 @@ TinyGo packaged WASM sizes:
 
 | Example | Raw | gzip | br | zstd |
 |---|---:|---:|---:|---:|
-| counter | 81350 | 32477 | 27098 | 29282 |
-| components | 86725 | 34131 | 28324 | 30555 |
-| todo | 113935 | 43622 | 36285 | 39263 |
-| dashboard | 163897 | 61217 | 49482 | 53454 |
-| context | 111440 | 42093 | 34413 | 37111 |
-| virtualized | 119729 | 45575 | 37524 | 40759 |
+| counter | 82097 | 32854 | 27459 | 29666 |
+| components | 87745 | 34600 | 28860 | 30963 |
+| todo | 115337 | 44243 | 36941 | 39786 |
+| dashboard | 166248 | 61923 | 50078 | 54282 |
+| context | 113108 | 42477 | 34964 | 37677 |
+| virtualized | 121195 | 46624 | 38229 | 41371 |
+| multipackage | 89727 | 35413 | 29549 | 31831 |
+| cmdapp | 89786 | 35444 | 29569 | 31836 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.
-
-MVP 19 component identity v2 added explicit generated component tokens. After
-trimming the runtime identity representation, the measured TinyGo size impact
-remained small but pushed the context raw bundle 56 B past its previous 110 KiB
-budget. The context raw budget was therefore moved to 111 KiB while compressed
-budgets stayed unchanged.
-
-MVP 19 measured sizes:
-
-| Example | Raw | gzip | br | zstd |
-|---|---:|---:|---:|---:|
-| counter | 82097 | 32854 | 27459 | 29666 |
-| components | 87609 | 34584 | 28768 | 30945 |
-| todo | 115033 | 44236 | 36835 | 39763 |
-| dashboard | 165558 | 61887 | 50065 | 54160 |
-| context | 112696 | 42437 | 34935 | 37622 |
-| virtualized | 120917 | 46609 | 38128 | 41346 |
-
-MVP 20 adds the first multi-package GOX workspace example. Existing example
-budgets remain authoritative in `scripts/size-budget.sh`; the new example is
-tracked with its own budget.
-
-MVP 20 measured size for the new example:
-
-| Example | Raw | gzip | br | zstd |
-|---|---:|---:|---:|---:|
-| multipackage | 89727 | 35422 | 29549 | 31831 |
-
-MVP 22 adds a child-entry package example. Existing example budgets remain
-authoritative in `scripts/size-budget.sh`; the new example is tracked with its
-own budget.
-
-| Example | Raw | gzip | br | zstd |
-|---|---:|---:|---:|---:|
-| cmdapp | 89786 | 35453 | 29569 | 31836 |
 
 ## Browser / DOM Baseline
 
@@ -186,13 +154,13 @@ CI budget yet.
 | All logical rows | 300 |
 | All mounted row max | 28 |
 | Open mounted row max | 28 |
-| Average All duration | 49.9 ms |
-| Max All duration | 61.7 ms |
+| Average All duration | 47.78 ms |
+| Max All duration | 64.7 ms |
 | Average All created nodes | 621 |
 | Average All removed nodes | 69 |
-| Average All runtime render | 11.91 ms |
-| Average All script | 13.64 ms |
-| Average All layout | 3.82 ms |
+| Average All runtime render | 11.65 ms |
+| Average All script | 12.75 ms |
+| Average All layout | 3.70 ms |
 | Live DOM All start/end | 486 -> 486 |
 | Net listeners All start/end | 0 -> 0 |
 | Post-idle live DOM nodes | 486 |
@@ -237,13 +205,13 @@ Current benchmark output is informational:
 
 | Benchmark | Current sample |
 |---|---:|
-| DirtyQueuePruning | 193.1 ns/op |
-| MatchChildIndicesKeyed | 18085 ns/op |
-| MatchChildIndicesUnkeyed | 3546 ns/op |
-| SplitProps | 3626 ns/op |
-| EventNameNormalization | 316.5 ns/op |
-| StateSlotAccess | 469.2 ns/op |
-| UnwrapKeyedNode | 8.358 ns/op |
+| DirtyQueuePruning | 192.7 ns/op |
+| MatchChildIndicesKeyed | 10483 ns/op |
+| MatchChildIndicesUnkeyed | 2448 ns/op |
+| SplitProps | 2296 ns/op |
+| EventNameNormalization | 331.3 ns/op |
+| StateSlotAccess | 346.4 ns/op |
+| UnwrapKeyedNode | 8.350 ns/op |
 
 Use these numbers to spot large regressions, but do not gate on exact values
 until the benchmark environment is controlled.

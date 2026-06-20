@@ -16,6 +16,7 @@ It checks:
 
 - tracked artifact gate;
 - canonical module path gate;
+- docs/example consistency check;
 - `go fmt ./...` plus a clean diff check;
 - `go test ./...`;
 - `go test -race ./pkg/... ./cmd/...`;
@@ -101,6 +102,7 @@ repository security settings. Recommended labels are `dependencies`,
 Core local verification:
 
 ```bash
+node scripts/docs-check.mjs
 go fmt ./...
 go test ./...
 go test -race ./pkg/... ./cmd/...

@@ -72,12 +72,9 @@ Dashboard size budgets run as part of:
 scripts/size-budget.sh
 ```
 
-Expected TinyGo size is dashboard-sized but still below the MVP budget:
-
-- raw <= 165 KiB;
-- gzip <= 70 KiB;
-- brotli <= 52 KiB;
-- zstd <= 60 KiB, when zstd is available.
+The authoritative byte budgets live in `scripts/size-budget.sh`. The dashboard
+is intentionally larger than the small examples, but it should remain below the
+tracked TinyGo raw/gzip/brotli/zstd budgets.
 
 ## Performance Notes
 

@@ -16,6 +16,9 @@ scripts/artifact-check.sh
 echo "== Module path gate =="
 scripts/module-path-check.sh
 
+echo "== Docs consistency =="
+node scripts/docs-check.mjs
+
 echo "== Go formatting =="
 go fmt ./...
 

@@ -1,156 +1,204 @@
 # goframe
 
-`goframe` is an experimental Go-first application platform for interactive
-apps. It combines a Go runtime library, JSX-like `.gox` markup, the `goxc`
-compiler toolchain, and WebAssembly browser targets.
+GoFrame is an experimental Go-first application platform for interactive
+browser apps. It combines:
 
-goframe is not intended to be a tiny replacement for React on static websites.
-The browser target is the current experiment; a future GoFrame Player remains
-an architectural direction rather than an implemented product.
+- the `goframe` runtime library;
+- JSX-like `.gox` markup embedded in Go files;
+- the `goxc` generate/build/package/serve toolchain;
+- TinyGo and standard Go WebAssembly targets.
 
-> Status: experimental MVP. APIs, GOX syntax, manifests, and toolchain behavior
-> may change.
-> Some APIs are public-candidate, but GoFrame is not production-ready yet.
+GoFrame is not production-ready. Some APIs are public-candidate, but the GOX
+syntax, manifests, packaging details, and runtime internals may still change
+between MVPs. The browser/WASM target is the current implementation; the
+Player/Engine idea remains future design work, not a shipped product.
 
-## Project layers
+## Status
 
-```text
-GOX language       JSX-like declarative markup embedded in Go
-goframe runtime    state, virtual nodes, DOM mounting, browser events
-goxc toolchain     generate, build, package, inspect, and serve applications
-GoFrame Player     possible future host for portable .gfapp bundles
+Current baseline includes:
+
+- GOX expression ergonomics and source-oriented diagnostics;
+- component boundaries, state, reducer dispatch, effects, context selectors,
+  memoization, keyed reconciliation, and fixed-height virtualization;
+- cache-safe packaging, hidden `.goframe` workspace output, export safety, and
+  clean workspace commands;
+- multi-package GOX workspaces, child entry packages such as `./cmd/app`, and
+  import-aware generated component identity;
+- CI gates for Go/GOX tests, TinyGo size budgets, browser smoke, artifact
+  checks, module path checks, and docs consistency.
+
+Non-goals for the current project surface include router, SSR, hydration,
+Player/Engine implementation, dynamic virtualization, infinite loading, LSP,
+formatter, namespace tags, spread props, production deployment server, and
+full multi-module monorepo support.
+
+## What Is GoFrame?
+
+GoFrame lets you write interactive UI in Go while keeping authored source
+clean:
+
+```gox
+package main
+
+func App(props AppProps) gf.Node {
+	count, setCount := gf.UseState(0)
+
+	return (
+		<main>
+			<h1>Counter</h1>
+			<p>Count: {count}</p>
+			<button onClick={func() { setCount(count + 1) }}>
+				Increment
+			</button>
+		</main>
+	)
+}
 ```
+
+`goxc generate` turns `.gox` into Go compiler output under `.goframe`; it does
+not write generated `.gox.go` files next to source by default.
+
+## Project Layers
+
+| Layer | Role |
+|---|---|
+| GOX language | JSX-like declarative markup embedded in Go source. |
+| `pkg/goframe` runtime | Nodes, component instances, hooks, context, events, reconciliation, and browser mounting. |
+| `pkg/gox` compiler | GOX lexer/parser/codegen plus diagnostics and golden tests. |
+| `cmd/goxc` toolchain | Generate, build, package, export, serve, size, clean, doctor, and version commands. |
+| examples and scripts | Integration probes, browser smoke, size budgets, and DOM pressure gates. |
+| VS Code extension | Lightweight syntax highlighting/snippets/commands over the same `goxc` workflow. |
 
 ## Installing goxc
 
-Install the latest published toolchain:
+Install the current published toolchain:
 
 ```bash
 go install github.com/graybuton/goframe/cmd/goxc@latest
 ```
 
-Make sure `$(go env GOPATH)/bin` is in `PATH`, then verify the installation:
+Make sure `$(go env GOPATH)/bin` is in `PATH`, then check the local toolchain:
 
 ```bash
 goxc version
 goxc doctor
 ```
 
-## Local development install
-
-From this repository:
+When working inside this repository, install the local checkout instead:
 
 ```bash
 go install ./cmd/goxc
 ```
 
-Alternatively, use `go run ./cmd/goxc` while changing the CLI itself.
+`go run ./cmd/goxc` is useful while editing the CLI itself.
 
-## Quick start
+## Quick Start
 
-The counter manifest selects TinyGo by default:
+Package and serve the counter example:
 
 ```bash
 goxc doctor
-goxc generate ./examples/counter
-goxc package ./examples/counter
+goxc package ./examples/counter --compiler=tinygo
 goxc size ./examples/counter
 goxc serve ./examples/counter --port=8080
 ```
 
-Open <http://127.0.0.1:8080>. Browser console logs show WASM instantiation.
-Render and patch probes require a `goframe_debug` build.
+Open <http://127.0.0.1:8080>.
 
-Use the standard Go compiler explicitly when compatibility matters more than
-download size:
+Use standard Go compatibility mode when TinyGo is unavailable or when binary
+size is not the main concern:
 
 ```bash
 goxc package ./examples/counter --compiler=go
 ```
 
-The components example demonstrates typed props, children, fragments, and
-state:
+## Examples
+
+| Example | What it demonstrates | Command |
+|---|---|---|
+| `examples/counter` | Minimal state, events, TinyGo quickstart, package/serve workflow. | `goxc package ./examples/counter --compiler=tinygo` |
+| `examples/components` | Typed props, children, fragments, component composition. | `goxc package ./examples/components --compiler=tinygo` |
+| `examples/todo` | Controlled inputs, events, effects, keys, list helpers, localStorage. | `goxc package ./examples/todo --compiler=tinygo` |
+| `examples/dashboard` | Reducer dispatch, explicit memoization, virtual table, dashboard pressure smoke. | `goxc package ./examples/dashboard --compiler=tinygo` |
+| `examples/context` | Scoped providers, selector consumers, broad `UseContext`, nested providers. | `goxc package ./examples/context --compiler=tinygo` |
+| `examples/virtualized` | `gf.VirtualList`, `gf.VirtualTable`, bounded DOM with 10,000 logical rows. | `goxc package ./examples/virtualized --compiler=tinygo` |
+| `examples/multipackage` | `entry: "."` app with root plus `internal/...` packages. | `goxc package ./examples/multipackage --compiler=tinygo` |
+| `examples/cmdapp` | Child entry package with `"entry": "./cmd/app"` and Go-first layout. | `goxc package ./examples/cmdapp --compiler=tinygo` |
+
+Serve any packaged example with:
 
 ```bash
-goxc package ./examples/components
-goxc serve ./examples/components --port=8080
+goxc serve ./examples/<name> --port=8080
 ```
 
-The Todo example exercises application-level primitives, controlled inputs,
-typed events, conditional/list helpers, keys, and lifecycle effects:
+For cache-safe deployment-style artifacts:
 
 ```bash
-goxc generate ./examples/todo
-goxc package ./examples/todo --compiler=tinygo
-goxc size ./examples/todo
-goxc serve ./examples/todo --port=8080
+goxc package ./examples/<name> --compiler=tinygo --asset-hash --preload --compress=gzip,br
 ```
 
-The Todo reconciliation smoke test uses a separate instrumented build so debug
-probes do not increase production WASM:
+Use `goxc export` only when you want a visible deploy directory:
 
 ```bash
-(cd ./examples/todo/.goframe/work/dev/examples/todo && \
-  tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-    -o ../../../../package/standalone/assets/bundle.wasm .)
-goxc serve ./examples/todo --port=18080
-node --experimental-websocket scripts/todo-browser-smoke.mjs
+goxc export ./examples/counter --out ./dist
 ```
 
-The dashboard example is a larger pressure test for the same runtime and GOX
-surface. It renders 300 deterministic issue rows, filters and sorts keyed table
-rows, updates metric cards, and exercises a detail panel:
+## Go-First App Layout
 
-```bash
-goxc generate ./examples/dashboard
-goxc package ./examples/dashboard --compiler=tinygo
-goxc size ./examples/dashboard
-goxc serve ./examples/dashboard --port=8080
+Single-package apps can keep `entry: "."`:
+
+```text
+app/
+├── goframe.json
+├── app.gox
+├── main.go
+├── index.html
+└── styles.css
 ```
 
-The context example demonstrates scoped providers and selector consumers:
+For larger apps, the recommended Go-first layout is a child executable entry
+package plus app-private internal packages:
 
-```bash
-goxc package ./examples/context --compiler=tinygo
-goxc serve ./examples/context --port=8080
+```text
+app/
+├── goframe.json
+├── index.html
+├── styles.css
+├── cmd/app/
+│   ├── main.go
+│   └── app.gox
+└── internal/
+    ├── ui/
+    │   └── layout.gox
+    └── features/
+        └── tasks/list.gox
 ```
 
-The virtualized collections example demonstrates framework-level fixed-height
-list and table virtualization with 10,000 logical rows but a bounded mounted
-DOM:
-
-```bash
-goxc package ./examples/virtualized --compiler=tinygo
-goxc serve ./examples/virtualized --port=8080
+```json
+{
+  "name": "app",
+  "entry": "./cmd/app",
+  "compiler": "tinygo",
+  "assets": ["index.html", "styles.css"]
+}
 ```
 
-The multi-package example demonstrates `goxc` building GOX files across a root
-package and internal child packages without writing generated `.gox.go` files
-into the source tree:
+Generic child entries such as `./app` or `./src/app` work as ordinary Go
+package directories, but `cmd/app + internal/...` is the primary Go convention.
+GOX discovery remains app-root-wide, so imported internal packages get
+generated files too. Cross-package composition uses normal Go imports and
+function calls; GOX namespace tags such as `<ui.Header />` are not supported.
 
-```bash
-goxc package ./examples/multipackage --compiler=tinygo
-goxc serve ./examples/multipackage --port=8080
-```
+## GOX In One Minute
 
-The child-entry example demonstrates a Go-first `cmd/app + internal/...`
-layout with `"entry": "./cmd/app"`:
-
-```bash
-goxc package ./examples/cmdapp --compiler=tinygo
-goxc serve ./examples/cmdapp --port=8080
-```
-
-## GOX component model
-
-Lowercase tags create HTML elements:
+Lowercase tags create DOM elements:
 
 ```gox
 <button onClick={increment}>Increment</button>
 ```
 
-Capitalized tags create runtime component boundaries using the
-`<ComponentName>Props` convention:
+Capitalized tags create runtime component boundaries using
+`<ComponentName>Props`:
 
 ```gox
 <Button Label="Increment" OnClick={increment} />
@@ -163,7 +211,7 @@ type ButtonProps struct {
 }
 ```
 
-The generated Go keeps the component visible to the runtime:
+Generated GOX uses typed component identity tokens:
 
 ```go
 var _goxComponent_app_Button = gf.NewComponentType("main.Button", "Button")
@@ -174,96 +222,72 @@ gf.ComponentT(_goxComponent_app_Button, ButtonProps{
 }, Button)
 ```
 
-Component children use a `Children []gf.Node` props field. Fragments use
-`<>...</>`. Child expressions are generated through `gf.Child`, which supports
-primitive values, a `gf.Node`, or `[]gf.Node`.
+`goxc` can emit import-aware ids for generated components when the package path
+is known, for example:
 
-Calling `Button(ButtonProps{...})` directly remains valid Go, but it is an
-ordinary function call and does not create component identity.
+```text
+github.com/graybuton/goframe/examples/cmdapp/internal/ui.Header
+```
 
-GOX render expressions keep UI code close to JSX ergonomics without turning
-GOX into a separate template language:
+Children use `Children []gf.Node`. Fragments use `<>...</>`.
+`Key={...}` is a pseudo-prop for reconciliation and is not passed to component
+props or emitted as a DOM attribute.
+
+GOX supports expression-oriented rendering:
 
 ```gox
 {ready && <ReadyView />}
 
 {len(items) == 0 ? (
-    <EmptyState />
+	<EmptyState />
 ) : (
-    <ItemList Items={items} />
+	<ItemList Items={items} />
 )}
-```
 
-List rendering stays Go-native, but callbacks may return GOX markup:
-
-```gox
 {gf.Map(items, func(item Item) gf.Node {
-    return <ItemRow Key={item.ID} Item={item} />
+	return <ItemRow Key={item.ID} Item={item} />
 })}
 ```
 
-`Key={...}` is a GOX pseudo-prop. It is not passed into component props and is
-not emitted as an HTML attribute; generated code lowers it to `gf.Key`.
+Unsupported syntax is intentionally rejected with source diagnostics:
 
-See [GOX language](docs/gox-language.md) and the
-[components example](examples/components/README.md).
+- namespace tags such as `<ui.Header />`;
+- spread props such as `<Button {...props} />`;
+- template-block `if`/`for`;
+- arbitrary JavaScript-like expressions.
 
-## Application primitives
+See [GOX language](docs/gox-language.md).
 
-State uses component-scoped slots and returns the current value plus a setter:
+## Runtime Primitives
+
+State is component-scoped and positional:
 
 ```go
 count, setCount := gf.UseState(0)
 setCount(count + 1)
 ```
 
-For event handlers that should update the latest state without closing over an
-old render value, use reducer dispatch:
+Reducer dispatch applies an action to the latest state slot at event time,
+which avoids stale render captures in retained event handlers:
 
 ```go
 type CounterAction int
 
 count, dispatch := gf.UseReducer(0, func(state int, action CounterAction) int {
-    return state + int(action)
+	return state + int(action)
 })
 dispatch(1)
 ```
 
-GOX keeps control flow in Go. The preferred user-facing list helpers are:
+Effects run after DOM patching:
 
 ```go
-gf.Map(items, func(item Item) gf.Node { ... })
-gf.MapIndexed(items, func(index int, item Item) gf.Node { ... })
+gf.UseEffect(func() gf.Cleanup { return nil })
+gf.UseEffect(func() gf.Cleanup { return nil }, gf.Deps(value))
+gf.UseUnmount(func() {})
 ```
 
-Low-level helpers such as `gf.Component`, `gf.ComponentT`, `gf.El`, `gf.Child`,
-`gf.Key`, `gf.If`, `gf.IfElse`, `gf.For`, and `gf.ForIndexed` remain exported
-because generated `.gox.go` files use the public runtime package. Treat them as
-runtime/compiler primitives unless you are writing generated-code-like Go by
-hand. In normal projects, `.gox.go` files live under `.goframe/gen` or an
-explicit `--out` directory and should not be committed.
-
-Browser props accept both lowercase and exported-style common names, including
-`value`/`Value`, `type`/`Type`, `placeholder`/`Placeholder`, and
-`onInput`/`OnInput`. Event handlers may use:
-
-```go
-func()
-func(gf.Event)
-func(gf.InputEvent)
-func(gf.ScrollEvent)
-```
-
-`gf.Event` provides `PreventDefault` and `StopPropagation`.
-`gf.InputEvent.Value()` supports controlled inputs. `gf.ScrollEvent.ScrollTop()`
-supports fixed-height virtualized collections. `gf.UseState` slots belong to
-the component instance currently rendering. State `Set` calls mark that owner
-dirty and are coalesced into one browser animation-frame update.
-`gf.UseReducer` uses the same slots, but dispatch reads the latest slot state
-at event time before applying a pure reducer action.
-
-Context is scoped by the component tree. Use selectors for performance-sensitive
-consumers:
+Context is scoped by the component tree:
 
 ```go
 var PreferencesContext = gf.CreateContext(Preferences{})
@@ -271,55 +295,168 @@ var PreferencesContext = gf.CreateContext(Preferences{})
 gf.ProvideContext(PreferencesContext, preferences)
 
 density := gf.UseContextSelector(PreferencesContext, func(value Preferences) string {
-    return value.Density
+	return value.Density
 })
 ```
 
-`UseContext` returns the whole nearest value and subscribes broadly. Prefer
-`UseContextSelector` when only a comparable field should trigger a rerender.
-See [context selectors](docs/context.md).
-
-MVP 9 adds minimal lifecycle hooks for component-owned side effects. MVP 10
-cleans up the public effect API:
-
-```go
-gf.UseEffect(func() gf.Cleanup { ... })
-gf.UseEffect(func() gf.Cleanup { ... }, gf.Deps(value, count))
-gf.UseEffect(func() gf.Cleanup { ... }, gf.EveryRender())
-gf.UseUnmount(func() { ... })
-```
-
-Effects run after DOM patching, not during render. Cleanup runs on unmount and
-before an effect reruns. `UseEffect(fn)` runs once after mount. Dependencies
-are explicit primitive values; unsupported dependency types panic with a clear
-message. The runtime does not use reflection or deep equality. `UseMount`
-remains as a deprecated alias for the once-after-mount shape. See [lifecycle
-and effects](docs/effects.md).
-
-The MVP patch layer updates text and props in place, keeps one stable listener
-per event name, patches unkeyed children positionally, and matches keyed
-children by key. Dirty component updates start directly at their mounted
-subtree, so unrelated ancestors and siblings are not traversed. If a parent and
-child are both dirty in the same batch, ancestor pruning keeps only the parent
-update. Descendant components encountered inside an updated parent subtree
-rerender. For selective subtree bailouts, define `MemoEqual` on props to opt
-in to explicit component memoization and skip stable re-renders.
+Memoization is explicit and opt-in: implement `MemoEqual` on props when a
+component can safely skip render/patch for equivalent props. The runtime also
+protects against dirty descendants hidden under memoized ancestors.
 
 Large fixed-height collections should use `gf.VirtualList` or
-`gf.VirtualTable` instead of rendering hundreds of hidden or offscreen rows.
-Virtualization keeps the mounted DOM bounded to the visible window plus
-overscan; it is separate from memoization, which reduces render work for
-mounted components. See [virtualized collections](docs/virtualization.md).
+`gf.VirtualTable` instead of mounting hidden offscreen rows.
 
-Duplicate sibling keys are a user error. Production builds keep the smallest
-behavior and do not diagnose them; `goframe_debug` builds record and warn about
-duplicate keys for browser smoke tests.
+## Toolchain Workflow
 
-## VS Code support
+Generated, build, and package outputs live under an app-local hidden workspace:
 
-The repository includes an MVP `.gox` extension in
-`extensions/vscode-gox`. It provides syntax highlighting, language
-configuration, snippets, `.gox` icons, and command-palette actions for `goxc`.
+```text
+<app>/.goframe/
+├── gen/
+├── work/
+├── build/
+└── package/
+```
+
+Use `GOFRAME_WORKSPACE=/work/goframe` or `--workspace /work/goframe` when the
+source tree is read-only.
+
+Common commands:
+
+| Command | Responsibility |
+|---|---|
+| `goxc generate <app>` | Generate `.gox.go` compiler output under `.goframe/gen`. |
+| `goxc build <app>` | Compile raw WASM under `.goframe/build/<compiler>/dev`. |
+| `goxc package <app>` | Build a runnable `.goframe/package/standalone` bundle. |
+| `goxc export <app> --out <dir>` | Copy the latest package to an explicit deploy directory. |
+| `goxc size <app>` | Report size from `.goframe/package/standalone`. |
+| `goxc serve <app>` | Serve the local package for development. |
+| `goxc clean <app>` | Remove tool-owned workspace/build/package artifacts. |
+| `goxc doctor` | Check local Go/TinyGo/compression/runtime-shim tools. |
+
+`goxc package` normalizes output to:
+
+```text
+<app>/.goframe/package/standalone/
+├── index.html
+├── asset-manifest.json
+├── goframe-package.json
+└── assets/
+    ├── bundle.wasm
+    └── wasm_exec.js
+```
+
+`goxc serve` is development-only. Production compression negotiation, cache
+headers, TLS, access control, and static-server hardening belong to deployment
+infrastructure.
+
+## Documentation Map
+
+Start here:
+
+- [Architecture and toolchain boundaries](docs/architecture.md)
+- [Runtime model](docs/runtime-model.md)
+- [GOX language and diagnostics](docs/gox-language.md)
+- [API stability tiers](docs/api-stability.md)
+- [CI and regression gates](docs/ci.md)
+
+Runtime topics:
+
+- [Lifecycle and effects](docs/effects.md)
+- [Explicit memoization](docs/memoization.md)
+- [Context selectors](docs/context.md)
+- [Virtualized collections](docs/virtualization.md)
+- [Component identity strategy](docs/component-identity.md)
+- [Component identity next steps](docs/component-identity-next.md)
+
+Toolchain and delivery:
+
+- [Multi-package GOX workspace](docs/multi-package-workspace.md)
+- [Cache-safe package delivery](docs/deployment.md)
+- [Symlink and file safety policy](docs/security-symlink-policy.md)
+- [Performance baseline](docs/performance-baseline.md)
+- [Release hygiene](docs/release.md)
+
+Project audits and future design:
+
+- [Foundation audit](docs/foundation-audit.md)
+- [Foundation Audit IV](docs/foundation-audit-iv.md)
+- [Public Surface Audit V](docs/public-surface-audit-v.md)
+- [Future GoFrame Player vision](docs/player-vision.md)
+
+Examples:
+
+- [Counter example](examples/counter/README.md)
+- [Components example](examples/components/README.md)
+- [Todo example](examples/todo/README.md)
+- [Dashboard pressure-test example](examples/dashboard/README.md)
+- [Context selectors example](examples/context/README.md)
+- [Virtualized collections example](examples/virtualized/README.md)
+- [Multi-package GOX example](examples/multipackage/README.md)
+- [Child entry package example](examples/cmdapp/README.md)
+- [VS Code GOX extension](extensions/vscode-gox/README.md)
+
+## Current Limitations
+
+- Experimental browser/WASM target only.
+- No router, SSR, hydration, hot reload, CSS-in-Go, or production deployment
+  server.
+- No Player/Engine implementation or `.gfapp` package format yet.
+- No namespace tags, spread props, template-block loops, formatter, or LSP.
+- No full multi-module monorepo story.
+- State/effect/context hooks are positional and require stable call order.
+- Context selectors require comparable selected values.
+- Memoization is explicit; there is no automatic deep equality or function-prop
+  equality.
+- Virtualized collections are fixed-height only; no dynamic measurement,
+  infinite loading, or advanced keyboard/accessibility layer yet.
+- Duplicate key diagnostics are debug-only.
+- TinyGo compatibility remains version- and feature-dependent.
+
+## Development Checks
+
+Core local checks:
+
+```bash
+go fmt ./...
+go test ./...
+go test -race ./pkg/... ./cmd/...
+go vet ./...
+go test -tags=goframe_debug ./...
+go test ./pkg/gox -run 'TestGolden|TestErrorGolden'
+```
+
+Full local gate:
+
+```bash
+scripts/check.sh
+scripts/size-budget.sh
+scripts/perf-report.sh
+scripts/browser-smoke.sh
+node --experimental-websocket scripts/dashboard-dom-pressure.mjs
+scripts/artifact-check.sh
+scripts/module-path-check.sh
+```
+
+Package all examples:
+
+```bash
+for app in examples/*; do
+	if [ -f "$app/goframe.json" ]; then
+		goxc package "$app" --compiler=tinygo --asset-hash --preload --compress=gzip,br
+	fi
+done
+```
+
+CI runs core Go/GOX checks, docs consistency, TinyGo WASM size budgets,
+browser smoke, dashboard DOM pressure, artifact/module gates, and VS Code
+extension compile checks.
+
+## VS Code Support
+
+The MVP `.gox` extension lives in `extensions/vscode-gox`. It provides syntax
+highlighting, snippets, file icons, and command-palette actions that shell out
+to `goxc`.
 
 Local extension development:
 
@@ -329,377 +466,6 @@ npm install
 npm run compile
 code .
 ```
-
-Press `F5` and select `Run GOX Extension` to launch an Extension Development
-Host. Open `samples/demo.gox` in that host to inspect highlighting and snippets.
-
-Available commands:
-
-- `GOX: Generate Current Project`
-- `GOX: Package Current Project`
-- `GOX: Serve Current Project`
-- `GOX: Run Doctor`
-
-The commands require an installed `goxc`. Configure `gox.goxcPath` when it is
-not directly available from the integrated terminal's `PATH`.
-
-See [VS Code GOX extension](extensions/vscode-gox/README.md).
-
-## Command responsibilities
-
-Generated, build, and package internals live under an app-local hidden
-workspace by default:
-
-```text
-<app>/.goframe/
-```
-
-Use `GOFRAME_WORKSPACE=/work/goframe` or `--workspace /work/goframe` when the
-source tree is read-only, for example in Docker or CI.
-
-### Generate
-
-`generate` transforms `.gox` source into Go compiler output under the hidden
-app workspace:
-
-```bash
-goxc generate ./examples/counter
-goxc generate ./examples/counter/app.gox
-```
-
-Default output:
-
-```text
-examples/counter/.goframe/gen/app.gox.go
-```
-
-Generated `.gox.go` files are toolchain output and are not committed. Use
-`--out=directory` to write generated files somewhere explicit. `--in-place`
-restores the old adjacent `.gox.go` behavior for debugging or legacy workflows
-and prints a warning.
-
-### Build
-
-`build` only compiles raw WASM. It does not copy web assets, create a
-distribution, or compress files:
-
-```bash
-goxc build ./examples/counter --compiler=tinygo
-goxc build ./examples/counter --compiler=go
-```
-
-Default output:
-
-```text
-examples/counter/.goframe/build/tinygo/dev/bundle.wasm
-```
-
-`--out=directory` overrides the build directory.
-
-### Package
-
-`package` creates a runnable normalized bundle:
-
-```bash
-goxc package ./examples/counter --compiler=tinygo
-```
-
-```text
-examples/counter/.goframe/package/standalone/
-├── index.html
-├── asset-manifest.json
-├── goframe-package.json
-└── assets/
-    ├── bundle.wasm
-    └── wasm_exec.js
-```
-
-Compiler-specific filenames are internal details. A packaged application uses
-`assets/bundle.wasm` and `assets/wasm_exec.js` for both Go and TinyGo.
-By default, package output stays under `.goframe/package/standalone`. If you
-explicitly pass `--out`, point it at an empty directory or a previous GoFrame
-package output; goxc treats that directory as tool-owned package output.
-
-Cache-safe release packaging can add content hashes, preload hints, and
-precompressed assets:
-
-```bash
-goxc package ./examples/counter --compiler=tinygo --asset-hash --preload --compress=gzip,br
-```
-
-This keeps `index.html`, `asset-manifest.json`, and `goframe-package.json`
-stable while writing immutable assets such as
-`assets/bundle.a83f19c4.wasm`.
-
-Compression is a deployment, web-server, CDN, or reverse-proxy responsibility.
-`goxc package` does not compress by default. Precompression is available only
-as an explicit packaging helper:
-
-```bash
-goxc package ./examples/counter --compress=gzip,br
-```
-
-Production servers must return the matching `Content-Encoding` when serving
-precompressed files.
-
-See [cache-safe package delivery](docs/deployment.md).
-
-### Export
-
-`export` copies the latest standalone package to a user-facing deploy
-directory:
-
-```bash
-goxc package ./examples/counter --compiler=tinygo --asset-hash --preload --compress=gzip,br
-goxc export ./examples/counter --out ./dist
-```
-
-`dist/` appears only when you explicitly export to it.
-
-The export directory is treated as tool-owned. If `--out` points at a
-non-empty directory that does not contain a previous GoFrame export marker
-(`goframe-package.json`, `asset-manifest.json`, or legacy `manifest.json`),
-`goxc export` fails instead of deleting a possibly user-owned `assets/`
-directory. Pass `--force` only when you intentionally want goxc to treat that
-directory as package output:
-
-```bash
-goxc export ./examples/counter --out ./dist --force
-```
-
-### Size
-
-```bash
-goxc size ./examples/counter
-goxc size --dir=./dist
-```
-
-When passed an application path, the command reads
-`.goframe/package/standalone`. Explicit directories are still supported with
-`--dir`.
-
-TinyGo package budgets can be checked after packaging the examples. The gate
-checks raw WASM plus gzip, brotli, and optional zstd delivery sizes:
-
-```bash
-scripts/size-budget.sh
-```
-
-Pure runtime benchmarks and budgets:
-
-```bash
-scripts/perf-report.sh
-```
-
-### Serve
-
-```bash
-goxc serve ./examples/counter --port=8080
-goxc serve --dir=./dist --port=8080
-```
-
-By default, `serve <app>` serves `.goframe/package/standalone`; run
-`goxc package <app>` first. The local server correctly serves `.wasm` as
-`application/wasm`. It does not perform gzip or brotli content negotiation.
-
-### Clean
-
-```bash
-goxc clean ./examples/counter
-goxc clean ./examples/counter --generated
-goxc clean ./examples/counter --legacy
-```
-
-The default removes `.goframe/work`, `.goframe/build`, and `.goframe/package`.
-Generated `.goframe/gen` files and legacy adjacent `.gox.go` files are removed
-only with `--generated`. `--legacy` helps migrate old app folders by removing
-legacy `build/` and adjacent generated `.gox.go` files. It removes legacy
-`dist/` only when the directory looks like a GoFrame export; otherwise it is
-left alone.
-
-### Doctor and version
-
-```bash
-goxc version
-goxc doctor
-goxc help
-```
-
-`doctor` checks Go, optional TinyGo, gzip, brotli, `wasm_exec.js`, the working
-directory, and temporary build storage.
-
-## Project manifest
-
-`goframe.json` is optional. Without it, `goxc` uses conservative defaults.
-Unknown manifest fields are rejected so misspelled toolchain settings fail
-early.
-
-```json
-{
-  "name": "counter",
-  "entry": ".",
-  "output": "dist",
-  "compiler": "tinygo",
-  "wasm": "bundle.wasm",
-  "assets": [
-    "index.html"
-  ]
-}
-```
-
-CLI flags override manifest compiler and output choices. The `output` field is
-kept as a legacy/export convention; normal package output is written under the
-hidden `.goframe/package/standalone` workspace. The hidden workspace builder
-supports `"entry": "."` apps and child entry packages such as `"./cmd/app"`,
-`"cmd/app"`, `"./src/app"`, and `"app"` when they stay inside the app root.
-GOX discovery remains app-root-wide.
-
-## Size experiment
-
-Measured on June 16, 2026 with Go 1.24.4 and TinyGo 0.41.1:
-
-| Artifact | Bytes | Approximate size |
-|---|---:|---:|
-| Counter, Go `bundle.wasm` | 1,928,333 | 1.8 MiB |
-| Counter, TinyGo `bundle.wasm` | 77,890 | 76.1 KiB |
-| Counter, TinyGo `bundle.wasm.br` | 25,965 | 25.4 KiB |
-| Counter, TinyGo `bundle.wasm.gz` | 30,850 | 30.1 KiB |
-| Components demo, Go `bundle.wasm` | 1,942,473 | 1.9 MiB |
-| Components demo, TinyGo `bundle.wasm` | 83,159 | 81.2 KiB |
-| Components demo, TinyGo `bundle.wasm.br` | 27,269 | 26.6 KiB |
-| Components demo, TinyGo `bundle.wasm.gz` | 32,785 | 32.0 KiB |
-| Todo demo, Go `bundle.wasm` | 2,007,086 | 1.9 MiB |
-| Todo demo, TinyGo `bundle.wasm` | 109,483 | 106.9 KiB |
-| Todo demo, TinyGo `bundle.wasm.br` | 34,885 | 34.1 KiB |
-| Todo demo, TinyGo `bundle.wasm.gz` | 42,003 | 41.0 KiB |
-| Dashboard pressure test, TinyGo `bundle.wasm` | 162,773 | 159.0 KiB |
-| Dashboard pressure test, TinyGo `bundle.wasm.br` | 49,075 | 47.9 KiB |
-| Dashboard pressure test, TinyGo `bundle.wasm.gz` | 60,187 | 58.8 KiB |
-| Virtualized collections, TinyGo `bundle.wasm` | 118,546 | 115.8 KiB |
-| Virtualized collections, TinyGo `bundle.wasm.br` | 37,076 | 36.2 KiB |
-| Virtualized collections, TinyGo `bundle.wasm.gz` | 45,134 | 44.1 KiB |
-| Go `wasm_exec.js` | 16,992 | 16.6 KiB |
-| TinyGo `wasm_exec.js` | 16,715 | 16.3 KiB |
-
-MVP 8.1 removed `reflect.DeepEqual` and production debug probes from the
-runtime. MVP 9 adds lifecycle/effect hooks. MVP 10 keeps the runtime
-size-conscious while improving GOX expression ergonomics and adds compressed
-delivery budgets. Counter remains an integration probe rather than a
-representative application benchmark.
-MVP 12 adds a dashboard-sized example and browser smoke coverage for a more
-realistic 300-row interactive app.
-MVP 13 adds content-hashed release assets for cache-safe delivery. MVP 13.1
-keeps the app source tree clean by moving generated, build, and package
-outputs under `.goframe/`; use `goxc export` when you want a visible `dist/`.
-MVP 17 adds fixed-height virtualized list and table primitives; the dashboard
-now keeps physical issue rows bounded while preserving the 300-row logical
-fixture.
-
-## Legacy CLI
-
-The CLI moved from `cmd/goframe` to `cmd/goxc`. The old command path was
-removed:
-
-```text
-go run ./cmd/goframe ...   removed
-goxc ...                   preferred
-```
-
-`goxc build --release` is accepted temporarily but only prints a deprecation
-warning. It no longer packages or compresses; use `goxc package`.
-
-## When should I use goframe?
-
-Use goframe for experiments with Go-first dashboards, admin panels,
-local-first apps, visual editors, developer tools, internal tools, and future
-desktop-like runtimes.
-
-## When should I not use goframe?
-
-Do not use goframe for tiny static websites, landing pages, blogs, or pages
-where a few kilobytes of JavaScript would be enough. Do not use the current MVP
-where stable APIs, mature accessibility tooling, SSR, or hydration are
-required.
-
-## Current limitations
-
-- Minimal mounted-tree and component reconciliation; no concurrent scheduler.
-- One mounted app and one browser thread. State is component-scoped and
-  positional within each component, so state/effect hook order must remain
-  stable.
-- Lifecycle/effects are minimal; context is scoped and selector-based, but
-  there are no error boundaries, async effects, dependency inference, or
-  priorities.
-- Memoization is explicit and opt-in today:
-  components can implement `MemoEqual` on their props type to skip renders when
-  prop shapes are unchanged and the component is otherwise clean.
-- Virtualized collections require fixed item/row heights and stable keys. They
-  bound mounted DOM work, but do not yet provide dynamic measurement, infinite
-  loading, or advanced keyboard navigation.
-- Duplicate key diagnostics are debug-only and do not run in production builds.
-- GOX has JSX-like render expressions for `condition && <Node />` and
-  `condition ? <A /> : <B />`, but no template-block `if`/`for`, spread props,
-  namespaces, or arbitrary JavaScript-like expression language.
-- No routing, SSR, hydration, CSS-in-Go, or hot reload.
-- TinyGo compatibility remains version- and feature-dependent.
-- The local server is for development, not production deployment.
-
-## Documentation
-
-- [Architecture and toolchain boundaries](docs/architecture.md)
-- [Foundation audit](docs/foundation-audit.md)
-- [Foundation Audit IV](docs/foundation-audit-iv.md)
-- [Performance baseline](docs/performance-baseline.md)
-- [API stability tiers](docs/api-stability.md)
-- [Component identity strategy](docs/component-identity.md)
-- [Component identity next steps](docs/component-identity-next.md)
-- [Multi-package GOX workspace](docs/multi-package-workspace.md)
-- [Symlink and file safety policy](docs/security-symlink-policy.md)
-- [GOX language and component model](docs/gox-language.md)
-- [Runtime model](docs/runtime-model.md)
-- [Lifecycle and effects](docs/effects.md)
-- [Context selectors](docs/context.md)
-- [Virtualized collections](docs/virtualization.md)
-- [VS Code GOX extension](extensions/vscode-gox/README.md)
-- [Future GoFrame Player vision](docs/player-vision.md)
-- [Counter example](examples/counter/README.md)
-- [Components example](examples/components/README.md)
-- [Todo example](examples/todo/README.md)
-- [Dashboard pressure-test example](examples/dashboard/README.md)
-- [Multi-package GOX example](examples/multipackage/README.md)
-- [Child entry package example](examples/cmdapp/README.md)
-- [Virtualized collections example](examples/virtualized/README.md)
-
-## Development
-
-```bash
-GOCACHE=/tmp/goframe-go-cache go fmt ./...
-GOCACHE=/tmp/goframe-go-cache go test ./...
-GOCACHE=/tmp/goframe-go-cache go vet ./...
-
-go install ./cmd/goxc
-goxc doctor
-goxc package ./examples/counter
-goxc serve ./examples/counter
-scripts/size-budget.sh
-scripts/perf-report.sh
-
-# Optional headless Chrome regression gate.
-scripts/browser-smoke.sh
-
-cd extensions/vscode-gox
-npm install
-npm run compile
-```
-
-## CI and regression gates
-
-GitHub Actions run core Go/GOX checks, TinyGo WASM size budgets, browser smoke,
-and VS Code extension compile checks. Local source gates also verify that build
-artifacts are not tracked and that the module path remains canonical.
-Dependabot is configured for weekly dependency update PRs.
-
-See [CI and regression gates](docs/ci.md) and [release hygiene](docs/release.md).
 
 ## License
 

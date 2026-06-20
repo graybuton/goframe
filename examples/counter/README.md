@@ -60,7 +60,7 @@ The default package is not compressed. Compression normally belongs to the
 deployment server or CDN. Explicit precompression is available for experiments:
 
 ```bash
-goxc package ./examples/counter --compress=br
+goxc package ./examples/counter --compress=gzip,br
 ```
 
 Release-style package output can add content hashes and preload hints:
@@ -75,5 +75,5 @@ Export to a visible deploy directory only when needed:
 goxc export ./examples/counter --out ./dist
 ```
 
-`goxc serve` always serves the raw WASM and does not perform compressed-content
-negotiation.
+`goxc serve` serves the local package and does not perform compressed-content
+negotiation for `.gz` or `.br` sidecars.
