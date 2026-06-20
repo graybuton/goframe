@@ -1,0 +1,10 @@
+{
+  "name": "runtime-errors",
+  "entry": ".",
+  "output": "dist",
+  "compiler": "tinygo",
+  "wasm": "bundle.wasm",
+  "assets": [
+    "index.html"
+  ]
+}

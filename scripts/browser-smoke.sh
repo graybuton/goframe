@@ -8,6 +8,7 @@ CHROME_BIN="${CHROME:-google-chrome}"
 
 TODO_SMOKE_URL_BASE="${GOFRAME_TODO_SMOKE_URL:-http://127.0.0.1}"
 DUPLICATE_SMOKE_URL_BASE="${GOFRAME_DUPLICATE_KEY_SMOKE_URL:-http://127.0.0.1}"
+RUNTIME_ERRORS_SMOKE_URL_BASE="${GOFRAME_RUNTIME_ERRORS_SMOKE_URL:-http://127.0.0.1}"
 DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
 VIRTUALIZED_SMOKE_URL_BASE="${GOFRAME_VIRTUALIZED_SMOKE_URL:-http://127.0.0.1}"
@@ -87,6 +88,11 @@ build_smoke_url() {
 build_duplicate_smoke_url() {
 	local port="$1"
 	echo "${DUPLICATE_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_runtime_errors_smoke_url() {
+	local port="$1"
+	echo "${RUNTIME_ERRORS_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 build_dashboard_smoke_url() {
@@ -211,6 +217,16 @@ export GOFRAME_DUPLICATE_KEY_CHROME_DEBUG_PORT="${GOFRAME_DUPLICATE_KEY_CHROME_D
 DUPLICATE_URL="$(build_duplicate_smoke_url "$DUPLICATE_PORT")"
 run_with_server ./scripts/fixtures/duplicate-keys "$DUPLICATE_PORT" "$DUPLICATE_URL" \
 	node --experimental-websocket scripts/duplicate-key-smoke.mjs
+
+echo
+echo "== Runtime errors debug browser smoke =="
+"$GOXC" package ./scripts/fixtures/runtime-errors --compiler=go
+
+RUNTIME_ERRORS_PORT="$(resolve_port "${GOFRAME_RUNTIME_ERRORS_SMOKE_PORT:-}")"
+export GOFRAME_RUNTIME_ERRORS_CHROME_DEBUG_PORT="${GOFRAME_RUNTIME_ERRORS_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+RUNTIME_ERRORS_URL="$(build_runtime_errors_smoke_url "$RUNTIME_ERRORS_PORT")"
+run_with_server ./scripts/fixtures/runtime-errors "$RUNTIME_ERRORS_PORT" "$RUNTIME_ERRORS_URL" \
+	node --experimental-websocket scripts/runtime-errors-browser-smoke.mjs
 
 echo
 echo "== Dashboard debug browser smoke =="

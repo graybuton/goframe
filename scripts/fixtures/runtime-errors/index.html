@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>goframe runtime error fixture</title>
+    <!-- goframe:preload -->
+    <!-- /goframe:preload -->
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+            .then((result) => go.run(result.instance));
+    </script>
+    <!-- /goframe:bootstrap -->
+</body>
+</html>
