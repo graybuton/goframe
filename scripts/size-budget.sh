@@ -136,5 +136,6 @@ check_app "context" "$(bundle_path context)" 115200 36864 46080 40960 || status=
 check_app "virtualized" "$(bundle_path virtualized)" 122880 40960 49152 44032 || status=1
 check_app "multipackage" "$(bundle_path multipackage)" 110592 43008 56320 49152 || status=1
 check_app "cmdapp" "$(bundle_path cmdapp)" 110592 43008 56320 49152 || status=1
+check_app "router" "$(bundle_path router)" 116736 45056 58368 51200 || status=1
 
 exit "$status"
