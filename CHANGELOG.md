@@ -54,6 +54,9 @@
   `gf.SetErrorHandler`, phase-specific error reports, event/effect/cleanup
   containment, memo comparator fallback, render fallback, and browser smoke
   coverage for recoverable runtime errors.
+- Hash-based client router primitives, including route params, not-found
+  handling, `RouterView`, `RouterLink`, programmatic navigation, a Go-first
+  router example, and browser smoke coverage.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

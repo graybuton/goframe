@@ -387,9 +387,10 @@ GOX does not currently support:
 - component namespaces or dotted tags;
 - style objects;
 - lifecycle/effect-specific GOX syntax; use Go calls such as `gf.UseEffect`;
+- routing-specific GOX syntax; use Go route declarations such as
+  `gf.NewHashRouter`;
 - advanced reconciliation controls;
 - async components;
-- routing;
 - SSR or hydration;
 - compile-time validation that a component function or props struct exists.
 

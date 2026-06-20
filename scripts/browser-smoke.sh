@@ -14,6 +14,7 @@ CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
 VIRTUALIZED_SMOKE_URL_BASE="${GOFRAME_VIRTUALIZED_SMOKE_URL:-http://127.0.0.1}"
 MULTIPACKAGE_SMOKE_URL_BASE="${GOFRAME_MULTIPACKAGE_SMOKE_URL:-http://127.0.0.1}"
 CMDAPP_SMOKE_URL_BASE="${GOFRAME_CMDAPP_SMOKE_URL:-http://127.0.0.1}"
+ROUTER_SMOKE_URL_BASE="${GOFRAME_ROUTER_SMOKE_URL:-http://127.0.0.1}"
 
 cd "$ROOT_DIR"
 export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
@@ -118,6 +119,11 @@ build_multipackage_smoke_url() {
 build_cmdapp_smoke_url() {
 	local port="$1"
 	echo "${CMDAPP_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_router_smoke_url() {
+	local port="$1"
+	echo "${ROUTER_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 stop_server() {
@@ -304,6 +310,21 @@ run_with_server ./examples/cmdapp "$CMDAPP_PORT" "$CMDAPP_URL" \
 	node --experimental-websocket scripts/cmdapp-browser-smoke.mjs
 
 echo
+echo "== Router debug browser smoke =="
+"$GOXC" package ./examples/router --compiler=tinygo
+(
+	cd ./examples/router/.goframe/work/dev/examples/router/cmd/app
+	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+		-o "$ROOT_DIR/examples/router/.goframe/package/standalone/assets/bundle.wasm" .
+)
+
+ROUTER_PORT="$(resolve_port "${GOFRAME_ROUTER_SMOKE_PORT:-}")"
+export GOFRAME_ROUTER_CHROME_DEBUG_PORT="${GOFRAME_ROUTER_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+ROUTER_URL="$(build_router_smoke_url "$ROUTER_PORT")"
+run_with_server ./examples/router "$ROUTER_PORT" "$ROUTER_URL" \
+	node --experimental-websocket scripts/router-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
@@ -311,5 +332,6 @@ echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/virtualized --compiler=tinygo
 "$GOXC" package ./examples/multipackage --compiler=tinygo
 "$GOXC" package ./examples/cmdapp --compiler=tinygo
+"$GOXC" package ./examples/router --compiler=tinygo
 
 echo "browser smoke: ok"

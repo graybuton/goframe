@@ -1,0 +1,23 @@
+package pages
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Home(props HomeProps) gf.Node {
+	return (
+		<section class="router-card" data-testid="router-home">
+			<h2>Home</h2>
+			<p>
+				This page is rendered by the root <code>/</code> route.
+				The shell around it stays mounted while route content changes.
+			</p>
+			<p>
+				{gf.RouterLink(gf.RouterLinkProps{
+					To: "/issues",
+					Class: "router-link",
+					TestID: "router-home-issues-link",
+					Children: []gf.Node{gf.Text("Browse issues")},
+				})}
+			</p>
+		</section>
+	)
+}

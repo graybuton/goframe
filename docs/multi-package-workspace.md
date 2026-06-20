@@ -207,7 +207,8 @@ goxc serve ./examples/cmdapp --port=8080
 
 - No namespace tags.
 - No full multi-module monorepo story.
-- No router/layout convention.
+- No file-based router or framework-level layout convention. The hash router
+  uses ordinary Go route declarations and stable shell composition.
 - External module dependencies in app packages are not deeply exercised yet.
   The current path is focused on packages below the app root plus the GoFrame
   runtime dependency.

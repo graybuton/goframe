@@ -69,6 +69,13 @@ Runtime:
 - `gf.UseContextSelector`
 - `gf.VirtualList`
 - `gf.VirtualTable`
+- `gf.RoutePath`
+- `gf.NotFoundRoute`
+- `gf.NewHashRouter`
+- `gf.RouterView`
+- `gf.RouterLink`
+- `gf.Navigate`
+- `gf.HashHref`
 - basic event facades such as `gf.Event`, `gf.InputEvent`, and
   `gf.ScrollEvent`
 
@@ -99,6 +106,8 @@ exact shapes can still change before public preview.
 - Runtime error reporting API and exact phase containment behavior:
   `gf.SetErrorHandler`, `gf.ErrorInfo`, `gf.ErrorHandler`, and
   `gf.ErrorPhase`.
+- Hash router details such as route remount policy, declaration-order matching
+  edge cases, link props, and browser listener internals.
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands and snippets.
@@ -142,7 +151,9 @@ For now, deprecations should:
 
 Not stable:
 
-- router design;
+- path/history-mode routing and server fallback behavior;
+- file-based routing, route loaders, route middleware, and route-level error
+  boundaries;
 - SSR/hydration;
 - Player/Engine or `.gfapp` format;
 - multi-module app support;

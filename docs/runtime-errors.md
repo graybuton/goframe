@@ -5,7 +5,7 @@
 GoFrame is still experimental, but applications are now large enough that user
 panics need clear runtime semantics. MVP 23 defines how the runtime reports and
 contains common user-code failures without adding a full Error Boundary,
-Suspense, router, or async resource model.
+Suspense, route-level error boundary, or async resource model.
 
 ## Current Problem
 
