@@ -62,6 +62,8 @@ jobs:
           goxc package ./examples/cmdapp --compiler=tinygo
           goxc generate ./examples/router
           goxc package ./examples/router --compiler=tinygo
+          goxc generate ./examples/router-dashboard
+          goxc package ./examples/router-dashboard --compiler=tinygo
           goxc package ./examples/counter --compiler=tinygo --asset-hash --preload --compress=gzip,br
           goxc package ./examples/components --compiler=tinygo --asset-hash --preload --compress=gzip,br
           goxc package ./examples/todo --compiler=tinygo --asset-hash --preload --compress=gzip,br
@@ -71,6 +73,7 @@ jobs:
           goxc package ./examples/multipackage --compiler=tinygo --asset-hash --preload --compress=gzip,br
           goxc package ./examples/cmdapp --compiler=tinygo --asset-hash --preload --compress=gzip,br
           goxc package ./examples/router --compiler=tinygo --asset-hash --preload --compress=gzip,br
+          goxc package ./examples/router-dashboard --compiler=tinygo --asset-hash --preload --compress=gzip,br
 
       - name: Size budgets
         run: scripts/size-budget.sh | tee size-report.txt
