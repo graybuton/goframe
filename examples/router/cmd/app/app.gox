@@ -1,0 +1,56 @@
+package main
+
+import (
+	layout "github.com/graybuton/goframe/examples/router/internal/layout"
+	pages "github.com/graybuton/goframe/examples/router/internal/pages"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+var router = gf.NewHashRouter([]gf.Route{
+	gf.RoutePath("/", homeRoute),
+	gf.RoutePath("/issues", issuesRoute),
+	gf.RoutePath("/issues/:id", issueDetailsRoute),
+	gf.NotFoundRoute(notFoundRoute),
+})
+
+func App() gf.Node {
+	return (
+		<main class="router-app">
+			{layout.Shell(shellProps())}
+		</main>
+	)
+}
+
+func homeRoute(gf.RouteContext) gf.Node {
+	return pages.Home(pages.HomeProps{})
+}
+
+func issuesRoute(gf.RouteContext) gf.Node {
+	return pages.Issues(pages.IssuesProps{
+		Items: pages.DemoIssues(),
+	})
+}
+
+func issueDetailsRoute(ctx gf.RouteContext) gf.Node {
+	return pages.IssueDetails(pages.IssueDetailsProps{
+		ID:       ctx.Param("id"),
+		RawQuery: ctx.RawQuery,
+	})
+}
+
+func notFoundRoute(ctx gf.RouteContext) gf.Node {
+	return pages.NotFound(pages.NotFoundProps{
+		Path: ctx.Path,
+	})
+}
+
+func shellProps() layout.ShellProps {
+	return layout.ShellProps{
+		OnOpenFirstIssue: func() {
+			gf.Navigate("/issues/2")
+		},
+		Children: []gf.Node{
+			gf.RouterView(router),
+		},
+	}
+}

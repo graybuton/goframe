@@ -1,0 +1,31 @@
+package pages
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Issues(props IssuesProps) gf.Node {
+	return (
+		<section class="router-card" data-testid="router-issues">
+			<h2>Issues</h2>
+			<p class="muted">Each issue link uses a route param.</p>
+			<ul class="issue-list">
+				{gf.Map(props.Items, func(issue Issue) gf.Node {
+					return <IssueLink Key={issue.ID} Item={issue} />
+				})}
+			</ul>
+		</section>
+	)
+}
+
+func IssueLink(props IssueLinkProps) gf.Node {
+	return (
+		<li data-testid="router-issue-item">
+			<span>{props.Item.Title}</span>
+			{gf.RouterLink(gf.RouterLinkProps{
+				To: props.Item.Path(),
+				Class: "router-link",
+				TestID: props.Item.TestID(),
+				Children: linkChildren("Open " + props.Item.ID),
+			})}
+		</li>
+	)
+}

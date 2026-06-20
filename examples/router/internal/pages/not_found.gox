@@ -1,0 +1,21 @@
+package pages
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func NotFound(props NotFoundProps) gf.Node {
+	return (
+		<section class="router-card" data-testid="router-not-found">
+			<h2>Not found</h2>
+			<p>
+				No route matched
+				<code data-testid="router-not-found-path">{props.Path}</code>.
+			</p>
+			{gf.RouterLink(gf.RouterLinkProps{
+				To: "/",
+				Class: "router-link",
+				TestID: "router-not-found-home",
+				Children: []gf.Node{gf.Text("Back home")},
+			})}
+		</section>
+	)
+}

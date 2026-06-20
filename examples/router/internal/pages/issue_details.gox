@@ -1,0 +1,18 @@
+package pages
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func IssueDetails(props IssueDetailsProps) gf.Node {
+	return (
+		<section class="router-card" data-testid="router-issue-details">
+			<h2>Issue details</h2>
+			<p>
+				Selected issue:
+				<strong data-testid="router-issue-id">{props.ID}</strong>
+			</p>
+			<p class="muted" data-testid="router-raw-query">
+				Raw query: {props.RawQuery}
+			</p>
+		</section>
+	)
+}
