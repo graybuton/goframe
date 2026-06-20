@@ -48,9 +48,9 @@ Build an instrumented regression bundle, serve it on port `18080`, and run the
 dependency-free browser identity probe:
 
 ```bash
-(cd ./examples/todo/.goframe/work/dev && \
+(cd ./examples/todo/.goframe/work/dev/examples/todo && \
   tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
-    -o ../../package/standalone/assets/bundle.wasm .)
+    -o ../../../../package/standalone/assets/bundle.wasm .)
 goxc serve ./examples/todo --port=18080
 node --experimental-websocket scripts/todo-browser-smoke.mjs
 ```

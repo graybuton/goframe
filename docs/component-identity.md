@@ -1,7 +1,7 @@
 # Component Identity
 
 This document records the component identity strategy and the options
-considered during Foundation Hardening II through MVP 20.
+considered through MVP 22.
 
 ## Current Model
 
@@ -71,7 +71,8 @@ Cons:
 - function implementation is not part of identity;
 - name changes are identity changes.
 
-This remains the current strategy.
+This remains the legacy compatibility strategy. Generated GOX now uses the
+typed token path by default.
 
 ## Alternative B: Generated Stable Type Token
 
@@ -145,7 +146,8 @@ The current migration path:
 2. Use `gf.ComponentT` in generated GOX output.
 3. Keep string-based `gf.Component` as a compatibility API.
 4. Measure TinyGo sizes after token codegen changes.
-5. Design import-path or compiler package tokens before multi-package apps.
+5. Continue hardening import-path identity before claiming reusable component
+   package or multi-module workspace support.
 
 ## Size Considerations
 

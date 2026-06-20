@@ -172,12 +172,12 @@ TinyGo is the preferred lightweight experiment. It supports a smaller runtime
 surface but dramatically reduces the counter:
 
 ```text
-counter bundle.wasm      81,233 bytes
-components bundle.wasm   86,608 bytes
-todo bundle.wasm        113,935 bytes
-dashboard bundle.wasm   162,773 bytes
-context bundle.wasm     111,440 bytes
-virtualized bundle.wasm 118,546 bytes
+counter bundle.wasm       82,097 bytes
+components bundle.wasm    87,745 bytes
+todo bundle.wasm         115,337 bytes
+dashboard bundle.wasm    166,248 bytes
+context bundle.wasm      113,108 bytes
+virtualized bundle.wasm  121,195 bytes
 multipackage bundle.wasm 89,727 bytes
 cmdapp bundle.wasm       89,786 bytes
 ```
@@ -282,8 +282,12 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
 
 ## Roadmap
 
-1. Add reproducible dashboard-sized size and startup benchmarks.
-2. Define lifecycle and effect semantics without hiding Go ownership.
-3. Add debug duplicate-key source locations and CI browser smoke wiring.
-4. Evolve `goframe.json` and generated package manifests.
-5. Explore a portable `.gfapp` contract before implementing a custom player.
+1. Keep public docs, examples, and regression gates aligned with the actual
+   toolchain surface.
+2. Harden component identity and workspace behavior before claiming reusable
+   package ecosystem support.
+3. Add deeper symlink/path-safety tests before public preview.
+4. Continue measuring size, DOM pressure, and browser smoke invariants before
+   taking on larger features.
+5. Explore router, Player/Engine, SSR/hydration, and `.gfapp` only as separate
+   design efforts, not incidental cleanup.
