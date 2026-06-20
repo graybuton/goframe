@@ -50,6 +50,10 @@
 - Foundation Audit V public surface polish, including a refreshed README,
   updated example/docs wording, local docs/example consistency checks, and
   `docs/public-surface-audit-v.md`.
+- Runtime error semantics for recoverable user-code panics, including
+  `gf.SetErrorHandler`, phase-specific error reports, event/effect/cleanup
+  containment, memo comparator fallback, render fallback, and browser smoke
+  coverage for recoverable runtime errors.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

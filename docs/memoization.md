@@ -65,6 +65,10 @@ other compared prop tracks that data.
   when offscreen collection items should not be mounted at all.
 - No router/Player integration in this stage.
 
+If `MemoEqual` panics, GoFrame reports `gf.ErrorPhaseMemo` through the runtime
+error handler and falls back to rendering instead of skipping. A broken
+comparator should not be able to freeze stale UI behind a bailout.
+
 ## Interaction with keys and identity
 
 Memoized skip applies within the same component identity boundary:

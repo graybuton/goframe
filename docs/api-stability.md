@@ -96,6 +96,9 @@ exact shapes can still change before public preview.
 - Virtualization details such as fixed-height range buffering and table spacer
   structure.
 - Component identity id format for generated GOX component tokens.
+- Runtime error reporting API and exact phase containment behavior:
+  `gf.SetErrorHandler`, `gf.ErrorInfo`, `gf.ErrorHandler`, and
+  `gf.ErrorPhase`.
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands and snippets.

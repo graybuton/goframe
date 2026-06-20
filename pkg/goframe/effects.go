@@ -303,16 +303,58 @@ func flushPendingEffects() {
 			}
 			slot.pending = false
 			if slot.cleanup != nil {
-				slot.cleanup()
+				runEffectCleanup(slot)
 				slot.cleanup = nil
 			}
-			slot.running = true
-			cleanup := slot.effect()
-			slot.running = false
-			slot.cleanup = cleanup
-			slot.hasRun = true
+			if cleanup, ok := runEffectSetup(slot); ok {
+				slot.cleanup = cleanup
+				slot.hasRun = true
+			}
 		}
 	}
+}
+
+func runEffectSetup(slot *effectSlot) (cleanup Cleanup, ok bool) {
+	slot.running = true
+	defer func() {
+		slot.running = false
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseEffect,
+				Component: runtimeComponentName(slot.owner),
+				Operation: "UseEffect",
+			}, recovered)
+			cleanup = nil
+			ok = false
+		}
+	}()
+	return slot.effect(), true
+}
+
+func runEffectCleanup(slot *effectSlot) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseEffectCleanup,
+				Component: runtimeComponentName(slot.owner),
+				Operation: "UseEffect cleanup",
+			}, recovered)
+		}
+	}()
+	slot.cleanup()
+}
+
+func runUnmountCleanup(instance *componentInstance, cleanup Cleanup) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseUnmountCleanup,
+				Component: runtimeComponentName(instance),
+				Operation: "UseUnmount cleanup",
+			}, recovered)
+		}
+	}()
+	cleanup()
 }
 
 func runUnmountCleanups(instance *componentInstance) {
@@ -322,15 +364,15 @@ func runUnmountCleanups(instance *componentInstance) {
 		}
 		slot.pending = false
 		slot.queued = false
-		slot.owner = nil
 		if slot.cleanup != nil {
-			slot.cleanup()
+			runEffectCleanup(slot)
 			slot.cleanup = nil
 		}
+		slot.owner = nil
 	}
 	for _, slot := range instance.unmountSlots {
 		if slot != nil && slot.cleanup != nil {
-			slot.cleanup()
+			runUnmountCleanup(instance, slot.cleanup)
 			slot.cleanup = nil
 		}
 	}

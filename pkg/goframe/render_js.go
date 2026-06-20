@@ -5,8 +5,10 @@ package goframe
 import "syscall/js"
 
 type mountedEvent struct {
-	handler  js.Func
-	callback any
+	handler   js.Func
+	callback  any
+	component string
+	eventName string
 }
 
 // mountedNode retains the virtual node, its DOM range, children, and event
@@ -38,7 +40,7 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 		mounted.first = element
 		mounted.last = element
 		mounted.pending = element
-		patchProps(element, mounted, nil, node.Props)
+		patchProps(element, mounted, nil, node.Props, owner)
 		mounted.children = mountChildren(document, element, node.Children, js.Null(), owner)
 	case TextNode:
 		text := document.Call("createTextNode", node.Value)
@@ -91,7 +93,7 @@ func patchMounted(document, parent js.Value, mounted *mountedNode, newNode Node,
 	switch oldNode := mounted.node.(type) {
 	case VNode:
 		newNode := newNode.(VNode)
-		patchProps(mounted.first, mounted, oldNode.Props, newNode.Props)
+		patchProps(mounted.first, mounted, oldNode.Props, newNode.Props, owner)
 		mounted.children = patchChildren(document, mounted.first, mounted.children, newNode.Children, js.Null(), owner)
 	case TextNode:
 		newNode := newNode.(TextNode)
@@ -242,7 +244,7 @@ func releaseMounted(mounted *mountedNode) {
 	}
 }
 
-func patchProps(element js.Value, mounted *mountedNode, oldProps, newProps Props) {
+func patchProps(element js.Value, mounted *mountedNode, oldProps, newProps Props, owner *componentInstance) {
 	oldDOM, _ := splitProps(oldProps)
 	newDOM, newEvents := splitProps(newProps)
 
@@ -257,7 +259,7 @@ func patchProps(element js.Value, mounted *mountedNode, oldProps, newProps Props
 		}
 		setDOMProp(element, name, newProp)
 	}
-	patchEvents(element, mounted, newEvents)
+	patchEvents(element, mounted, newEvents, owner)
 }
 
 func removeDOMProp(element js.Value, name string, prop domProp) {
@@ -288,7 +290,7 @@ func setDOMProp(element js.Value, name string, prop domProp) {
 	element.Call("setAttribute", name, prop.value)
 }
 
-func patchEvents(element js.Value, mounted *mountedNode, callbacks map[string]any) {
+func patchEvents(element js.Value, mounted *mountedNode, callbacks map[string]any, owner *componentInstance) {
 	for eventName, event := range mounted.events {
 		if _, exists := callbacks[eventName]; exists {
 			continue
@@ -308,9 +310,15 @@ func patchEvents(element js.Value, mounted *mountedNode, callbacks map[string]an
 	for eventName, callback := range callbacks {
 		if event, exists := mounted.events[eventName]; exists {
 			event.callback = callback
+			event.component = runtimeComponentName(owner)
+			event.eventName = eventName
 			continue
 		}
-		event := &mountedEvent{callback: callback}
+		event := &mountedEvent{
+			callback:  callback,
+			component: runtimeComponentName(owner),
+			eventName: eventName,
+		}
 		event.handler = eventHandler(event)
 		element.Call("addEventListener", eventName, event.handler)
 		mounted.events[eventName] = event
@@ -319,6 +327,15 @@ func patchEvents(element js.Value, mounted *mountedNode, callbacks map[string]an
 
 func eventHandler(listener *mountedEvent) js.Func {
 	return js.FuncOf(func(this js.Value, args []js.Value) any {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				reportRecoveredRuntimeError(ErrorInfo{
+					Phase:     ErrorPhaseEvent,
+					Component: listener.component,
+					Operation: listener.eventName,
+				}, recovered)
+			}
+		}()
 		rawEvent := js.Undefined()
 		if len(args) > 0 {
 			rawEvent = args[0]

@@ -59,9 +59,15 @@ scripts/browser-smoke.sh
 The smoke script chooses dynamic ports, verifies the expected app origin before
 storage cleanup, checks WASM MIME type, and separates harness failures from app
 failures. It currently covers Todo reconciliation, duplicate-key debug
-diagnostics, dashboard-sized filtering/sorting/selection behavior, context
-selector rerender isolation, virtualized collection scroll/selection/toggle
-behavior, a multi-package GOX workspace smoke, and a child-entry package smoke.
+diagnostics, runtime error containment for event/effect/cleanup panics,
+dashboard-sized filtering/sorting/selection behavior, context selector rerender
+isolation, virtualized collection scroll/selection/toggle behavior, a
+multi-package GOX workspace smoke, and a child-entry package smoke.
+
+The runtime error containment fixture is compiled with the Go WASM compiler so
+`recover` semantics are available. The size-oriented TinyGo package path uses
+trap-style panic behavior, which is documented as a runtime error containment
+limitation.
 
 GOX diagnostic golden tests intentionally assert filenames, line/column
 prefixes, specific unsupported-syntax messages, and source snippets. They are

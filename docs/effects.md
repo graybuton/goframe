@@ -110,6 +110,13 @@ Unmount cleanups run while the DOM range still exists, but applications should
 not depend on this detail. Treat cleanup as the place to release timers,
 external event listeners, subscriptions, and retained browser resources.
 
+If an effect body panics, the runtime reports `gf.ErrorPhaseEffect` through the
+installed runtime error handler and does not register a cleanup for that failed
+effect run. If an effect cleanup panics, the runtime reports
+`gf.ErrorPhaseEffectCleanup`, clears that cleanup slot, and continues later
+cleanup work where possible. `UseUnmount` cleanup panics report
+`gf.ErrorPhaseUnmountCleanup` and do not stop other cleanup slots from running.
+
 ## Hook Slots
 
 Effects use component-scoped positional hook slots, just like `UseState`.

@@ -319,6 +319,42 @@ after the guard threshold.
 
 See [lifecycle and effects](effects.md) for API details.
 
+## Runtime error semantics
+
+MVP 23 adds a small runtime error reporting model for recoverable user-code
+panics:
+
+```go
+restore := gf.SetErrorHandler(func(info gf.ErrorInfo) {
+    // app logging, tests, or browser diagnostics
+})
+defer restore()
+```
+
+The handler receives a phase, component debug name, operation label, and the
+recovered panic value. Event handler panics are reported and contained so the
+listener remains installed and the app stays interactive. Effect setup,
+effect cleanup, and `UseUnmount` cleanup panics are also reported and
+contained, with later cleanup work continuing where possible.
+
+Memo comparator panics report `ErrorPhaseMemo` and fall back to "do not skip
+render." Component render panics report `ErrorPhaseRender` and render
+`gf.Empty()` for that pass. Future state or parent updates may retry the
+component. Context selector panics during provider notification keep the
+previous selected value; selector panics during initial render report and flow
+through render containment.
+
+Runtime invariant panics whose message starts with `goframe:` remain hard
+programmer errors. Examples include invalid hook order, calling hooks outside
+render, unsupported effect dependency types, invalid component types, and
+invalid virtualization dimensions.
+
+This is not a full Error Boundary API. There is no component-level fallback UI,
+route-level error page, async resource model, or production crash reporting
+integration yet. The current TinyGo package path uses trap-style panic lowering,
+so recover-based containment is only available in recover-capable builds such
+as Go/WASM and Go tests. See [runtime error semantics](runtime-errors.md).
+
 ## Debug probes
 
 Render, patch, and performance probes compile only with the `goframe_debug`

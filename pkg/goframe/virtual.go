@@ -97,7 +97,7 @@ func renderVirtualList[T any](props VirtualListProps[T]) Node {
 		children = append(children, Key(key, El("div", Props{
 			"class": "gf-virtual-item",
 			"style": style,
-		}, props.RenderItem(item))))
+		}, renderVirtualListItem(props.RenderItem, item))))
 	}
 
 	outerProps := Props{
@@ -133,7 +133,7 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 	bodyChildren := make([]Node, 0, rangeInfo.End-rangeInfo.Start+2)
 	if len(props.Items) == 0 {
 		if props.Empty != nil {
-			bodyChildren = append(bodyChildren, Key(virtualTableEmptyKey, virtualTableContentRow(props.Empty(), props.ColumnCount)))
+			bodyChildren = append(bodyChildren, Key(virtualTableEmptyKey, virtualTableContentRow(renderVirtualTableEmpty(props.Empty), props.ColumnCount)))
 		}
 	} else {
 		bodyChildren = append(bodyChildren, Key(
@@ -148,7 +148,7 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 				Key:      key,
 				RowStyle: "height:" + ToString(props.RowHeight) + "px;",
 			}
-			bodyChildren = append(bodyChildren, Key(virtualTableRowKeyPrefix+key, props.RenderRow(row)))
+			bodyChildren = append(bodyChildren, Key(virtualTableRowKeyPrefix+key, renderVirtualTableRow(props.RenderRow, row, props.ColumnCount)))
 		}
 		bodyChildren = append(bodyChildren, Key(
 			virtualTableBottomSpacerKey,
@@ -158,7 +158,7 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 
 	tableChildren := make([]Node, 0, 2)
 	if props.Header != nil {
-		tableChildren = append(tableChildren, props.Header())
+		tableChildren = append(tableChildren, renderVirtualTableHeader(props.Header))
 	}
 	tableChildren = append(tableChildren, El("tbody", Props{}, bodyChildren...))
 
@@ -181,6 +181,62 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 			"class": joinVirtualClass("gf-virtual-table", props.Class),
 		}, tableChildren...),
 	)
+}
+
+func renderVirtualListItem[T any](render func(VirtualItem[T]) Node, item VirtualItem[T]) (node Node) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseRender,
+				Component: "VirtualList",
+				Operation: "VirtualList.RenderItem",
+			}, recovered)
+			node = Empty()
+		}
+	}()
+	return render(item)
+}
+
+func renderVirtualTableHeader(render func() Node) (node Node) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseRender,
+				Component: "VirtualTable",
+				Operation: "VirtualTable.Header",
+			}, recovered)
+			node = Empty()
+		}
+	}()
+	return render()
+}
+
+func renderVirtualTableRow[T any](render func(VirtualRow[T]) Node, row VirtualRow[T], columnCount int) (node Node) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseRender,
+				Component: "VirtualTable",
+				Operation: "VirtualTable.RenderRow",
+			}, recovered)
+			node = virtualTableContentRow(Empty(), columnCount)
+		}
+	}()
+	return render(row)
+}
+
+func renderVirtualTableEmpty(render func() Node) (node Node) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseRender,
+				Component: "VirtualTable",
+				Operation: "VirtualTable.Empty",
+			}, recovered)
+			node = Empty()
+		}
+	}()
+	return render()
 }
 
 func validateVirtualDimensions(name string, height int, itemHeight int, itemHeightName string) {
