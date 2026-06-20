@@ -1,0 +1,34 @@
+package layout
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Shell(props ShellProps) gf.Node {
+	return (
+		<section class="rd-shell" data-testid="rd-shell">
+			<header class="rd-header">
+				<div>
+					<p class="rd-eyebrow">GoFrame reference app</p>
+					<h1>Router Dashboard</h1>
+					<p class="rd-muted">Hash routes, query filters, controlled forms, and Go-first layout.</p>
+				</div>
+				<nav class="rd-nav" aria-label="Primary navigation">
+					{gf.RouterLink(gf.RouterLinkProps{
+						To: "/",
+						Class: "rd-link",
+						TestID: "rd-nav-home",
+						Children: []gf.Node{gf.Text("Home")},
+					})}
+					{gf.RouterLink(gf.RouterLinkProps{
+						To: "/issues",
+						Class: "rd-link",
+						TestID: "rd-nav-issues",
+						Children: []gf.Node{gf.Text("Issues")},
+					})}
+				</nav>
+			</header>
+			<div class="rd-outlet" data-testid="rd-outlet">
+				{props.Children}
+			</div>
+		</section>
+	)
+}

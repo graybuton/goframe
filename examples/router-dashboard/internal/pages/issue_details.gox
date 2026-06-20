@@ -1,0 +1,44 @@
+package pages
+
+import (
+	data "github.com/graybuton/goframe/examples/router-dashboard/internal/data"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func IssueDetails(props IssueDetailsProps) gf.Node {
+	if !props.Found {
+		return <MissingIssue ID={props.ID} />
+	}
+	return (
+		<section class="rd-card" data-testid="rd-issue-detail">
+			<p class="rd-eyebrow">{props.Issue.ID}</p>
+			<h2>{props.Issue.Title}</h2>
+			<div class="rd-meta">
+				<span>{data.StatusLabel(props.Issue.Status)}</span>
+				<span>{props.Issue.Priority}</span>
+				<span>{props.Issue.Owner}</span>
+			</div>
+			<p>{props.Issue.Description}</p>
+			{gf.RouterLink(gf.RouterLinkProps{
+				To: data.IssueEditPath(props.Issue.ID),
+				Class: "rd-link",
+				TestID: "rd-edit-link",
+				Children: []gf.Node{gf.Text("Edit issue")},
+			})}
+		</section>
+	)
+}
+
+func MissingIssue(props MissingIssueProps) gf.Node {
+	return (
+		<section class="rd-card" data-testid="rd-issue-missing">
+			<h2>Issue not found</h2>
+			<p>No local issue matched {props.ID}.</p>
+			{gf.RouterLink(gf.RouterLinkProps{
+				To: "/issues",
+				Class: "rd-link",
+				Children: []gf.Node{gf.Text("Back to issues")},
+			})}
+		</section>
+	)
+}

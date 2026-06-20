@@ -1,0 +1,74 @@
+package main
+
+import (
+	data "github.com/graybuton/goframe/examples/router-dashboard/internal/data"
+	layout "github.com/graybuton/goframe/examples/router-dashboard/internal/layout"
+	pages "github.com/graybuton/goframe/examples/router-dashboard/internal/pages"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+var router = gf.NewHashRouter([]gf.Route{
+	gf.RoutePath("/", homeRoute),
+	gf.RoutePath("/issues", issuesRoute),
+	gf.RoutePath("/issues/:id/edit", issueEditRoute),
+	gf.RoutePath("/issues/:id", issueDetailsRoute),
+	gf.NotFoundRoute(notFoundRoute),
+})
+
+func App() gf.Node {
+	return (
+		<main class="rd-app">
+			{layout.Shell(layout.ShellProps{
+				Children: []gf.Node{
+					gf.RouterView(router),
+				},
+			})}
+		</main>
+	)
+}
+
+func homeRoute(gf.RouteContext) gf.Node {
+	return pages.Home(pages.HomeProps{
+		Title: appTitle,
+	})
+}
+
+func issuesRoute(ctx gf.RouteContext) gf.Node {
+	query := ctx.Query()
+	allIssues := data.DemoIssues()
+	filter := data.IssueFilter{
+		Query:  query.Get("q"),
+		Status: query.Get("status"),
+	}
+	return pages.IssueList(pages.IssueListProps{
+		Items:       data.FilterIssues(allIssues, filter),
+		TotalCount:  len(allIssues),
+		Query:       filter.Query,
+		Status:      filter.Status,
+		CurrentPath: ctx.Path,
+	})
+}
+
+func issueDetailsRoute(ctx gf.RouteContext) gf.Node {
+	issue, ok := data.FindIssue(ctx.Param("id"))
+	return pages.IssueDetails(pages.IssueDetailsProps{
+		Issue: issue,
+		Found: ok,
+		ID:    ctx.Param("id"),
+	})
+}
+
+func issueEditRoute(ctx gf.RouteContext) gf.Node {
+	issue, ok := data.FindIssue(ctx.Param("id"))
+	return pages.IssueEdit(pages.IssueEditProps{
+		Issue: issue,
+		Found: ok,
+		ID:    ctx.Param("id"),
+	})
+}
+
+func notFoundRoute(ctx gf.RouteContext) gf.Node {
+	return pages.NotFound(pages.NotFoundProps{
+		Path: ctx.Path,
+	})
+}
