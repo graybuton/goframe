@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This document records the measurable baseline after MVP 24. It is a decision
-aid for future runtime and tooling work, not a claim that GoFrame is
+This document records the measurable baseline through MVP 25. It is a
+decision aid for future runtime and tooling work, not a claim that GoFrame is
 production-ready.
 
 The goal is to separate hard regression gates from noisy informational metrics
@@ -18,7 +18,7 @@ The baseline covers:
 - TinyGo raw, gzip, brotli, and zstd size budgets;
 - browser smoke behavior for Todo, duplicate keys, dashboard, context,
   virtualized collections, the multi-package example, the child-entry example,
-  and the hash-router example;
+  the hash-router example, and the router-dashboard reference example;
 - dashboard DOM pressure and listener stability;
 - pure runtime benchmark reports;
 - package, export, artifact, and module path safety gates.
@@ -68,8 +68,8 @@ CDP node drift as an investigation signal, not a failure by itself.
 
 ## Current Baseline
 
-Recorded during the hash router pass from local `main` after the runtime error
-semantics baseline.
+Updated during the public preview hardening pass from local `main` after the
+hash router baseline.
 
 Tool versions:
 
@@ -82,7 +82,7 @@ Tool versions:
 `main` and `origin/main` pointed at the same commit when this baseline was
 taken.
 
-Baseline checks passed before documentation changes:
+Current verification includes:
 
 - `go fmt ./...`
 - `git diff --check`
@@ -97,6 +97,7 @@ Baseline checks passed before documentation changes:
 - `go test ./examples/multipackage`
 - `go test ./examples/cmdapp`
 - `go test ./examples/router`
+- `go test ./examples/router-dashboard`
 - `scripts/check.sh`
 - `scripts/size-budget.sh`
 - `scripts/perf-report.sh`
@@ -111,15 +112,16 @@ TinyGo packaged WASM sizes:
 
 | Example | Raw | gzip | br | zstd |
 |---|---:|---:|---:|---:|
-| counter | 82885 | 33356 | 27739 | 29977 |
-| components | 88533 | 35020 | 29241 | 31375 |
-| todo | 116727 | 44793 | 37407 | 40340 |
-| dashboard | 167962 | 62645 | 50713 | 54906 |
-| context | 114656 | 43058 | 35370 | 38255 |
-| virtualized | 122478 | 47194 | 38732 | 41904 |
-| multipackage | 90515 | 35840 | 29836 | 32293 |
-| cmdapp | 90574 | 35864 | 29811 | 32307 |
-| router | 106671 | 41830 | 34422 | 37389 |
+| counter | 83540 | 33574 | 27965 | 30155 |
+| components | 89188 | 35206 | 29301 | 31556 |
+| todo | 117399 | 44995 | 37552 | 40479 |
+| dashboard | 168618 | 62895 | 50775 | 55100 |
+| context | 115344 | 43248 | 35584 | 38452 |
+| virtualized | 123134 | 47419 | 38837 | 42090 |
+| multipackage | 91170 | 36059 | 30015 | 32442 |
+| cmdapp | 91229 | 36087 | 30070 | 32445 |
+| router | 107303 | 42038 | 34721 | 37544 |
+| router-dashboard | 156170 | 59279 | 48264 | 52492 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.
@@ -143,6 +145,9 @@ snapshot, not a second budget file.
 - Hash-router initial route, hash links, route params, programmatic
   navigation, browser back handling, not-found rendering, and stable shell
   layout.
+- Router-dashboard query filters, browser back query restoration, route params,
+  controlled form validation, reset behavior, not-found rendering, and stable
+  shell layout.
 
 Hard browser gates focus on correctness and structural invariants. Timing
 printed by smoke scripts is useful for trend spotting, but it is not a stable

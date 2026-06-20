@@ -20,19 +20,20 @@ Current baseline includes:
 - GOX expression ergonomics and source-oriented diagnostics;
 - component boundaries, state, reducer dispatch, effects, context selectors,
   memoization, keyed reconciliation, fixed-height virtualization, and a small
-  hash-based client router;
+  hash-based client router with tiny query helpers;
 - cache-safe packaging, hidden `.goframe` workspace output, export safety, and
   clean workspace commands;
 - multi-package GOX workspaces, child entry packages such as `./cmd/app`, and
   import-aware generated component identity;
+- documented forms/validation patterns and a router-dashboard reference app;
 - CI gates for Go/GOX tests, TinyGo size budgets, browser smoke, artifact
   checks, module path checks, and docs consistency.
 
 Non-goals for the current project surface include SSR, hydration,
 Player/Engine implementation, path/history-mode routing, file-based routing,
 route loaders, dynamic virtualization, infinite loading, LSP, formatter,
-namespace tags, spread props, production deployment server, and full
-multi-module monorepo support.
+namespace tags, spread props, schema validation framework, production
+deployment server, and full multi-module monorepo support.
 
 ## What Is GoFrame?
 
@@ -116,17 +117,35 @@ goxc package ./examples/counter --compiler=go
 
 ## Examples
 
+### Quickstart
+
 | Example | What it demonstrates | Command |
 |---|---|---|
 | `examples/counter` | Minimal state, events, TinyGo quickstart, package/serve workflow. | `goxc package ./examples/counter --compiler=tinygo` |
 | `examples/components` | Typed props, children, fragments, component composition. | `goxc package ./examples/components --compiler=tinygo` |
+
+### Application Primitives
+
+| Example | What it demonstrates | Command |
+|---|---|---|
 | `examples/todo` | Controlled inputs, events, effects, keys, list helpers, localStorage. | `goxc package ./examples/todo --compiler=tinygo` |
-| `examples/dashboard` | Reducer dispatch, explicit memoization, virtual table, dashboard pressure smoke. | `goxc package ./examples/dashboard --compiler=tinygo` |
 | `examples/context` | Scoped providers, selector consumers, broad `UseContext`, nested providers. | `goxc package ./examples/context --compiler=tinygo` |
 | `examples/virtualized` | `gf.VirtualList`, `gf.VirtualTable`, bounded DOM with 10,000 logical rows. | `goxc package ./examples/virtualized --compiler=tinygo` |
+| `examples/router` | Hash router, query helpers, route params, not-found route, and stable shell layout. | `goxc package ./examples/router --compiler=tinygo` |
+
+### Toolchain / Layout
+
+| Example | What it demonstrates | Command |
+|---|---|---|
 | `examples/multipackage` | `entry: "."` app with root plus `internal/...` packages. | `goxc package ./examples/multipackage --compiler=tinygo` |
 | `examples/cmdapp` | Child entry package with `"entry": "./cmd/app"` and Go-first layout. | `goxc package ./examples/cmdapp --compiler=tinygo` |
-| `examples/router` | Hash router, route params, not-found route, and stable shell layout. | `goxc package ./examples/router --compiler=tinygo` |
+
+### Reference / Pressure
+
+| Example | What it demonstrates | Command |
+|---|---|---|
+| `examples/dashboard` | Reducer dispatch, explicit memoization, virtual table, dashboard pressure smoke. | `goxc package ./examples/dashboard --compiler=tinygo` |
+| `examples/router-dashboard` | Router, query-state filters, controlled form validation, and Go-first layout. | `goxc package ./examples/router-dashboard --compiler=tinygo` |
 
 Serve any packaged example with:
 
@@ -326,6 +345,22 @@ func App() gf.Node {
 The MVP router is hash-based. Path/history mode, file-based routing, loaders,
 route middleware, and route-level error boundaries remain future work.
 
+For small URL-driven state, routes expose query helpers:
+
+```go
+query := ctx.Query()
+status := query.Get("status")
+
+gf.Navigate(gf.WithQuery("/issues", gf.QueryValues{
+	"status": {"open"},
+	"q":      {"auth"},
+}))
+```
+
+Forms use ordinary runtime primitives: controlled inputs, `gf.InputEvent`,
+`gf.Event.PreventDefault`, and application-owned validation state. GoFrame
+does not include a schema validation framework.
+
 ## Toolchain Workflow
 
 Generated, build, and package outputs live under an app-local hidden workspace:
@@ -384,6 +419,7 @@ Runtime topics:
 
 - [Lifecycle and effects](docs/effects.md)
 - [Runtime error semantics](docs/runtime-errors.md)
+- [Forms and validation patterns](docs/forms.md)
 - [Explicit memoization](docs/memoization.md)
 - [Context selectors](docs/context.md)
 - [Virtualized collections](docs/virtualization.md)
@@ -404,6 +440,7 @@ Project audits and future design:
 - [Foundation audit](docs/foundation-audit.md)
 - [Foundation Audit IV](docs/foundation-audit-iv.md)
 - [Public Surface Audit V](docs/public-surface-audit-v.md)
+- [Public Preview Hardening I](docs/public-preview-hardening-i.md)
 - [Future GoFrame Player vision](docs/player-vision.md)
 
 Examples:
@@ -417,6 +454,7 @@ Examples:
 - [Multi-package GOX example](examples/multipackage/README.md)
 - [Child entry package example](examples/cmdapp/README.md)
 - [Router example](examples/router/README.md)
+- [Router dashboard reference example](examples/router-dashboard/README.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 
 ## Current Limitations

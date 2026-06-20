@@ -271,6 +271,11 @@ subtree is keyed by route pattern. Navigating between different patterns
 remounts the route subtree; navigating between the same pattern with different
 params updates the route context and may preserve route-local state.
 
+`RouteContext.RawQuery` stores query text after `?`, and
+`RouteContext.Query()` parses it into `QueryValues` for small URL-driven state
+such as filters. `gf.WithQuery` builds normalized route targets for
+`gf.Navigate` and `gf.RouterLink`.
+
 The recommended layout model is a stable shell component with `RouterView` as
 an outlet. There is no nested route DSL, file-based routing, path/history-mode
 server fallback, route loader system, or route-level Error Boundary API in this
