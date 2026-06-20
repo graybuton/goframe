@@ -47,6 +47,9 @@
   other relative child package directories, app-root-wide GOX generation,
   import-aware component identities, and a focused `cmdapp` example plus
   browser smoke.
+- Foundation Audit V public surface polish, including a refreshed README,
+  updated example/docs wording, local docs/example consistency checks, and
+  `docs/public-surface-audit-v.md`.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
