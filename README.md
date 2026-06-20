@@ -19,7 +19,8 @@ Current baseline includes:
 
 - GOX expression ergonomics and source-oriented diagnostics;
 - component boundaries, state, reducer dispatch, effects, context selectors,
-  memoization, keyed reconciliation, and fixed-height virtualization;
+  memoization, keyed reconciliation, fixed-height virtualization, and a small
+  hash-based client router;
 - cache-safe packaging, hidden `.goframe` workspace output, export safety, and
   clean workspace commands;
 - multi-package GOX workspaces, child entry packages such as `./cmd/app`, and
@@ -27,10 +28,11 @@ Current baseline includes:
 - CI gates for Go/GOX tests, TinyGo size budgets, browser smoke, artifact
   checks, module path checks, and docs consistency.
 
-Non-goals for the current project surface include router, SSR, hydration,
-Player/Engine implementation, dynamic virtualization, infinite loading, LSP,
-formatter, namespace tags, spread props, production deployment server, and
-full multi-module monorepo support.
+Non-goals for the current project surface include SSR, hydration,
+Player/Engine implementation, path/history-mode routing, file-based routing,
+route loaders, dynamic virtualization, infinite loading, LSP, formatter,
+namespace tags, spread props, production deployment server, and full
+multi-module monorepo support.
 
 ## What Is GoFrame?
 
@@ -124,6 +126,7 @@ goxc package ./examples/counter --compiler=go
 | `examples/virtualized` | `gf.VirtualList`, `gf.VirtualTable`, bounded DOM with 10,000 logical rows. | `goxc package ./examples/virtualized --compiler=tinygo` |
 | `examples/multipackage` | `entry: "."` app with root plus `internal/...` packages. | `goxc package ./examples/multipackage --compiler=tinygo` |
 | `examples/cmdapp` | Child entry package with `"entry": "./cmd/app"` and Go-first layout. | `goxc package ./examples/cmdapp --compiler=tinygo` |
+| `examples/router` | Hash router, route params, not-found route, and stable shell layout. | `goxc package ./examples/router --compiler=tinygo` |
 
 Serve any packaged example with:
 
@@ -306,6 +309,23 @@ protects against dirty descendants hidden under memoized ancestors.
 Large fixed-height collections should use `gf.VirtualList` or
 `gf.VirtualTable` instead of mounting hidden offscreen rows.
 
+Client-side page changes can use the small hash router:
+
+```go
+var router = gf.NewHashRouter([]gf.Route{
+	gf.RoutePath("/", homeRoute),
+	gf.RoutePath("/issues/:id", issueRoute),
+	gf.NotFoundRoute(notFoundRoute),
+})
+
+func App() gf.Node {
+	return gf.RouterView(router)
+}
+```
+
+The MVP router is hash-based. Path/history mode, file-based routing, loaders,
+route middleware, and route-level error boundaries remain future work.
+
 ## Toolchain Workflow
 
 Generated, build, and package outputs live under an app-local hidden workspace:
@@ -367,6 +387,7 @@ Runtime topics:
 - [Explicit memoization](docs/memoization.md)
 - [Context selectors](docs/context.md)
 - [Virtualized collections](docs/virtualization.md)
+- [Client router](docs/router.md)
 - [Component identity strategy](docs/component-identity.md)
 - [Component identity next steps](docs/component-identity-next.md)
 
@@ -395,13 +416,15 @@ Examples:
 - [Virtualized collections example](examples/virtualized/README.md)
 - [Multi-package GOX example](examples/multipackage/README.md)
 - [Child entry package example](examples/cmdapp/README.md)
+- [Router example](examples/router/README.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 
 ## Current Limitations
 
 - Experimental browser/WASM target only.
-- No router, SSR, hydration, hot reload, CSS-in-Go, or production deployment
-  server.
+- Hash router only; no SSR, hydration, path/history-mode server fallback,
+  file-based routing, route loaders, hot reload, CSS-in-Go, or production
+  deployment server.
 - No Player/Engine implementation or `.gfapp` package format yet.
 - No namespace tags, spread props, template-block loops, formatter, or LSP.
 - No full multi-module monorepo story.

@@ -230,8 +230,19 @@ When serving precompressed files, configure the web server or CDN to return the
 matching `Content-Encoding` for `.gz` and `.br` variants. `goxc serve` is
 development-only and does not implement production compression negotiation.
 
+## Hash Router Deployment
+
+The MVP 24 router is hash-based. Routes such as `#/issues/42` are handled by
+the browser after `index.html` loads, so static hosting can serve the same
+package without server-side route rewrites.
+
+Path/history-mode routing is not implemented. If a future app wants clean URLs
+such as `/issues/42`, the server or CDN would need a fallback that serves
+`index.html` for application routes. `goxc serve` remains development-only and
+does not configure a production fallback policy.
+
 ## Not In MVP 13
 
 Bundle splitting is intentionally not part of this stage. It needs an app graph,
-route/loading model, loader design, and probably router, SSR/hydration, or
-Player decisions first.
+route/loading model, loader design, and probably path/history routing,
+SSR/hydration, or Player decisions first.

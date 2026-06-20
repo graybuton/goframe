@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document records the measurable baseline after MVP 23. It is a decision
+This document records the measurable baseline after MVP 24. It is a decision
 aid for future runtime and tooling work, not a claim that GoFrame is
 production-ready.
 
@@ -17,8 +17,8 @@ The baseline covers:
 - Go, race, vet, debug-tag, and GOX golden tests;
 - TinyGo raw, gzip, brotli, and zstd size budgets;
 - browser smoke behavior for Todo, duplicate keys, dashboard, context,
-  virtualized collections, the multi-package example, and the child-entry
-  example;
+  virtualized collections, the multi-package example, the child-entry example,
+  and the hash-router example;
 - dashboard DOM pressure and listener stability;
 - pure runtime benchmark reports;
 - package, export, artifact, and module path safety gates.
@@ -68,8 +68,8 @@ CDP node drift as an investigation signal, not a failure by itself.
 
 ## Current Baseline
 
-Recorded during the runtime error semantics pass from local `main` after the
-public surface polish baseline.
+Recorded during the hash router pass from local `main` after the runtime error
+semantics baseline.
 
 Tool versions:
 
@@ -96,6 +96,7 @@ Baseline checks passed before documentation changes:
 - `go test ./examples/virtualized`
 - `go test ./examples/multipackage`
 - `go test ./examples/cmdapp`
+- `go test ./examples/router`
 - `scripts/check.sh`
 - `scripts/size-budget.sh`
 - `scripts/perf-report.sh`
@@ -118,6 +119,7 @@ TinyGo packaged WASM sizes:
 | virtualized | 122478 | 47194 | 38732 | 41904 |
 | multipackage | 90515 | 35840 | 29836 | 32293 |
 | cmdapp | 90574 | 35864 | 29811 | 32307 |
+| router | 106671 | 41830 | 34422 | 37389 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.
@@ -138,6 +140,9 @@ snapshot, not a second budget file.
   readable debug names, and a simple state interaction.
 - Child-entry package loading from `cmd/app`, internal package component
   rendering, readable debug names, and a simple state interaction.
+- Hash-router initial route, hash links, route params, programmatic
+  navigation, browser back handling, not-found rendering, and stable shell
+  layout.
 
 Hard browser gates focus on correctness and structural invariants. Timing
 printed by smoke scripts is useful for trend spotting, but it is not a stable

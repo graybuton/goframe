@@ -142,4 +142,4 @@ goxc serve ./examples/context --port=8080
 - No server context, async context, or context devtools.
 - Context is not a global store; provider scope is the component tree.
 - Context selectors do not replace reducer dispatch, explicit memoization,
-  virtualization, or future router design.
+  virtualization, or the hash router's route state.

@@ -30,9 +30,9 @@ It checks:
 and manually through `workflow_dispatch`.
 
 It installs Go, TinyGo `0.41.1`, brotli, and zstd. Then it packages the
-counter, components, todo, dashboard, context, virtualized, multipackage, and
-cmdapp examples with TinyGo. It also runs a release-style package pass with
-`--asset-hash --preload --compress=gzip,br` before checking:
+counter, components, todo, dashboard, context, virtualized, multipackage,
+cmdapp, and router examples with TinyGo. It also runs a release-style package
+pass with `--asset-hash --preload --compress=gzip,br` before checking:
 
 ```bash
 scripts/size-budget.sh
@@ -62,7 +62,8 @@ failures. It currently covers Todo reconciliation, duplicate-key debug
 diagnostics, runtime error containment for event/effect/cleanup panics,
 dashboard-sized filtering/sorting/selection behavior, context selector rerender
 isolation, virtualized collection scroll/selection/toggle behavior, a
-multi-package GOX workspace smoke, and a child-entry package smoke.
+multi-package GOX workspace smoke, a child-entry package smoke, and a
+hash-router navigation smoke.
 
 The runtime error containment fixture is compiled with the Go WASM compiler so
 `recover` semantics are available. The size-oriented TinyGo package path uses
@@ -219,6 +220,9 @@ missing Chrome, unavailable storage, or stale server state. App failures include
 DOM identity loss, render counter regressions, localStorage persistence issues,
 duplicate key diagnostics failures, dashboard filter/sort regressions,
 virtualized collection window regressions, or listener churn regressions.
+Router smoke failures include broken hash navigation, missing route params,
+not-found fallback regressions, browser back handling regressions, or unstable
+shell layout identity.
 
 The smoke script must not continue against an unknown server or `about:blank`.
 

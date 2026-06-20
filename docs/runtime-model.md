@@ -252,6 +252,30 @@ The current virtualized model assumes fixed item or row height. Dynamic
 measurement, infinite loading, keyboard navigation, and richer table
 accessibility are future work. See [virtualized collections](virtualization.md).
 
+## Client routing
+
+MVP 24 adds a small hash-based client router for browser/WASM apps. Routes are
+declared in Go and matched by normalized hash path:
+
+```go
+var router = gf.NewHashRouter([]gf.Route{
+	gf.RoutePath("/", homeRoute),
+	gf.RoutePath("/issues/:id", issueRoute),
+	gf.NotFoundRoute(notFoundRoute),
+})
+```
+
+`gf.RouterView(router)` is a component boundary. It reads the current hash,
+subscribes to `hashchange`, and renders the matched route handler. The route
+subtree is keyed by route pattern. Navigating between different patterns
+remounts the route subtree; navigating between the same pattern with different
+params updates the route context and may preserve route-local state.
+
+The recommended layout model is a stable shell component with `RouterView` as
+an outlet. There is no nested route DSL, file-based routing, path/history-mode
+server fallback, route loader system, or route-level Error Boundary API in this
+MVP. See [client router](router.md).
+
 ## DOM stability regression
 
 DOM node replacement, component render, patch traversal, DOM mutation, and
@@ -403,6 +427,8 @@ The dependency-free headless Chrome probe verifies:
   custom non-comparable selector equality;
 - virtualized collections are fixed-height only and do not include dynamic
   measurement, infinite loading, or keyboard navigation;
+- hash routing only; no path/history-mode server fallback, file-based routing,
+  route loaders, or nested route layout DSL;
 - no error boundaries;
 - GOX-generated component identity uses a typed token derived from package
   import path when `goxc` knows it, with package-name fallback for lower-level

@@ -180,6 +180,7 @@ context bundle.wasm      113,108 bytes
 virtualized bundle.wasm  121,195 bytes
 multipackage bundle.wasm 89,727 bytes
 cmdapp bundle.wasm       89,786 bytes
+router bundle.wasm       106,671 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -192,7 +193,7 @@ The repository includes `scripts/size-budget.sh` as a regression gate for raw,
 gzip, brotli, and optional zstd packaged TinyGo examples, including the
 dashboard-sized pressure-test example, the context selector example, and the
 virtualized collections, multi-package workspace, and child-entry workspace
-examples.
+examples, plus the hash-router example.
 `scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
 budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
 regression probes.
@@ -234,6 +235,8 @@ The MVP runtime currently has:
 - scoped context providers with selector-based consumer dirtying;
 - component-scoped lifecycle/effect slots;
 - fixed-height `VirtualList` and `VirtualTable` collection primitives;
+- hash-based client routing through `RouterView`, `RouterLink`, and Go-declared
+  routes;
 - dirty component updates coalesced into one animation-frame flush;
 - direct dirty-owner subtree updates without root traversal;
 - dirty queue ancestor pruning when parent and child are dirty in the same
@@ -275,7 +278,8 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
 - GOX has expression-oriented conditional rendering, but no template-block
   loops/conditionals, spread props, or component namespaces.
 - No spread props or component namespaces.
-- No routing, SSR, hydration, or accessibility abstraction.
+- Hash routing only; no path/history-mode server fallback, file-based routing,
+  route loaders, SSR, hydration, or accessibility abstraction.
 - TinyGo compatibility is experimental and feature-dependent.
 - `goxc serve` is a development server without compression negotiation.
 - Debug-tag performance probes are observations, not rigorous benchmarks.
@@ -289,5 +293,5 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
 3. Add deeper symlink/path-safety tests before public preview.
 4. Continue measuring size, DOM pressure, and browser smoke invariants before
    taking on larger features.
-5. Explore router, Player/Engine, SSR/hydration, and `.gfapp` only as separate
-   design efforts, not incidental cleanup.
+5. Explore path/history routing, Player/Engine, SSR/hydration, and `.gfapp`
+   only as separate design efforts, not incidental cleanup.

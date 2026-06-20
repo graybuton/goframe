@@ -63,7 +63,8 @@ other compared prop tracks that data.
   that can be represented as pure actions.
 - Virtualization is a separate tool. Use `gf.VirtualList` or `gf.VirtualTable`
   when offscreen collection items should not be mounted at all.
-- No router/Player integration in this stage.
+- Router route changes are ordinary component updates; memoization does not
+  provide route loaders, route-level error handling, or Player integration.
 
 If `MemoEqual` panics, GoFrame reports `gf.ErrorPhaseMemo` through the runtime
 error handler and falls back to rendering instead of skipping. A broken
