@@ -1,7 +1,5 @@
 package pages
 
-import gf "github.com/graybuton/goframe/pkg/goframe"
-
 type HomeProps struct{}
 
 type IssuesProps struct {
@@ -44,8 +42,4 @@ func (issue Issue) TestID() string {
 		return "router-link-first-issue"
 	}
 	return "router-link-issue-" + issue.ID
-}
-
-func linkChildren(text string) []gf.Node {
-	return []gf.Node{gf.Text(text)}
 }

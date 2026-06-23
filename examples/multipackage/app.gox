@@ -25,18 +25,15 @@ func App() gf.Node {
 	return (
 		<main class="multipackage-page">
 			<Header Subtitle={appSubtitle} />
-			{ui.Layout(ui.LayoutProps{
-				Title: "Multi-package GOX",
-				Count: count,
-				OnIncrement: func() {
+			<ui.Layout
+				Title="Multi-package GOX"
+				Count={count}
+				OnIncrement={func() {
 					setCount(count + 1)
-				},
-				Children: []gf.Node{
-					issues.IssueList(issues.IssueListProps{
-						Items: issues.DemoIssues(),
-					}),
-				},
-			})}
+				}}
+			>
+				<issues.IssueList Items={issues.DemoIssues()} />
+			</ui.Layout>
 		</main>
 	)
 }

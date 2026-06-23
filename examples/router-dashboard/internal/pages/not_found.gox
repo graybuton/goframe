@@ -10,11 +10,9 @@ func NotFound(props NotFoundProps) gf.Node {
 				No route matched
 				<code data-testid="rd-not-found-path">{props.Path}</code>.
 			</p>
-			{gf.RouterLink(gf.RouterLinkProps{
-				To: "/issues",
-				Class: "rd-link",
-				Children: []gf.Node{gf.Text("Back to issues")},
-			})}
+			<gf.RouterLink To="/issues" Class="rd-link">
+				Back to issues
+			</gf.RouterLink>
 		</section>
 	)
 }

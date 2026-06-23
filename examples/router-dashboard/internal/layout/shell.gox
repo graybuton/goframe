@@ -12,18 +12,12 @@ func Shell(props ShellProps) gf.Node {
 					<p class="rd-muted">Hash routes, query filters, controlled forms, and Go-first layout.</p>
 				</div>
 				<nav class="rd-nav" aria-label="Primary navigation">
-					{gf.RouterLink(gf.RouterLinkProps{
-						To: "/",
-						Class: "rd-link",
-						TestID: "rd-nav-home",
-						Children: []gf.Node{gf.Text("Home")},
-					})}
-					{gf.RouterLink(gf.RouterLinkProps{
-						To: "/issues",
-						Class: "rd-link",
-						TestID: "rd-nav-issues",
-						Children: []gf.Node{gf.Text("Issues")},
-					})}
+					<gf.RouterLink To="/" Class="rd-link" TestID="rd-nav-home">
+						Home
+					</gf.RouterLink>
+					<gf.RouterLink To="/issues" Class="rd-link" TestID="rd-nav-issues">
+						Issues
+					</gf.RouterLink>
 				</nav>
 			</header>
 			<div class="rd-outlet" data-testid="rd-outlet">

@@ -18,19 +18,15 @@ var router = gf.NewHashRouter([]gf.Route{
 func App() gf.Node {
 	return (
 		<main class="rd-app">
-			{layout.Shell(layout.ShellProps{
-				Children: []gf.Node{
-					gf.RouterView(router),
-				},
-			})}
+			<layout.Shell>
+				{gf.RouterView(router)}
+			</layout.Shell>
 		</main>
 	)
 }
 
 func homeRoute(gf.RouteContext) gf.Node {
-	return pages.Home(pages.HomeProps{
-		Title: appTitle,
-	})
+	return <pages.Home Title={appTitle} />
 }
 
 func issuesRoute(ctx gf.RouteContext) gf.Node {
@@ -40,35 +36,25 @@ func issuesRoute(ctx gf.RouteContext) gf.Node {
 		Query:  query.Get("q"),
 		Status: query.Get("status"),
 	}
-	return pages.IssueList(pages.IssueListProps{
-		Items:       data.FilterIssues(allIssues, filter),
-		TotalCount:  len(allIssues),
-		Query:       filter.Query,
-		Status:      filter.Status,
-		CurrentPath: ctx.Path,
-	})
+	return <pages.IssueList
+		Items={data.FilterIssues(allIssues, filter)}
+		TotalCount={len(allIssues)}
+		Query={filter.Query}
+		Status={filter.Status}
+		CurrentPath={ctx.Path}
+	/>
 }
 
 func issueDetailsRoute(ctx gf.RouteContext) gf.Node {
 	issue, ok := data.FindIssue(ctx.Param("id"))
-	return pages.IssueDetails(pages.IssueDetailsProps{
-		Issue: issue,
-		Found: ok,
-		ID:    ctx.Param("id"),
-	})
+	return <pages.IssueDetails Issue={issue} Found={ok} ID={ctx.Param("id")} />
 }
 
 func issueEditRoute(ctx gf.RouteContext) gf.Node {
 	issue, ok := data.FindIssue(ctx.Param("id"))
-	return pages.IssueEdit(pages.IssueEditProps{
-		Issue: issue,
-		Found: ok,
-		ID:    ctx.Param("id"),
-	})
+	return <pages.IssueEdit Issue={issue} Found={ok} ID={ctx.Param("id")} />
 }
 
 func notFoundRoute(ctx gf.RouteContext) gf.Node {
-	return pages.NotFound(pages.NotFoundProps{
-		Path: ctx.Path,
-	})
+	return <pages.NotFound Path={ctx.Path} />
 }

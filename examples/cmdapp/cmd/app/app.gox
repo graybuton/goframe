@@ -25,18 +25,15 @@ func App() gf.Node {
 	return (
 		<main class="cmdapp-page">
 			<Header Subtitle={appSubtitle} />
-			{ui.Layout(ui.LayoutProps{
-				Title: "Child entry GOX",
-				Count: count,
-				OnIncrement: func() {
+			<ui.Layout
+				Title="Child entry GOX"
+				Count={count}
+				OnIncrement={func() {
 					setCount(count + 1)
-				},
-				Children: []gf.Node{
-					tasks.TaskList(tasks.TaskListProps{
-						Items: tasks.DemoTasks(),
-					}),
-				},
-			})}
+				}}
+			>
+				<tasks.TaskList Items={tasks.DemoTasks()} />
+			</ui.Layout>
 		</main>
 	)
 }
