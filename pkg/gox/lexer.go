@@ -119,6 +119,12 @@ func (lexer *Lexer) nextTagToken() (token, error) {
 	case lexer.input[lexer.pos] == '{':
 		value, err := lexer.readExpression()
 		return token{kind: tokenExpression, value: value, offset: start}, err
+	case lexer.input[lexer.pos] == '.':
+		lexer.pos++
+		for lexer.pos < len(lexer.input) && isIdentifierPart(lexer.input[lexer.pos]) {
+			lexer.pos++
+		}
+		return token{kind: tokenIdentifier, value: lexer.input[start:lexer.pos], offset: start}, nil
 	case isIdentifierStart(lexer.input[lexer.pos]):
 		lexer.pos++
 		for lexer.pos < len(lexer.input) && isIdentifierPart(lexer.input[lexer.pos]) {
