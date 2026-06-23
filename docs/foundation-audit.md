@@ -146,7 +146,7 @@ Remaining compiler risks:
 - The parser is purpose-built and not a full Go parser. It works for current
   GOX blocks but may need a proper source-aware parser before larger syntax.
 - Diagnostics are human-readable but not yet structured machine diagnostics.
-- Component namespace tags and spread props are intentionally rejected.
+- XML-style component namespace tags and spread props are intentionally rejected.
 - GOX does not validate whether a referenced props struct or component function
   exists; the Go compiler remains the type checker.
 

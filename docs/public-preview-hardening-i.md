@@ -44,7 +44,7 @@ Out of scope:
 - history-mode router or server fallback automation;
 - route loaders, middleware, auth guards, or route-level Error Boundary API;
 - schema validation library or large form registry;
-- new GOX syntax, namespace tags, or spread props;
+- XML-style namespace tags, spread props, or broad template syntax;
 - LSP, formatter, Player/Engine, `.gfapp`, or production deployment server.
 
 ## Public API Surface Review
@@ -103,6 +103,10 @@ It demonstrates:
 - touched/dirty/submit state;
 - local deterministic data only;
 - not-found route and stable shell layout.
+
+MVP 26 refines the same example to use package-qualified component tags such
+as `<layout.Shell>` and `<filters.FilterControls>`, replacing the earlier
+cross-package props-struct function-call workaround.
 
 It is intentionally smaller than `examples/dashboard`. The existing dashboard
 remains the pressure test; the new example is the user-facing reference app.

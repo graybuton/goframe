@@ -109,6 +109,7 @@ should prefer GOX markup for structure.
 
 - GOX syntax surface.
 - GOX expression ergonomics.
+- GOX package-qualified component tags (`packageAlias.Component`).
 - GOX diagnostic wording beyond the filename/line/column/source-line contract.
 - Context topology behavior and selector limitations.
 - Virtualization details such as fixed-height range buffering and table spacer
