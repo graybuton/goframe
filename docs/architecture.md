@@ -51,6 +51,9 @@ The MVP component model deliberately delegates type checking to Go:
 - lowercase tags generate `gf.El`;
 - capitalized tags generate `gf.ComponentT` boundaries using generated
   `gf.ComponentType` tokens and `<Name>Props`;
+- package-qualified capitalized tags such as `<ui.Header />` generate the same
+  kind of boundary with the selected package alias, imported props type, and
+  import-path-aware component identity when available;
 - component children populate `Children []gf.Node`;
 - fragments generate `gf.Fragment`;
 - child expressions generate `gf.Child`.
@@ -178,10 +181,10 @@ todo bundle.wasm            117,399 bytes
 dashboard bundle.wasm       168,618 bytes
 context bundle.wasm         115,344 bytes
 virtualized bundle.wasm     123,134 bytes
-multipackage bundle.wasm     91,170 bytes
-cmdapp bundle.wasm           91,229 bytes
-router bundle.wasm          107,303 bytes
-router-dashboard bundle.wasm 156,170 bytes
+multipackage bundle.wasm     94,344 bytes
+cmdapp bundle.wasm           94,370 bytes
+router bundle.wasm          114,706 bytes
+router-dashboard bundle.wasm 164,091 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
