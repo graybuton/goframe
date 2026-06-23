@@ -1,0 +1,2 @@
+testdata/errors/qualified_blank_alias.gox:6:10: package-qualified component tag cannot use blank or dot import alias: <_.Header>
+  <_.Header />

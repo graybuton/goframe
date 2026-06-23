@@ -1,5 +1,5 @@
 package demo
 
 func View() any {
-	return <ui:Button />
+	return <ui.Header />
 }

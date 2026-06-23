@@ -1,0 +1,2 @@
+testdata/errors/qualified_mismatched.gox:6:21: expected closing tag </ui.Shell>, got </ui.Card>
+  <ui.Shell></ui.Card>

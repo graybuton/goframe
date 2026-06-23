@@ -1,0 +1,7 @@
+package demo
+
+import _ "github.com/example/app/internal/ui"
+
+func View() any {
+	return <_.Header />
+}

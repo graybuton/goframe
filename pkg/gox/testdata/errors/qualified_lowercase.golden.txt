@@ -1,0 +1,2 @@
+testdata/errors/qualified_lowercase.gox:6:10: qualified component tag <ui.header> must select an exported component name
+  <ui.header />
