@@ -62,8 +62,9 @@ failures. It currently covers Todo reconciliation, duplicate-key debug
 diagnostics, runtime error containment for event/effect/cleanup panics,
 dashboard-sized filtering/sorting/selection behavior, context selector rerender
 isolation, virtualized collection scroll/selection/toggle behavior, a
-multi-package GOX workspace smoke, a child-entry package smoke, and a
-hash-router navigation smoke.
+multi-package GOX workspace smoke, a child-entry package smoke, hash-router
+navigation smoke, and the router-dashboard reference app smoke for query
+filters plus form validation.
 
 The runtime error containment fixture is compiled with the Go WASM compiler so
 `recover` semantics are available. The size-oriented TinyGo package path uses
@@ -221,7 +222,8 @@ DOM identity loss, render counter regressions, localStorage persistence issues,
 duplicate key diagnostics failures, dashboard filter/sort regressions,
 virtualized collection window regressions, or listener churn regressions.
 Router smoke failures include broken hash navigation, missing route params,
-not-found fallback regressions, browser back handling regressions, or unstable
+not-found fallback regressions, browser back handling regressions, query helper
+regressions, form validation regressions in the reference app, or unstable
 shell layout identity.
 
 The smoke script must not continue against an unknown server or `about:blank`.

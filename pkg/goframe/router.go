@@ -2,6 +2,10 @@ package goframe
 
 import "strings"
 
+// QueryValues stores parsed route query values. Repeated query keys are kept
+// in insertion order for that key.
+type QueryValues map[string][]string
+
 // RouteContext describes the currently matched route.
 type RouteContext struct {
 	Path     string
@@ -16,6 +20,32 @@ func (ctx RouteContext) Param(name string) string {
 		return ""
 	}
 	return ctx.Params[name]
+}
+
+// Query parses RawQuery into route query values.
+func (ctx RouteContext) Query() QueryValues {
+	return ParseQuery(ctx.RawQuery)
+}
+
+// Get returns the first query value for name, or an empty string when absent.
+func (values QueryValues) Get(name string) string {
+	if values == nil {
+		return ""
+	}
+	items := values[name]
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0]
+}
+
+// Has reports whether name is present in the query.
+func (values QueryValues) Has(name string) bool {
+	if values == nil {
+		return false
+	}
+	_, ok := values[name]
+	return ok
 }
 
 // RouteHandler renders one matched route.
@@ -186,6 +216,81 @@ func HashHref(to string) string {
 	return "#" + normalizeRouteTarget(to)
 }
 
+// WithQuery returns path with query values applied. Existing query text on path
+// is replaced.
+func WithQuery(path string, values QueryValues) string {
+	path, _ = splitRouteTarget(normalizeRouteTarget(path))
+	encoded := values.Encode()
+	if encoded == "" {
+		return path
+	}
+	return path + "?" + encoded
+}
+
+// ParseQuery parses raw route query text into QueryValues. Malformed percent
+// escapes are preserved literally rather than panicking.
+func ParseQuery(raw string) QueryValues {
+	values := QueryValues{}
+	if raw == "" {
+		return values
+	}
+	parts := strings.Split(raw, "&")
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		name := part
+		value := ""
+		hasValue := false
+		if index := strings.IndexByte(part, '='); index >= 0 {
+			name = part[:index]
+			value = part[index+1:]
+			hasValue = true
+		}
+		name = decodeQueryComponent(name)
+		if name == "" {
+			continue
+		}
+		if hasValue {
+			value = decodeQueryComponent(value)
+			values[name] = append(values[name], value)
+		} else {
+			values[name] = append(values[name], "")
+		}
+	}
+	return values
+}
+
+// Encode serializes query values with deterministic key ordering.
+func (values QueryValues) Encode() string {
+	if len(values) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sortRouteQueryKeys(keys)
+	var builder strings.Builder
+	for _, key := range keys {
+		items := values[key]
+		if len(items) == 0 {
+			appendQuerySeparator(&builder)
+			builder.WriteString(encodeQueryComponent(key))
+			continue
+		}
+		for _, value := range items {
+			appendQuerySeparator(&builder)
+			builder.WriteString(encodeQueryComponent(key))
+			builder.WriteByte('=')
+			builder.WriteString(encodeQueryComponent(value))
+		}
+	}
+	return builder.String()
+}
+
 func normalizeRoutePattern(pattern string) string {
 	if pattern == "" {
 		panic("goframe: route pattern must not be empty")
@@ -287,4 +392,94 @@ func routeParts(path string) []string {
 		return nil
 	}
 	return strings.Split(strings.TrimPrefix(path, "/"), "/")
+}
+
+func appendQuerySeparator(builder *strings.Builder) {
+	if builder.Len() > 0 {
+		builder.WriteByte('&')
+	}
+}
+
+func sortRouteQueryKeys(keys []string) {
+	for index := 1; index < len(keys); index++ {
+		key := keys[index]
+		position := index - 1
+		for position >= 0 && keys[position] > key {
+			keys[position+1] = keys[position]
+			position--
+		}
+		keys[position+1] = key
+	}
+}
+
+func encodeQueryComponent(value string) string {
+	var builder strings.Builder
+	for index := 0; index < len(value); index++ {
+		char := value[index]
+		if isQueryUnreserved(char) {
+			builder.WriteByte(char)
+			continue
+		}
+		if char == ' ' {
+			builder.WriteByte('+')
+			continue
+		}
+		builder.WriteByte('%')
+		builder.WriteByte(hexDigit(char >> 4))
+		builder.WriteByte(hexDigit(char))
+	}
+	return builder.String()
+}
+
+func decodeQueryComponent(value string) string {
+	var builder strings.Builder
+	for index := 0; index < len(value); index++ {
+		char := value[index]
+		if char == '+' {
+			builder.WriteByte(' ')
+			continue
+		}
+		if char == '%' && index+2 < len(value) {
+			high, highOK := fromHex(value[index+1])
+			low, lowOK := fromHex(value[index+2])
+			if highOK && lowOK {
+				builder.WriteByte(high<<4 | low)
+				index += 2
+				continue
+			}
+		}
+		builder.WriteByte(char)
+	}
+	return builder.String()
+}
+
+func isQueryUnreserved(char byte) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '-' ||
+		char == '_' ||
+		char == '.' ||
+		char == '~'
+}
+
+func hexDigit(value byte) byte {
+	value = value & 0x0f
+	if value < 10 {
+		return '0' + value
+	}
+	return 'A' + value - 10
+}
+
+func fromHex(char byte) (byte, bool) {
+	switch {
+	case char >= '0' && char <= '9':
+		return char - '0', true
+	case char >= 'a' && char <= 'f':
+		return char - 'a' + 10, true
+	case char >= 'A' && char <= 'F':
+		return char - 'A' + 10, true
+	default:
+		return 0, false
+	}
 }

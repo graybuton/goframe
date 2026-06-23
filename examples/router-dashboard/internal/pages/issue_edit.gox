@@ -1,0 +1,24 @@
+package pages
+
+import (
+	forms "github.com/graybuton/goframe/examples/router-dashboard/internal/forms"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func IssueEdit(props IssueEditProps) gf.Node {
+	if !props.Found {
+		return <MissingIssue ID={props.ID} />
+	}
+	return (
+		<section class="rd-card" data-testid="rd-issue-edit">
+			<p class="rd-eyebrow">Edit {props.Issue.ID}</p>
+			<h2>Update issue</h2>
+			<p class="rd-muted">
+				This form validates local state only. It does not call a server.
+			</p>
+			{forms.IssueFormView(forms.IssueFormProps{
+				Issue: props.Issue,
+			})}
+		</section>
+	)
+}

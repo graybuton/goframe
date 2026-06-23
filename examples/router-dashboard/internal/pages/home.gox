@@ -1,0 +1,23 @@
+package pages
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Home(props HomeProps) gf.Node {
+	return (
+		<section class="rd-card" data-testid="rd-home">
+			<h2>{props.Title}</h2>
+			<p>
+				This reference app combines the small hash router, route query helpers,
+				and controlled form validation without a larger app framework.
+			</p>
+			<p>
+				{gf.RouterLink(gf.RouterLinkProps{
+					To: "/issues?status=open",
+					Class: "rd-link",
+					TestID: "rd-home-open-issues",
+					Children: []gf.Node{gf.Text("Open issues")},
+				})}
+			</p>
+		</section>
+	)
+}

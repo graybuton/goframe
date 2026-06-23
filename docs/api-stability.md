@@ -48,11 +48,13 @@ After public preview, this policy should be revisited and tightened.
 
 Runtime:
 
+- `gf.Node`
 - `gf.El`
 - `gf.Text`
 - `gf.Fragment`
 - `gf.Child`
 - `gf.Key`
+- `gf.Props`
 - `gf.Component`
 - `gf.C`
 - `gf.NewComponentType`
@@ -76,6 +78,9 @@ Runtime:
 - `gf.RouterLink`
 - `gf.Navigate`
 - `gf.HashHref`
+- `gf.QueryValues`
+- `gf.ParseQuery`
+- `gf.WithQuery`
 - basic event facades such as `gf.Event`, `gf.InputEvent`, and
   `gf.ScrollEvent`
 
@@ -94,6 +99,12 @@ Tooling:
 These are public-candidate because examples and docs rely on them, but their
 exact shapes can still change before public preview.
 
+Low-level node helpers such as `gf.El`, `gf.Text`, `gf.Fragment`, `gf.Child`,
+`gf.Key`, `gf.Props`, `gf.If`, `gf.IfElse`, `gf.Map`, and `gf.MapIndexed` are
+also compiler-facing exported primitives. GOX-generated code uses them
+directly, and handwritten low-level Go can use them when needed. Most app code
+should prefer GOX markup for structure.
+
 ### Experimental
 
 - GOX syntax surface.
@@ -107,7 +118,10 @@ exact shapes can still change before public preview.
   `gf.SetErrorHandler`, `gf.ErrorInfo`, `gf.ErrorHandler`, and
   `gf.ErrorPhase`.
 - Hash router details such as route remount policy, declaration-order matching
-  edge cases, link props, and browser listener internals.
+  edge cases, link props, query helper edge cases, and browser listener
+  internals.
+- Form and validation patterns. MVP 25 documents controlled-input patterns but
+  intentionally does not add a runtime form framework.
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands and snippets.
@@ -154,6 +168,8 @@ Not stable:
 - path/history-mode routing and server fallback behavior;
 - file-based routing, route loaders, route middleware, and route-level error
   boundaries;
+- schema validation or a form framework;
+- external data/resource story;
 - SSR/hydration;
 - Player/Engine or `.gfapp` format;
 - multi-module app support;

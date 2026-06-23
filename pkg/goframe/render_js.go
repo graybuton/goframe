@@ -42,6 +42,7 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 		mounted.pending = element
 		patchProps(element, mounted, nil, node.Props, owner)
 		mounted.children = mountChildren(document, element, node.Children, js.Null(), owner)
+		applyPostMountProps(element, node)
 	case TextNode:
 		text := document.Call("createTextNode", node.Value)
 		mounted.first = text
@@ -68,6 +69,16 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 		panic("goframe: unsupported node type")
 	}
 	return mounted
+}
+
+func applyPostMountProps(element js.Value, node VNode) {
+	if node.Tag != "select" || len(node.Props) == 0 {
+		return
+	}
+	props, _ := splitProps(node.Props)
+	if prop, ok := props["value"]; ok {
+		setDOMProp(element, "value", prop)
+	}
 }
 
 func mountChildren(document, parent js.Value, nodes []Node, boundary js.Value, owner *componentInstance) []*mountedNode {

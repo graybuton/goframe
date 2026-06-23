@@ -203,6 +203,14 @@ goxc size ./examples/cmdapp
 goxc serve ./examples/cmdapp --port=8080
 ```
 
+The router-dashboard reference example uses the same child-entry model while
+also demonstrating router query filters and local form validation:
+
+```bash
+goxc package ./examples/router-dashboard --compiler=tinygo
+goxc serve ./examples/router-dashboard --port=8080
+```
+
 ## Current Limitations
 
 - No namespace tags.
@@ -219,3 +227,5 @@ goxc serve ./examples/cmdapp --port=8080
 See `examples/multipackage` for a compact `entry: "."` app with a root
 package, `internal/ui`, `internal/issues`, and ordinary shared Go helpers.
 See `examples/cmdapp` for a compact `entry: "./cmd/app"` app.
+See `examples/router-dashboard` for a larger child-entry reference app that
+combines routing, query-state filters, and controlled forms.

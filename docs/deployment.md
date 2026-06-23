@@ -236,6 +236,10 @@ The MVP 24 router is hash-based. Routes such as `#/issues/42` are handled by
 the browser after `index.html` loads, so static hosting can serve the same
 package without server-side route rewrites.
 
+Route query state also lives in the hash, for example
+`#/issues?status=open&q=auth`. The server still receives only the original
+`index.html` request.
+
 Path/history-mode routing is not implemented. If a future app wants clean URLs
 such as `/issues/42`, the server or CDN would need a fallback that serves
 `index.html` for application routes. `goxc serve` remains development-only and

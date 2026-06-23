@@ -63,6 +63,8 @@ echo "== Package examples with TinyGo =="
 "$GOXC" package ./examples/cmdapp --compiler=tinygo
 "$GOXC" generate ./examples/router
 "$GOXC" package ./examples/router --compiler=tinygo
+"$GOXC" generate ./examples/router-dashboard
+"$GOXC" package ./examples/router-dashboard --compiler=tinygo
 
 echo "== Size budgets =="
 scripts/size-budget.sh

@@ -1,0 +1,66 @@
+package filters
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func FilterControlsView(props FilterControlsProps) gf.Node {
+	return <FilterControls
+		Key={FilterKey(props.Query, props.Status)}
+		Query={props.Query}
+		Status={props.Status}
+		ResultCount={props.ResultCount}
+		TotalCount={props.TotalCount}
+	/>
+}
+
+func FilterControls(props FilterControlsProps) gf.Node {
+	query, setQuery := gf.UseState(props.Query)
+	status, setStatus := gf.UseState(normalizeStatusForControl(props.Status))
+
+	applyFilters := func() {
+		gf.Navigate(filterTarget(query, status))
+	}
+
+	resetFilters := func() {
+		setQuery("")
+		setStatus("all")
+		gf.Navigate("/issues")
+	}
+
+	return (
+		<form class="rd-filters" data-testid="rd-filters" OnSubmit={func(event gf.Event) {
+			event.PreventDefault()
+			applyFilters()
+		}}>
+			<label>
+				<span>Search</span>
+				<input
+					data-testid="rd-filter-query"
+					Type="search"
+					Value={query}
+					Placeholder="Search issues"
+					OnInput={func(event gf.InputEvent) {
+						setQuery(event.Value())
+					}}
+				/>
+			</label>
+			<label>
+				<span>Status</span>
+				<select data-testid="rd-filter-status" Value={status} OnChange={func(event gf.InputEvent) {
+					setStatus(event.Value())
+				}}>
+					<option Value="all">All statuses</option>
+					<option Value="open">Open</option>
+					<option Value="review">In review</option>
+					<option Value="closed">Closed</option>
+				</select>
+			</label>
+			<div class="rd-filter-actions">
+				<button data-testid="rd-filter-apply" Type="submit">Apply filters</button>
+				<button data-testid="rd-filter-reset" Type="button" OnClick={resetFilters}>Reset</button>
+			</div>
+			<p class="rd-summary" data-testid="rd-filter-summary">
+				Showing {props.ResultCount} of {props.TotalCount} issues
+			</p>
+		</form>
+	)
+}

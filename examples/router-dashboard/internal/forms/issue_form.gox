@@ -1,0 +1,65 @@
+package forms
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func IssueFormView(props IssueFormProps) gf.Node {
+	return <IssueForm Key={props.Issue.ID} Issue={props.Issue} />
+}
+
+func IssueForm(props IssueFormProps) gf.Node {
+	state, dispatch := gf.UseReducer(newIssueFormState(props.Issue), reduceIssueForm)
+
+	return (
+		<form class="rd-form" data-testid="rd-issue-form" OnSubmit={func(event gf.Event) {
+			event.PreventDefault()
+			dispatch(IssueFormAction{Kind: issueFormSubmit})
+		}}>
+			<label>
+				<span>Title</span>
+				<input
+					data-testid="rd-field-title"
+					Type="text"
+					Value={state.Title.Value}
+					aria-invalid={state.TitleInvalid()}
+					aria-describedby="rd-field-error-title"
+					OnInput={func(event gf.InputEvent) {
+						dispatch(IssueFormAction{Kind: issueFormTitleChanged, Value: event.Value()})
+					}}
+				/>
+			</label>
+			{state.ShowTitleError() && (
+				<p class="rd-field-error" id="rd-field-error-title" data-testid="rd-field-error-title">
+					{state.Title.Error}
+				</p>
+			)}
+			<label>
+				<span>Status</span>
+				<select data-testid="rd-field-status" Value={state.Status.Value} OnChange={func(event gf.InputEvent) {
+					dispatch(IssueFormAction{Kind: issueFormStatusChanged, Value: event.Value()})
+				}}>
+					<option Value="open">Open</option>
+					<option Value="review">In review</option>
+					<option Value="closed">Closed</option>
+				</select>
+			</label>
+			<label>
+				<span>Description</span>
+				<textarea data-testid="rd-field-description" Value={state.Description.Value} OnInput={func(event gf.InputEvent) {
+					dispatch(IssueFormAction{Kind: issueFormDescriptionChanged, Value: event.Value()})
+				}} />
+			</label>
+			<p class="rd-dirty" data-testid="rd-form-dirty">{state.DirtyText()}</p>
+			<div class="rd-form-actions">
+				<button data-testid="rd-form-submit" Type="submit">Save issue</button>
+				<button data-testid="rd-form-reset" Type="button" OnClick={func() {
+					dispatch(IssueFormAction{Kind: issueFormReset})
+				}}>Reset form</button>
+			</div>
+			{state.Saved && (
+				<p class="rd-saved" data-testid="rd-form-saved">
+					Saved locally. This example does not persist to a server.
+				</p>
+			)}
+		</form>
+	)
+}

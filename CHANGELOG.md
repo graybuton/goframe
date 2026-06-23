@@ -57,6 +57,9 @@
 - Hash-based client router primitives, including route params, not-found
   handling, `RouterView`, `RouterLink`, programmatic navigation, a Go-first
   router example, and browser smoke coverage.
+- MVP 25 public preview hardening, including router query helpers, documented
+  forms/validation patterns, a router-dashboard reference example, browser
+  smoke coverage, and public API surface clarification.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

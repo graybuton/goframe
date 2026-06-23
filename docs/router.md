@@ -17,6 +17,7 @@ The router supports:
 - hash-based navigation;
 - static and parameterized route patterns;
 - route params;
+- small query helpers for URL-driven route state;
 - a not-found route;
 - `RouterView`;
 - `RouterLink`;
@@ -28,7 +29,7 @@ The router intentionally does not support:
 
 - path/history mode;
 - server fallback automation;
-- query-state management;
+- full query-state management;
 - route loaders or data fetching;
 - nested route/layout DSL;
 - scroll restoration;
@@ -51,6 +52,12 @@ The empty hash, `#`, and `#/` normalize to `/`.
 
 `gf.HashHref("/issues")` returns `#/issues`. `gf.Navigate("/issues")` updates
 `window.location.hash` in browser builds.
+
+Query strings stay inside the hash target:
+
+```text
+#/issues?status=open&q=auth
+```
 
 Path/history mode remains future work. It would require server or CDN fallback
 to `index.html`, which GoFrame does not configure in this MVP.
@@ -85,7 +92,8 @@ Supported semantics:
 - static path segments match exactly;
 - `:param` matches one non-empty segment;
 - trailing slash is normalized away except for `/`;
-- query text after `?` is stored as raw query text;
+- query text after `?` is stored as raw query text and can be parsed with
+  `RouteContext.Query()`;
 - wildcard, optional, regex, and splat params are not supported.
 
 ## Params
@@ -101,8 +109,47 @@ func issueDetailsRoute(ctx gf.RouteContext) gf.Node {
 ```
 
 `RouteContext.Param(name)` returns the matching route param or an empty string.
-`RouteContext.RawQuery` contains the query text after `?` without parsing it
-into a map.
+`RouteContext.RawQuery` contains the query text after `?`.
+
+## Query Helpers
+
+MVP 25 adds a tiny query helper layer:
+
+```go
+query := ctx.Query()
+status := query.Get("status")
+
+target := gf.WithQuery("/issues", gf.QueryValues{
+	"status": {"open"},
+	"q":      {"auth"},
+})
+gf.Navigate(target)
+```
+
+API:
+
+```go
+type QueryValues map[string][]string
+
+func (ctx RouteContext) Query() QueryValues
+func ParseQuery(raw string) QueryValues
+func (values QueryValues) Get(name string) string
+func (values QueryValues) Has(name string) bool
+func (values QueryValues) Encode() string
+func WithQuery(path string, values QueryValues) string
+```
+
+Semantics:
+
+- `Get` returns the first value or an empty string;
+- repeated keys are preserved in `QueryValues`;
+- keys without `=` parse as present with an empty first value;
+- `WithQuery` replaces any existing query on the path;
+- `Encode` orders keys deterministically and preserves per-key value order;
+- malformed percent escapes are preserved literally instead of panicking.
+
+This is not a full query-state manager. There are no typed codecs, no automatic
+state binding, no route loaders, and no external data fetching story in MVP 25.
 
 ## RouterView
 
@@ -190,7 +237,7 @@ development-only and does not implement a production fallback policy.
 - No middleware or auth guards.
 - No scroll restoration.
 - No active link helper.
-- No query parsing beyond raw query text.
+- No typed query-state manager.
 - No route ranking beyond declaration order.
 
 ## Future Work

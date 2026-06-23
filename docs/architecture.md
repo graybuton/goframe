@@ -172,15 +172,16 @@ TinyGo is the preferred lightweight experiment. It supports a smaller runtime
 surface but dramatically reduces the counter:
 
 ```text
-counter bundle.wasm       82,097 bytes
-components bundle.wasm    87,745 bytes
-todo bundle.wasm         115,337 bytes
-dashboard bundle.wasm    166,248 bytes
-context bundle.wasm      113,108 bytes
-virtualized bundle.wasm  121,195 bytes
-multipackage bundle.wasm 89,727 bytes
-cmdapp bundle.wasm       89,786 bytes
-router bundle.wasm       106,671 bytes
+counter bundle.wasm          83,540 bytes
+components bundle.wasm       89,188 bytes
+todo bundle.wasm            117,399 bytes
+dashboard bundle.wasm       168,618 bytes
+context bundle.wasm         115,344 bytes
+virtualized bundle.wasm     123,134 bytes
+multipackage bundle.wasm     91,170 bytes
+cmdapp bundle.wasm           91,229 bytes
+router bundle.wasm          107,303 bytes
+router-dashboard bundle.wasm 156,170 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -192,8 +193,8 @@ than Counter because it also demonstrates compact localStorage persistence.
 The repository includes `scripts/size-budget.sh` as a regression gate for raw,
 gzip, brotli, and optional zstd packaged TinyGo examples, including the
 dashboard-sized pressure-test example, the context selector example, and the
-virtualized collections, multi-package workspace, and child-entry workspace
-examples, plus the hash-router example.
+virtualized collections, multi-package workspace, child-entry workspace,
+hash-router, and router-dashboard reference examples.
 `scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
 budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
 regression probes.
@@ -209,13 +210,18 @@ events, browser startup, compilation, packaging, and serving. It is not a good
 measure of platform value because it contains almost no application behavior.
 
 `examples/dashboard` is the first dashboard-sized pressure test. It keeps all
-components in one Go package because GOX does not yet support component
-namespaces, but splits layout, metrics, filters, table, and detail components
-across multiple GOX files. It models 300 deterministic rows and exercises
-search, filters, sorting, keyed row identity, selection, metric updates, and a
-small document-title effect. The table is physically virtualized with
-`gf.VirtualTable`, so the logical row count can stay dashboard-sized while the
-mounted DOM remains bounded.
+components in one Go package, but splits layout, metrics, filters, table, and
+detail components across multiple GOX files. It models 300 deterministic rows
+and exercises search, filters, sorting, keyed row identity, selection, metric
+updates, and a small document-title effect. The table is physically
+virtualized with `gf.VirtualTable`, so the logical row count can stay
+dashboard-sized while the mounted DOM remains bounded.
+
+`examples/router-dashboard` is the first reference-grade integrated app. It
+uses a child entry package, internal packages, the hash router, query-driven
+filters, controlled form state, synchronous validation, and stable shell
+composition without adding a data-loading framework or schema validation
+library.
 
 Future editor-sized experiments should measure startup, update time, memory,
 compressed transfer size, and development ergonomics before broader conclusions
