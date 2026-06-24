@@ -80,6 +80,16 @@
 - Artifact and module path regression gates.
 - CI and release hygiene documentation.
 
+### Fixed
+
+- Resource loader panics no longer leave the internal effect slot pending, so a
+  same-key rerender after failed state does not automatically restart the same
+  panicking loader. Explicit retry remains available through `reload` or key
+  change, and first completion still wins if a loader resolves or rejects before
+  panicking.
+- The resource example browser loader now releases cancelled promise/timer
+  callbacks on inactive response paths.
+
 ### Planned
 
 - CI pipeline tuning after the first public pull requests.

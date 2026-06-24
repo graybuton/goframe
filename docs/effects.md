@@ -161,6 +161,13 @@ Resource loaders are expected to release browser timers, abort controllers,
 subscriptions, or other retained handles from their cleanup. Late `resolve` or
 `reject` calls after cleanup are ignored by the resource generation guard.
 
+Resource loader setup panics are resource-specific. In recover-capable builds,
+the resource wrapper reports `gf.ErrorPhaseEffect`, completes the current
+generation as failed if panic was the first completion, and lets the internal
+effect slot finish. A same-key rerender therefore does not retry a panicking
+loader automatically. Use `reload` or a key change to start a new generation.
+This does not change ordinary `UseEffect` body panic behavior.
+
 ## Limitations
 
 - No `UseEffect` dependency inference.

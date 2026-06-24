@@ -309,7 +309,11 @@ resources.
 Ordinary loader rejection is modeled as `ResourceFailed`, not as a render
 panic, and it does not activate an Error Boundary. Loader setup panics are
 effect-phase runtime errors and also leave the resource in failed state where
-recover is available. See [component-scoped resources](resources.md).
+recover is available. A loader panic completes the current resource effect run,
+so a same-key rerender does not retry it automatically; retry is explicit via
+`reload` or key change. If the loader already resolved or rejected before
+panicking, that first completion remains authoritative while the panic is still
+reported once. See [component-scoped resources](resources.md).
 
 ## DOM stability regression
 

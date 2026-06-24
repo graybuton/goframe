@@ -103,9 +103,12 @@ effect does not register a cleanup. The component remains mounted. A later
 render may queue and retry the effect according to the normal dependency rules.
 
 `UseResource` starts loaders through this same after-patch effect path. A
-loader setup panic reports `ErrorPhaseEffect` and leaves the resource in failed
-state where recover is available. Ordinary `reject(err)` is not a runtime
-panic; it is represented as `ResourceFailed`.
+loader setup panic is handled by the resource wrapper: it reports
+`ErrorPhaseEffect`, leaves the current generation in failed state when panic is
+the first completion, and marks that resource effect run complete so an
+ordinary same-key rerender does not restart the loader. Explicit retry still
+uses `reload()` or a key change. Ordinary `reject(err)` is not a runtime panic;
+it is represented as `ResourceFailed`.
 
 ### Effect Cleanup
 

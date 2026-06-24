@@ -154,9 +154,23 @@ Ordinary loader rejection is application data state. It becomes
 
 Loader panic happens while the loader starts inside an effect. In
 recover-capable builds, GoFrame records a failed resource state with an
-internal error and then lets the existing effect containment report
-`gf.ErrorPhaseEffect`. No cleanup is registered if the loader did not return
-one.
+internal error when the generation has not already completed, reports one
+`gf.ErrorPhaseEffect`, and treats that resource effect as finished for the
+current key. Same-key rerenders do not automatically retry a panicking loader.
+Retry is explicit: call the returned `reload` function or change the resource
+key.
+
+For one generation, the first completion still wins even when the loader later
+panics. If the loader calls `resolve(value)` and then panics, the resource
+remains `ResourceReady` with that value and the panic is still reported once.
+If the loader calls `reject(err)` and then panics, the resource remains
+`ResourceFailed` with the original error and the panic is still reported once.
+The internal loader-panic error is used only when panic is the first
+completion.
+
+No cleanup is registered when the loader panics before returning one. The
+resource wrapper handles this panic itself so the generic `UseEffect` panic
+semantics are unchanged.
 
 MVP 28 does not add `ErrorPhaseResource`.
 
