@@ -99,6 +99,8 @@ func LoadIssues(key string, resolve func([]Issue), reject func(error)) gf.Cleanu
 	})
 	responseThen = js.FuncOf(func(this js.Value, args []js.Value) any {
 		if !active {
+			releasePromiseFuncs()
+			releaseTimer()
 			return nil
 		}
 		if len(args) == 0 {
@@ -130,9 +132,7 @@ func LoadIssues(key string, resolve func([]Issue), reject func(error)) gf.Cleanu
 			return
 		}
 		active = false
-		if timer.Type() == js.TypeNumber {
-			releaseTimer()
-		}
+		releaseTimer()
 		controller.Call("abort")
 	}
 }
