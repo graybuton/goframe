@@ -42,7 +42,8 @@ Out of scope:
 - server resources, server functions, or external data fetching;
 - async resource framework or Suspense-like behavior;
 - history-mode router or server fallback automation;
-- route loaders, middleware, auth guards, or route-level Error Boundary API;
+- route loaders, middleware, auth guards, or automatic route-level Error
+  Boundary policy;
 - schema validation library or large form registry;
 - XML-style namespace tags, spread props, or broad template syntax;
 - LSP, formatter, Player/Engine, `.gfapp`, or production deployment server.
@@ -153,5 +154,5 @@ After this pass, likely next work should focus on one of:
 - a careful external data/resource model;
 - browser support and deployment documentation hardening;
 - public-preview compatibility policy;
-- route-level error UI after Error Boundaries are designed;
+- route-level error UI helpers after scoped Error Boundaries have more usage;
 - deeper accessibility review for forms and virtualized tables.

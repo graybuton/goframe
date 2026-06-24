@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document records the measurable baseline through MVP 25. It is a
+This document records the measurable baseline through MVP 27. It is a
 decision aid for future runtime and tooling work, not a claim that GoFrame is
 production-ready.
 
@@ -16,9 +16,10 @@ The baseline covers:
 
 - Go, race, vet, debug-tag, and GOX golden tests;
 - TinyGo raw, gzip, brotli, and zstd size budgets;
-- browser smoke behavior for Todo, duplicate keys, dashboard, context,
-  virtualized collections, the multi-package example, the child-entry example,
-  the hash-router example, and the router-dashboard reference example;
+- browser smoke behavior for Todo, duplicate keys, runtime errors, Error
+  Boundaries, dashboard, context, virtualized collections, the multi-package
+  example, the child-entry example, the hash-router example, and the
+  router-dashboard reference example;
 - dashboard DOM pressure and listener stability;
 - pure runtime benchmark reports;
 - package, export, artifact, and module path safety gates.
@@ -36,6 +37,9 @@ These failures should block CI or a PR:
 - `scripts/artifact-check.sh` or `scripts/module-path-check.sh` fails.
 - `scripts/size-budget.sh` exceeds a raw or compressed WASM budget.
 - Browser smoke reports a harness failure or app failure.
+- Error Boundary smoke fails to report a render failure once, switch to
+  fallback UI, reset cleanly, preserve shell identity, or keep nested-boundary
+  bubbling semantics.
 - A smoke app loads from the wrong origin or cannot validate WASM MIME type.
 - Dashboard mounted `.issue-row` count becomes unbounded.
 - Dashboard DOM pressure shows live DOM growth across Open -> All cycles.
@@ -68,8 +72,8 @@ CDP node drift as an investigation signal, not a failure by itself.
 
 ## Current Baseline
 
-Updated during the public preview hardening pass from local `main` after the
-hash router baseline.
+Updated during the Error Boundary hardening pass from local `main` after the
+public preview hardening baseline.
 
 Tool versions:
 
@@ -105,6 +109,7 @@ Current verification includes:
 - `node --experimental-websocket scripts/dashboard-dom-pressure.mjs`
 - `scripts/artifact-check.sh`
 - `scripts/module-path-check.sh`
+- `node scripts/docs-check.mjs`
 
 ## Size Baseline
 
@@ -112,16 +117,16 @@ TinyGo packaged WASM sizes:
 
 | Example | Raw | gzip | br | zstd |
 |---|---:|---:|---:|---:|
-| counter | 83540 | 33574 | 27965 | 30155 |
-| components | 89188 | 35206 | 29301 | 31556 |
-| todo | 117399 | 44995 | 37552 | 40479 |
-| dashboard | 168618 | 62895 | 50775 | 55100 |
-| context | 115344 | 43248 | 35584 | 38452 |
-| virtualized | 123134 | 47419 | 38837 | 42090 |
-| multipackage | 94344 | 36856 | 30767 | 33102 |
-| cmdapp | 94370 | 36844 | 30745 | 33115 |
-| router | 114706 | 43589 | 36122 | 39020 |
-| router-dashboard | 164091 | 61876 | 49842 | 53830 |
+| counter | 83550 | 33578 | 28000 | 30158 |
+| components | 89198 | 35217 | 29238 | 31563 |
+| todo | 117409 | 44989 | 37487 | 40506 |
+| dashboard | 168628 | 62883 | 50808 | 55093 |
+| context | 115354 | 43252 | 35569 | 38445 |
+| virtualized | 123144 | 47417 | 38780 | 42098 |
+| multipackage | 94354 | 36850 | 30728 | 33175 |
+| cmdapp | 94380 | 36839 | 30720 | 33124 |
+| router | 114716 | 43602 | 36062 | 39026 |
+| router-dashboard | 164098 | 61873 | 49731 | 53810 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.
@@ -133,6 +138,9 @@ snapshot, not a second budget file.
 - Todo DOM identity, controlled input behavior, localStorage, keyed reorder,
   and event listener stability.
 - Duplicate key debug diagnostics.
+- Runtime error containment for event/effect/cleanup panic reporting.
+- Scoped render Error Boundary fallback, reset, nested bubbling, and failed
+  protected-subtree cleanup behavior.
 - Dashboard focus, search, selection, sorting, filters, reducer-safe row
   toggles, virtual table layout, spacer stability, and bounded scroll churn.
 - Context selector rerender isolation.
@@ -164,13 +172,13 @@ CI budget yet.
 | All logical rows | 300 |
 | All mounted row max | 28 |
 | Open mounted row max | 28 |
-| Average All duration | 47.78 ms |
-| Max All duration | 64.7 ms |
+| Average All duration | 53.71 ms |
+| Max All duration | 67 ms |
 | Average All created nodes | 621 |
 | Average All removed nodes | 69 |
-| Average All runtime render | 11.65 ms |
-| Average All script | 12.75 ms |
-| Average All layout | 3.70 ms |
+| Average All runtime render | 14.17 ms |
+| Average All script | 17.75 ms |
+| Average All layout | 3.73 ms |
 | Live DOM All start/end | 486 -> 486 |
 | Net listeners All start/end | 0 -> 0 |
 | Post-idle live DOM nodes | 486 |
@@ -215,13 +223,13 @@ Current benchmark output is informational:
 
 | Benchmark | Current sample |
 |---|---:|
-| DirtyQueuePruning | 192.7 ns/op |
-| MatchChildIndicesKeyed | 10483 ns/op |
-| MatchChildIndicesUnkeyed | 2448 ns/op |
-| SplitProps | 2296 ns/op |
-| EventNameNormalization | 331.3 ns/op |
-| StateSlotAccess | 346.4 ns/op |
-| UnwrapKeyedNode | 8.350 ns/op |
+| DirtyQueuePruning | 387.8 ns/op |
+| MatchChildIndicesKeyed | 11468 ns/op |
+| MatchChildIndicesUnkeyed | 1935 ns/op |
+| SplitProps | 1324 ns/op |
+| EventNameNormalization | 162.0 ns/op |
+| StateSlotAccess | 295.0 ns/op |
+| UnwrapKeyedNode | 8.403 ns/op |
 
 Use these numbers to spot large regressions, but do not gate on exact values
 until the benchmark environment is controlled.

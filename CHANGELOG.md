@@ -65,6 +65,10 @@
   import-path-aware generated component identity, clearer unsupported selector
   diagnostics, example refactors away from wrapper-only cross-package
   components, and VS Code syntax highlighting updates.
+- Scoped render-only Error Boundaries with `gf.ErrorBoundary`,
+  `gf.ErrorBoundaryProps`, `gf.ErrorBoundaryContext`, manual reset,
+  `ResetKey`, nested-boundary behavior, Go/WASM browser smoke coverage, and
+  lifecycle safety tests for failed render subtrees.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

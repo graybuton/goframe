@@ -81,6 +81,8 @@ other during scroll, filter, and sort updates.
 If `Header`, `RenderRow`, or `Empty` panics, the runtime reports a render-phase
 error with a virtual-table operation label. `RenderRow` falls back to an empty
 content row with the configured `ColumnCount`, so the table tree remains valid.
+These virtual callback fallbacks are local to the virtualized primitive and do
+not switch a surrounding `gf.ErrorBoundary` to fallback UI.
 
 ## Range Calculation
 
@@ -127,7 +129,8 @@ for static append-only lists, but it is not recommended for filtered, sorted,
 or mutable data. The dashboard uses issue IDs as virtual row keys.
 
 If `VirtualList.RenderItem` panics, the runtime reports a render-phase error
-and falls back to an empty item subtree for that slot.
+and falls back to an empty item subtree for that slot. This is also a local
+virtualization fallback rather than an Error Boundary capture.
 
 ## Dashboard Pressure
 

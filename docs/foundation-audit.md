@@ -115,8 +115,9 @@ Runtime risks that remain:
   may panic if types change.
 - `Set` after unmount mutates the detached state slot but does not schedule.
   This is safe for now but there is no warning.
-- Lifecycle hooks now cover mount/effect/unmount cleanup, but there is still no
-  context, error boundary, async lifecycle, or external DOM mutation recovery.
+- Historical MVP 9 note: lifecycle hooks covered mount/effect/unmount cleanup,
+  while context selectors, render Error Boundaries, async lifecycle, and
+  external DOM mutation recovery were not yet available.
 - Event listener release depends on runtime unmount/replace paths; external
   DOM mutation remains outside runtime ownership.
 
@@ -324,9 +325,9 @@ Remaining safety risks:
 - Component identity does not include Go function identity.
 - State and lifecycle slots are positional and do not support conditional hook
   ordering.
-- Lifecycle/effects are intentionally minimal. Context is scoped and
-  selector-based, but there are still no error boundaries, async effects, or
-  priorities.
+- Historical MVP 9 note: lifecycle/effects were intentionally minimal. Context
+  selectors and scoped render Error Boundaries were added later; async effects
+  and priorities remain out of scope.
 - Memoization is explicit and opt-in via `MemoEqual` on props. Automatic
   memoization is intentionally avoided to keep runtime behavior predictable.
 - GOX parser remains a focused parser, not a full Go-aware frontend.

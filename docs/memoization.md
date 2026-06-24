@@ -68,7 +68,9 @@ other compared prop tracks that data.
 
 If `MemoEqual` panics, GoFrame reports `gf.ErrorPhaseMemo` through the runtime
 error handler and falls back to rendering instead of skipping. A broken
-comparator should not be able to freeze stale UI behind a bailout.
+comparator should not be able to freeze stale UI behind a bailout. Scoped
+`gf.ErrorBoundary` components do not switch to fallback UI for memo comparator
+panics; they catch descendant render-path failures only.
 
 ## Interaction with keys and identity
 

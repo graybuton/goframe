@@ -118,6 +118,8 @@ should prefer GOX markup for structure.
 - Runtime error reporting API and exact phase containment behavior:
   `gf.SetErrorHandler`, `gf.ErrorInfo`, `gf.ErrorHandler`, and
   `gf.ErrorPhase`.
+- Scoped render Error Boundary API: `gf.ErrorBoundary`,
+  `gf.ErrorBoundaryProps`, and `gf.ErrorBoundaryContext`.
 - Hash router details such as route remount policy, declaration-order matching
   edge cases, link props, query helper edge cases, and browser listener
   internals.
@@ -168,7 +170,7 @@ Not stable:
 
 - path/history-mode routing and server fallback behavior;
 - file-based routing, route loaders, route middleware, and route-level error
-  boundaries;
+  boundary policy;
 - schema validation or a form framework;
 - external data/resource story;
 - SSR/hydration;
@@ -180,7 +182,8 @@ Not stable:
 - advanced accessibility/keyboard model for tables;
 - LSP/formatter behavior;
 - stable callback hook;
-- error boundaries;
+- full Error Boundary model beyond scoped render fallback and reset;
+- automatic route-level Error Boundaries;
 - production deployment server behavior.
 
 ## Road To Public Preview
