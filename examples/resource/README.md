@@ -1,10 +1,13 @@
 # Resource
 
-This example demonstrates the experimental `gf.UseResource` primitive.
+This focused example demonstrates the experimental `gf.UseResource` primitive.
 
 It loads small packaged text assets through browser `fetch`, but the runtime
 resource API itself is transport-agnostic. The fetch, parsing, delay, and abort
 logic live in the example under `internal/data`.
+
+For an integrated app that combines resources with router/query/forms/Error
+Boundary patterns, start with `examples/router-dashboard`.
 
 ## Run
 
@@ -20,5 +23,7 @@ goxc serve ./examples/resource --port=8080
 - `Load Slow Open` followed by `Load Fast All` demonstrates stale completion
   protection.
 - `Toggle panel` unmounts the resource panel and runs loader cleanup.
+- Loader panic semantics are covered by runtime tests; this TinyGo browser
+  smoke focuses on ordinary resource lifecycle behavior.
 - There is no cache, Suspense, route loader, retry policy, JSON helper, or
   runtime fetch API in this MVP.

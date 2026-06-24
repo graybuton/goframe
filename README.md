@@ -28,7 +28,8 @@ Current baseline includes:
   clean workspace commands;
 - multi-package GOX workspaces, child entry packages such as `./cmd/app`, and
   import-aware generated component identity;
-- documented forms/validation patterns and a router-dashboard reference app;
+- documented forms/validation patterns and a resource-backed router-dashboard
+  reference app;
 - CI gates for Go/GOX tests, TinyGo size budgets, browser smoke, artifact
   checks, module path checks, and docs consistency.
 
@@ -119,6 +120,36 @@ size is not the main concern:
 goxc package ./examples/counter --compiler=go
 ```
 
+## Start Here
+
+Recommended first path:
+
+```text
+examples/counter
+  -> examples/components
+  -> examples/router-dashboard
+```
+
+`examples/router-dashboard` is the flagship reference app. It shows how the
+current primitives fit together in a small Go-first SPA/dashboard/admin-style
+application: stable shell, hash router, query filters, component-scoped
+resource data, explicit loading/failed UI, controlled form validation, and a
+render Error Boundary.
+
+Focused deep dives:
+
+- `examples/router`: routing only;
+- `examples/resource`: resource lifecycle, stale completion, failure, and
+  cleanup;
+- `examples/context`: scoped providers and selector consumers;
+- `examples/virtualized`: fixed-height bounded DOM;
+- `examples/todo`: controlled inputs, effects, events, and list helpers.
+
+Toolchain/layout examples: `examples/multipackage` and `examples/cmdapp`.
+Pressure/performance example: `examples/dashboard`.
+
+For the guided path, read [GoFrame Tutorial](docs/tutorial.md).
+
 ## Examples
 
 ### Quickstart
@@ -136,7 +167,7 @@ goxc package ./examples/counter --compiler=go
 | `examples/context` | Scoped providers, selector consumers, broad `UseContext`, nested providers. | `goxc package ./examples/context --compiler=tinygo` |
 | `examples/virtualized` | `gf.VirtualList`, `gf.VirtualTable`, bounded DOM with 10,000 logical rows. | `goxc package ./examples/virtualized --compiler=tinygo` |
 | `examples/router` | Hash router, query helpers, route params, not-found route, and stable shell layout. | `goxc package ./examples/router --compiler=tinygo` |
-| `examples/resource` | Experimental `gf.UseResource`, explicit loading/ready/failed state, stale completion guards, and example-local browser fetch. | `goxc package ./examples/resource --compiler=tinygo` |
+| `examples/resource` | Focused `gf.UseResource` lifecycle: loading/ready/failed state, stale completion guards, reload, and cleanup. | `goxc package ./examples/resource --compiler=tinygo` |
 
 ### Toolchain / Layout
 
@@ -150,7 +181,7 @@ goxc package ./examples/counter --compiler=go
 | Example | What it demonstrates | Command |
 |---|---|---|
 | `examples/dashboard` | Reducer dispatch, explicit memoization, virtual table, dashboard pressure smoke. | `goxc package ./examples/dashboard --compiler=tinygo` |
-| `examples/router-dashboard` | Router, query-state filters, controlled form validation, and Go-first layout. | `goxc package ./examples/router-dashboard --compiler=tinygo` |
+| `examples/router-dashboard` | Flagship reference app: router, query-state filters, component-scoped resource data, forms, validation, Error Boundary, and Go-first layout. | `goxc package ./examples/router-dashboard --compiler=tinygo` |
 
 Serve any packaged example with:
 
@@ -446,6 +477,7 @@ infrastructure.
 
 Start here:
 
+- [GoFrame Tutorial](docs/tutorial.md)
 - [Architecture and toolchain boundaries](docs/architecture.md)
 - [Runtime model](docs/runtime-model.md)
 - [GOX language and diagnostics](docs/gox-language.md)

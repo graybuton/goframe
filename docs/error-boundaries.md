@@ -210,6 +210,11 @@ put the boundary inside selected route handlers. This keeps routing and error
 UI policy separate. Automatic route-level error pages, route loaders, and
 Suspense-style resource fallback remain future work.
 
+`examples/router-dashboard` follows this model: the stable shell and
+component-scoped data owner remain mounted, route content is wrapped in an
+explicit render boundary, and ordinary `ResourceFailed` state renders a failed
+resource panel instead of switching to boundary fallback.
+
 The lower-level Go props/`Children` form remains valid for hand-written runtime
 code and tests, but the package-qualified GOX style is the recommended
 application-facing shape.

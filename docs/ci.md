@@ -65,10 +65,11 @@ render Error Boundary fallback/reset behavior, dashboard-sized
 filtering/sorting/selection behavior, context selector rerender isolation,
 virtualized collection scroll/selection/toggle behavior, a multi-package GOX
 workspace smoke, a child-entry package smoke, hash-router navigation smoke, and
-the router-dashboard reference app smoke for query filters plus form
-validation. It also covers the resource example for explicit loading/ready/
-failed state, reload, stale completion guards, and cleanup-after-unmount
-behavior.
+the router-dashboard reference app smoke for query filters, form validation,
+single-owner resource loading, no duplicate reloads across navigation/query
+changes, manual reload, explicit resource failure UI, and stable shell
+identity. It also covers the resource example for explicit loading/ready/failed
+state, reload, stale completion guards, and cleanup-after-unmount behavior.
 
 The runtime error containment and Error Boundary fixtures are compiled with the
 Go WASM compiler so `recover` semantics are available. The size-oriented TinyGo
@@ -227,8 +228,9 @@ duplicate key diagnostics failures, dashboard filter/sort regressions,
 virtualized collection window regressions, or listener churn regressions.
 Router smoke failures include broken hash navigation, missing route params,
 not-found fallback regressions, browser back handling regressions, query helper
-regressions, form validation regressions in the reference app, or unstable
-shell layout identity.
+regressions, form validation regressions in the reference app, duplicate
+reference-app data loads on navigation/query changes, resource failure escaping
+to Error Boundary fallback UI, or unstable shell layout identity.
 Resource smoke failures include broken loading/ready/failed transitions, stale
 completion updates, cleanup-after-unmount regressions, or resource failures
 escaping into Error Boundary fallback UI.

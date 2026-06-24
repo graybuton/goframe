@@ -34,7 +34,7 @@ In scope:
 - public API surface review;
 - router query parsing and URL building helpers;
 - form patterns based on existing event, state, and reducer primitives;
-- reference example using local deterministic data only;
+- reference example using local deterministic packaged data only;
 - browser smoke and size budget coverage for the reference example;
 - README and docs alignment.
 
@@ -103,12 +103,18 @@ It demonstrates:
 - query-driven filters for an issues list;
 - controlled edit form with local validation;
 - touched/dirty/submit state;
-- local deterministic data only;
+- local deterministic packaged data only;
 - not-found route and stable shell layout.
 
 MVP 26 refines the same example to use package-qualified component tags such
 as `<layout.Shell>` and `<filters.FilterControls>`, replacing the earlier
 cross-package props-struct function-call workaround.
+
+MVP 29 keeps this same example as the flagship reference app and integrates the
+later component-scoped resource and scoped render Error Boundary primitives:
+packaged data flows through one stable app-local resource owner, route pages
+render explicit loading/failed state, and render failures remain separate from
+ordinary resource failures.
 
 It is intentionally smaller than `examples/dashboard`. The existing dashboard
 remains the pressure test; the new example is the user-facing reference app.
@@ -145,9 +151,10 @@ MVP 25 does not introduce:
 - Forms remain patterns rather than a library. This is deliberate, but users
   who want schema validation still need app-level code.
 - Router state remains hash-based only.
-- The reference app is local and deterministic; it does not answer the broader
+- The reference app is local and deterministic; it demonstrates packaged data
+  plus one component-scoped resource owner, but it does not answer the broader
   external data, global cache, or route-loader story. MVP 28's component
-  resource primitive is a smaller explicit-state step.
+  resource primitive remains a smaller explicit-state step.
 
 ## Next Steps
 

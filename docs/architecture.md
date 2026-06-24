@@ -175,17 +175,17 @@ TinyGo is the preferred lightweight experiment. It supports a smaller runtime
 surface but dramatically reduces the counter:
 
 ```text
-counter bundle.wasm          83,540 bytes
-components bundle.wasm       89,188 bytes
-todo bundle.wasm            117,399 bytes
-dashboard bundle.wasm       168,618 bytes
-context bundle.wasm         115,344 bytes
-virtualized bundle.wasm     123,134 bytes
-multipackage bundle.wasm     94,344 bytes
-cmdapp bundle.wasm           94,370 bytes
-router bundle.wasm          114,706 bytes
-router-dashboard bundle.wasm 164,091 bytes
-resource bundle.wasm        147,562 bytes
+counter bundle.wasm          83,550 bytes
+components bundle.wasm       89,198 bytes
+todo bundle.wasm            117,409 bytes
+dashboard bundle.wasm       168,628 bytes
+context bundle.wasm         115,354 bytes
+virtualized bundle.wasm     123,144 bytes
+multipackage bundle.wasm     94,354 bytes
+cmdapp bundle.wasm           94,380 bytes
+router bundle.wasm          114,716 bytes
+router-dashboard bundle.wasm 225,649 bytes
+resource bundle.wasm        147,673 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -221,11 +221,12 @@ updates, and a small document-title effect. The table is physically
 virtualized with `gf.VirtualTable`, so the logical row count can stay
 dashboard-sized while the mounted DOM remains bounded.
 
-`examples/router-dashboard` is the first reference-grade integrated app. It
+`examples/router-dashboard` is the flagship reference-grade integrated app. It
 uses a child entry package, internal packages, the hash router, query-driven
-filters, controlled form state, synchronous validation, and stable shell
-composition without adding a data-loading framework or schema validation
-library.
+filters, one component-scoped resource owner for packaged issue data,
+controlled form state, synchronous validation, scoped render Error Boundary
+composition, and stable shell composition without adding route loaders, a
+global cache, server resources, or a schema validation library.
 
 `examples/resource` is the first resource-loading probe. It uses
 component-scoped `gf.UseResource` with example-local browser fetch, text

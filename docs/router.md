@@ -199,6 +199,17 @@ The shell is an ordinary component that stays mounted while `RouterView`
 changes the route content inside it. This gives applications a stable layout
 without a nested route DSL.
 
+When route pages share component-scoped data, keep the resource owner above the
+shell/router if data should survive route transitions:
+
+```text
+App -> IssueProvider -> Shell -> RouterView
+```
+
+`examples/router-dashboard` uses this pattern. It is still ordinary component
+composition, not a route loader system, global cache, or automatic preload
+policy.
+
 ## Browser Back/Forward
 
 Browser back and forward work through the native hash history stack. Since
