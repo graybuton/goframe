@@ -90,10 +90,14 @@ try {
     const beforeFallbackPanic = await probe(client);
     await click(client, "[data-testid='eb-trigger-inner-fallback-panic']");
     await waitForSelector(client, "[data-testid='eb-nested-outer-fallback']", "inner fallback panic bubbles to outer");
+    await waitForAbsent(client, "[data-testid='eb-nested-inner-fallback']", "inner fallback removed after outer capture");
     await waitForProbe(client, (current) =>
         current.reports.length === beforeFallbackPanic.reports.length + 1 &&
-        current.reports.at(-1).component === "ErrorBoundary",
-    "fallback panic report");
+        current.reports.at(-1).component === "InnerFallback",
+    "fallback component panic report");
+    await waitForStableReportCount(client, beforeFallbackPanic.reports.length + 1, "fallback component panic");
+    await assertShellSame(client, "shell after nested fallback panic");
+    await assertListenerNetStable(client, "nested fallback panic");
 
     const beforeNoBoundary = await probe(client);
     await click(client, "[data-testid='eb-trigger-no-boundary-error']");
@@ -181,6 +185,24 @@ async function waitForProbe(client, predicate, label) {
         await wait(100);
     }
     throw new Error(`APP FAILURE: timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+}
+
+async function waitForStableReportCount(client, expected, label) {
+    await waitForProbe(client, (current) => current.reports.length === expected, `${label} report count`);
+    for (let i = 0; i < 5; i++) {
+        await wait(100);
+        const current = await probe(client);
+        if (current.reports.length !== expected) {
+            throw new Error(`APP FAILURE: unstable report count after ${label}; expected=${expected}; current=${JSON.stringify(current)}`);
+        }
+    }
+}
+
+async function assertListenerNetStable(client, label) {
+    const current = await probe(client);
+    if (current.listenerAudit.add !== current.listenerAudit.remove) {
+        throw new Error(`APP FAILURE: listener net changed during ${label}; audit=${JSON.stringify(current.listenerAudit)}`);
+    }
 }
 
 async function waitForSelector(client, selector, label) {

@@ -99,7 +99,7 @@ func NestedBoundaryScenario(props NestedBoundaryScenarioProps) gf.Node {
 		Children: []gf.Node{
 			gf.ErrorBoundary(gf.ErrorBoundaryProps{
 				Fallback: func(gf.ErrorBoundaryContext) gf.Node {
-					return InnerFallback(InnerFallbackProps{Crash: props.FallbackCrash})
+					return gf.Component("InnerFallback", InnerFallbackProps{Crash: props.FallbackCrash}, InnerFallback)
 				},
 				Children: []gf.Node{
 					gf.Component("NestedRisky", NestedRiskyProps{Broken: props.Broken}, NestedRisky),
