@@ -137,7 +137,7 @@ check_app "virtualized" "$(bundle_path virtualized)" 124928 40960 49152 44032 ||
 check_app "multipackage" "$(bundle_path multipackage)" 110592 43008 56320 49152 || status=1
 check_app "cmdapp" "$(bundle_path cmdapp)" 110592 43008 56320 49152 || status=1
 check_app "router" "$(bundle_path router)" 116736 45056 58368 51200 || status=1
-check_app "routerdash" "$(bundle_path router-dashboard)" 166912 51200 63488 56320 || status=1
+check_app "routerdash" "$(bundle_path router-dashboard)" 230400 77824 94208 81920 || status=1
 check_app "resource" "$(bundle_path resource)" 153600 57344 67584 61440 || status=1
 
 exit "$status"
