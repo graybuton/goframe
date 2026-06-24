@@ -24,7 +24,7 @@ func TestErrorBoundaryCapturesDescendantRenderPanic(t *testing.T) {
 	if len(errors()) != 1 {
 		t.Fatalf("runtime reports = %d, want 1", len(errors()))
 	}
-	if !boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase == errorBoundaryProtected {
 		t.Fatal("boundary did not enter failed state")
 	}
 
@@ -62,6 +62,39 @@ func TestErrorBoundaryFirstErrorWinsUntilReset(t *testing.T) {
 	}
 }
 
+func TestErrorBoundaryCapturedPhaseRemainsEligibleBeforeFallback(t *testing.T) {
+	resetRuntimeBoundaryTestState()
+	errors := captureRuntimeErrors(t)
+	outer := testErrorBoundaryInstance("", func(ErrorBoundaryContext) Node {
+		return Text("outer")
+	}, nil)
+	renderComponentInstance(outer)
+	inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+		return Text("inner")
+	}, nil)
+	renderComponentInstance(inner)
+
+	renderComponentInstance(testComponentInstanceWithParent("FirstRisky", inner, func() Node {
+		panic("first protected")
+	}))
+	if inner.errorBoundary.phase != errorBoundaryCaptured {
+		t.Fatalf("inner phase after first capture = %d, want captured", inner.errorBoundary.phase)
+	}
+	renderComponentInstance(testComponentInstanceWithParent("SecondRisky", inner, func() Node {
+		panic("second protected")
+	}))
+
+	if got := inner.errorBoundary.info.Panic; got != "first protected" {
+		t.Fatalf("inner original panic = %v, want first protected", got)
+	}
+	if outer.errorBoundary.phase != errorBoundaryProtected {
+		t.Fatal("captured inner boundary should remain eligible before fallback activation")
+	}
+	if len(errors()) != 2 {
+		t.Fatalf("runtime reports = %d, want both protected panics: %#v", len(errors()), errors())
+	}
+}
+
 func TestNestedErrorBoundaryNearestWinsAndFallbackPanicBubbles(t *testing.T) {
 	resetRuntimeBoundaryTestState()
 	outer := testErrorBoundaryInstance("", func(ErrorBoundaryContext) Node {
@@ -77,10 +110,10 @@ func TestNestedErrorBoundaryNearestWinsAndFallbackPanicBubbles(t *testing.T) {
 		panic("inner child")
 	}))
 
-	if !inner.errorBoundary.failed {
+	if inner.errorBoundary.phase == errorBoundaryProtected {
 		t.Fatal("inner boundary should catch nearest child")
 	}
-	if outer.errorBoundary.failed {
+	if outer.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatal("outer boundary should stay healthy for inner child error")
 	}
 
@@ -93,11 +126,101 @@ func TestNestedErrorBoundaryNearestWinsAndFallbackPanicBubbles(t *testing.T) {
 	if _, ok := rendered.(EmptyNode); !ok {
 		t.Fatalf("inner fallback panic render = %#v, want EmptyNode", rendered)
 	}
-	if !outer.errorBoundary.failed {
+	if outer.errorBoundary.phase == errorBoundaryProtected {
 		t.Fatal("outer boundary should catch inner fallback panic")
 	}
 	if got := outer.errorBoundary.info.Component; got != "ErrorBoundary" {
 		t.Fatalf("outer captured component = %q, want ErrorBoundary", got)
+	}
+}
+
+func TestErrorBoundaryFallbackComponentPanicSkipsDisplayingBoundary(t *testing.T) {
+	resetRuntimeBoundaryTestState()
+	errors := captureRuntimeErrors(t)
+	outer := testErrorBoundaryInstance("", func(ErrorBoundaryContext) Node {
+		return Text("outer")
+	}, nil)
+	renderComponentInstance(outer)
+	inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+		return Component("FallbackExploder", struct{}{}, func(struct{}) Node {
+			panic("fallback component boom")
+		})
+	}, nil)
+	renderComponentInstance(inner)
+
+	renderComponentInstance(testComponentInstanceWithParent("Risky", inner, func() Node {
+		panic("protected boom")
+	}))
+	if inner.errorBoundary.phase == errorBoundaryProtected {
+		t.Fatal("inner boundary should capture protected child before fallback")
+	}
+	if got := inner.errorBoundary.info.Panic; got != "protected boom" {
+		t.Fatalf("inner original panic = %v, want protected boom", got)
+	}
+	if outer.errorBoundary.phase != errorBoundaryProtected {
+		t.Fatal("outer should stay healthy after inner protected child error")
+	}
+
+	fallback := requireKeyedNode(t, renderComponentInstance(inner))
+	fallbackComponent, ok := fallback.Node.(ComponentNode)
+	if !ok {
+		t.Fatalf("inner fallback node = %#v, want ComponentNode", fallback.Node)
+	}
+	rendered := renderComponentInstance(newComponentInstance(fallbackComponent, "", inner, nil))
+	if _, ok := rendered.(EmptyNode); !ok {
+		t.Fatalf("fallback component panic render = %#v, want EmptyNode", rendered)
+	}
+
+	if got := inner.errorBoundary.info.Panic; got != "protected boom" {
+		t.Fatalf("inner incident was replaced by fallback panic: %v", got)
+	}
+	if outer.errorBoundary.phase == errorBoundaryProtected {
+		t.Fatal("outer boundary should capture fallback component panic")
+	}
+	if got := outer.errorBoundary.info.Component; got != "FallbackExploder" {
+		t.Fatalf("outer captured component = %q, want FallbackExploder", got)
+	}
+	if len(errors()) != 2 {
+		t.Fatalf("runtime reports = %d, want exactly 2: %#v", len(errors()), errors())
+	}
+	renderComponentInstance(outer)
+	renderComponentInstance(inner)
+	if len(errors()) != 2 {
+		t.Fatalf("rerender without new panic changed reports to %d: %#v", len(errors()), errors())
+	}
+}
+
+func TestErrorBoundaryFallbackComponentPanicWithoutOuterDoesNotSelfCapture(t *testing.T) {
+	resetRuntimeBoundaryTestState()
+	errors := captureRuntimeErrors(t)
+	boundary := testErrorBoundaryInstance("", func(ErrorBoundaryContext) Node {
+		return Component("FallbackExploder", struct{}{}, func(struct{}) Node {
+			panic("fallback component boom")
+		})
+	}, nil)
+	renderComponentInstance(boundary)
+	renderComponentInstance(testComponentInstanceWithParent("Risky", boundary, func() Node {
+		panic("protected boom")
+	}))
+
+	fallback := requireKeyedNode(t, renderComponentInstance(boundary))
+	if boundary.errorBoundary.phase != errorBoundaryFallback {
+		t.Fatalf("boundary phase = %d, want fallback", boundary.errorBoundary.phase)
+	}
+	fallbackComponent, ok := fallback.Node.(ComponentNode)
+	if !ok {
+		t.Fatalf("fallback node = %#v, want ComponentNode", fallback.Node)
+	}
+	renderComponentInstance(newComponentInstance(fallbackComponent, "", boundary, nil))
+
+	if got := boundary.errorBoundary.info.Panic; got != "protected boom" {
+		t.Fatalf("boundary self-captured fallback panic and replaced incident with %v", got)
+	}
+	if boundary.errorBoundary.phase != errorBoundaryFallback {
+		t.Fatalf("boundary phase after fallback panic = %d, want fallback", boundary.errorBoundary.phase)
+	}
+	if len(errors()) != 2 {
+		t.Fatalf("runtime reports = %d, want protected plus fallback panics: %#v", len(errors()), errors())
 	}
 }
 
@@ -114,7 +237,7 @@ func TestErrorBoundaryDoesNotCatchRuntimeInvariantPanic(t *testing.T) {
 	assertPanic(t, "goframe: invariant", func() {
 		renderComponentInstance(child)
 	})
-	if boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatal("boundary should not catch runtime invariant panic")
 	}
 }
@@ -135,7 +258,7 @@ func TestErrorBoundaryManualResetRemountsProtectedSubtree(t *testing.T) {
 	reset()
 	reset()
 
-	if boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatal("boundary stayed failed after reset")
 	}
 	if !boundary.dirty {
@@ -174,7 +297,7 @@ func TestErrorBoundaryResetKeyClearsFailedBoundaryOnly(t *testing.T) {
 		Fallback: func(ErrorBoundaryContext) Node { return Text("fallback") },
 	}).(ComponentNode)
 	reset := requireKeyedNode(t, renderComponentInstance(boundary))
-	if boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatal("ResetKey change should clear failed boundary")
 	}
 	if reset.Key == healthy.Key {
@@ -322,7 +445,7 @@ func TestErrorBoundaryDoesNotCaptureEffectOrMemoPhases(t *testing.T) {
 	})
 	renderComponentInstance(effectChild)
 	flushPendingEffects()
-	if boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatal("effect setup panic should not switch boundary")
 	}
 
@@ -334,7 +457,7 @@ func TestErrorBoundaryDoesNotCaptureEffectOrMemoPhases(t *testing.T) {
 	if shouldSkipComponentRender(memoChild, node, "") {
 		t.Fatal("memo panic should not skip")
 	}
-	if boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatal("memo comparator panic should not switch boundary")
 	}
 }
@@ -354,7 +477,7 @@ func TestInitialContextSelectorPanicCanBeCapturedByBoundaryRenderPath(t *testing
 		return Empty()
 	}))
 
-	if !boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase == errorBoundaryProtected {
 		t.Fatal("initial selector panic should flow through render boundary")
 	}
 }
@@ -370,7 +493,7 @@ func TestVirtualRenderCallbacksKeepLocalFallbackBehavior(t *testing.T) {
 		panic("virtual boom")
 	}, VirtualItem[int]{Item: 1})
 
-	if boundary.errorBoundary.failed {
+	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatal("virtual callback local fallback should not switch surrounding boundary")
 	}
 }
