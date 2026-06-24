@@ -4,7 +4,7 @@
 
 Error Boundaries add a small scoped fallback UI for render failures. They build
 on the runtime error reporting model from MVP 23 without turning GoFrame into a
-React-style boundary, Suspense, or async resource framework.
+React-style boundary, Suspense, or route-level resource framework.
 
 The boundary scope is intentionally narrow: it catches render-path failures in
 descendant component subtrees, reports them through the existing global runtime
@@ -79,6 +79,8 @@ They do not catch:
 
 Those phases keep the MVP 23 semantics and continue to report through
 `SetErrorHandler` without switching the boundary to fallback UI.
+Ordinary `gf.UseResource` rejection is explicit `ResourceFailed` state, not a
+render failure, so it also does not switch a boundary to fallback UI.
 
 Initial context selector panics happen during component render. They still
 report `ErrorPhaseContext`, then flow through render containment and can be
@@ -205,8 +207,8 @@ component style used elsewhere:
 
 Apps that want a stable shell can still keep the shell outside `RouterView` and
 put the boundary inside selected route handlers. This keeps routing and error
-UI policy separate. Automatic route-level error pages, loaders, async
-resources, and Suspense remain future work.
+UI policy separate. Automatic route-level error pages, route loaders, and
+Suspense-style resource fallback remain future work.
 
 The lower-level Go props/`Children` form remains valid for hand-written runtime
 code and tests, but the package-qualified GOX style is the recommended
@@ -231,7 +233,7 @@ They should not be treated as proof that runtime recover handlers execute.
 - No full Error Boundary component API beyond fallback and reset.
 - No route-level automatic boundary.
 - No event/effect/cleanup containment through boundaries.
-- No async resources or Suspense-like model.
+- No Suspense-like resource throwing or route loader model.
 - No stack trace parsing or source-map integration.
 - No production crash-reporting integration.
 - No special TinyGo recover-capable packaging profile yet.
@@ -244,4 +246,4 @@ Future stages may consider:
 - recover-capable TinyGo package mode if the size tradeoff is acceptable;
 - richer app diagnostics or debug probes;
 - optional crash reporting integration points;
-- async resource/error semantics, if GoFrame later adds a resource model.
+- route-level resource/error semantics if repeated app patterns justify them.

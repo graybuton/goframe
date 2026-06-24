@@ -7,8 +7,8 @@ hash-based router designed for static hosting, Go-first route declarations, and
 stable layout composition.
 
 This is not a full application framework. There is no file-based routing,
-server routing, route loader system, async resource model, Suspense-like
-behavior, middleware, auth guard, or automatic route-level boundary policy.
+server routing, route loader system, Suspense-like resource behavior,
+middleware, auth guard, or automatic route-level boundary policy.
 
 ## Scope
 
@@ -31,6 +31,7 @@ The router intentionally does not support:
 - server fallback automation;
 - full query-state management;
 - route loaders or data fetching;
+- automatic integration with `UseResource`;
 - nested route/layout DSL;
 - scroll restoration;
 - code splitting;
@@ -149,7 +150,7 @@ Semantics:
 - malformed percent escapes are preserved literally instead of panicking.
 
 This is not a full query-state manager. There are no typed codecs, no automatic
-state binding, no route loaders, and no external data fetching story in MVP 25.
+state binding, no route loaders, and no automatic resource integration.
 
 ## RouterView
 
@@ -226,8 +227,8 @@ func issuesRoute(ctx gf.RouteContext) gf.Node {
 ```
 
 This keeps route matching separate from application error UI policy. Automatic
-route-level error elements, route loaders, async resources, and Suspense-like
-behavior remain future work.
+route-level error elements, route loaders, resource preloading, and
+Suspense-like behavior remain future work.
 
 ## Deployment Notes
 
@@ -244,7 +245,8 @@ development-only and does not implement a production fallback policy.
 - No file-based routes.
 - No XML-style namespace tags with `:` and no arbitrary selector-chain GOX
   tags beyond `packageAlias.Component`.
-- No route loaders or async resources.
+- No route loaders, resource preloading, or automatic `UseResource`
+  integration.
 - No automatic route-level Error Boundary installation.
 - No middleware or auth guards.
 - No scroll restoration.

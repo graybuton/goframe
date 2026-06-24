@@ -189,7 +189,7 @@ GoFrame does not provide:
 - server submit actions;
 - automatic field registration;
 - form context;
-- route loaders/resources;
+- route loaders or automatic resource binding;
 - query-state binding;
 - browser-native constraint validation wrappers;
 - file upload helpers.

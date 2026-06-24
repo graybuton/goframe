@@ -19,8 +19,9 @@ Current baseline includes:
 
 - GOX expression ergonomics and source-oriented diagnostics;
 - component boundaries, state, reducer dispatch, effects, context selectors,
-  memoization, keyed reconciliation, fixed-height virtualization, and a small
-  hash-based client router with tiny query helpers;
+  memoization, keyed reconciliation, fixed-height virtualization,
+  component-scoped resources, and a small hash-based client router with tiny
+  query helpers;
 - runtime error reporting plus scoped render-only Error Boundaries for
   recover-capable builds;
 - cache-safe packaging, hidden `.goframe` workspace output, export safety, and
@@ -33,9 +34,10 @@ Current baseline includes:
 
 Non-goals for the current project surface include SSR, hydration,
 Player/Engine implementation, path/history-mode routing, file-based routing,
-route loaders, dynamic virtualization, infinite loading, LSP, formatter,
-XML-style namespace tags, spread props, schema validation framework,
-production deployment server, and full multi-module monorepo support.
+route loaders, Suspense-style resources, global resource caching, dynamic
+virtualization, infinite loading, LSP, formatter, XML-style namespace tags,
+spread props, schema validation framework, production deployment server, and
+full multi-module monorepo support.
 
 ## What Is GoFrame?
 
@@ -134,6 +136,7 @@ goxc package ./examples/counter --compiler=go
 | `examples/context` | Scoped providers, selector consumers, broad `UseContext`, nested providers. | `goxc package ./examples/context --compiler=tinygo` |
 | `examples/virtualized` | `gf.VirtualList`, `gf.VirtualTable`, bounded DOM with 10,000 logical rows. | `goxc package ./examples/virtualized --compiler=tinygo` |
 | `examples/router` | Hash router, query helpers, route params, not-found route, and stable shell layout. | `goxc package ./examples/router --compiler=tinygo` |
+| `examples/resource` | Experimental `gf.UseResource`, explicit loading/ready/failed state, stale completion guards, and example-local browser fetch. | `goxc package ./examples/resource --compiler=tinygo` |
 
 ### Toolchain / Layout
 
@@ -459,6 +462,7 @@ Runtime topics:
 - [Context selectors](docs/context.md)
 - [Virtualized collections](docs/virtualization.md)
 - [Client router](docs/router.md)
+- [Component-scoped resources](docs/resources.md)
 - [Component identity strategy](docs/component-identity.md)
 - [Component identity next steps](docs/component-identity-next.md)
 
@@ -490,6 +494,7 @@ Examples:
 - [Child entry package example](examples/cmdapp/README.md)
 - [Router example](examples/router/README.md)
 - [Router dashboard reference example](examples/router-dashboard/README.md)
+- [Resource loading example](examples/resource/README.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 
 ## Current Limitations
@@ -511,6 +516,9 @@ Examples:
 - Error Boundaries are render-only and recover-based. Default TinyGo
   `panic=trap` builds compile the API but are not the proof path for boundary
   containment.
+- Resources are component-scoped and explicit-state only. There is no global
+  resource cache, Suspense-style render blocking, route loader framework, or
+  runtime fetch/JSON API.
 - Duplicate key diagnostics are debug-only.
 - TinyGo compatibility remains version- and feature-dependent.
 

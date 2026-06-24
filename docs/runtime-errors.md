@@ -7,8 +7,9 @@ panics need clear runtime semantics. MVP 23 defined how the runtime reports and
 contains common user-code failures. MVP 27 adds a narrow scoped Error Boundary
 for descendant render failures.
 
-This is still not Suspense, an async resource model, route loaders, or a
-route-level error framework.
+This is still not Suspense, a route loader framework, or a route-level error
+framework. MVP 28 resources use explicit component state rather than
+panic/throw-style render blocking.
 
 ## Current Problem
 
@@ -101,6 +102,11 @@ An effect body panic is reported as `ErrorPhaseEffect` and contained. The failed
 effect does not register a cleanup. The component remains mounted. A later
 render may queue and retry the effect according to the normal dependency rules.
 
+`UseResource` starts loaders through this same after-patch effect path. A
+loader setup panic reports `ErrorPhaseEffect` and leaves the resource in failed
+state where recover is available. Ordinary `reject(err)` is not a runtime
+panic; it is represented as `ResourceFailed`.
+
 ### Effect Cleanup
 
 A cleanup returned by `UseEffect` can run before a rerun or during unmount. If
@@ -112,6 +118,10 @@ cleanup slot, and continues with remaining cleanup work.
 `UseUnmount` cleanup panics are reported as `ErrorPhaseUnmountCleanup`. The
 runtime continues releasing effect slots, context subscriptions, event
 listeners, and other component resources where possible.
+
+Resource loader cleanup panics are reported as `ErrorPhaseEffectCleanup`.
+Cleanup still invalidates that resource generation first, so later callbacks
+from the same run are ignored.
 
 ### Memo Comparators
 
@@ -179,6 +189,9 @@ Boundary rules:
 Boundaries do not catch event, effect, cleanup, memo comparator, or context
 selector update failures. Those phases keep the phase-specific containment
 listed above and continue to report through `SetErrorHandler`.
+Ordinary resource failed state is also not a boundary incident; applications
+render loading, ready, and failed UI explicitly from the returned
+`gf.Resource[T]`.
 
 See [Error Boundaries](error-boundaries.md) for lifecycle details and the
 TinyGo panic-mode matrix.
@@ -227,7 +240,7 @@ the size and behavior tradeoff is acceptable.
 - Error Boundaries catch render-path failures only.
 - No automatic route-level Error Boundary installation.
 - No route-level error handling.
-- No async resource or Suspense-style model.
+- No Suspense-style resource throwing, render blocking, or route loader model.
 - No production crash reporting integration.
 - Context selector containment during initial render is report + re-panic.
 - TinyGo trap-style panic builds cannot provide recover-based containment.
