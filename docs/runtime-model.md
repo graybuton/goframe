@@ -278,8 +278,8 @@ such as filters. `gf.WithQuery` builds normalized route targets for
 
 The recommended layout model is a stable shell component with `RouterView` as
 an outlet. There is no nested route DSL, file-based routing, path/history-mode
-server fallback, route loader system, or route-level Error Boundary API in this
-MVP. See [client router](router.md).
+server fallback, route loader system, or automatic route-level Error Boundary
+API in this MVP. See [client router](router.md).
 
 ## DOM stability regression
 
@@ -367,22 +367,35 @@ effect cleanup, and `UseUnmount` cleanup panics are also reported and
 contained, with later cleanup work continuing where possible.
 
 Memo comparator panics report `ErrorPhaseMemo` and fall back to "do not skip
-render." Component render panics report `ErrorPhaseRender` and render
-`gf.Empty()` for that pass. Future state or parent updates may retry the
-component. Context selector panics during provider notification keep the
-previous selected value; selector panics during initial render report and flow
-through render containment.
+render." Component render panics report `ErrorPhaseRender`. Without an Error
+Boundary, the runtime renders `gf.Empty()` for that pass. With a nearest active
+`gf.ErrorBoundary`, the failed render still returns `gf.Empty()` immediately,
+but the boundary records the incident, cancels pending effects under the
+protected subtree, and patches to fallback UI. Manual reset or `ResetKey`
+clears the incident and remounts children fresh.
+
+Error Boundary state is internally modeled as protected, captured, or fallback.
+The displaying boundary is skipped while rendering its fallback subtree, so a
+fallback component panic is not self-captured by the same boundary. It bubbles
+to the nearest outer boundary, or uses the default render fallback when there
+is no outer boundary. These phases are runtime internals, not public API.
+
+Context selector panics during provider notification keep the previous selected
+value; selector panics during initial render report and flow through render
+containment.
 
 Runtime invariant panics whose message starts with `goframe:` remain hard
 programmer errors. Examples include invalid hook order, calling hooks outside
 render, unsupported effect dependency types, invalid component types, and
 invalid virtualization dimensions.
 
-This is not a full Error Boundary API. There is no component-level fallback UI,
-route-level error page, async resource model, or production crash reporting
-integration yet. The current TinyGo package path uses trap-style panic lowering,
-so recover-based containment is only available in recover-capable builds such
-as Go/WASM and Go tests. See [runtime error semantics](runtime-errors.md).
+Error Boundaries are render-only. Event, effect, cleanup, memo, and context
+update failures keep their phase-specific MVP 23 behavior and do not switch a
+boundary to fallback UI. There is no route-level error page, async resource
+model, or production crash reporting integration yet. The current TinyGo
+package path uses trap-style panic lowering, so recover-based containment is
+only available in recover-capable builds such as Go/WASM and Go tests. See
+[runtime error semantics](runtime-errors.md) and [Error Boundaries](error-boundaries.md).
 
 ## Debug probes
 
@@ -434,7 +447,8 @@ The dependency-free headless Chrome probe verifies:
   measurement, infinite loading, or keyboard navigation;
 - hash routing only; no path/history-mode server fallback, file-based routing,
   route loaders, or nested route layout DSL;
-- no error boundaries;
+- Error Boundaries are render-only and recover-based; no automatic route-level
+  boundary or async resource error model;
 - GOX-generated component identity uses a typed token derived from package
   import path when `goxc` knows it, with package-name fallback for lower-level
   generation helpers. Legacy `gf.Component` still uses string identity.

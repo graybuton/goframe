@@ -116,6 +116,8 @@ effect run. If an effect cleanup panics, the runtime reports
 `gf.ErrorPhaseEffectCleanup`, clears that cleanup slot, and continues later
 cleanup work where possible. `UseUnmount` cleanup panics report
 `gf.ErrorPhaseUnmountCleanup` and do not stop other cleanup slots from running.
+Scoped `gf.ErrorBoundary` components do not catch effect, effect cleanup, or
+unmount cleanup panics; boundaries are render-only.
 
 ## Hook Slots
 

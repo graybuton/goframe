@@ -116,6 +116,7 @@ type componentInstance struct {
 	contextIndex     int
 	contextProviders map[int]*contextProvider
 	providedContexts []int
+	errorBoundary    *errorBoundaryState
 	dirty            bool
 	dirtyCounted     bool
 	dirtyDescendants int
@@ -183,11 +184,15 @@ func renderComponentInstance(instance *componentInstance) (rendered Node) {
 				panic(recovered)
 			}
 			finishComponentContextRender(instance)
-			reportRecoveredRuntimeError(ErrorInfo{
+			cancelPendingEffectsForRenderFailure(instance)
+			info := ErrorInfo{
 				Phase:     ErrorPhaseRender,
 				Component: runtimeComponentName(instance),
 				Operation: "component render",
-			}, recovered)
+				Panic:     recovered,
+			}
+			reportRuntimeError(info)
+			captureRenderErrorBoundary(instance, info)
 			rendered = Empty()
 		}
 	}()
@@ -312,4 +317,5 @@ func deactivateComponent(instance *componentInstance) {
 	instance.contextSlots = nil
 	instance.contextProviders = nil
 	instance.providedContexts = nil
+	instance.errorBoundary = nil
 }

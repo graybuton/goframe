@@ -8,7 +8,7 @@ stable layout composition.
 
 This is not a full application framework. There is no file-based routing,
 server routing, route loader system, async resource model, Suspense-like
-behavior, middleware, auth guard, or route-level error boundary API.
+behavior, middleware, auth guard, or automatic route-level boundary policy.
 
 ## Scope
 
@@ -210,8 +210,24 @@ Route handlers run as render work. If a route handler panics, MVP 23 runtime
 error containment reports it as a render error and uses the normal render
 fallback behavior.
 
-The router does not provide route-level error elements or error pages in MVP
-24. A full Error Boundary API remains future work.
+MVP 27 adds scoped render-only `gf.ErrorBoundary`. The router does not install
+one automatically, but route handlers can wrap page content explicitly:
+
+```go
+func issuesRoute(ctx gf.RouteContext) gf.Node {
+	return gf.ErrorBoundary(gf.ErrorBoundaryProps{
+		ResetKey: ctx.Path,
+		Fallback: routeFallback,
+		Children: []gf.Node{
+			pages.Issues(pages.IssuesProps{}),
+		},
+	})
+}
+```
+
+This keeps route matching separate from application error UI policy. Automatic
+route-level error elements, route loaders, async resources, and Suspense-like
+behavior remain future work.
 
 ## Deployment Notes
 
@@ -229,7 +245,7 @@ development-only and does not implement a production fallback policy.
 - No XML-style namespace tags with `:` and no arbitrary selector-chain GOX
   tags beyond `packageAlias.Component`.
 - No route loaders or async resources.
-- No route-level ErrorBoundary API.
+- No automatic route-level Error Boundary installation.
 - No middleware or auth guards.
 - No scroll restoration.
 - No active link helper.
@@ -241,7 +257,7 @@ development-only and does not implement a production fallback policy.
 Potential future router work should be separate from this MVP:
 
 - path/history mode with documented deployment fallback;
-- route-level error UI after Error Boundaries exist;
+- route-level error UI helpers if repeated application patterns justify them;
 - loader/resource integration;
 - nested route layout DSL if Go-first composition proves insufficient;
 - active link helpers;

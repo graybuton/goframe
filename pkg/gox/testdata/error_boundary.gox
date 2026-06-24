@@ -1,0 +1,14 @@
+package demo
+
+import (
+	pages "github.com/example/app/internal/pages"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func View(routeKey string, fallback func(gf.ErrorBoundaryContext) gf.Node) gf.Node {
+	return (
+		<gf.ErrorBoundary ResetKey={routeKey} Fallback={fallback}>
+			<pages.Risky />
+		</gf.ErrorBoundary>
+	)
+}

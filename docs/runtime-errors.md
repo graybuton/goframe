@@ -3,9 +3,12 @@
 ## Purpose
 
 GoFrame is still experimental, but applications are now large enough that user
-panics need clear runtime semantics. MVP 23 defines how the runtime reports and
-contains common user-code failures without adding a full Error Boundary,
-Suspense, route-level error boundary, or async resource model.
+panics need clear runtime semantics. MVP 23 defined how the runtime reports and
+contains common user-code failures. MVP 27 adds a narrow scoped Error Boundary
+for descendant render failures.
+
+This is still not Suspense, an async resource model, route loaders, or a
+route-level error framework.
 
 ## Current Problem
 
@@ -73,13 +76,16 @@ When no safe fallback exists, the runtime reports and re-panics.
 
 ### Component Render
 
-A component render panic is reported as `ErrorPhaseRender`. The MVP 23 fallback
-is `gf.Empty()` for that render. This keeps the mounted component instance and
-anchor range alive while replacing its rendered child subtree with an empty
-comment node.
+A component render panic is reported as `ErrorPhaseRender`.
 
-Future updates may retry the component render. This is containment, not a
-component-level error UI. A full Error Boundary API remains future work.
+If the failing component has an active ancestor `gf.ErrorBoundary`, the nearest
+boundary captures the first incident, cancels pending effects under its
+protected subtree, and renders fallback UI on the next patch. The failing render
+still returns `gf.Empty()` for that immediate pass so reconciliation can finish
+deterministically.
+
+If no boundary exists, the fallback remains the MVP 23 behavior: `gf.Empty()`
+for that render. Future state or parent updates may retry the component.
 
 ### Event Handlers
 
@@ -130,8 +136,52 @@ consumer dirty from that failed selector evaluation.
 
 `VirtualList.RenderItem`, `VirtualTable.Header`, `VirtualTable.RenderRow`, and
 `VirtualTable.Empty` are user render callbacks. Panics are reported as render
-errors with operation labels such as `VirtualTable.RenderRow`. The fallback is
-an empty item or row subtree, matching component render containment.
+errors with operation labels such as `VirtualTable.RenderRow`. These callbacks
+keep their local empty item/row fallback behavior in MVP 27 rather than
+switching surrounding boundaries, because they are invoked by virtualization
+primitives rather than a distinct user component boundary.
+
+## Error Boundaries
+
+`gf.ErrorBoundary` is a scoped render fallback primitive:
+
+```go
+gf.ErrorBoundary(gf.ErrorBoundaryProps{
+    ResetKey: routeKey,
+    Fallback: func(ctx gf.ErrorBoundaryContext) gf.Node {
+        return retryPanel(ctx.Info, ctx.Reset)
+    },
+    Children: []gf.Node{content},
+})
+```
+
+In GOX:
+
+```gox
+<gf.ErrorBoundary ResetKey={routeKey} Fallback={fallback}>
+    <pages.Content />
+</gf.ErrorBoundary>
+```
+
+Boundary rules:
+
+- nearest active boundary wins;
+- nested inner boundaries catch before outer boundaries;
+- a boundary does not catch failures from the fallback subtree it is currently
+  displaying;
+- fallback subtree failures can be captured by an outer boundary;
+- first error wins until manual reset or `ResetKey` reset;
+- `ctx.Reset()` remounts the protected subtree fresh;
+- changing `ResetKey` while failed clears the incident and remounts children;
+- runtime invariant panics whose value starts with `goframe:` bypass boundary
+  containment.
+
+Boundaries do not catch event, effect, cleanup, memo comparator, or context
+selector update failures. Those phases keep the phase-specific containment
+listed above and continue to report through `SetErrorHandler`.
+
+See [Error Boundaries](error-boundaries.md) for lifecycle details and the
+TinyGo panic-mode matrix.
 
 ## Default Behavior
 
@@ -153,9 +203,11 @@ lifecycle warnings remain separate.
 ## Browser Smoke Behavior
 
 Browser smoke verifies that recoverable event and cleanup failures do not
-unmount the app or leak listeners. It uses a Go-compiled WASM fixture because
-the current TinyGo package path uses trap-style panic lowering, where panics do
-not return to Go `recover`.
+unmount the app or leak listeners. A separate Error Boundary fixture verifies
+render fallback, retry, `ResetKey`, nested boundaries, and cleanup behavior.
+
+Both fixtures use Go-compiled WASM because the current TinyGo package path uses
+trap-style panic lowering, where panics do not return to Go `recover`.
 
 It should not use timing gates for runtime error behavior.
 
@@ -172,23 +224,10 @@ the size and behavior tradeoff is acceptable.
 
 ## Limitations
 
-- No full Error Boundary component API.
-- No error UI rendering policy.
+- Error Boundaries catch render-path failures only.
+- No automatic route-level Error Boundary installation.
 - No route-level error handling.
 - No async resource or Suspense-style model.
 - No production crash reporting integration.
 - Context selector containment during initial render is report + re-panic.
 - TinyGo trap-style panic builds cannot provide recover-based containment.
-
-## Future Error Boundaries
-
-A future Error Boundary design should decide:
-
-- how boundaries are declared in Go/GOX;
-- whether boundaries catch only render errors or also event/effect errors;
-- how boundary state resets after key changes or route changes;
-- how browser diagnostics and app logging integrate.
-
-MVP 23 deliberately stops before that API. It creates the smaller foundation:
-phase classification, reporting, and deterministic containment where the
-runtime can safely continue.

@@ -68,7 +68,9 @@ GoFrame reports `gf.ErrorPhaseContext`, keeps the previous selected value, and
 does not mark the consumer dirty from that failed selector evaluation. If a
 selector panics during the consumer's own render before a stable previous value
 exists, the panic is reported as a context failure and then flows through normal
-component render error handling.
+component render error handling. A nearest scoped `gf.ErrorBoundary` can catch
+that initial render-path failure, but it does not catch later provider
+notification failures.
 
 ## Broad Consumers
 

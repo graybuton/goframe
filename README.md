@@ -21,6 +21,8 @@ Current baseline includes:
 - component boundaries, state, reducer dispatch, effects, context selectors,
   memoization, keyed reconciliation, fixed-height virtualization, and a small
   hash-based client router with tiny query helpers;
+- runtime error reporting plus scoped render-only Error Boundaries for
+  recover-capable builds;
 - cache-safe packaging, hidden `.goframe` workspace output, export safety, and
   clean workspace commands;
 - multi-package GOX workspaces, child entry packages such as `./cmd/app`, and
@@ -363,7 +365,7 @@ func App() gf.Node {
 ```
 
 The MVP router is hash-based. Path/history mode, file-based routing, loaders,
-route middleware, and route-level error boundaries remain future work.
+route middleware, and automatic route-level boundaries remain future work.
 
 For small URL-driven state, routes expose query helpers:
 
@@ -380,6 +382,18 @@ gf.Navigate(gf.WithQuery("/issues", gf.QueryValues{
 Forms use ordinary runtime primitives: controlled inputs, `gf.InputEvent`,
 `gf.Event.PreventDefault`, and application-owned validation state. GoFrame
 does not include a schema validation framework.
+
+Render failures can be contained with an experimental scoped Error Boundary:
+
+```gox
+<gf.ErrorBoundary ResetKey={routeKey} Fallback={fallback}>
+	<pages.Content />
+</gf.ErrorBoundary>
+```
+
+Boundaries catch descendant render failures, report through
+`gf.SetErrorHandler`, and render fallback UI until reset. They do not catch
+event, effect, cleanup, memo comparator, or context update failures.
 
 ## Toolchain Workflow
 
@@ -439,6 +453,7 @@ Runtime topics:
 
 - [Lifecycle and effects](docs/effects.md)
 - [Runtime error semantics](docs/runtime-errors.md)
+- [Error Boundaries](docs/error-boundaries.md)
 - [Forms and validation patterns](docs/forms.md)
 - [Explicit memoization](docs/memoization.md)
 - [Context selectors](docs/context.md)
@@ -493,6 +508,9 @@ Examples:
   equality.
 - Virtualized collections are fixed-height only; no dynamic measurement,
   infinite loading, or advanced keyboard/accessibility layer yet.
+- Error Boundaries are render-only and recover-based. Default TinyGo
+  `panic=trap` builds compile the API but are not the proof path for boundary
+  containment.
 - Duplicate key diagnostics are debug-only.
 - TinyGo compatibility remains version- and feature-dependent.
 
