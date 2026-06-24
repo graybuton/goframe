@@ -1,0 +1,75 @@
+package ui
+
+import (
+	data "github.com/graybuton/goframe/examples/resource/internal/data"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func ResourcePanel(props ResourcePanelProps) gf.Node {
+	resource, reload := gf.UseResource(props.ResourceKey, data.LoadIssues)
+	attempt, setAttempt := gf.UseState(1)
+
+	return (
+		<section class="resource-panel" data-testid="resource-panel">
+			<div>
+				<p class="resource-muted">Component-scoped loader</p>
+				<h2>Issue resource</h2>
+			</div>
+			<div class="resource-meta">
+				<span data-testid="resource-key">{props.ResourceKey}</span>
+				<span data-testid="resource-attempt">{gf.ToString(attempt)}</span>
+				<span data-testid="resource-status">{resourceStatusText(resource)}</span>
+			</div>
+			<button data-testid="resource-reload" OnClick={func() {
+				setAttempt(attempt + 1)
+				reload()
+			}}>Reload</button>
+			{resource.Loading() && (
+				<p class="resource-status loading" data-testid="resource-loading">
+					Loading packaged issue data...
+				</p>
+			)}
+			{resource.Failed() && (
+				<div class="resource-status failed" data-testid="resource-failed">
+					<strong>Load failed</strong>
+					<p data-testid="resource-error">{resourceErrorText(resource)}</p>
+				</div>
+			)}
+			{resource.Ready() && (
+				<div data-testid="resource-ready">
+					<ul class="resource-items" data-testid="resource-items">
+						{gf.Map(resource.Value, func(issue data.Issue) gf.Node {
+							return <IssueItem Key={issue.ID} Issue={issue} />
+						})}
+					</ul>
+				</div>
+			)}
+		</section>
+	)
+}
+
+func IssueItem(props IssueItemProps) gf.Node {
+	return (
+		<li class="resource-item" data-testid="resource-item">
+			<span><strong>{props.Issue.ID}</strong> {props.Issue.Title}</span>
+			<span class="resource-status-pill">{props.Issue.Status}</span>
+		</li>
+	)
+}
+
+func resourceStatusText(resource gf.Resource[[]data.Issue]) string {
+	if resource.Ready() {
+		return "ready"
+	}
+	if resource.Failed() {
+		return "failed"
+	}
+	return "loading"
+}
+
+func resourceErrorText(resource gf.Resource[[]data.Issue]) string {
+	if resource.Err == nil {
+		return ""
+	}
+	return resource.Err.Error()
+}

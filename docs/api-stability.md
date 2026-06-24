@@ -122,6 +122,9 @@ should prefer GOX markup for structure.
   `gf.ErrorBoundaryProps`, and `gf.ErrorBoundaryContext`.
   Internal boundary phases such as protected, captured, and fallback are not
   public API.
+- Component-scoped resource API and exact lifecycle semantics:
+  `gf.ResourceStatus`, `gf.Resource`, `gf.ResourceLoader`, and
+  `gf.UseResource`.
 - Hash router details such as route remount policy, declaration-order matching
   edge cases, link props, query helper edge cases, and browser listener
   internals.
@@ -174,7 +177,8 @@ Not stable:
 - file-based routing, route loaders, route middleware, and route-level error
   boundary policy;
 - schema validation or a form framework;
-- external data/resource story;
+- global resource cache, transport helpers, route loaders, and Suspense-style
+  resource story;
 - SSR/hydration;
 - Player/Engine or `.gfapp` format;
 - multi-module app support;

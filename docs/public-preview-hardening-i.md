@@ -21,10 +21,11 @@ The current project direction is:
 > GoFrame is an experimental Go-first browser/WASM framework and toolchain for
 > SPA-style and dashboard/admin-class applications.
 
-That direction makes router/query/forms polish more useful than jumping
+That direction made router/query/forms polish more useful than jumping
 directly to data loading, LSP, history routing, Player/Engine work, or a broad
-application convention layer. Small real apps need URL-driven filters and
-forms before they need a large app framework.
+application convention layer. MVP 28 later adds a deliberately small
+component-scoped resource primitive; it does not change the MVP 25 conclusion
+that GoFrame should avoid a large app framework surface.
 
 ## Scope
 
@@ -39,8 +40,8 @@ In scope:
 
 Out of scope:
 
-- server resources, server functions, or external data fetching;
-- async resource framework or Suspense-like behavior;
+- server resources, server functions, or built-in external data fetching;
+- global resource cache, route loaders, or Suspense-like behavior;
 - history-mode router or server fallback automation;
 - route loaders, middleware, auth guards, or automatic route-level Error
   Boundary policy;
@@ -131,8 +132,8 @@ MVP 25 does not introduce:
 
 - a global store;
 - a schema validation package;
-- external data loading;
-- async submit/data resource model;
+- built-in external data loading;
+- async submit, route loader, or Suspense-style resource model;
 - route loaders or route middleware;
 - history-mode routing;
 - production server behavior.
@@ -144,14 +145,15 @@ MVP 25 does not introduce:
 - Forms remain patterns rather than a library. This is deliberate, but users
   who want schema validation still need app-level code.
 - Router state remains hash-based only.
-- The reference app is local and deterministic; it does not answer the future
-  external data/resource story.
+- The reference app is local and deterministic; it does not answer the broader
+  external data, global cache, or route-loader story. MVP 28's component
+  resource primitive is a smaller explicit-state step.
 
 ## Next Steps
 
 After this pass, likely next work should focus on one of:
 
-- a careful external data/resource model;
+- careful app patterns around the component-scoped resource model;
 - browser support and deployment documentation hardening;
 - public-preview compatibility policy;
 - route-level error UI helpers after scoped Error Boundaries have more usage;

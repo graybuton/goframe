@@ -150,6 +150,24 @@ The Todo example uses effects to persist tasks:
 - encoding lives in the example, not in `pkg/goframe`, so the runtime does not
   import `encoding/json`.
 
+## Resource Loaders
+
+`gf.UseResource` builds on the same after-patch timing and cleanup model as
+effects. A resource loader starts only after the component's render has been
+patched, and its cleanup runs when the resource key changes, `reload` starts a
+new generation, or the component unmounts.
+
+Resource loaders are expected to release browser timers, abort controllers,
+subscriptions, or other retained handles from their cleanup. Late `resolve` or
+`reject` calls after cleanup are ignored by the resource generation guard.
+
+Resource loader setup panics are resource-specific. In recover-capable builds,
+the resource wrapper reports `gf.ErrorPhaseEffect`, completes the current
+generation as failed if panic was the first completion, and lets the internal
+effect slot finish. A same-key rerender therefore does not retry a panicking
+loader automatically. Use `reload` or a key change to start a new generation.
+This does not change ordinary `UseEffect` body panic behavior.
+
 ## Limitations
 
 - No `UseEffect` dependency inference.
@@ -158,6 +176,7 @@ The Todo example uses effects to persist tasks:
 - No lifecycle hooks for before-render or before-patch.
 - No automatic component memoization in the GOX compiler or runtime. Memoization is
   explicit via `MemoEqual` on component props and is intentionally opt-in.
-- No route-aware effect lifecycle, SSR, hydration, or async component model.
+- No route-aware effect lifecycle, SSR, hydration, Suspense, or async component
+  model.
 - Hook order changes are unsupported and may panic only when the slot type
   changes.

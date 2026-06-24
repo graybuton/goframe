@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document records the measurable baseline through MVP 27. It is a
+This document records the measurable baseline through MVP 28. It is a
 decision aid for future runtime and tooling work, not a claim that GoFrame is
 production-ready.
 
@@ -19,7 +19,7 @@ The baseline covers:
 - browser smoke behavior for Todo, duplicate keys, runtime errors, Error
   Boundaries, dashboard, context, virtualized collections, the multi-package
   example, the child-entry example, the hash-router example, and the
-  router-dashboard reference example;
+  router-dashboard reference example, and the resource example;
 - dashboard DOM pressure and listener stability;
 - pure runtime benchmark reports;
 - package, export, artifact, and module path safety gates.
@@ -40,6 +40,9 @@ These failures should block CI or a PR:
 - Error Boundary smoke fails to report a render failure once, switch to
   fallback UI, reset cleanly, preserve shell identity, or keep nested-boundary
   bubbling semantics.
+- Resource smoke fails explicit loading/ready/failed transitions, reload,
+  stale-completion guards, cleanup-after-unmount behavior, or non-boundary
+  failed-state semantics.
 - A smoke app loads from the wrong origin or cannot validate WASM MIME type.
 - Dashboard mounted `.issue-row` count becomes unbounded.
 - Dashboard DOM pressure shows live DOM growth across Open -> All cycles.
@@ -102,6 +105,7 @@ Current verification includes:
 - `go test ./examples/cmdapp`
 - `go test ./examples/router`
 - `go test ./examples/router-dashboard`
+- `go test ./examples/resource`
 - `scripts/check.sh`
 - `scripts/size-budget.sh`
 - `scripts/perf-report.sh`
@@ -127,6 +131,7 @@ TinyGo packaged WASM sizes:
 | cmdapp | 94380 | 36839 | 30720 | 33124 |
 | router | 114716 | 43602 | 36062 | 39026 |
 | router-dashboard | 164098 | 61873 | 49731 | 53810 |
+| resource | 147562 | 64576 | 54640 | 58090 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.
@@ -156,6 +161,9 @@ snapshot, not a second budget file.
 - Router-dashboard query filters, browser back query restoration, route params,
   controlled form validation, reset behavior, not-found rendering, and stable
   shell layout.
+- Resource example explicit loading/ready/failed state, reload behavior,
+  stale completion guards, cleanup after unmount, and failed-state behavior
+  that does not activate Error Boundary fallback.
 
 Hard browser gates focus on correctness and structural invariants. Timing
 printed by smoke scripts is useful for trend spotting, but it is not a stable
@@ -172,13 +180,13 @@ CI budget yet.
 | All logical rows | 300 |
 | All mounted row max | 28 |
 | Open mounted row max | 28 |
-| Average All duration | 53.71 ms |
-| Max All duration | 67 ms |
+| Average All duration | 51.08 ms |
+| Max All duration | 68.9 ms |
 | Average All created nodes | 621 |
 | Average All removed nodes | 69 |
-| Average All runtime render | 14.17 ms |
-| Average All script | 17.75 ms |
-| Average All layout | 3.73 ms |
+| Average All runtime render | 14.43 ms |
+| Average All script | 17.48 ms |
+| Average All layout | 4.39 ms |
 | Live DOM All start/end | 486 -> 486 |
 | Net listeners All start/end | 0 -> 0 |
 | Post-idle live DOM nodes | 486 |

@@ -281,6 +281,40 @@ an outlet. There is no nested route DSL, file-based routing, path/history-mode
 server fallback, route loader system, or automatic route-level Error Boundary
 API in this MVP. See [client router](router.md).
 
+## Component-scoped resources
+
+MVP 28 adds an experimental component-scoped resource primitive:
+
+```go
+resource, reload := gf.UseResource(key, loader)
+```
+
+`UseResource` returns explicit `Loading`, `Ready`, or `Failed` state. It starts
+the loader after the current render has been patched, using the same lifecycle
+timing as effects. The first render for a key is always loading; the loader can
+later call `resolve(value)` or `reject(err)` to schedule a normal component
+update.
+
+The resource is owned by the component instance that called the hook. There is
+no global cache or shared registry: two components that use the same key own
+independent resources. Changing the key or calling `reload` invalidates the
+current generation, returns to loading state, runs the previous cleanup exactly
+once, and ignores stale completions before they can dirty the component.
+
+Loaders are transport-agnostic. Browser `fetch`, parsing, timers, abort
+controllers, local storage, or test fakes live in application/example code.
+The runtime does not import `net/http`, `encoding/json`, or browser APIs for
+resources.
+
+Ordinary loader rejection is modeled as `ResourceFailed`, not as a render
+panic, and it does not activate an Error Boundary. Loader setup panics are
+effect-phase runtime errors and also leave the resource in failed state where
+recover is available. A loader panic completes the current resource effect run,
+so a same-key rerender does not retry it automatically; retry is explicit via
+`reload` or key change. If the loader already resolved or rejected before
+panicking, that first completion remains authoritative while the panic is still
+reported once. See [component-scoped resources](resources.md).
+
 ## DOM stability regression
 
 DOM node replacement, component render, patch traversal, DOM mutation, and
@@ -389,10 +423,11 @@ programmer errors. Examples include invalid hook order, calling hooks outside
 render, unsupported effect dependency types, invalid component types, and
 invalid virtualization dimensions.
 
-Error Boundaries are render-only. Event, effect, cleanup, memo, and context
-update failures keep their phase-specific MVP 23 behavior and do not switch a
-boundary to fallback UI. There is no route-level error page, async resource
-model, or production crash reporting integration yet. The current TinyGo
+Error Boundaries are render-only. Event, effect, cleanup, memo, context update,
+and ordinary resource failed states keep their phase-specific behavior and do
+not switch a boundary to fallback UI. There is no route-level error page,
+Suspense-style resource model, or production crash reporting integration yet.
+The current TinyGo
 package path uses trap-style panic lowering, so recover-based containment is
 only available in recover-capable builds such as Go/WASM and Go tests. See
 [runtime error semantics](runtime-errors.md) and [Error Boundaries](error-boundaries.md).
@@ -447,8 +482,11 @@ The dependency-free headless Chrome probe verifies:
   measurement, infinite loading, or keyboard navigation;
 - hash routing only; no path/history-mode server fallback, file-based routing,
   route loaders, or nested route layout DSL;
+- resources are component-scoped explicit state only; no global cache,
+  Suspense-style blocking, route loader integration, or built-in fetch/JSON
+  transport;
 - Error Boundaries are render-only and recover-based; no automatic route-level
-  boundary or async resource error model;
+  boundary or resource fallback model;
 - GOX-generated component identity uses a typed token derived from package
   import path when `goxc` knows it, with package-name fallback for lower-level
   generation helpers. Legacy `gf.Component` still uses string identity.

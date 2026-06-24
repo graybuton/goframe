@@ -17,6 +17,7 @@ MULTIPACKAGE_SMOKE_URL_BASE="${GOFRAME_MULTIPACKAGE_SMOKE_URL:-http://127.0.0.1}
 CMDAPP_SMOKE_URL_BASE="${GOFRAME_CMDAPP_SMOKE_URL:-http://127.0.0.1}"
 ROUTER_SMOKE_URL_BASE="${GOFRAME_ROUTER_SMOKE_URL:-http://127.0.0.1}"
 ROUTER_DASHBOARD_SMOKE_URL_BASE="${GOFRAME_ROUTER_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
+RESOURCE_SMOKE_URL_BASE="${GOFRAME_RESOURCE_SMOKE_URL:-http://127.0.0.1}"
 
 cd "$ROOT_DIR"
 export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
@@ -136,6 +137,11 @@ build_router_smoke_url() {
 build_router_dashboard_smoke_url() {
 	local port="$1"
 	echo "${ROUTER_DASHBOARD_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_resource_smoke_url() {
+	local port="$1"
+	echo "${RESOURCE_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 stop_server() {
@@ -362,6 +368,21 @@ run_with_server ./examples/router-dashboard "$ROUTER_DASHBOARD_PORT" "$ROUTER_DA
 	node --experimental-websocket scripts/router-dashboard-browser-smoke.mjs
 
 echo
+echo "== Resource debug browser smoke =="
+"$GOXC" package ./examples/resource --compiler=tinygo
+(
+	cd ./examples/resource/.goframe/work/dev/examples/resource/cmd/app
+	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+		-o "$ROOT_DIR/examples/resource/.goframe/package/standalone/assets/bundle.wasm" .
+)
+
+RESOURCE_PORT="$(resolve_port "${GOFRAME_RESOURCE_SMOKE_PORT:-}")"
+export GOFRAME_RESOURCE_CHROME_DEBUG_PORT="${GOFRAME_RESOURCE_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+RESOURCE_URL="$(build_resource_smoke_url "$RESOURCE_PORT")"
+run_with_server ./examples/resource "$RESOURCE_PORT" "$RESOURCE_URL" \
+	node --experimental-websocket scripts/resource-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
@@ -371,5 +392,6 @@ echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/cmdapp --compiler=tinygo
 "$GOXC" package ./examples/router --compiler=tinygo
 "$GOXC" package ./examples/router-dashboard --compiler=tinygo
+"$GOXC" package ./examples/resource --compiler=tinygo
 
 echo "browser smoke: ok"

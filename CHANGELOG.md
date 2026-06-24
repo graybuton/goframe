@@ -72,10 +72,23 @@
 - Error Boundary fallback correctness: a boundary no longer self-captures
   failures from the fallback subtree it is currently displaying; those failures
   bubble to an outer boundary or the default render fallback.
+- Component-scoped resource prototype with `gf.UseResource`, explicit
+  loading/ready/failed state, stale completion guards, cleanup/cancellation
+  semantics, and a focused resource example plus browser smoke coverage.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
 - CI and release hygiene documentation.
+
+### Fixed
+
+- Resource loader panics no longer leave the internal effect slot pending, so a
+  same-key rerender after failed state does not automatically restart the same
+  panicking loader. Explicit retry remains available through `reload` or key
+  change, and first completion still wins if a loader resolves or rejects before
+  panicking.
+- The resource example browser loader now releases cancelled promise/timer
+  callbacks on inactive response paths.
 
 ### Planned
 

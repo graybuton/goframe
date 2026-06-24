@@ -1,0 +1,13 @@
+{
+  "name": "resource",
+  "entry": "./cmd/app",
+  "output": "dist",
+  "compiler": "tinygo",
+  "wasm": "bundle.wasm",
+  "assets": [
+    "index.html",
+    "styles.css",
+    "data/issues-open.txt",
+    "data/issues-all.txt"
+  ]
+}

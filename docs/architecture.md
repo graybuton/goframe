@@ -185,6 +185,7 @@ multipackage bundle.wasm     94,344 bytes
 cmdapp bundle.wasm           94,370 bytes
 router bundle.wasm          114,706 bytes
 router-dashboard bundle.wasm 164,091 bytes
+resource bundle.wasm        147,562 bytes
 ```
 
 MVP 8.1 removed reflective props comparison and compiles browser
@@ -197,7 +198,7 @@ The repository includes `scripts/size-budget.sh` as a regression gate for raw,
 gzip, brotli, and optional zstd packaged TinyGo examples, including the
 dashboard-sized pressure-test example, the context selector example, and the
 virtualized collections, multi-package workspace, child-entry workspace,
-hash-router, and router-dashboard reference examples.
+hash-router, router-dashboard reference, and resource loading examples.
 `scripts/perf-report.sh` runs pure runtime benchmarks plus the same size
 budgets, and `scripts/browser-smoke.sh` runs the optional headless Chrome
 regression probes.
@@ -226,6 +227,12 @@ filters, controlled form state, synchronous validation, and stable shell
 composition without adding a data-loading framework or schema validation
 library.
 
+`examples/resource` is the first resource-loading probe. It uses
+component-scoped `gf.UseResource` with example-local browser fetch, text
+parsing, delayed responses, and abort cleanup. It intentionally does not add a
+runtime fetch API, JSON helper, global resource cache, Suspense model, or route
+loader framework.
+
 Future editor-sized experiments should measure startup, update time, memory,
 compressed transfer size, and development ergonomics before broader conclusions
 are drawn.
@@ -243,6 +250,7 @@ The MVP runtime currently has:
 - reducer dispatch that applies actions to the latest component state slot;
 - scoped context providers with selector-based consumer dirtying;
 - component-scoped lifecycle/effect slots;
+- component-scoped explicit-state resources;
 - fixed-height `VirtualList` and `VirtualTable` collection primitives;
 - hash-based client routing through `RouterView`, `RouterLink`, and Go-declared
   routes;

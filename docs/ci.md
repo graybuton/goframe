@@ -31,8 +31,9 @@ and manually through `workflow_dispatch`.
 
 It installs Go, TinyGo `0.41.1`, brotli, and zstd. Then it packages the
 counter, components, todo, dashboard, context, virtualized, multipackage,
-cmdapp, and router examples with TinyGo. It also runs a release-style package
-pass with `--asset-hash --preload --compress=gzip,br` before checking:
+cmdapp, router, router-dashboard, and resource examples with TinyGo. It also
+runs a release-style package pass with `--asset-hash --preload
+--compress=gzip,br` before checking:
 
 ```bash
 scripts/size-budget.sh
@@ -65,7 +66,9 @@ filtering/sorting/selection behavior, context selector rerender isolation,
 virtualized collection scroll/selection/toggle behavior, a multi-package GOX
 workspace smoke, a child-entry package smoke, hash-router navigation smoke, and
 the router-dashboard reference app smoke for query filters plus form
-validation.
+validation. It also covers the resource example for explicit loading/ready/
+failed state, reload, stale completion guards, and cleanup-after-unmount
+behavior.
 
 The runtime error containment and Error Boundary fixtures are compiled with the
 Go WASM compiler so `recover` semantics are available. The size-oriented TinyGo
@@ -226,6 +229,9 @@ Router smoke failures include broken hash navigation, missing route params,
 not-found fallback regressions, browser back handling regressions, query helper
 regressions, form validation regressions in the reference app, or unstable
 shell layout identity.
+Resource smoke failures include broken loading/ready/failed transitions, stale
+completion updates, cleanup-after-unmount regressions, or resource failures
+escaping into Error Boundary fallback UI.
 Error Boundary smoke failures include missing render-failure reports, fallback
 or reset regressions, fallback component self-capture/report-loop regressions,
 nested-boundary bubbling regressions, protected-subtree cleanup regressions, or
