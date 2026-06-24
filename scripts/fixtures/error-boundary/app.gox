@@ -1,0 +1,69 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	broken, setBroken := gf.UseState(false)
+	resetKey, setResetKey := gf.UseState("initial")
+	nestedBroken, setNestedBroken := gf.UseState(false)
+	innerFallbackCrash, setInnerFallbackCrash := gf.UseState(false)
+	noBoundaryBroken, setNoBoundaryBroken := gf.UseState(false)
+
+	return (
+		<main data-testid="eb-shell">
+			<button
+				data-testid="eb-trigger-render-error"
+				OnClick={func() {
+					setBroken(true)
+				}}
+			>
+				Trigger render error
+			</button>
+			<button
+				data-testid="eb-reset-key"
+				OnClick={func() {
+					setBroken(false)
+					setResetKey(resetKey + "!")
+				}}
+			>
+				Reset key
+			</button>
+			<p data-testid="eb-effect-count">{protectedEffectCount}</p>
+			<p data-testid="eb-cleanup-count">{protectedCleanupCount}</p>
+			<gf.ErrorBoundary
+				ResetKey={resetKey}
+				Fallback={makeBoundaryFallback(setBroken)}
+			>
+				<RiskyPanel Broken={broken} />
+			</gf.ErrorBoundary>
+
+			<button
+				data-testid="eb-trigger-nested-error"
+				OnClick={func() {
+					setNestedBroken(true)
+				}}
+			>
+				Trigger nested error
+			</button>
+			<button
+				data-testid="eb-trigger-inner-fallback-panic"
+				OnClick={func() {
+					setInnerFallbackCrash(true)
+				}}
+			>
+				Trigger inner fallback panic
+			</button>
+			<NestedBoundaryScenario Broken={nestedBroken} FallbackCrash={innerFallbackCrash} />
+
+			<button
+				data-testid="eb-trigger-no-boundary-error"
+				OnClick={func() {
+					setNoBoundaryBroken(true)
+				}}
+			>
+				Trigger no-boundary error
+			</button>
+			<NoBoundaryRisky Broken={noBoundaryBroken} />
+		</main>
+	)
+}

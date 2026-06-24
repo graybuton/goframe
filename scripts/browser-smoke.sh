@@ -9,6 +9,7 @@ CHROME_BIN="${CHROME:-google-chrome}"
 TODO_SMOKE_URL_BASE="${GOFRAME_TODO_SMOKE_URL:-http://127.0.0.1}"
 DUPLICATE_SMOKE_URL_BASE="${GOFRAME_DUPLICATE_KEY_SMOKE_URL:-http://127.0.0.1}"
 RUNTIME_ERRORS_SMOKE_URL_BASE="${GOFRAME_RUNTIME_ERRORS_SMOKE_URL:-http://127.0.0.1}"
+ERROR_BOUNDARY_SMOKE_URL_BASE="${GOFRAME_ERROR_BOUNDARY_SMOKE_URL:-http://127.0.0.1}"
 DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
 VIRTUALIZED_SMOKE_URL_BASE="${GOFRAME_VIRTUALIZED_SMOKE_URL:-http://127.0.0.1}"
@@ -95,6 +96,11 @@ build_duplicate_smoke_url() {
 build_runtime_errors_smoke_url() {
 	local port="$1"
 	echo "${RUNTIME_ERRORS_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_error_boundary_smoke_url() {
+	local port="$1"
+	echo "${ERROR_BOUNDARY_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 build_dashboard_smoke_url() {
@@ -239,6 +245,16 @@ export GOFRAME_RUNTIME_ERRORS_CHROME_DEBUG_PORT="${GOFRAME_RUNTIME_ERRORS_CHROME
 RUNTIME_ERRORS_URL="$(build_runtime_errors_smoke_url "$RUNTIME_ERRORS_PORT")"
 run_with_server ./scripts/fixtures/runtime-errors "$RUNTIME_ERRORS_PORT" "$RUNTIME_ERRORS_URL" \
 	node --experimental-websocket scripts/runtime-errors-browser-smoke.mjs
+
+echo
+echo "== Error boundary browser smoke =="
+"$GOXC" package ./scripts/fixtures/error-boundary --compiler=go
+
+ERROR_BOUNDARY_PORT="$(resolve_port "${GOFRAME_ERROR_BOUNDARY_SMOKE_PORT:-}")"
+export GOFRAME_ERROR_BOUNDARY_CHROME_DEBUG_PORT="${GOFRAME_ERROR_BOUNDARY_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+ERROR_BOUNDARY_URL="$(build_error_boundary_smoke_url "$ERROR_BOUNDARY_PORT")"
+run_with_server ./scripts/fixtures/error-boundary "$ERROR_BOUNDARY_PORT" "$ERROR_BOUNDARY_URL" \
+	node --experimental-websocket scripts/error-boundary-browser-smoke.mjs
 
 echo
 echo "== Dashboard debug browser smoke =="
