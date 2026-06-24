@@ -130,6 +130,59 @@ func View() gf.Node {
 	}
 }
 
+func TestGenerateIntoDirectorySupportsQualifiedComponentIdentity(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/example/root\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appDir := filepath.Join(root, "apps", "demo")
+	writeTestFile(t, appDir, "app.gox", `package main
+
+import (
+	ui "github.com/example/root/apps/demo/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func App() gf.Node {
+	return <ui.Layout Title="Demo" />
+}
+`)
+	writeTestFile(t, appDir, "internal/ui/layout.gox", `package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type LayoutProps struct {
+	Title string
+}
+
+func Layout(props LayoutProps) gf.Node {
+	return <section>{props.Title}</section>
+}
+`)
+
+	destination := t.TempDir()
+	if err := generateIntoDirectory(appDir, destination, true); err != nil {
+		t.Fatalf("generateIntoDirectory() error: %v", err)
+	}
+	output := filepath.Join(destination, "app.gox.go")
+	content, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("generated file missing: %v", err)
+	}
+	for _, want := range []string{
+		`gf.NewComponentType("github.com/example/root/apps/demo/internal/ui.Layout", "ui.Layout")`,
+		`gf.ComponentT(_goxComponent_app_ui_Layout, ui.LayoutProps{`,
+		`}, ui.Layout)`,
+	} {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("generated app.gox.go missing %q:\n%s", want, content)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(appDir, "app.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("source tree generated file exists after generateIntoDirectory: %v", err)
+	}
+}
+
 func TestGenerateIntoDirectoryReportsOriginalGOXSource(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/example/root\n\ngo 1.22\n"), 0o644); err != nil {

@@ -11,12 +11,9 @@ func Home(props HomeProps) gf.Node {
 				The shell around it stays mounted while route content changes.
 			</p>
 			<p>
-				{gf.RouterLink(gf.RouterLinkProps{
-					To: "/issues",
-					Class: "router-link",
-					TestID: "router-home-issues-link",
-					Children: []gf.Node{gf.Text("Browse issues")},
-				})}
+				<gf.RouterLink To="/issues" Class="router-link" TestID="router-home-issues-link">
+					Browse issues
+				</gf.RouterLink>
 			</p>
 		</section>
 	)

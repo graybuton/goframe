@@ -173,13 +173,11 @@ inside the route handler.
 
 ## RouterLink
 
-`gf.RouterLink` renders a normal hash link:
+`gf.RouterLink` renders a normal hash link. In GOX, use the package-qualified
+component tag:
 
-```go
-gf.RouterLink(gf.RouterLinkProps{
-    To: "/issues",
-    Children: []gf.Node{gf.Text("Issues")},
-})
+```gox
+<gf.RouterLink To="/issues">Issues</gf.RouterLink>
 ```
 
 The output is an anchor with `href="#/issues"`. MVP 24 does not intercept
@@ -187,16 +185,13 @@ clicks, compute active link classes, or manage focus/scroll restoration.
 
 ## Layout Composition
 
-The MVP layout model is a Go-first composition pattern:
+The MVP layout model is a Go-first composition pattern. In multi-package GOX
+apps, the shell is usually rendered with a package-qualified component tag:
 
-```go
-func App() gf.Node {
-    return layout.Shell(layout.ShellProps{
-        Children: []gf.Node{
-            gf.RouterView(router),
-        },
-    })
-}
+```gox
+<layout.Shell>
+	{gf.RouterView(router)}
+</layout.Shell>
 ```
 
 The shell is an ordinary component that stays mounted while `RouterView`
@@ -231,7 +226,8 @@ development-only and does not implement a production fallback policy.
 
 - Hash routing only.
 - No file-based routes.
-- No namespace tags or GOX syntax changes.
+- No XML-style namespace tags with `:` and no arbitrary selector-chain GOX
+  tags beyond `packageAlias.Component`.
 - No route loaders or async resources.
 - No route-level ErrorBoundary API.
 - No middleware or auth guards.

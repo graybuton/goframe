@@ -1,0 +1,2 @@
+testdata/errors/qualified_dot_alias.gox:4:10: qualified component tags support exactly packageAlias.Component: <.Header>
+  <.Header />

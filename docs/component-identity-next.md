@@ -166,8 +166,9 @@ GOX codegen would need to emit either package-aware names or token variables.
 Direct function calls would remain direct calls. Capitalized tags would keep
 creating component boundaries.
 
-The compiler should continue to reject unsupported namespaces/spread props
-until those features are designed separately.
+The compiler should continue to reject unsupported XML-style namespace syntax,
+selector chains beyond `packageAlias.Component`, and spread props until those
+features are designed separately.
 
 ## Impact On TinyGo Size
 

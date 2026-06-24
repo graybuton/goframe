@@ -40,6 +40,7 @@ The form validation logic is ordinary application Go code.
 The larger `examples/dashboard` remains the DOM pressure test. This example is
 the smaller reference app for router + query state + form patterns.
 
-Stateful cross-package GOX components are exposed through small GOX wrapper
-functions in their own package. The wrapper renders the local capitalized tag,
-so generated code creates a component boundary before other packages call it.
+Cross-package GOX components use package-qualified tags such as
+`<layout.Shell />`, `<filters.FilterControls />`, `<forms.IssueForm />`, and
+`<gf.RouterLink />`. This keeps component boundaries explicit without wrapper
+functions that only forward props across packages.

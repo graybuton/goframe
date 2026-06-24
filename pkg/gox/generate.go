@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
+	"go/parser"
+	gotoken "go/token"
 	"os"
+	pathpkg "path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -43,6 +47,8 @@ func GenerateWithOptions(source []byte, options GenerateOptions) ([]byte, error)
 		componentIdentity = packageNameFromSource(input)
 	}
 	ctx := newCodegenContext(componentIdentity, options.Filename, true)
+	aliases, invalidAliases := importAliasesFromSource(options.Filename, input)
+	ctx.withImportAliases(aliases, invalidAliases)
 	var output bytes.Buffer
 	cursor := 0
 	searchFrom := 0
@@ -168,7 +174,7 @@ func findMarkupStart(input string, from int) int {
 				return -1
 			}
 			index += end + 4
-		case input[index] == '<' && index+1 < len(input) && (isIdentifierStart(input[index+1]) || input[index+1] == '>') && isLikelyMarkupStart(input, index):
+		case input[index] == '<' && index+1 < len(input) && (isIdentifierStart(input[index+1]) || input[index+1] == '.' || input[index+1] == '>') && isLikelyMarkupStart(input, index):
 			return index
 		default:
 			index++
@@ -260,6 +266,37 @@ func packageNameFromSource(input string) string {
 		}
 	}
 	return "main"
+}
+
+func importAliasesFromSource(filename, input string) (map[string]string, map[string]string) {
+	aliases := map[string]string{}
+	invalid := map[string]string{}
+	file, err := parser.ParseFile(gotoken.NewFileSet(), filename, input, parser.ImportsOnly)
+	if err != nil {
+		return aliases, invalid
+	}
+	for _, spec := range file.Imports {
+		importPath, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || importPath == "" {
+			continue
+		}
+		if spec.Name != nil {
+			alias := spec.Name.Name
+			if alias == "_" || alias == "." {
+				invalid[alias] = importPath
+				continue
+			}
+			if validGoIdentifier(alias) {
+				aliases[alias] = importPath
+			}
+			continue
+		}
+		alias := pathpkg.Base(importPath)
+		if validGoIdentifier(alias) {
+			aliases[alias] = importPath
+		}
+	}
+	return aliases, invalid
 }
 
 func insertGeneratedDeclarations(input string, declarations string) string {

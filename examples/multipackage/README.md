@@ -28,17 +28,20 @@ goxc package ./examples/multipackage --compiler=tinygo --asset-hash --preload --
 
 ## What It Proves
 
-The root package imports internal packages through normal Go imports. GOX does
-not add namespace tags such as `<ui.Header />`; cross-package composition uses
-ordinary Go function calls.
+The root package imports internal packages through normal Go imports. GOX can
+render imported components through package-qualified tags such as
+`<ui.Layout />` and `<issues.IssueList />`; the alias must be imported in the
+`.gox` file and the selected component must be exported.
 
-GOX files inside each package still use local capitalized tags. Generated
-component identity uses the package import path when `goxc` can determine it,
-for example:
+Generated component identity uses the package import path when `goxc` can
+determine it, for example:
 
 ```text
 github.com/graybuton/goframe/examples/multipackage/internal/ui.Header
 ```
+
+XML-style namespace syntax such as `<ui:Header />` and selector chains such as
+`<app.ui.Header />` remain unsupported.
 
 `entry: "."` remains supported for apps with packages under the app root. For
 a child-entry layout such as `entry: "./cmd/app"`, see `examples/cmdapp`.

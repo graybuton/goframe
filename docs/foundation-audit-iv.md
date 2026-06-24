@@ -225,7 +225,7 @@ GOX parser/codegen tests and golden tests cover:
 - key pseudo-props;
 - conditional and ternary render expressions;
 - nested GOX markup in callback returns;
-- unsupported spread props and namespace tags with clear errors;
+- unsupported spread props and XML-style namespace tags with clear errors;
 - mismatched/unclosed tags with line/column diagnostics.
 
 No compiler bug was fixed in this audit. Remaining risk: GOX still has no

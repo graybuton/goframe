@@ -25,7 +25,7 @@ Out of scope:
 
 - router, SSR, hydration, Player/Engine implementation, `.gfapp`;
 - dynamic virtualization or infinite loading;
-- LSP, formatter, namespace tags, spread props;
+- LSP, formatter, XML-style namespace tags, spread props;
 - production deployment server;
 - runtime/compiler/toolchain behavior changes.
 

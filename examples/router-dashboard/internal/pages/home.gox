@@ -11,12 +11,9 @@ func Home(props HomeProps) gf.Node {
 				and controlled form validation without a larger app framework.
 			</p>
 			<p>
-				{gf.RouterLink(gf.RouterLinkProps{
-					To: "/issues?status=open",
-					Class: "rd-link",
-					TestID: "rd-home-open-issues",
-					Children: []gf.Node{gf.Text("Open issues")},
-				})}
+				<gf.RouterLink To="/issues?status=open" Class="rd-link" TestID="rd-home-open-issues">
+					Open issues
+				</gf.RouterLink>
 			</p>
 		</section>
 	)

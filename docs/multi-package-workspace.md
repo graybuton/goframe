@@ -2,8 +2,10 @@
 
 MVP 20 added the first `goxc` path for applications with more than one Go
 package. MVP 22 extends that path so the executable entry package can live in
-a child directory such as `./cmd/app`. This is toolchain support, not a
-router, namespace system, or app framework convention.
+a child directory such as `./cmd/app`. MVP 26 adds Go-like package-qualified
+component tags, so cross-package component composition can remain declarative.
+This is toolchain and language support, not a router, XML namespace system, or
+app framework convention.
 
 ## Supported Layout
 
@@ -135,27 +137,53 @@ under `.goframe/work/<profile>` together.
 
 ## Cross-package Components
 
-GOX does not add namespace tags in MVP 22. This remains unsupported:
+GOX supports package-qualified component tags:
 
 ```gox
-<ui.Header />
-```
-
-Use ordinary Go imports and function calls for cross-package composition:
-
-```go
 import ui "github.com/example/app/internal/ui"
 
 func App() gf.Node {
-    return ui.Layout(ui.LayoutProps{Title: "Demo"})
+    return (
+        <ui.Layout Title="Demo">
+            <p>Hello</p>
+        </ui.Layout>
+    )
 }
 ```
 
+The tag form is exactly `packageAlias.Component`; `packageAlias` is the normal
+Go import alias in the current file. Generated component identity uses the
+resolved import path plus component name:
+
+```text
+github.com/example/app/internal/ui.Layout
+```
+
+The generated shape uses the package-qualified props struct and render
+function:
+
+```go
+gf.ComponentT(_goxComponent_app_ui_Layout, ui.LayoutProps{
+    Title: "Demo",
+    Children: []gf.Node{...},
+}, ui.Layout)
+```
+
+Ordinary Go function calls remain valid for helpers and low-level composition,
+but package-qualified tags are the recommended way to create cross-package
+component boundaries in GOX.
+
+Unsupported forms:
+
+```gox
+<ui:Layout />       // XML-style namespace syntax
+<foo.bar.Layout />  // nested selector chain
+<ui.layout />       // selected component is not exported
+<.Layout />         // dot imports are not supported for tags
+```
+
 Inside each package, local capitalized GOX tags still create component
-boundaries with import-aware generated identities. The cross-package function
-call itself is not a runtime component boundary unless that package exposes one
-through its own local GOX-generated component calls or handwritten
-`gf.ComponentT` wrapper.
+boundaries with import-aware generated identities.
 
 ## Entry Path Rules
 
@@ -213,7 +241,8 @@ goxc serve ./examples/router-dashboard --port=8080
 
 ## Current Limitations
 
-- No namespace tags.
+- No XML-style namespace tags with `:`.
+- No arbitrary selector chains beyond `packageAlias.Component`.
 - No full multi-module monorepo story.
 - No file-based router or framework-level layout convention. The hash router
   uses ordinary Go route declarations and stable shell composition.

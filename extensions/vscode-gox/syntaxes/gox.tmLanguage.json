@@ -99,7 +99,7 @@
     },
     "component-tag": {
       "name": "meta.tag.component.gox",
-      "begin": "(<)([A-Z][A-Za-z0-9_]*)",
+      "begin": "(<)((?:[A-Za-z_][A-Za-z0-9_]*\\.)?[A-Z][A-Za-z0-9_]*)",
       "beginCaptures": {
         "1": {
           "name": "punctuation.definition.tag.begin.gox"
@@ -108,7 +108,7 @@
           "name": "entity.name.tag.component.gox"
         }
       },
-      "end": "(/>)|(</)([A-Z][A-Za-z0-9_]*)(>)",
+      "end": "(/>)|(</)((?:[A-Za-z_][A-Za-z0-9_]*\\.)?[A-Z][A-Za-z0-9_]*)(>)",
       "endCaptures": {
         "1": {
           "name": "punctuation.definition.tag.self-closing.gox"

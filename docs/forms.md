@@ -168,10 +168,17 @@ For larger forms:
 - make validation deterministic and synchronous;
 - keep navigation after successful submit explicit with `gf.Navigate`.
 
-When a stateful form lives in another Go package, expose a small local GOX
-wrapper in that package that renders the capitalized form tag. Calling a
-stateful GOX render function directly from another package is just an ordinary
-Go function call and does not create its own component boundary.
+When a stateful form lives in another Go package, prefer a package-qualified
+component tag:
+
+```gox
+<forms.IssueForm Key={issue.ID} Issue={issue} />
+```
+
+That keeps component composition declarative and still gives generated code a
+runtime component boundary. Calling a stateful render function directly from
+another package is just an ordinary Go function call and does not create its
+own component boundary.
 
 ## What GoFrame Does Not Provide Yet
 

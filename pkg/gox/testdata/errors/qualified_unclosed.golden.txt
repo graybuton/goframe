@@ -1,0 +1,1 @@
+testdata/errors/qualified_unclosed.gox:10:1: unclosed tag <ui.Shell>; expected </ui.Shell>

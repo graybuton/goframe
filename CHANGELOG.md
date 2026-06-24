@@ -60,6 +60,11 @@
 - MVP 25 public preview hardening, including router query helpers, documented
   forms/validation patterns, a router-dashboard reference example, browser
   smoke coverage, and public API surface clarification.
+- GOX package-qualified component tags such as `<layout.Shell />`,
+  `<gf.RouterLink />`, and `<filters.FilterControls />`, including
+  import-path-aware generated component identity, clearer unsupported selector
+  diagnostics, example refactors away from wrapper-only cross-package
+  components, and VS Code syntax highlighting updates.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.

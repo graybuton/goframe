@@ -1,0 +1,26 @@
+package demo
+
+import (
+	rows "github.com/example/app/internal/rows"
+	ui "github.com/example/app/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+type Item struct {
+	ID string
+}
+
+func View(items []Item) gf.Node {
+	return (
+		<ui.Shell Title="Dashboard">
+			<gf.RouterLink To="/issues" Class="link">
+				Issues
+			</gf.RouterLink>
+			<ul>
+				{gf.Map(items, func(item Item) gf.Node {
+					return <rows.ItemRow Key={item.ID} Item={item} />
+				})}
+			</ul>
+		</ui.Shell>
+	)
+}

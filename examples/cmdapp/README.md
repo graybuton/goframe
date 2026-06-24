@@ -41,11 +41,18 @@ goxc package ./examples/cmdapp --compiler=tinygo --asset-hash --preload --compre
 GOX files across the whole app root, including `internal/ui` and
 `internal/features/tasks`.
 
-GOX does not add namespace tags such as `<ui.Header />`. Cross-package
-composition uses ordinary Go imports and function calls. Local capitalized tags
-inside each package still get import-aware component identities, for example:
+GOX supports package-qualified component tags such as `<ui.Layout />` and
+`<tasks.TaskList />` for imported packages. These tags are still ordinary Go
+imports under the hood: the alias must be imported in the `.gox` file, and the
+selected component must be exported.
+
+Generated component identity uses the resolved package import path, for
+example:
 
 ```text
 github.com/graybuton/goframe/examples/cmdapp/cmd/app.Header
 github.com/graybuton/goframe/examples/cmdapp/internal/ui.Header
 ```
+
+XML-style namespace syntax such as `<ui:Header />` and selector chains such as
+`<app.ui.Header />` remain unsupported.

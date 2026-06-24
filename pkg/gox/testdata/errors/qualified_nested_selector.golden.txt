@@ -1,0 +1,2 @@
+testdata/errors/qualified_nested_selector.gox:4:10: qualified component tags support exactly packageAlias.Component: <foo.bar.Baz>
+  <foo.bar.Baz />

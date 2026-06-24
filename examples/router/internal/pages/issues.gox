@@ -20,12 +20,9 @@ func IssueLink(props IssueLinkProps) gf.Node {
 	return (
 		<li data-testid="router-issue-item">
 			<span>{props.Item.Title}</span>
-			{gf.RouterLink(gf.RouterLinkProps{
-				To: props.Item.Path(),
-				Class: "router-link",
-				TestID: props.Item.TestID(),
-				Children: linkChildren("Open " + props.Item.ID),
-			})}
+			<gf.RouterLink To={props.Item.Path()} Class="router-link" TestID={props.Item.TestID()}>
+				Open {props.Item.ID}
+			</gf.RouterLink>
 		</li>
 	)
 }

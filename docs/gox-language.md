@@ -94,6 +94,90 @@ path plus the component name, for example
 Lower-level generation helpers can still fall back to package-name ids such as
 `main.Header`.
 
+## Package-qualified component tags
+
+GOX supports Go-like package-qualified component tags for cross-package
+composition:
+
+```gox
+import ui "github.com/example/app/internal/ui"
+
+func App() gf.Node {
+    return (
+        <ui.Shell Title="Dashboard">
+            <p>Hello</p>
+        </ui.Shell>
+    )
+}
+```
+
+This is not an XML namespace system. The supported form is exactly:
+
+```text
+packageAlias.Component
+```
+
+Rules:
+
+- `packageAlias` must be a Go import alias in the current `.gox` file;
+- implicit aliases from import path bases are supported;
+- blank and dot imports cannot be used for qualified component tags;
+- `Component` must be an exported Go identifier;
+- props use the `packageAlias.ComponentProps` convention;
+- nested children map to `Children []gf.Node`;
+- `Key` remains a pseudo-prop and is not passed into the props struct.
+
+Generated shape:
+
+```go
+var _goxComponent_app_ui_Shell = gf.NewComponentType(
+    "github.com/example/app/internal/ui.Shell",
+    "ui.Shell",
+)
+
+gf.ComponentT(_goxComponent_app_ui_Shell, ui.ShellProps{
+    Title: "Dashboard",
+    Children: []gf.Node{
+        gf.El("p", nil, gf.Text("Hello")),
+    },
+}, ui.Shell)
+```
+
+Component identity uses the resolved import path plus component name, not the
+local alias. The debug name uses `alias.Component`, which keeps browser smoke
+and debug counters readable when several packages define `Header` or `Shell`.
+
+Useful examples:
+
+```gox
+<layout.Shell>
+    {gf.RouterView(router)}
+</layout.Shell>
+
+<gf.RouterLink To="/issues" Class="nav-link">
+    Issues
+</gf.RouterLink>
+
+<filters.FilterControls
+    Query={props.Query}
+    Status={props.Status}
+    ResultCount={len(props.Items)}
+    TotalCount={props.TotalCount}
+/>
+```
+
+Unsupported forms:
+
+```gox
+<ui:Shell />       // XML-style namespace syntax
+<foo.bar.Shell />  // nested selector chain
+<ui.shell />       // selected component is not exported
+<.Shell />         // dot imports are not supported for tags
+```
+
+Use ordinary Go expressions for values that are not component composition, such
+as `gf.RouterView(router)`, `gf.Map(...)`, or helper formatting functions.
+
 ## Children
 
 A component receives nested markup through a `Children []gf.Node` field:
@@ -351,16 +435,25 @@ examples/app.gox:12:18: expected closing tag </div>, got </main>
 
 GOX also reports focused diagnostics for unclosed tags, invalid component
 names, invalid component prop names, empty child/attribute expressions,
-duplicate or valueless `Key` pseudo-props, spread props, and namespace tags.
-Nested GOX markup inside callback return expressions is also reported against
-the original `.gox` file rather than only the generated `.goframe/work` output.
+duplicate or valueless `Key` pseudo-props, spread props, XML-style namespace
+syntax, unknown package aliases, lowercase qualified component selectors, and
+nested selector chains. Nested GOX markup inside callback return expressions is
+also reported against the original `.gox` file rather than only the generated
+`.goframe/work` output.
 
-Unsupported namespace tags remain unsupported. The diagnostic points users back
-to ordinary Go imports and function calls for cross-package composition:
+Package-qualified tags require an import alias. Unknown aliases get a focused
+diagnostic:
 
 ```text
-examples/app.gox:8:10: namespace tags are not supported; use ordinary Go imports and function calls for cross-package composition: <ui.Header>
+examples/app.gox:8:10: gox: unknown package alias "ui" in qualified component <ui.Header>; import the package or use a local component tag
   <ui.Header />
+```
+
+XML-style namespace tags remain unsupported:
+
+```text
+examples/app.gox:8:10: namespace tags with ':' are not supported; use package-qualified component tags like <ui.Header>
+  <ui:Header />
 ```
 
 Unsupported spread props remain unsupported. Pass explicit props instead:
@@ -384,7 +477,8 @@ GOX does not currently support:
   render expressions and Go callbacks with `gf.Map`;
 - arbitrary JavaScript-like expressions, arrow functions, or `items.map(...)`;
 - spread props;
-- component namespaces or dotted tags;
+- XML-style namespace tags with `:`;
+- nested selector chains beyond `packageAlias.Component`;
 - style objects;
 - lifecycle/effect-specific GOX syntax; use Go calls such as `gf.UseEffect`;
 - routing-specific GOX syntax; use Go route declarations such as

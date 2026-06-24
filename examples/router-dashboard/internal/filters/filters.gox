@@ -2,16 +2,6 @@ package filters
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
-func FilterControlsView(props FilterControlsProps) gf.Node {
-	return <FilterControls
-		Key={FilterKey(props.Query, props.Status)}
-		Query={props.Query}
-		Status={props.Status}
-		ResultCount={props.ResultCount}
-		TotalCount={props.TotalCount}
-	/>
-}
-
 func FilterControls(props FilterControlsProps) gf.Node {
 	query, setQuery := gf.UseState(props.Query)
 	status, setStatus := gf.UseState(normalizeStatusForControl(props.Status))

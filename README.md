@@ -32,8 +32,8 @@ Current baseline includes:
 Non-goals for the current project surface include SSR, hydration,
 Player/Engine implementation, path/history-mode routing, file-based routing,
 route loaders, dynamic virtualization, infinite loading, LSP, formatter,
-namespace tags, spread props, schema validation framework, production
-deployment server, and full multi-module monorepo support.
+XML-style namespace tags, spread props, schema validation framework,
+production deployment server, and full multi-module monorepo support.
 
 ## What Is GoFrame?
 
@@ -208,8 +208,9 @@ app/
 Generic child entries such as `./app` or `./src/app` work as ordinary Go
 package directories, but `cmd/app + internal/...` is the primary Go convention.
 GOX discovery remains app-root-wide, so imported internal packages get
-generated files too. Cross-package composition uses normal Go imports and
-function calls; GOX namespace tags such as `<ui.Header />` are not supported.
+generated files too. Cross-package component composition can use normal Go
+imports with package-qualified tags such as `<ui.Header />`. Ordinary Go
+function calls are still useful for helper functions and low-level composition.
 
 ## GOX In One Minute
 
@@ -232,6 +233,24 @@ type ButtonProps struct {
 	OnClick func()
 }
 ```
+
+Package-qualified component tags use ordinary Go import aliases and keep
+cross-package composition declarative:
+
+```gox
+import ui "github.com/example/app/internal/ui"
+
+func App() gf.Node {
+	return (
+		<ui.Shell Title="Dashboard">
+			<p>Hello</p>
+		</ui.Shell>
+	)
+}
+```
+
+The supported form is exactly `packageAlias.Component`. It is not an XML
+namespace system and does not support arbitrary selector chains.
 
 Generated GOX uses typed component identity tokens:
 
@@ -273,7 +292,8 @@ GOX supports expression-oriented rendering:
 
 Unsupported syntax is intentionally rejected with source diagnostics:
 
-- namespace tags such as `<ui.Header />`;
+- XML-style namespace tags such as `<ui:Header />`;
+- arbitrary selector chains such as `<foo.bar.Baz />`;
 - spread props such as `<Button {...props} />`;
 - template-block `if`/`for`;
 - arbitrary JavaScript-like expressions.
@@ -464,7 +484,8 @@ Examples:
   file-based routing, route loaders, hot reload, CSS-in-Go, or production
   deployment server.
 - No Player/Engine implementation or `.gfapp` package format yet.
-- No namespace tags, spread props, template-block loops, formatter, or LSP.
+- No XML-style namespace tags, arbitrary selector chains, spread props,
+  template-block loops, formatter, or LSP.
 - No full multi-module monorepo story.
 - State/effect/context hooks are positional and require stable call order.
 - Context selectors require comparable selected values.

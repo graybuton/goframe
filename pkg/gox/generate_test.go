@@ -195,6 +195,185 @@ func View() gf.Node {
 	}
 }
 
+func TestGenerateQualifiedComponentExplicitAlias(t *testing.T) {
+	source := []byte(`package demo
+
+import (
+	ui "github.com/example/app/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func View() gf.Node {
+	return <ui.Header Title="Hello" />
+}
+`)
+
+	generated, err := GenerateNamed("qualified_explicit.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	for _, want := range []string{
+		`gf.NewComponentType("github.com/example/app/internal/ui.Header", "ui.Header")`,
+		`gf.ComponentT(_goxComponent_qualified_explicit_ui_Header, ui.HeaderProps{`,
+		`Title: "Hello"`,
+		`}, ui.Header)`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated source does not contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestGenerateQualifiedComponentImplicitAlias(t *testing.T) {
+	source := []byte(`package demo
+
+import (
+	"github.com/example/app/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func View() gf.Node {
+	return <ui.Header Title="Hello" />
+}
+`)
+
+	generated, err := GenerateNamed("qualified_implicit.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	if !strings.Contains(text, `gf.NewComponentType("github.com/example/app/internal/ui.Header", "ui.Header")`) {
+		t.Fatalf("generated source does not use implicit import alias identity:\n%s", text)
+	}
+}
+
+func TestGenerateQualifiedComponentCollisions(t *testing.T) {
+	source := []byte(`package demo
+
+import (
+	layout "github.com/example/app/internal/layout"
+	pages "github.com/example/app/internal/pages"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func View() gf.Node {
+	return (
+		<div>
+			<layout.Header />
+			<pages.Header />
+		</div>
+	)
+}
+`)
+
+	generated, err := GenerateNamed("qualified_headers.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	for _, want := range []string{
+		`gf.NewComponentType("github.com/example/app/internal/layout.Header", "layout.Header")`,
+		`gf.NewComponentType("github.com/example/app/internal/pages.Header", "pages.Header")`,
+		`_goxComponent_qualified_headers_layout_Header`,
+		`_goxComponent_qualified_headers_pages_Header`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated source does not contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestGenerateQualifiedRouterLink(t *testing.T) {
+	source := []byte(`package demo
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <gf.RouterLink To="/issues">Issues</gf.RouterLink>
+}
+`)
+
+	generated, err := GenerateNamed("qualified_router_link.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	for _, want := range []string{
+		`gf.NewComponentType("github.com/graybuton/goframe/pkg/goframe.RouterLink", "gf.RouterLink")`,
+		`gf.ComponentT(_goxComponent_qualified_router_link_gf_RouterLink, gf.RouterLinkProps{`,
+		`Children: []gf.Node{`,
+		`gf.Text("Issues")`,
+		`}, gf.RouterLink)`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated source does not contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestGenerateQualifiedNestedCallbackReturn(t *testing.T) {
+	source := []byte(`package demo
+
+import (
+	rows "github.com/example/app/internal/rows"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+type Item struct {
+	ID string
+}
+
+func View(items []Item) gf.Node {
+	return (
+		<ul>
+			{gf.Map(items, func(item Item) gf.Node {
+				return <rows.ItemRow Key={item.ID} Item={item} />
+			})}
+		</ul>
+	)
+}
+`)
+
+	generated, err := GenerateNamed("qualified_nested_callback.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	for _, want := range []string{
+		`gf.NewComponentType("github.com/example/app/internal/rows.ItemRow", "rows.ItemRow")`,
+		`gf.Key(gf.ToString(item.ID),`,
+		`gf.ComponentT(_goxComponent_qualified_nested_callback_rows_ItemRow, rows.ItemRowProps{`,
+		`}, rows.ItemRow)`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated source does not contain %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestGenerateQualifiedUnknownAliasDiagnostic(t *testing.T) {
+	source := []byte(`package demo
+
+func View() any {
+	return <ui.Header />
+}
+`)
+	_, err := GenerateNamed("examples/broken/qualified.gox", source)
+	if err == nil {
+		t.Fatal("GenerateNamed() returned nil error")
+	}
+	for _, want := range []string{
+		`examples/broken/qualified.gox:4:`,
+		`unknown package alias "ui" in qualified component <ui.Header>`,
+		`<ui.Header />`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
 func TestParseElementReportsMismatchedTag(t *testing.T) {
 	_, _, err := ParseElement("<div><span></div>")
 	if err == nil || !strings.Contains(err.Error(), "expected closing tag </span>, got </div>") {

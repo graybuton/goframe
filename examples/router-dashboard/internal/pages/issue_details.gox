@@ -19,12 +19,9 @@ func IssueDetails(props IssueDetailsProps) gf.Node {
 				<span>{props.Issue.Owner}</span>
 			</div>
 			<p>{props.Issue.Description}</p>
-			{gf.RouterLink(gf.RouterLinkProps{
-				To: data.IssueEditPath(props.Issue.ID),
-				Class: "rd-link",
-				TestID: "rd-edit-link",
-				Children: []gf.Node{gf.Text("Edit issue")},
-			})}
+			<gf.RouterLink To={data.IssueEditPath(props.Issue.ID)} Class="rd-link" TestID="rd-edit-link">
+				Edit issue
+			</gf.RouterLink>
 		</section>
 	)
 }
@@ -34,11 +31,9 @@ func MissingIssue(props MissingIssueProps) gf.Node {
 		<section class="rd-card" data-testid="rd-issue-missing">
 			<h2>Issue not found</h2>
 			<p>No local issue matched {props.ID}.</p>
-			{gf.RouterLink(gf.RouterLinkProps{
-				To: "/issues",
-				Class: "rd-link",
-				Children: []gf.Node{gf.Text("Back to issues")},
-			})}
+			<gf.RouterLink To="/issues" Class="rd-link">
+				Back to issues
+			</gf.RouterLink>
 		</section>
 	)
 }

@@ -16,9 +16,7 @@ func IssueEdit(props IssueEditProps) gf.Node {
 			<p class="rd-muted">
 				This form validates local state only. It does not call a server.
 			</p>
-			{forms.IssueFormView(forms.IssueFormProps{
-				Issue: props.Issue,
-			})}
+			<forms.IssueForm Key={props.Issue.ID} Issue={props.Issue} />
 		</section>
 	)
 }

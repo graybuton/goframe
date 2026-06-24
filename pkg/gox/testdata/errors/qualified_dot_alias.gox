@@ -1,0 +1,5 @@
+package main
+
+func App() any {
+	return <.Header />
+}

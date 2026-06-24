@@ -41,6 +41,22 @@ Direct Go calls such as `Header(HeaderProps{...})` remain ordinary function
 calls. They do not create a component boundary, state scope, or independent
 dirty update target.
 
+Package-qualified GOX component tags create the same kind of boundary across
+packages:
+
+```gox
+<ui.Header Title="Demo" />
+```
+
+When `ui` imports `github.com/example/app/internal/ui`, generated identity is:
+
+```text
+github.com/example/app/internal/ui.Header
+```
+
+The debug label remains `ui.Header` so browser smoke and debug counters stay
+readable when several packages define a `Header`.
+
 ## Risks
 
 Name-based identity is compact and easy to debug, but it has limits:
@@ -97,6 +113,8 @@ Remaining cons:
 
 - `goxc` generated ids use package import path plus component name when the
   module path is known;
+- package-qualified component tags use the resolved import path plus selected
+  component name, not the local alias alone;
 - lower-level generation helpers can still fall back to package name plus
   component name;
 - token variable names are generated-code details;

@@ -60,12 +60,30 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 	if name.kind != tokenIdentifier {
 		return nil, parser.unexpected(name, "tag name or > for fragment")
 	}
-	if strings.ContainsAny(name.value, ".:") {
-		return nil, parser.lexer.errorAt(name.offset, "namespace tags are not supported; use ordinary Go imports and function calls for cross-package composition: <%s>", name.value)
-	}
 	component := isComponent(name.value)
+	if strings.Contains(name.value, ":") {
+		return nil, parser.lexer.errorAt(name.offset, "namespace tags with ':' are not supported; use package-qualified component tags like <ui.Header>")
+	}
+	if strings.Contains(name.value, ".") {
+		if strings.Count(name.value, ".") != 1 {
+			return nil, parser.lexer.errorAt(name.offset, "qualified component tags support exactly packageAlias.Component: <%s>", name.value)
+		}
+		alias, selected, ok := splitQualifiedTag(name.value)
+		if !ok || !validGoIdentifier(alias) || !validGoIdentifier(selected) {
+			return nil, parser.lexer.errorAt(name.offset, "qualified component tags support exactly packageAlias.Component: <%s>", name.value)
+		}
+		if alias == "_" {
+			return nil, parser.lexer.errorAt(name.offset, "package-qualified component tag cannot use blank or dot import alias: <%s>", name.value)
+		}
+		if !isExportedIdentifier(selected) {
+			return nil, parser.lexer.errorAt(name.offset, "qualified component tag <%s> must select an exported component name", name.value)
+		}
+		component = true
+	}
 	if component && !validGoIdentifier(name.value) {
-		return nil, parser.lexer.errorAt(name.offset, "invalid component tag <%s>; component names must be Go identifiers", name.value)
+		if !strings.Contains(name.value, ".") {
+			return nil, parser.lexer.errorAt(name.offset, "invalid component tag <%s>; component names must be Go identifiers", name.value)
+		}
 	}
 
 	element := &Element{Tag: name.value}

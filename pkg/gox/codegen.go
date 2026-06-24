@@ -21,8 +21,10 @@ type codegenContext struct {
 	componentIdentity     string
 	sourceName            string
 	declareComponentTypes bool
-	componentTypes        map[string]string
+	componentTypes        map[string]componentTypeDeclaration
 	componentOrder        []string
+	importAliases         map[string]string
+	invalidImportAliases  map[string]string
 	diagnosticFilename    string
 	diagnosticSource      string
 	diagnosticLine        int
@@ -42,8 +44,19 @@ func newCodegenContext(componentIdentity string, sourceName string, declareCompo
 		componentIdentity:     componentIdentity,
 		sourceName:            sanitizeIdentifierPart(sourceName),
 		declareComponentTypes: declareComponentTypes,
-		componentTypes:        make(map[string]string),
+		componentTypes:        make(map[string]componentTypeDeclaration),
 	}
+}
+
+type componentTypeDeclaration struct {
+	name      string
+	id        string
+	debugName string
+}
+
+func (ctx *codegenContext) withImportAliases(aliases, invalid map[string]string) {
+	ctx.importAliases = aliases
+	ctx.invalidImportAliases = invalid
 }
 
 func (ctx *codegenContext) withDiagnostics(filename, source string, line, column int, positions map[Node]int) {
@@ -84,17 +97,54 @@ func (ctx *codegenContext) codegen(node Node) (string, error) {
 	return output.String(), nil
 }
 
-func (ctx *codegenContext) componentTypeExpression(tag string) string {
-	id := ctx.componentIdentity + "." + tag
+func (ctx *codegenContext) componentForTag(tag string) (componentTag, error) {
+	if alias, selected, ok := splitQualifiedTag(tag); ok {
+		if _, invalid := ctx.invalidImportAliases[alias]; invalid || alias == "_" || alias == "." {
+			return componentTag{}, fmt.Errorf("gox: package-qualified component tag cannot use blank or dot import alias: <%s>", tag)
+		}
+		importPath, ok := ctx.importAliases[alias]
+		if !ok {
+			return componentTag{}, fmt.Errorf("gox: unknown package alias %q in qualified component <%s>; import the package or use a local component tag", alias, tag)
+		}
+		if !isExportedIdentifier(selected) {
+			return componentTag{}, fmt.Errorf("gox: qualified component tag <%s> must select an exported component name", tag)
+		}
+		return componentTag{
+			raw:       tag,
+			propsType: alias + "." + selected + "Props",
+			render:    alias + "." + selected,
+			id:        importPath + "." + selected,
+			debugName: tag,
+			varPart:   alias + "_" + selected,
+		}, nil
+	}
+	if !validGoIdentifier(tag) {
+		return componentTag{}, fmt.Errorf("gox: invalid component name %q", tag)
+	}
+	return componentTag{
+		raw:       tag,
+		propsType: tag + "Props",
+		render:    tag,
+		id:        ctx.componentIdentity + "." + tag,
+		debugName: tag,
+		varPart:   tag,
+	}, nil
+}
+
+func (ctx *codegenContext) componentTypeExpression(component componentTag) string {
 	if !ctx.declareComponentTypes {
-		return fmt.Sprintf("gf.NewComponentType(%q, %q)", id, tag)
+		return fmt.Sprintf("gf.NewComponentType(%q, %q)", component.id, component.debugName)
 	}
-	if name, ok := ctx.componentTypes[tag]; ok {
-		return name
+	if declaration, ok := ctx.componentTypes[component.raw]; ok {
+		return declaration.name
 	}
-	name := "_goxComponent_" + ctx.sourceName + "_" + sanitizeIdentifierPart(tag)
-	ctx.componentTypes[tag] = name
-	ctx.componentOrder = append(ctx.componentOrder, tag)
+	name := "_goxComponent_" + ctx.sourceName + "_" + sanitizeIdentifierPart(component.varPart)
+	ctx.componentTypes[component.raw] = componentTypeDeclaration{
+		name:      name,
+		id:        component.id,
+		debugName: component.debugName,
+	}
+	ctx.componentOrder = append(ctx.componentOrder, component.raw)
 	return name
 }
 
@@ -105,9 +155,8 @@ func (ctx *codegenContext) declarations() string {
 	var output bytes.Buffer
 	output.WriteString("var (\n")
 	for _, tag := range ctx.componentOrder {
-		name := ctx.componentTypes[tag]
-		id := ctx.componentIdentity + "." + tag
-		fmt.Fprintf(&output, "\t%s = gf.NewComponentType(%q, %q)\n", name, id, tag)
+		declaration := ctx.componentTypes[tag]
+		fmt.Fprintf(&output, "\t%s = gf.NewComponentType(%q, %q)\n", declaration.name, declaration.id, declaration.debugName)
 	}
 	output.WriteString(")\n")
 	return output.String()
@@ -141,8 +190,9 @@ func (ctx *codegenContext) writeNode(output *bytes.Buffer, node Node, depth int)
 }
 
 func (ctx *codegenContext) writeComponent(output *bytes.Buffer, component *Element, depth int) error {
-	if !validGoIdentifier(component.Tag) {
-		return fmt.Errorf("gox: invalid component name %q", component.Tag)
+	componentInfo, err := ctx.componentForTag(component.Tag)
+	if err != nil {
+		return err
 	}
 	key, attributes, err := splitKeyAttribute(component.Attributes)
 	if err != nil {
@@ -151,7 +201,7 @@ func (ctx *codegenContext) writeComponent(output *bytes.Buffer, component *Eleme
 
 	var body bytes.Buffer
 
-	fmt.Fprintf(&body, "gf.ComponentT(%s, %sProps{\n", ctx.componentTypeExpression(component.Tag), component.Tag)
+	fmt.Fprintf(&body, "gf.ComponentT(%s, %s{\n", ctx.componentTypeExpression(componentInfo), componentInfo.propsType)
 	for _, attribute := range attributes {
 		if !validGoIdentifier(attribute.Name) {
 			return fmt.Errorf("gox: component prop %q must be a Go field name", attribute.Name)
@@ -173,7 +223,7 @@ func (ctx *codegenContext) writeComponent(output *bytes.Buffer, component *Eleme
 		body.WriteString("},\n")
 	}
 	writeIndent(&body, depth)
-	fmt.Fprintf(&body, "}, %s)", component.Tag)
+	fmt.Fprintf(&body, "}, %s)", componentInfo.render)
 	return writeKeyed(output, key, body.Bytes(), depth)
 }
 
@@ -427,6 +477,9 @@ func hasRenderableChildren(children []Node) bool {
 func isComponent(tag string) bool {
 	if tag == "" {
 		return false
+	}
+	if _, selected, ok := splitQualifiedTag(tag); ok {
+		return isExportedIdentifier(selected)
 	}
 	return unicode.IsUpper([]rune(tag)[0])
 }

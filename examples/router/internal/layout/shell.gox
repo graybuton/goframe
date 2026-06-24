@@ -11,18 +11,12 @@ func Shell(props ShellProps) gf.Node {
 					<p class="muted">Hash routing with a stable Go-first shell layout.</p>
 				</div>
 				<nav class="router-nav" aria-label="Primary navigation">
-					{gf.RouterLink(gf.RouterLinkProps{
-						To: "/",
-						Class: "router-link",
-						TestID: "router-link-home",
-						Children: []gf.Node{gf.Text("Home")},
-					})}
-					{gf.RouterLink(gf.RouterLinkProps{
-						To: "/issues",
-						Class: "router-link",
-						TestID: "router-link-issues",
-						Children: []gf.Node{gf.Text("Issues")},
-					})}
+					<gf.RouterLink To="/" Class="router-link" TestID="router-link-home">
+						Home
+					</gf.RouterLink>
+					<gf.RouterLink To="/issues" Class="router-link" TestID="router-link-issues">
+						Issues
+					</gf.RouterLink>
 					<button data-testid="router-programmatic-nav" onClick={props.OnOpenFirstIssue}>
 						Open issue 2
 					</button>

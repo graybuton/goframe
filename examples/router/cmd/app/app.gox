@@ -16,41 +16,27 @@ var router = gf.NewHashRouter([]gf.Route{
 func App() gf.Node {
 	return (
 		<main class="router-app">
-			{layout.Shell(shellProps())}
+			<layout.Shell OnOpenFirstIssue={func() {
+				gf.Navigate("/issues/2")
+			}}>
+				{gf.RouterView(router)}
+			</layout.Shell>
 		</main>
 	)
 }
 
 func homeRoute(gf.RouteContext) gf.Node {
-	return pages.Home(pages.HomeProps{})
+	return <pages.Home />
 }
 
 func issuesRoute(gf.RouteContext) gf.Node {
-	return pages.Issues(pages.IssuesProps{
-		Items: pages.DemoIssues(),
-	})
+	return <pages.Issues Items={pages.DemoIssues()} />
 }
 
 func issueDetailsRoute(ctx gf.RouteContext) gf.Node {
-	return pages.IssueDetails(pages.IssueDetailsProps{
-		ID:       ctx.Param("id"),
-		RawQuery: ctx.RawQuery,
-	})
+	return <pages.IssueDetails ID={ctx.Param("id")} RawQuery={ctx.RawQuery} />
 }
 
 func notFoundRoute(ctx gf.RouteContext) gf.Node {
-	return pages.NotFound(pages.NotFoundProps{
-		Path: ctx.Path,
-	})
-}
-
-func shellProps() layout.ShellProps {
-	return layout.ShellProps{
-		OnOpenFirstIssue: func() {
-			gf.Navigate("/issues/2")
-		},
-		Children: []gf.Node{
-			gf.RouterView(router),
-		},
-	}
+	return <pages.NotFound Path={ctx.Path} />
 }

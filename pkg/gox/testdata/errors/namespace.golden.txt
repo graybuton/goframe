@@ -1,2 +1,2 @@
-testdata/errors/namespace.gox:4:10: namespace tags are not supported; use ordinary Go imports and function calls for cross-package composition: <ui.Button>
-  <ui.Button />
+testdata/errors/namespace.gox:4:10: namespace tags with ':' are not supported; use package-qualified component tags like <ui.Header>
+  <ui:Button />

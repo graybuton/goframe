@@ -1,0 +1,2 @@
+testdata/errors/qualified_unknown_alias.gox:4:10: gox: unknown package alias "ui" in qualified component <ui.Header>; import the package or use a local component tag
+  <ui.Header />

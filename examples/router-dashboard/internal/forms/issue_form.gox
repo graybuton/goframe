@@ -2,10 +2,6 @@ package forms
 
 import gf "github.com/graybuton/goframe/pkg/goframe"
 
-func IssueFormView(props IssueFormProps) gf.Node {
-	return <IssueForm Key={props.Issue.ID} Issue={props.Issue} />
-}
-
 func IssueForm(props IssueFormProps) gf.Node {
 	state, dispatch := gf.UseReducer(newIssueFormState(props.Issue), reduceIssueForm)
 

@@ -14,18 +14,17 @@ func IssueList(props IssueListProps) gf.Node {
 					<p class="rd-eyebrow">Issues</p>
 					<h2>URL-driven filters</h2>
 				</div>
-				{gf.RouterLink(gf.RouterLinkProps{
-					To: "/issues/RD-1/edit",
-					Class: "rd-link",
-					Children: []gf.Node{gf.Text("Edit RD-1")},
-				})}
+				<gf.RouterLink To="/issues/RD-1/edit" Class="rd-link">
+					Edit RD-1
+				</gf.RouterLink>
 			</div>
-			{filters.FilterControlsView(filters.FilterControlsProps{
-				Query:       props.Query,
-				Status:      props.Status,
-				ResultCount: len(props.Items),
-				TotalCount:  props.TotalCount,
-			})}
+			<filters.FilterControls
+				Key={filters.FilterKey(props.Query, props.Status)}
+				Query={props.Query}
+				Status={props.Status}
+				ResultCount={len(props.Items)}
+				TotalCount={props.TotalCount}
+			/>
 			{(len(props.Items) == 0) ? (
 				<p class="rd-empty" data-testid="rd-issue-empty">No issues matched this route query.</p>
 			) : (
@@ -48,18 +47,12 @@ func IssueRow(props IssueRowProps) gf.Node {
 			</div>
 			<div class="rd-row-actions">
 				<span>{data.StatusLabel(props.Issue.Status)}</span>
-				{gf.RouterLink(gf.RouterLinkProps{
-					To: data.IssuePath(props.Issue.ID),
-					Class: "rd-link",
-					TestID: "rd-issue-link-"+props.Issue.ID,
-					Children: []gf.Node{gf.Text("Details")},
-				})}
-				{gf.RouterLink(gf.RouterLinkProps{
-					To: data.IssueEditPath(props.Issue.ID),
-					Class: "rd-link",
-					TestID: "rd-issue-edit-"+props.Issue.ID,
-					Children: []gf.Node{gf.Text("Edit")},
-				})}
+				<gf.RouterLink To={data.IssuePath(props.Issue.ID)} Class="rd-link" TestID={"rd-issue-link-"+props.Issue.ID}>
+					Details
+				</gf.RouterLink>
+				<gf.RouterLink To={data.IssueEditPath(props.Issue.ID)} Class="rd-link" TestID={"rd-issue-edit-"+props.Issue.ID}>
+					Edit
+				</gf.RouterLink>
 			</div>
 		</li>
 	)

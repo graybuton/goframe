@@ -118,10 +118,10 @@ TinyGo packaged WASM sizes:
 | dashboard | 168618 | 62895 | 50775 | 55100 |
 | context | 115344 | 43248 | 35584 | 38452 |
 | virtualized | 123134 | 47419 | 38837 | 42090 |
-| multipackage | 91170 | 36059 | 30015 | 32442 |
-| cmdapp | 91229 | 36087 | 30070 | 32445 |
-| router | 107303 | 42038 | 34721 | 37544 |
-| router-dashboard | 156170 | 59279 | 48264 | 52492 |
+| multipackage | 94344 | 36856 | 30767 | 33102 |
+| cmdapp | 94370 | 36844 | 30745 | 33115 |
+| router | 114706 | 43589 | 36122 | 39020 |
+| router-dashboard | 164091 | 61876 | 49842 | 53830 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a
 snapshot, not a second budget file.
