@@ -167,8 +167,9 @@ Boundary rules:
 
 - nearest active boundary wins;
 - nested inner boundaries catch before outer boundaries;
-- a boundary does not catch its own fallback panic;
-- fallback panic can be captured by an outer boundary;
+- a boundary does not catch failures from the fallback subtree it is currently
+  displaying;
+- fallback subtree failures can be captured by an outer boundary;
 - first error wins until manual reset or `ResetKey` reset;
 - `ctx.Reset()` remounts the protected subtree fresh;
 - changing `ResetKey` while failed clears the incident and remounts children;

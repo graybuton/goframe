@@ -227,8 +227,9 @@ not-found fallback regressions, browser back handling regressions, query helper
 regressions, form validation regressions in the reference app, or unstable
 shell layout identity.
 Error Boundary smoke failures include missing render-failure reports, fallback
-or reset regressions, nested-boundary bubbling regressions, protected-subtree
-cleanup regressions, or shell identity loss.
+or reset regressions, fallback component self-capture/report-loop regressions,
+nested-boundary bubbling regressions, protected-subtree cleanup regressions, or
+shell identity loss.
 
 The smoke script must not continue against an unknown server or `about:blank`.
 

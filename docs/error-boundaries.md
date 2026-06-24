@@ -21,6 +21,8 @@ When a boundary captures a render failure:
 - the runtime reports one `gf.ErrorInfo` for that failing render;
 - the nearest active boundary stores the first incident;
 - the boundary switches to fallback UI;
+- the boundary never captures failures from the fallback subtree it is
+  currently displaying;
 - later fallback rerenders do not report the original incident again.
 
 If no boundary exists, component render panics keep the MVP 23 behavior:
@@ -104,6 +106,17 @@ pass. The boundary is marked dirty, pending effects under the protected subtree
 are cancelled, and the next patch replaces the protected subtree with fallback
 UI.
 
+Internally, the boundary moves through three phases:
+
+- `protected`: the normal child subtree is active and may be captured;
+- `captured`: a protected descendant failed and the incident has been stored;
+- `fallback`: the fallback subtree is being displayed.
+
+These phases are implementation details, not public API. They matter because a
+boundary in the fallback phase is skipped by the nearest-boundary search. If a
+fallback subtree renders another component boundary and that component panics,
+the displaying boundary does not self-capture that fallback failure.
+
 The fallback receives the captured `ErrorInfo` and a reset callback:
 
 ```go
@@ -151,10 +164,12 @@ reflection, or automatic router subscription.
 Nested boundaries are ordinary components. The nearest active boundary catches
 descendant render failures first.
 
-If an inner boundary fallback panics, that panic happens while rendering the
-inner boundary itself. The inner boundary does not catch its own fallback. The
-runtime reports the new render failure and lets the nearest outer boundary
-capture it. If there is no outer boundary, the default render fallback applies.
+If an inner boundary fallback panics, or if the fallback returns a component
+that panics while rendering, that panic belongs to the fallback subtree the
+inner boundary is currently displaying. The inner boundary does not catch that
+failure. The runtime reports the new render failure and lets the nearest outer
+boundary capture it. If there is no outer boundary, the default render fallback
+applies.
 
 ## Cleanup And Lifecycle Guarantees
 
@@ -179,26 +194,23 @@ rather than keeping hidden failed DOM or a global boundary registry.
 ## Router Integration Pattern
 
 The router does not install boundaries automatically. Route handlers can wrap
-their page content manually:
+their page content manually. In GOX, prefer the same package-qualified
+component style used elsewhere:
 
-```go
-func issueRoute(ctx gf.RouteContext) gf.Node {
-    return gf.ErrorBoundary(gf.ErrorBoundaryProps{
-        ResetKey: ctx.Path,
-        Fallback: routeFallback,
-        Children: []gf.Node{
-            pages.Issue(pages.IssueProps{
-                ID: ctx.Param("id"),
-            }),
-        },
-    })
-}
+```gox
+<gf.ErrorBoundary ResetKey={ctx.Path} Fallback={routeFallback}>
+    <pages.Issue ID={ctx.Param("id")} />
+</gf.ErrorBoundary>
 ```
 
 Apps that want a stable shell can still keep the shell outside `RouterView` and
 put the boundary inside selected route handlers. This keeps routing and error
 UI policy separate. Automatic route-level error pages, loaders, async
 resources, and Suspense remain future work.
+
+The lower-level Go props/`Children` form remains valid for hand-written runtime
+code and tests, but the package-qualified GOX style is the recommended
+application-facing shape.
 
 ## TinyGo Panic-Mode Matrix
 

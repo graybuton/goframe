@@ -120,6 +120,8 @@ should prefer GOX markup for structure.
   `gf.ErrorPhase`.
 - Scoped render Error Boundary API: `gf.ErrorBoundary`,
   `gf.ErrorBoundaryProps`, and `gf.ErrorBoundaryContext`.
+  Internal boundary phases such as protected, captured, and fallback are not
+  public API.
 - Hash router details such as route remount policy, declaration-order matching
   edge cases, link props, query helper edge cases, and browser listener
   internals.

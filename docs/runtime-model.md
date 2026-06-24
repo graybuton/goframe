@@ -374,6 +374,12 @@ but the boundary records the incident, cancels pending effects under the
 protected subtree, and patches to fallback UI. Manual reset or `ResetKey`
 clears the incident and remounts children fresh.
 
+Error Boundary state is internally modeled as protected, captured, or fallback.
+The displaying boundary is skipped while rendering its fallback subtree, so a
+fallback component panic is not self-captured by the same boundary. It bubbles
+to the nearest outer boundary, or uses the default render fallback when there
+is no outer boundary. These phases are runtime internals, not public API.
+
 Context selector panics during provider notification keep the previous selected
 value; selector panics during initial render report and flow through render
 containment.
