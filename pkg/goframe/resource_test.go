@@ -398,9 +398,11 @@ func TestUseResourceCleanupTriggeredCompletionIsIgnored(t *testing.T) {
 func TestUseResourceLoaderPanicReportsEffectAndFails(t *testing.T) {
 	resetEffectsForTest()
 	errorsSeen := captureRuntimeErrors(t)
+	starts := 0
 	var resource Resource[string]
 	instance := testComponentInstance("ResourceExploder", func() Node {
 		resource, _ = UseResource("panic", func(string, func(string), func(error)) Cleanup {
+			starts++
 			panic("loader boom")
 		})
 		return Empty()
@@ -413,6 +415,227 @@ func TestUseResourceLoaderPanicReportsEffectAndFails(t *testing.T) {
 	requireRuntimeError(t, errorsSeen(), ErrorPhaseEffect, "ResourceExploder", "UseEffect", "loader boom")
 	if !resource.Failed() || resource.Err == nil || resource.Err.Error() != "goframe: resource loader panicked" {
 		t.Fatalf("resource after loader panic = %#v, want failed loader panic", resource)
+	}
+	if starts != 1 || len(errorsSeen()) != 1 {
+		t.Fatalf("starts=%d errors=%d, want one loader start and one report", starts, len(errorsSeen()))
+	}
+	requireResourceEffectSlotCompleted(t, instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if starts != 1 || len(errorsSeen()) != 1 {
+		t.Fatalf("after same-key rerenders starts=%d errors=%d, want no automatic retry", starts, len(errorsSeen()))
+	}
+	if !resource.Failed() || resource.Err == nil || resource.Err.Error() != "goframe: resource loader panicked" {
+		t.Fatalf("resource after same-key rerenders = %#v, want stable failed state", resource)
+	}
+}
+
+func TestUseResourceLoaderPanicParentRerenderDoesNotRetry(t *testing.T) {
+	resetEffectsForTest()
+	errorsSeen := captureRuntimeErrors(t)
+	starts := 0
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceParentRerender", func() Node {
+		resource, _ = UseResource("panic", func(string, func(string), func(error)) Cleanup {
+			starts++
+			panic("loader boom")
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+
+	if starts != 1 || len(errorsSeen()) != 1 {
+		t.Fatalf("parent rerenders starts=%d errors=%d, want no automatic retry", starts, len(errorsSeen()))
+	}
+	if !resource.Failed() {
+		t.Fatalf("resource after parent rerenders = %#v, want failed", resource)
+	}
+	requireResourceEffectSlotCompleted(t, instance)
+}
+
+func TestUseResourceResolveThenPanicKeepsReadyAndDoesNotRetry(t *testing.T) {
+	resetEffectsForTest()
+	errorsSeen := captureRuntimeErrors(t)
+	starts := 0
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceResolveThenPanic", func() Node {
+		resource, _ = UseResource("key", func(_ string, resolve func(string), _ func(error)) Cleanup {
+			starts++
+			resolve("ready")
+			panic("late panic")
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseEffect, "ResourceResolveThenPanic", "UseEffect", "late panic")
+	if starts != 1 || len(errorsSeen()) != 1 {
+		t.Fatalf("starts=%d errors=%d, want one start/report", starts, len(errorsSeen()))
+	}
+	if !resource.Ready() || resource.Value != "ready" || resource.Err != nil {
+		t.Fatalf("resource after resolve then panic = %#v, want ready first completion", resource)
+	}
+	requireResourceEffectSlotCompleted(t, instance)
+}
+
+func TestUseResourceRejectThenPanicKeepsOriginalErrorAndDoesNotRetry(t *testing.T) {
+	resetEffectsForTest()
+	errorsSeen := captureRuntimeErrors(t)
+	original := errors.New("original failure")
+	starts := 0
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceRejectThenPanic", func() Node {
+		resource, _ = UseResource("key", func(_ string, _ func(string), reject func(error)) Cleanup {
+			starts++
+			reject(original)
+			panic("late panic")
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseEffect, "ResourceRejectThenPanic", "UseEffect", "late panic")
+	if starts != 1 || len(errorsSeen()) != 1 {
+		t.Fatalf("starts=%d errors=%d, want one start/report", starts, len(errorsSeen()))
+	}
+	if !resource.Failed() || resource.Err != original {
+		t.Fatalf("resource after reject then panic = %#v, want original failure", resource)
+	}
+	requireResourceEffectSlotCompleted(t, instance)
+}
+
+func TestUseResourceManualReloadAfterLoaderPanicRetriesExplicitly(t *testing.T) {
+	resetEffectsForTest()
+	errorsSeen := captureRuntimeErrors(t)
+	starts := 0
+	var reload func()
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceReloadPanic", func() Node {
+		resource, reload = UseResource("key", func(string, func(string), func(error)) Cleanup {
+			starts++
+			panic("loader boom")
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if starts != 1 || len(errorsSeen()) != 1 || !resource.Failed() {
+		t.Fatalf("before reload starts=%d errors=%d resource=%#v, want first failed generation", starts, len(errorsSeen()), resource)
+	}
+
+	reload()
+	renderComponentInstance(instance)
+	if !resource.Loading() {
+		t.Fatalf("resource after reload render = %#v, want loading", resource)
+	}
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+
+	if starts != 2 || len(errorsSeen()) != 2 {
+		t.Fatalf("after reload starts=%d errors=%d, want explicit second generation only", starts, len(errorsSeen()))
+	}
+	if !resource.Failed() || resource.Err == nil || resource.Err.Error() != "goframe: resource loader panicked" {
+		t.Fatalf("resource after reload panic = %#v, want failed", resource)
+	}
+	requireResourceEffectSlotCompleted(t, instance)
+}
+
+func TestUseResourceKeyChangeAfterLoaderPanicRetriesExplicitly(t *testing.T) {
+	resetEffectsForTest()
+	errorsSeen := captureRuntimeErrors(t)
+	key := "a"
+	starts := []string{}
+	resolves := map[string]func(string){}
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceKeyPanic", func() Node {
+		resource, _ = UseResource(key, func(key string, resolve func(string), _ func(error)) Cleanup {
+			starts = append(starts, key)
+			resolves[key] = resolve
+			panic("loader boom " + key)
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	key = "b"
+	renderComponentInstance(instance)
+	if !resource.Loading() {
+		t.Fatalf("resource after key change render = %#v, want loading", resource)
+	}
+	flushPendingEffects()
+	resolves["a"]("late-a")
+	renderComponentInstance(instance)
+	flushPendingEffects()
+
+	if len(starts) != 2 || starts[0] != "a" || starts[1] != "b" {
+		t.Fatalf("starts = %#v, want [a b]", starts)
+	}
+	if len(errorsSeen()) != 2 {
+		t.Fatalf("errors = %d, want two key-change reports", len(errorsSeen()))
+	}
+	if !resource.Failed() || resource.Value != "" {
+		t.Fatalf("resource after key change panic and old resolve = %#v, want failed B and no late A value", resource)
+	}
+	requireResourceEffectSlotCompleted(t, instance)
+}
+
+func TestUseResourceLoaderPanicDoesNotRegisterCleanup(t *testing.T) {
+	resetEffectsForTest()
+	errorsSeen := captureRuntimeErrors(t)
+	starts := 0
+	cleanups := 0
+	key := "a"
+	var reload func()
+	instance := testComponentInstance("ResourcePanicCleanup", func() Node {
+		_, reload = UseResource(key, func(string, func(string), func(error)) Cleanup {
+			starts++
+			panic("loader boom")
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	renderComponentInstance(instance)
+	reload()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	key = "b"
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	deactivateComponent(instance)
+
+	if starts != 3 || len(errorsSeen()) != 3 {
+		t.Fatalf("starts=%d errors=%d, want explicit initial/reload/key generations", starts, len(errorsSeen()))
+	}
+	if cleanups != 0 {
+		t.Fatalf("cleanups = %d, want no synthetic cleanup after panic before return", cleanups)
 	}
 }
 
@@ -446,12 +669,14 @@ func TestUseResourceCleanupPanicReportsEffectCleanup(t *testing.T) {
 
 func TestUseResourceRejectDoesNotActivateErrorBoundary(t *testing.T) {
 	resetEffectsForTest()
+	errorsSeen := captureRuntimeErrors(t)
 	loader := &resourceTestLoader{}
+	var resource Resource[string]
 	boundary := testErrorBoundaryInstance("", func(ErrorBoundaryContext) Node {
 		return Text("fallback")
 	}, nil)
 	child := testComponentInstanceWithParent("ResourceChild", boundary, func() Node {
-		_, _ = UseResource("missing", loader.load)
+		resource, _ = UseResource("missing", loader.load)
 		return Empty()
 	})
 
@@ -464,16 +689,23 @@ func TestUseResourceRejectDoesNotActivateErrorBoundary(t *testing.T) {
 	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatalf("boundary phase after resource reject = %d, want protected", boundary.errorBoundary.phase)
 	}
+	if len(errorsSeen()) != 0 {
+		t.Fatalf("runtime errors after ordinary resource reject = %d, want 0", len(errorsSeen()))
+	}
+	if !resource.Failed() {
+		t.Fatalf("resource after ordinary reject = %#v, want failed UI state", resource)
+	}
 }
 
 func TestUseResourceLoaderPanicDoesNotActivateErrorBoundary(t *testing.T) {
 	resetEffectsForTest()
-	_ = captureRuntimeErrors(t)
+	errorsSeen := captureRuntimeErrors(t)
+	var resource Resource[string]
 	boundary := testErrorBoundaryInstance("", func(ErrorBoundaryContext) Node {
 		return Text("fallback")
 	}, nil)
 	child := testComponentInstanceWithParent("ResourceChild", boundary, func() Node {
-		_, _ = UseResource("panic", func(string, func(string), func(error)) Cleanup {
+		resource, _ = UseResource("panic", func(string, func(string), func(error)) Cleanup {
 			panic("loader boom")
 		})
 		return Empty()
@@ -482,9 +714,17 @@ func TestUseResourceLoaderPanicDoesNotActivateErrorBoundary(t *testing.T) {
 	renderComponentInstance(boundary)
 	renderComponentInstance(child)
 	flushPendingEffects()
+	renderComponentInstance(child)
 
 	if boundary.errorBoundary.phase != errorBoundaryProtected {
 		t.Fatalf("boundary phase after resource loader panic = %d, want protected", boundary.errorBoundary.phase)
+	}
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseEffect, "ResourceChild", "UseEffect", "loader boom")
+	if len(errorsSeen()) != 1 {
+		t.Fatalf("runtime errors after loader panic = %d, want 1", len(errorsSeen()))
+	}
+	if !resource.Failed() {
+		t.Fatalf("resource after loader panic = %#v, want failed UI state", resource)
 	}
 }
 
@@ -536,4 +776,15 @@ func TestUseResourceNilLoaderPanics(t *testing.T) {
 	assertPanic(t, "goframe: UseResource requires a loader", func() {
 		renderComponentInstance(instance)
 	})
+}
+
+func requireResourceEffectSlotCompleted(t *testing.T, instance *componentInstance) {
+	t.Helper()
+	if len(instance.effectSlots) != 1 {
+		t.Fatalf("effect slots = %d, want 1", len(instance.effectSlots))
+	}
+	slot := instance.effectSlots[0]
+	if !slot.hasRun || slot.pending || slot.queued || slot.running || slot.cleanup != nil {
+		t.Fatalf("resource effect slot = %#v, want hasRun=true pending=false queued=false running=false cleanup=nil", slot)
+	}
 }

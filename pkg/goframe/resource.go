@@ -121,7 +121,7 @@ func (control *resourceControl[T]) reload() {
 	markComponentDirty(control.owner)
 }
 
-func (control *resourceControl[T]) start(key string, generation int) Cleanup {
+func (control *resourceControl[T]) start(key string, generation int) (cleanup Cleanup) {
 	if control == nil || control.owner == nil || !control.owner.active {
 		return nil
 	}
@@ -137,7 +137,12 @@ func (control *resourceControl[T]) start(key string, generation int) Cleanup {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			control.fail(run, resourceLoaderPanicError)
-			panic(recovered)
+			reportRecoveredRuntimeError(ErrorInfo{
+				Phase:     ErrorPhaseEffect,
+				Component: runtimeComponentName(control.owner),
+				Operation: "UseEffect",
+			}, recovered)
+			cleanup = nil
 		}
 	}()
 	run.cleanup = control.loader(key, func(value T) {
@@ -145,9 +150,10 @@ func (control *resourceControl[T]) start(key string, generation int) Cleanup {
 	}, func(err error) {
 		control.reject(run, err)
 	})
-	return func() {
+	cleanup = func() {
 		control.cleanupRun(run)
 	}
+	return cleanup
 }
 
 func (control *resourceControl[T]) resolve(run *resourceRun[T], value T) {
