@@ -13,8 +13,16 @@ type ErrorBoundaryProps struct {
 	Children []Node
 }
 
+type errorBoundaryPhase uint8
+
+const (
+	errorBoundaryProtected errorBoundaryPhase = iota
+	errorBoundaryCaptured
+	errorBoundaryFallback
+)
+
 type errorBoundaryState struct {
-	failed      bool
+	phase       errorBoundaryPhase
 	info        ErrorInfo
 	generation  int
 	resetKey    string
@@ -36,7 +44,10 @@ func renderErrorBoundary(props ErrorBoundaryProps) Node {
 	instance := requireCurrentComponent("ErrorBoundary")
 	state := ensureErrorBoundaryState(instance)
 	updateErrorBoundaryResetKey(state, props.ResetKey)
-	if state.failed {
+	if state.phase == errorBoundaryCaptured {
+		state.phase = errorBoundaryFallback
+	}
+	if state.phase == errorBoundaryFallback {
 		context := ErrorBoundaryContext{
 			Info: state.info,
 			Reset: func() {
@@ -65,19 +76,19 @@ func updateErrorBoundaryResetKey(state *errorBoundaryState, resetKey string) {
 		return
 	}
 	state.resetKey = resetKey
-	if state.failed {
+	if state.phase != errorBoundaryProtected {
 		clearErrorBoundary(state)
 	}
 }
 
 func clearErrorBoundary(state *errorBoundaryState) {
-	state.failed = false
+	state.phase = errorBoundaryProtected
 	state.info = ErrorInfo{}
 	state.generation++
 }
 
 func resetErrorBoundary(instance *componentInstance, state *errorBoundaryState) {
-	if instance == nil || !instance.active || instance.errorBoundary != state || !state.failed {
+	if instance == nil || !instance.active || instance.errorBoundary != state || state.phase == errorBoundaryProtected {
 		return
 	}
 	clearErrorBoundary(state)
@@ -91,8 +102,8 @@ func captureRenderErrorBoundary(failing *componentInstance, info ErrorInfo) {
 	}
 	cancelPendingEffectsUnderBoundary(boundary)
 	state := boundary.errorBoundary
-	if !state.failed {
-		state.failed = true
+	if state.phase == errorBoundaryProtected {
+		state.phase = errorBoundaryCaptured
 		state.info = info
 		state.generation++
 	}
@@ -101,7 +112,7 @@ func captureRenderErrorBoundary(failing *componentInstance, info ErrorInfo) {
 
 func nearestErrorBoundary(instance *componentInstance) *componentInstance {
 	for current := instance.parent; current != nil; current = current.parent {
-		if current.active && current.errorBoundary != nil {
+		if current.active && current.errorBoundary != nil && current.errorBoundary.phase != errorBoundaryFallback {
 			return current
 		}
 	}
