@@ -81,7 +81,8 @@ textarea {
 .rd-filter-actions,
 .rd-form-actions,
 .rd-row-actions,
-.rd-meta {
+.rd-meta,
+.rd-resource-strip {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
@@ -194,6 +195,39 @@ textarea {
 
 .rd-saved {
     color: #087443;
+}
+
+.rd-resource-strip {
+    border-top: 1px solid #e7edf8;
+    padding-top: 14px;
+}
+
+.rd-resource-status,
+.rd-resource-attempt {
+    border-radius: 999px;
+    padding: 0.35rem 0.7rem;
+    background: #f0f4fb;
+    color: #42516a;
+}
+
+.rd-resource-status-ready {
+    background: #e8f7ef;
+    color: #087443;
+}
+
+.rd-resource-status-loading {
+    background: #fff4d6;
+    color: #7a4d00;
+}
+
+.rd-resource-status-failed {
+    background: #fee4e2;
+    color: #b42318;
+}
+
+.rd-resource-panel,
+.rd-boundary-fallback {
+    border-style: dashed;
 }
 
 @media (max-width: 720px) {

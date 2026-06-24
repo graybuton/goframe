@@ -1,0 +1,12 @@
+RD-1|Auth token refresh fails on slow networks|open|high|Identity|Refresh retry state is not visible in the admin screen.
+RD-2|Billing dashboard needs clearer empty state|review|medium|Billing|Empty invoices should explain the current filter.
+RD-3|Export CSV action should preserve filters|open|medium|Reports|CSV export currently ignores the active query string.
+RD-4|Audit log row spacing is inconsistent|closed|low|Platform|Visual polish issue in dense table mode.
+RD-5|Support queue route needs not-found copy|review|low|Support|Unknown support ticket routes should be clearer.
+RD-6|Search input should keep URL state|open|high|Experience|Filter state should survive reload and browser back.
+RD-7|Admin form validation needs touched state|open|medium|Experience|Field errors should not appear before user interaction.
+RD-8|Router smoke should cover query filters|closed|medium|Runtime|The preview app should lock down URL-driven filters.
+RD-9|Resource reload should preserve route state|open|high|Runtime|Manual data reload should not reset the active hash route or query filters.
+RD-10|Render fallback copy needs a retry hint|review|medium|Experience|Error Boundary fallback should explain that resource failures are rendered separately.
+RD-11|Package manifest should list data assets|closed|low|Tooling|The reference app should prove packaged static data is available to browser fetch.
+RD-12|Edit form reset should clear touched state|open|medium|Experience|Reset should restore initial values and clear local validation state.

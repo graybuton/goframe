@@ -1,0 +1,27 @@
+package data
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func ResourceStatusPanel(props ResourceStatusPanelProps) gf.Node {
+	repository := UseIssueRepository()
+	if repository.Resource.Loading() {
+		return (
+			<section class="rd-card rd-resource-panel" data-testid="rd-resource-loading">
+				<p class="rd-eyebrow">Loading</p>
+				<h2>Loading packaged issue data</h2>
+				<p class="rd-muted">The shell and current route stay mounted while the resource resolves.</p>
+			</section>
+		)
+	}
+	if repository.Resource.Failed() {
+		return (
+			<section class="rd-card rd-resource-panel" data-testid="rd-resource-failed">
+				<p class="rd-eyebrow">Resource failed</p>
+				<h2>Issue data did not load</h2>
+				<p class="rd-muted" data-testid="rd-resource-error">{repository.ErrorText()}</p>
+				<button data-testid="rd-resource-retry" OnClick={repository.Retry}>Retry packaged data</button>
+			</section>
+		)
+	}
+	return gf.Empty()
+}

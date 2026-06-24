@@ -1,15 +1,20 @@
 package layout
 
-import gf "github.com/graybuton/goframe/pkg/goframe"
+import (
+	data "github.com/graybuton/goframe/examples/router-dashboard/internal/data"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
 
 func Shell(props ShellProps) gf.Node {
+	repository := data.UseIssueRepository()
+
 	return (
 		<section class="rd-shell" data-testid="rd-shell">
 			<header class="rd-header">
 				<div>
 					<p class="rd-eyebrow">GoFrame reference app</p>
 					<h1>Router Dashboard</h1>
-					<p class="rd-muted">Hash routes, query filters, controlled forms, and Go-first layout.</p>
+					<p class="rd-muted">Hash routes, query filters, resource data, controlled forms, and Go-first layout.</p>
 				</div>
 				<nav class="rd-nav" aria-label="Primary navigation">
 					<gf.RouterLink To="/" Class="rd-link" TestID="rd-nav-home">
@@ -19,6 +24,20 @@ func Shell(props ShellProps) gf.Node {
 						Issues
 					</gf.RouterLink>
 				</nav>
+				<div class="rd-resource-strip" aria-label="Issue data resource">
+					<span class={data.StatusClass(repository.StatusText())} data-testid="rd-resource-status">
+						{repository.StatusText()}
+					</span>
+					<span class="rd-resource-attempt" data-testid="rd-resource-attempt">
+						load attempts: {repository.AttemptText()}
+					</span>
+					<button data-testid="rd-resource-reload" Type="button" OnClick={repository.ReloadData}>
+						Reload data
+					</button>
+					<button class="secondary" data-testid="rd-resource-fail" Type="button" OnClick={repository.SimulateDataFailure}>
+						Simulate failed load
+					</button>
+				</div>
 			</header>
 			<div class="rd-outlet" data-testid="rd-outlet">
 				{props.Children}

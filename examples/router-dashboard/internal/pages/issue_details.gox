@@ -6,20 +6,28 @@ import (
 )
 
 func IssueDetails(props IssueDetailsProps) gf.Node {
-	if !props.Found {
+	if props.Crash {
+		panic("router dashboard requested render failure")
+	}
+	repository := data.UseIssueRepository()
+	if !repository.Ready() {
+		return <data.ResourceStatusPanel />
+	}
+	issue, ok := data.FindIssue(repository.Issues(), props.ID)
+	if !ok {
 		return <MissingIssue ID={props.ID} />
 	}
 	return (
 		<section class="rd-card" data-testid="rd-issue-detail">
-			<p class="rd-eyebrow">{props.Issue.ID}</p>
-			<h2>{props.Issue.Title}</h2>
+			<p class="rd-eyebrow">{issue.ID}</p>
+			<h2>{issue.Title}</h2>
 			<div class="rd-meta">
-				<span>{data.StatusLabel(props.Issue.Status)}</span>
-				<span>{props.Issue.Priority}</span>
-				<span>{props.Issue.Owner}</span>
+				<span>{data.StatusLabel(issue.Status)}</span>
+				<span>{issue.Priority}</span>
+				<span>{issue.Owner}</span>
 			</div>
-			<p>{props.Issue.Description}</p>
-			<gf.RouterLink To={data.IssueEditPath(props.Issue.ID)} Class="rd-link" TestID="rd-edit-link">
+			<p>{issue.Description}</p>
+			<gf.RouterLink To={data.IssueEditPath(issue.ID)} Class="rd-link" TestID="rd-edit-link">
 				Edit issue
 			</gf.RouterLink>
 		</section>

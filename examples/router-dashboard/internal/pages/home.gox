@@ -7,8 +7,9 @@ func Home(props HomeProps) gf.Node {
 		<section class="rd-card" data-testid="rd-home">
 			<h2>{props.Title}</h2>
 			<p>
-				This reference app combines the small hash router, route query helpers,
-				and controlled form validation without a larger app framework.
+				This flagship reference app combines the small hash router, URL query
+				state, a component-scoped resource, controlled form validation, and a
+				scoped render Error Boundary without a larger app framework.
 			</p>
 			<p>
 				<gf.RouterLink To="/issues?status=open" Class="rd-link" TestID="rd-home-open-issues">

@@ -18,9 +18,11 @@ var router = gf.NewHashRouter([]gf.Route{
 func App() gf.Node {
 	return (
 		<main class="rd-app">
-			<layout.Shell>
-				{gf.RouterView(router)}
-			</layout.Shell>
+			<data.IssueProvider>
+				<layout.Shell>
+					{gf.RouterView(router)}
+				</layout.Shell>
+			</data.IssueProvider>
 		</main>
 	)
 }
@@ -31,30 +33,42 @@ func homeRoute(gf.RouteContext) gf.Node {
 
 func issuesRoute(ctx gf.RouteContext) gf.Node {
 	query := ctx.Query()
-	allIssues := data.DemoIssues()
 	filter := data.IssueFilter{
 		Query:  query.Get("q"),
 		Status: query.Get("status"),
 	}
-	return <pages.IssueList
-		Items={data.FilterIssues(allIssues, filter)}
-		TotalCount={len(allIssues)}
+	return routeBoundary(ctx, <pages.IssueList
 		Query={filter.Query}
 		Status={filter.Status}
-		CurrentPath={ctx.Path}
-	/>
+	/>)
 }
 
 func issueDetailsRoute(ctx gf.RouteContext) gf.Node {
-	issue, ok := data.FindIssue(ctx.Param("id"))
-	return <pages.IssueDetails Issue={issue} Found={ok} ID={ctx.Param("id")} />
+	return routeBoundary(ctx, <pages.IssueDetails
+		ID={ctx.Param("id")}
+		Crash={ctx.Query().Get("panic") == "render"}
+	/>)
 }
 
 func issueEditRoute(ctx gf.RouteContext) gf.Node {
-	issue, ok := data.FindIssue(ctx.Param("id"))
-	return <pages.IssueEdit Issue={issue} Found={ok} ID={ctx.Param("id")} />
+	return routeBoundary(ctx, <pages.IssueEdit ID={ctx.Param("id")} />)
 }
 
 func notFoundRoute(ctx gf.RouteContext) gf.Node {
 	return <pages.NotFound Path={ctx.Path} />
+}
+
+func routeBoundary(ctx gf.RouteContext, child gf.Node) gf.Node {
+	return (
+		<gf.ErrorBoundary ResetKey={routeResetKey(ctx)} Fallback={pages.RouteErrorFallback}>
+			{child}
+		</gf.ErrorBoundary>
+	)
+}
+
+func routeResetKey(ctx gf.RouteContext) string {
+	if ctx.RawQuery == "" {
+		return ctx.Path
+	}
+	return ctx.Path + "?" + ctx.RawQuery
 }

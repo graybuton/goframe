@@ -7,11 +7,8 @@ type HomeProps struct {
 }
 
 type IssueListProps struct {
-	Items       []data.Issue
-	TotalCount  int
-	Query       string
-	Status      string
-	CurrentPath string
+	Query  string
+	Status string
 }
 
 type IssueRowProps struct {
@@ -19,15 +16,12 @@ type IssueRowProps struct {
 }
 
 type IssueDetailsProps struct {
-	Issue data.Issue
-	Found bool
 	ID    string
+	Crash bool
 }
 
 type IssueEditProps struct {
-	Issue data.Issue
-	Found bool
-	ID    string
+	ID string
 }
 
 type MissingIssueProps struct {
