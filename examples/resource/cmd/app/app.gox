@@ -1,0 +1,63 @@
+package main
+
+import (
+	ui "github.com/graybuton/goframe/examples/resource/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func App() gf.Node {
+	state, dispatch := gf.UseReducer(initialResourceAppState(), reduceResourceApp)
+
+	return (
+		<main class="resource-app" data-testid="resource-app">
+			<section class="resource-hero">
+				<p class="resource-muted">MVP 28 resource prototype</p>
+				<h1>Component-scoped resources</h1>
+				<p>
+					This example loads packaged static text assets through browser fetch.
+					The runtime resource API remains transport-agnostic.
+				</p>
+				<div class="resource-controls">
+					<button data-testid="resource-load-open" OnClick={func() {
+						dispatch(resourceAppAction{Kind: resourceAppSetKey, Key: resourceOpenKey})
+					}}>Load Open</button>
+					<button data-testid="resource-load-all" OnClick={func() {
+						dispatch(resourceAppAction{Kind: resourceAppSetKey, Key: resourceAllKey})
+					}}>Load All</button>
+					<button data-testid="resource-load-missing" OnClick={func() {
+						dispatch(resourceAppAction{Kind: resourceAppSetKey, Key: resourceMissingKey})
+					}}>Load Missing</button>
+					<button data-testid="resource-load-slow" OnClick={func() {
+						dispatch(resourceAppAction{Kind: resourceAppSetKey, Key: resourceSlowOpenKey})
+					}}>Load Slow Open</button>
+					<button data-testid="resource-load-fast" OnClick={func() {
+						dispatch(resourceAppAction{Kind: resourceAppSetKey, Key: resourceAllKey})
+					}}>Load Fast All</button>
+					<button class="secondary" data-testid="resource-toggle-panel" OnClick={func() {
+						dispatch(resourceAppAction{Kind: resourceAppTogglePanel})
+					}}>Toggle panel</button>
+				</div>
+			</section>
+			<gf.ErrorBoundary ResetKey={state.Key} Fallback={resourceBoundaryFallback}>
+				{state.ShowPanel ? (
+					<ui.ResourcePanel ResourceKey={state.Key} />
+				) : (
+					<section class="resource-panel" data-testid="resource-panel-unmounted">
+						<h2>Panel unmounted</h2>
+						<p class="resource-muted">Resource cleanup has run for the active generation.</p>
+					</section>
+				)}
+			</gf.ErrorBoundary>
+		</main>
+	)
+}
+
+func resourceBoundaryFallback(ctx gf.ErrorBoundaryContext) gf.Node {
+	return (
+		<section class="resource-panel" data-testid="resource-boundary-fallback">
+			<h2>Unexpected render failure</h2>
+			<p>{ctx.Info.Component}</p>
+			<button OnClick={ctx.Reset}>Retry</button>
+		</section>
+	)
+}
