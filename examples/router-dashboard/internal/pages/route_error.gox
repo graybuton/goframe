@@ -10,7 +10,16 @@ func RouteErrorFallback(ctx gf.ErrorBoundaryContext) gf.Node {
 			<p class="rd-muted">
 				The stable shell stayed mounted. Component: {ctx.Info.Component}.
 			</p>
-			<button data-testid="rd-boundary-reset" OnClick={ctx.Reset}>Reset route content</button>
+			<p class="rd-muted">
+				Retry repeats the current route with the same URL state. If the route input is still invalid,
+				the fallback can appear again.
+			</p>
+			<div class="rd-actions">
+				<button data-testid="rd-boundary-reset" OnClick={ctx.Reset}>Retry current route</button>
+				<gf.RouterLink To="/issues" Class="rd-link" TestID="rd-boundary-back-to-issues">
+					Back to issues
+				</gf.RouterLink>
+			</div>
 		</section>
 	)
 }
