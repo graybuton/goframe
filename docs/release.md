@@ -53,6 +53,9 @@ Before creating a tag:
 - `scripts/module-path-check.sh` passes;
 - release package layout is checked with `goxc package --asset-hash --preload`
   for affected examples;
+- filesystem/package safety spot checks pass for symlink rejection, ownership
+  markers, output overlap, asset collisions, publish, clean, and serve
+  behavior;
 - README, docs, and changelog are updated;
 - no `dist/`, `build/`, `.goframe`, `.gox.go`, `.wasm`, `.wasm.gz`,
   `.wasm.br`, `.wasm.zst`, `node_modules`, `.vsix`, or `.test` files are
@@ -126,7 +129,10 @@ clear about API instability and experimental status.
 - `goxc package --asset-hash --preload --compress=gzip,br` checked for
   representative examples;
 - `asset-manifest.json` and `goframe-package.json` present;
-- export ownership safety checked;
+- package/export ownership safety checked with structured markers, not
+  placeholder files;
+- manifest assets checked for collisions with generated WASM, runtime, and
+  compressed sidecar names;
 - clean workspace checked;
 - sample static-host deploy notes current.
 

@@ -16,7 +16,10 @@ contracts still need final decisions before a preview tag:
 
 MVP 30 closes part of the readiness gap by documenting API tiers, component
 identity, manifest/package compatibility, symlink policy, platform support,
-compatibility/deprecation policy, migration policy, and release checklist.
+compatibility/deprecation policy, migration policy, and release checklist. The
+filesystem/package corrective pass hardens the goxc package/export/generate/
+build/clean/serve paths against common symlink traversal, false ownership, path
+overlap, and generated-asset collision mistakes.
 
 ## Current Status
 
@@ -24,7 +27,7 @@ compatibility/deprecation policy, migration policy, and release checklist.
 |---|---|---|
 | Runtime primitives | Ready with limitations | `pkg/goframe/*_test.go`, `docs/runtime-model.md`, browser smoke. |
 | GOX compiler | Ready with limitations | `pkg/gox` golden/error tests, source diagnostics, package-qualified component tests. |
-| Toolchain | Ready with limitations | `cmd/goxc` tests, browser smoke, size budget, package matrix. |
+| Toolchain | Ready with limitations | `cmd/goxc` tests, browser smoke, size budget, package matrix, filesystem/package safety matrix. |
 | Public docs | Ready with limitations | README, tutorial, API stability docs, docs-check. |
 | Platform support | Needs hardening | Chrome/Linux are tested; macOS/Windows/Firefox/Safari are not CI-tested. |
 | Public preview release process | Needs hardening | `docs/release.md` now contains a preview checklist; no preview tag has been cut. |
@@ -108,6 +111,11 @@ Decision:
 - `goframe.json` is the public input contract;
 - `asset-manifest.json` and `goframe-package.json` are generated metadata and
   package/export ownership markers;
+- package/export ownership is granted only by structured, regular, valid
+  metadata; generic `{}` files and generic web `manifest.json` files are not
+  ownership markers;
+- package assets are planned before publication so user assets cannot collide
+  with the generated WASM, `wasm_exec.js`, or compressed sidecars;
 - no mandatory manifest schema version is added in MVP 30.
 
 ## Filesystem And Symlink Safety
@@ -118,13 +126,22 @@ Evidence:
 
 - `docs/security-symlink-policy.md`;
 - `cmd/goxc/symlink_test.go`;
-- package/export validation rejects symlinked output roots;
-- entry/source/assets symlinks are rejected.
+- `cmd/goxc/filesystem_safety_test.go`;
+- root-aware validation rejects intermediate symlink components below declared
+  roots;
+- package/export validation rejects symlinked output roots and false ownership
+  markers;
+- entry/source/assets/package-source symlinks and non-regular files are
+  rejected;
+- output overlap and generated asset namespace collisions are rejected before
+  publication.
 
 Remaining risk:
 
-- symlinked app roots are not a promised workflow;
-- serve path hardening remains development-server scoped.
+- concurrent filesystem mutation between validation and operation remains out
+  of scope;
+- Windows path behavior is not CI-verified;
+- `goxc serve` remains development-server scoped.
 
 ## Platform Support Matrix
 
@@ -199,6 +216,7 @@ Recommendation:
 | High | Platform support is Linux/Chrome-heavy. | `docs/platform-support.md` | Add macOS/Windows and Firefox/Safari verification or mark preview scope narrowly. |
 | Medium | `goframe.json` has no schema version decision. | `docs/manifest-compatibility.md` | Decide optional schema marker before preview. |
 | Medium | Production deployment server remains out of scope. | `docs/deployment.md` | Keep preview messaging static-hosting/hash-router focused. |
+| Medium | Package publication is hardened but not a full transactional installer. | `cmd/goxc/package.go` | Metadata is written last and sources are prevalidated; a future transaction/rollback design can further protect existing packages from mid-copy failures. |
 | Documentation-only | Public API classification must be kept current. | `docs/api-stability.md` | Optional exported-symbol classification gate can be added later. |
 
 ## Deferred Non-goals

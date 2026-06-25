@@ -100,6 +100,16 @@
 - `goxc` now rejects symlinked entry directories, source files, manifest
   assets, package output roots, and export output roots at safety-sensitive
   boundaries instead of following them.
+- `goxc` now rejects intermediate symlink components under declared
+  app/workspace/output roots, symlinked package sources, destination symlink
+  writes, source/output overlap, false package ownership markers, and package
+  asset namespace collisions with generated WASM/runtime/sidecar files.
+- Package/export ownership detection now requires regular, structured GoFrame
+  metadata instead of trusting placeholder filenames such as `{}` or generic
+  web `manifest.json`.
+- Package publication now validates staged source entries before copying and
+  publishes `goframe-package.json` last, reducing the chance of a failed copy
+  leaving misleading completed package metadata.
 - Resource loader panics no longer leave the internal effect slot pending, so a
   same-key rerender after failed state does not automatically restart the same
   panicking loader. Explicit retry remains available through `reload` or key

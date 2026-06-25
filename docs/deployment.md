@@ -38,14 +38,16 @@ Only the export step creates `./dist`.
 
 If you intentionally pass `goxc package --out <dir>`, that directory is also
 treated as package output owned by goxc. It must be empty or already contain a
-GoFrame package marker; otherwise package fails before removing any existing
-`assets/` directory. The recommended visible deployment flow remains
+valid GoFrame package marker; otherwise package fails before removing any
+existing `assets/` directory. Empty `{}` marker placeholders, malformed
+metadata, symlinked markers, and generic web `manifest.json` files are not
+treated as GoFrame ownership. The recommended visible deployment flow remains
 `goxc package` followed by `goxc export`.
 
 The export directory is tool-owned. If `--out` already exists, is non-empty,
 and does not contain `goframe-package.json`, `asset-manifest.json`, or legacy
-`manifest.json` from a previous GoFrame export, `goxc export` fails before
-touching it:
+`manifest.json` with recognizable GoFrame package structure from a previous
+GoFrame export, `goxc export` fails before touching it:
 
 ```bash
 goxc export ./examples/todo --out ./dist
@@ -84,6 +86,11 @@ examples/todo/.goframe/package/standalone/
 
 CSS assets are emitted under `assets/` too, for example
 `assets/styles.77a1de20.css`.
+
+Before packaging, goxc builds an asset namespace plan. Manifest assets cannot
+collide with generated names such as `bundle.wasm`, `wasm_exec.js`, generated
+metadata, or `.gz`/`.br` sidecars. Duplicate assets after path normalization
+are rejected before publication.
 
 ## HTML Rewriting
 
@@ -202,7 +209,8 @@ Default command outputs:
 
 `GOFRAME_WORKSPACE=/work/goframe` or `--workspace /work/goframe` moves this
 workspace outside the source tree. With an external workspace, goxc creates a
-safe app-specific subdirectory to avoid collisions between apps.
+safe app-specific subdirectory to avoid collisions between apps. External
+workspaces must not overlap the app source tree.
 
 `goxc generate --in-place` is available only for debugging or legacy workflows.
 It writes adjacent `.gox.go` files and prints a warning. Normal source trees
@@ -214,6 +222,13 @@ and adjacent legacy `.gox.go` files. `goxc clean <app> --legacy` helps migrate
 old workspaces by removing legacy `build/` and adjacent generated `.gox.go`
 files. Legacy `dist/` is removed only if it looks like a GoFrame export; user
 directories are skipped instead of silently deleted.
+
+The toolchain rejects symlinked app roots, entry directories, authored source
+files, package assets, package/export roots, and symlinked package sources at
+safety-sensitive boundaries. Cleanup removes final tool-owned symlinks as
+links and rejects intermediate workspace symlinks instead of traversing
+external targets. This is best-effort protection for static repository trees;
+hostile concurrent filesystem mutation is outside the threat model.
 
 The materialized hidden workspace supports `"entry": "."` apps and child entry
 packages such as `"./cmd/app"`, `"cmd/app"`, `"./src/app"`, and `"app"` when

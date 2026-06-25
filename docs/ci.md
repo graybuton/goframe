@@ -25,9 +25,10 @@ It checks:
 - GOX golden tests, including source-oriented error diagnostics.
 
 The `cmd/goxc` test suite includes manifest/path/package/export/workspace
-regression tests, including symlink safety checks for entry directories,
-source files, manifest assets, package/export output roots, and workspace
-cleanup behavior.
+regression tests, including root-aware symlink checks for app roots, entry
+directories, source files, manifest assets, package/export roots, generated
+outputs, workspace cleanup behavior, package ownership markers, asset
+namespace collisions, source/output overlap, and dev-server symlink entries.
 
 ### WASM Size
 
@@ -136,7 +137,7 @@ Public-preview readiness spot checks:
 
 ```bash
 go test ./pkg/gox -run 'Identity|Package|Golden|ErrorGolden|Qualified'
-go test ./cmd/goxc -run 'Manifest|Package|Export|Workspace|Clean|Symlink|Path'
+go test ./cmd/goxc -run 'Symlink|Path|Workspace|Generate|Build|Package|Export|Clean|Manifest|Ownership|Collision|Publish|Serve'
 ```
 
 No separate public-preview script is required yet; the readiness checks are

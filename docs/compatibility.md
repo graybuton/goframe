@@ -76,6 +76,8 @@ The project may break compatibility without a full deprecation window for:
 - path traversal or symlink escape fixes;
 - destructive output behavior fixes;
 - security-sensitive package/export ownership behavior;
+- manifest path canonicalization that rejects ambiguous raw `..` components;
+- package asset namespace collision rejection;
 - CI-only smoke harness internals;
 - generated workspace internals.
 
