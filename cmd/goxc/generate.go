@@ -85,11 +85,14 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		}
 		fmt.Fprintln(os.Stderr, "warning: --in-place writes generated compiler output into the source tree; use only for debugging or legacy workflows")
 		for _, file := range files {
-			output, err := gox.GenerateFileToWithOptions(file, file+".go", gox.GenerateOptions{
+			output := file + ".go"
+			if err := validatePathBelowRoot(appDir, output, "in-place generated file", true); err != nil {
+				return err
+			}
+			if err := generateFileSafely(file, output, gox.GenerateOptions{
 				Filename:        file,
 				PackageIdentity: packageIdentityForFile(appDir, file),
-			})
-			if err != nil {
+			}); err != nil {
 				return fmt.Errorf("generate failed for %s: %w", file, err)
 			}
 			fmt.Printf("generated %s -> %s\n", file, output)
@@ -107,7 +110,17 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		if err != nil {
 			return err
 		}
+		if err := validateWorkspaceRoot(layout); err != nil {
+			return err
+		}
 		outputRoot = layout.GenDir
+		if err := validatePathBelowRoot(layout.WorkspaceRoot, outputRoot, "generated output directory", true); err != nil {
+			return err
+		}
+	} else {
+		if err := validateExplicitPathRoot(outputRoot, "generated output directory", true); err != nil {
+			return err
+		}
 	}
 
 	for _, file := range files {
@@ -116,11 +129,13 @@ func generatePath(options generateOptions, requireFiles bool) error {
 			return fmt.Errorf("resolve GOX source %s: %w", file, err)
 		}
 		output := filepath.Join(outputRoot, relative+".go")
-		output, err = gox.GenerateFileToWithOptions(file, output, gox.GenerateOptions{
+		if err := validatePathBelowRoot(outputRoot, output, "generated file", true); err != nil {
+			return err
+		}
+		if err := generateFileSafely(file, output, gox.GenerateOptions{
 			Filename:        file,
 			PackageIdentity: packageIdentityForFile(appDir, file),
-		})
-		if err != nil {
+		}); err != nil {
 			return fmt.Errorf("generate failed for %s: %w", file, err)
 		}
 		fmt.Printf("generated %s -> %s\n", file, output)
@@ -129,9 +144,12 @@ func generatePath(options generateOptions, requireFiles bool) error {
 }
 
 func generationAppDir(path string) (string, error) {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%s is a symlink; symlink paths are not supported", path)
 	}
 	if info.IsDir() {
 		return path, nil

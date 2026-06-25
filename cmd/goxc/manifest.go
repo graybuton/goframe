@@ -162,6 +162,11 @@ func safeRelativePath(path string) bool {
 	if path == "" || filepath.IsAbs(path) {
 		return false
 	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return false
+		}
+	}
 	clean := filepath.Clean(path)
 	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }

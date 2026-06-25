@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -68,7 +69,10 @@ func exportApp(options exportOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := rejectSymlinkPath(layout.PackageDir, "standalone package directory"); err != nil {
+	if err := validateWorkspaceRoot(layout); err != nil {
+		return err
+	}
+	if err := validatePathBelowRoot(layout.WorkspaceRoot, layout.PackageDir, "standalone package directory", false); err != nil {
 		return err
 	}
 	if info, err := os.Stat(layout.PackageDir); err != nil {
@@ -76,10 +80,16 @@ func exportApp(options exportOptions) error {
 	} else if !info.IsDir() {
 		return fmt.Errorf("standalone package path is not a directory: %s", layout.PackageDir)
 	}
-	if err := rejectSymlinkPath(options.outDir, "export output directory"); err != nil {
+	if pathsOverlap(layout.PackageDir, options.outDir) {
+		return fmt.Errorf("export output directory %s must not overlap standalone package directory %s", options.outDir, layout.PackageDir)
+	}
+	if err := validateExplicitPathRoot(options.outDir, "export output directory", true); err != nil {
 		return err
 	}
 	if err := validateExportDestination(options.outDir, options.force); err != nil {
+		return err
+	}
+	if err := validateExplicitPathRoot(options.outDir, "export output directory", true); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(options.outDir, 0o755); err != nil {
@@ -96,7 +106,7 @@ func exportApp(options exportOptions) error {
 }
 
 func validateExportDestination(outDir string, force bool) error {
-	if err := rejectSymlinkPath(outDir, "export output directory"); err != nil {
+	if err := validateExplicitPathRoot(outDir, "export output directory", true); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(outDir)
@@ -113,7 +123,7 @@ func validateExportDestination(outDir string, force bool) error {
 }
 
 func validatePackageDestination(outDir string) error {
-	if err := rejectSymlinkPath(outDir, "package output directory"); err != nil {
+	if err := validateExplicitPathRoot(outDir, "package output directory", true); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(outDir)
@@ -130,14 +140,102 @@ func validatePackageDestination(outDir string) error {
 }
 
 func isGoframeOwnedExport(directory string) bool {
-	if fileExists(filepath.Join(directory, packageMetadataName)) {
-		return true
+	owned, _ := inspectPackageOwnership(directory)
+	return owned
+}
+
+func inspectPackageOwnership(directory string) (bool, error) {
+	if ok, err := validCurrentPackageMetadata(filepath.Join(directory, packageMetadataName)); ok || err != nil {
+		return ok, err
 	}
-	if fileExists(filepath.Join(directory, assetManifestName)) {
-		return true
+	if ok, err := validAssetManifestMetadata(filepath.Join(directory, assetManifestName)); ok || err != nil {
+		return ok, err
 	}
-	if fileExists(filepath.Join(directory, legacyPackageManifest)) {
-		return true
+	if ok, err := validLegacyPackageSignature(directory); ok || err != nil {
+		return ok, err
 	}
-	return false
+	return false, nil
+}
+
+func validCurrentPackageMetadata(path string) (bool, error) {
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	var metadata packageMetadata
+	if err := readJSONRegular(path, "package metadata", &metadata); err != nil {
+		return false, nil
+	}
+	if metadata.Version != 1 || metadata.Name == "" || metadata.AssetsDir != assetDirectoryName {
+		return false, nil
+	}
+	if metadata.Compiler != "go" && metadata.Compiler != "tinygo" {
+		return false, nil
+	}
+	if !safeChildPath(metadata.Entrypoints.HTML) || !safeChildPath(metadata.Entrypoints.WASM) || !safeChildPath(metadata.Entrypoints.Runtime) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func validAssetManifestMetadata(path string) (bool, error) {
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	var manifest assetManifest
+	if err := readJSONRegular(path, "asset manifest", &manifest); err != nil {
+		return false, nil
+	}
+	if manifest.Version != 1 || len(manifest.Assets) == 0 {
+		return false, nil
+	}
+	if !safeChildPath(manifest.Entrypoints.WASM) || !safeChildPath(manifest.Entrypoints.Runtime) {
+		return false, nil
+	}
+	for _, asset := range manifest.Assets {
+		if !safeChildPath(asset.Path) || asset.Type == "" {
+			return false, nil
+		}
+		for _, compressed := range asset.Compressed {
+			if !safeChildPath(compressed) {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
+func validLegacyPackageSignature(directory string) (bool, error) {
+	manifestPath := filepath.Join(directory, legacyPackageManifest)
+	if _, err := os.Lstat(manifestPath); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	var generic map[string]any
+	if err := readJSONRegular(manifestPath, "legacy package manifest", &generic); err != nil {
+		return false, nil
+	}
+	wasmRoot := filepath.Join(directory, "main.wasm")
+	if _, err := regularFileNoFollow(wasmRoot, "legacy package WASM"); err != nil {
+		wasmRoot = filepath.Join(directory, "bundle.wasm")
+		if _, err := regularFileNoFollow(wasmRoot, "legacy package WASM"); err != nil {
+			return false, nil
+		}
+	}
+	if _, err := regularFileNoFollow(filepath.Join(directory, runtimeAssetName), "legacy runtime asset"); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+func readJSONRegular(path string, description string, value any) error {
+	if _, err := regularFileNoFollow(path, description); err != nil {
+		return err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(content, value); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	return nil
 }

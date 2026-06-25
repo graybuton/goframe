@@ -22,7 +22,9 @@ const (
 type BuildLayout struct {
 	AppDir string
 
-	WorkspaceRoot string
+	WorkspaceRoot     string
+	WorkspaceBase     string
+	ExternalWorkspace bool
 
 	GenDir     string
 	WorkDir    string
@@ -57,30 +59,40 @@ func newBuildLayout(options layoutOptions) (BuildLayout, error) {
 	}
 
 	workspaceRoot := options.workspace
+	externalWorkspace := false
 	if workspaceRoot == "" {
 		workspaceRoot = os.Getenv("GOFRAME_WORKSPACE")
 	}
 	if workspaceRoot == "" {
 		workspaceRoot = filepath.Join(appDir, defaultWorkspaceName)
 	} else {
+		externalWorkspace = true
 		workspaceRoot, err = filepath.Abs(workspaceRoot)
 		if err != nil {
 			return BuildLayout{}, fmt.Errorf("resolve workspace directory: %w", err)
 		}
+		if pathsOverlap(appDir, workspaceRoot) {
+			return BuildLayout{}, fmt.Errorf("workspace directory %s must not overlap application directory %s", workspaceRoot, appDir)
+		}
 		workspaceRoot = filepath.Join(workspaceRoot, appWorkspaceSlug(appDir))
+		if pathsOverlap(appDir, workspaceRoot) {
+			return BuildLayout{}, fmt.Errorf("workspace root %s must not overlap application directory %s", workspaceRoot, appDir)
+		}
 	}
 
 	return BuildLayout{
-		AppDir:        appDir,
-		WorkspaceRoot: workspaceRoot,
-		GenDir:        filepath.Join(workspaceRoot, "gen"),
-		WorkDir:       filepath.Join(workspaceRoot, "work", profile),
-		BuildDir:      filepath.Join(workspaceRoot, "build", compiler, profile),
-		PackageDir:    filepath.Join(workspaceRoot, "package", standalonePackage),
-		CacheDir:      filepath.Join(workspaceRoot, "cache"),
-		LogsDir:       filepath.Join(workspaceRoot, "logs"),
-		Compiler:      compiler,
-		Profile:       profile,
+		AppDir:            appDir,
+		WorkspaceRoot:     workspaceRoot,
+		WorkspaceBase:     filepath.Dir(workspaceRoot),
+		ExternalWorkspace: externalWorkspace,
+		GenDir:            filepath.Join(workspaceRoot, "gen"),
+		WorkDir:           filepath.Join(workspaceRoot, "work", profile),
+		BuildDir:          filepath.Join(workspaceRoot, "build", compiler, profile),
+		PackageDir:        filepath.Join(workspaceRoot, "package", standalonePackage),
+		CacheDir:          filepath.Join(workspaceRoot, "cache"),
+		LogsDir:           filepath.Join(workspaceRoot, "logs"),
+		Compiler:          compiler,
+		Profile:           profile,
 	}, nil
 }
 

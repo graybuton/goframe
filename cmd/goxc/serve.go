@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	pathpkg "path"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -86,6 +88,12 @@ func parseServeOptions(args []string) (serveOptions, error) {
 }
 
 func serve(options serveOptions) error {
+	if err := directoryNoFollow(options.dir, "serve directory"); err != nil {
+		if options.appDir != "" && errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no standalone package found; run `goxc package %s` first", options.appDir)
+		}
+		return err
+	}
 	info, err := os.Stat(options.dir)
 	if err != nil {
 		if options.appDir != "" {
@@ -105,6 +113,15 @@ func serve(options serveOptions) error {
 func staticHandler(directory string) http.Handler {
 	files := http.FileServer(http.Dir(directory))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		localPath := filepath.Join(directory, filepath.FromSlash(strings.TrimPrefix(pathpkg.Clean("/"+request.URL.Path), "/")))
+		if err := validatePathBelowRoot(directory, localPath, "serve path", false); err != nil {
+			http.NotFound(response, request)
+			return
+		}
+		if info, err := os.Lstat(localPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			http.NotFound(response, request)
+			return
+		}
 		path := request.URL.Path
 		if strings.HasSuffix(path, ".br") {
 			response.Header().Set("Content-Encoding", "br")

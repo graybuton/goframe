@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/graybuton/goframe/pkg/gox"
 )
 
 type cleanOptions struct {
@@ -64,12 +62,15 @@ func cleanApp(options cleanOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := validateWorkspaceRoot(layout); err != nil {
+		return err
+	}
 	for _, directory := range []string{
 		filepath.Join(layout.WorkspaceRoot, "work"),
 		filepath.Join(layout.WorkspaceRoot, "build"),
 		filepath.Join(layout.WorkspaceRoot, "package"),
 	} {
-		if err := removeDirectoryIfExists(directory); err != nil {
+		if err := removeDirectoryIfExistsBelowRoot(layout.WorkspaceRoot, directory); err != nil {
 			return err
 		}
 	}
@@ -86,14 +87,14 @@ func cleanApp(options cleanOptions) error {
 	if !options.generated {
 		return nil
 	}
-	if err := removeDirectoryIfExists(layout.GenDir); err != nil {
+	if err := removeDirectoryIfExistsBelowRoot(layout.WorkspaceRoot, layout.GenDir); err != nil {
 		return err
 	}
 	return nil
 }
 
 func cleanAdjacentGeneratedFiles(appDir string) error {
-	files, err := gox.FindFiles(appDir)
+	files, err := findGOXFiles(appDir)
 	if err != nil {
 		return err
 	}
@@ -110,12 +111,12 @@ func cleanAdjacentGeneratedFiles(appDir string) error {
 }
 
 func cleanLegacyArtifacts(appDir string) error {
-	if err := removeDirectoryIfExists(filepath.Join(appDir, "build")); err != nil {
+	if err := removeDirectoryIfExistsBelowRoot(appDir, filepath.Join(appDir, "build")); err != nil {
 		return err
 	}
 	dist := filepath.Join(appDir, "dist")
 	if isGoframeOwnedExport(dist) {
-		return removeDirectoryIfExists(dist)
+		return removeDirectoryIfExistsBelowRoot(appDir, dist)
 	}
 	if entries, err := os.ReadDir(dist); err == nil && len(entries) > 0 {
 		fmt.Printf("skipped %s; it does not look like a GoFrame package export\n", dist)
@@ -128,6 +129,27 @@ func removeDirectoryIfExists(directory string) error {
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("inspect %s: %w", directory, err)
+	}
+	if err := os.RemoveAll(directory); err != nil {
+		return fmt.Errorf("remove %s: %w", directory, err)
+	}
+	fmt.Printf("removed %s\n", directory)
+	return nil
+}
+
+func removeDirectoryIfExistsBelowRoot(root, directory string) error {
+	if err := validatePathBelowRoot(root, filepath.Dir(directory), "cleanup parent", false); err != nil {
+		return err
+	}
+	info, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", directory, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 && !info.IsDir() {
+		return fmt.Errorf("cleanup path %s is not a directory", directory)
 	}
 	if err := os.RemoveAll(directory); err != nil {
 		return fmt.Errorf("remove %s: %w", directory, err)

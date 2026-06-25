@@ -16,8 +16,14 @@ var (
 )
 
 func prepareBuildWorkspace(layout BuildLayout, manifest projectManifest) (string, error) {
+	if err := validateWorkspaceRoot(layout); err != nil {
+		return "", err
+	}
 	entry, err := resolveEntryPackageDir(layout.AppDir, manifest.Entry)
 	if err != nil {
+		return "", err
+	}
+	if err := validatePathBelowRoot(layout.WorkspaceRoot, layout.WorkDir, "workspace work directory", true); err != nil {
 		return "", err
 	}
 	if err := refreshDirectory(layout.WorkDir); err != nil {
@@ -60,7 +66,7 @@ func resolveEntryPackageDir(appDir, entry string) (string, error) {
 	if entry != "." {
 		entryDir = filepath.Join(appDir, filepath.FromSlash(entry))
 	}
-	if err := rejectSymlinkPath(entryDir, "entry directory"); err != nil {
+	if err := validatePathBelowRoot(appDir, entryDir, "entry directory", false); err != nil {
 		return "", err
 	}
 	relative, err := filepath.Rel(appDir, entryDir)
@@ -91,7 +97,20 @@ func refreshDirectory(directory string) error {
 	return nil
 }
 
+func validateWorkspaceRoot(layout BuildLayout) error {
+	if layout.ExternalWorkspace {
+		if pathsOverlap(layout.AppDir, layout.WorkspaceRoot) {
+			return fmt.Errorf("workspace root %s must not overlap application directory %s", layout.WorkspaceRoot, layout.AppDir)
+		}
+		return validatePathBelowRoot(layout.WorkspaceBase, layout.WorkspaceRoot, "workspace root", true)
+	}
+	return validatePathBelowRoot(layout.AppDir, layout.WorkspaceRoot, "workspace root", true)
+}
+
 func copyAuthoredGoFiles(sourceRoot, destinationRoot string) error {
+	if pathsOverlap(sourceRoot, destinationRoot) && !isToolOwnedDestinationBelowSource(sourceRoot, destinationRoot) {
+		return fmt.Errorf("copy destination %s must not overlap source root %s", destinationRoot, sourceRoot)
+	}
 	return filepath.WalkDir(sourceRoot, func(sourcePath string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("inspect source file %s: %w", sourcePath, err)
@@ -118,8 +137,31 @@ func copyAuthoredGoFiles(sourceRoot, destinationRoot string) error {
 		if filepath.Ext(sourcePath) != ".go" || strings.HasSuffix(sourcePath, ".gox.go") {
 			return nil
 		}
+		if _, err := regularFileNoFollow(sourcePath, "source file"); err != nil {
+			return err
+		}
+		if err := validatePathBelowRoot(destinationRoot, filepath.Join(destinationRoot, relative), "workspace authored file", true); err != nil {
+			return err
+		}
 		return copyFile(sourcePath, filepath.Join(destinationRoot, relative))
 	})
+}
+
+func isToolOwnedDestinationBelowSource(sourceRoot, destinationRoot string) bool {
+	sourceRoot, err := filepath.Abs(sourceRoot)
+	if err != nil {
+		return false
+	}
+	destinationRoot, err = filepath.Abs(destinationRoot)
+	if err != nil {
+		return false
+	}
+	relative, err := filepath.Rel(sourceRoot, destinationRoot)
+	if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || relative == ".." {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	return len(parts) > 0 && parts[0] == defaultWorkspaceName
 }
 
 func generateIntoDirectory(sourceRoot, destinationRoot string, requireFiles bool) error {
@@ -139,12 +181,37 @@ func generateIntoDirectory(sourceRoot, destinationRoot string, requireFiles bool
 			return fmt.Errorf("resolve GOX source %s: %w", file, err)
 		}
 		output := filepath.Join(destinationRoot, relative+".go")
-		if _, err := gox.GenerateFileToWithOptions(file, output, gox.GenerateOptions{
+		if err := generateFileSafely(file, output, gox.GenerateOptions{
 			Filename:        file,
 			PackageIdentity: packageIdentityForFile(sourceRoot, file),
 		}); err != nil {
 			return fmt.Errorf("generate failed for %s: %w", file, err)
 		}
+	}
+	return nil
+}
+
+func generateFileSafely(file, output string, options gox.GenerateOptions) error {
+	source, err := regularFileNoFollow(file, "GOX source file")
+	if err != nil {
+		return err
+	}
+	content, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", file, err)
+	}
+	if source.Size() < 0 {
+		return fmt.Errorf("inspect %s: invalid source size", file)
+	}
+	generated, err := gox.GenerateWithOptions(content, options)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return fmt.Errorf("create generated directory for %s: %w", output, err)
+	}
+	if err := writeFileAtomic(output, generated, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", output, err)
 	}
 	return nil
 }
@@ -207,13 +274,19 @@ func shouldSkipWorkspaceSource(relative string, entry os.DirEntry) bool {
 }
 
 func findGOXFiles(path string) ([]string, error) {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("GOX source path %s is a symlink; symlinked source files are not supported", path)
 	}
 	if !info.IsDir() {
 		if filepath.Ext(path) != ".gox" {
 			return nil, fmt.Errorf("%s is not a .gox file", path)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s is not a regular .gox file", path)
 		}
 		return []string{path}, nil
 	}
