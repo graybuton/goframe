@@ -31,6 +31,36 @@ func writeValidPackageMetadata(t *testing.T, directory string) {
 	}
 }
 
+func writeCompleteCurrentPackage(t *testing.T, directory string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(directory, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeValidPackageMetadata(t, directory)
+	writeValidAssetManifest(t, directory)
+	for path, content := range map[string]string{
+		"index.html":                        "<html></html>",
+		"assets/bundle.12345678.wasm":       "wasm",
+		"assets/wasm_exec.12345678.js":      "js",
+		"assets/bundle.wasm":                "wasm",
+		"assets/wasm_exec.js":               "js",
+		"assets/styles.12345678.css":        "body{}",
+		"assets/bundle.12345678.wasm.gz":    "gzip",
+		"assets/bundle.12345678.wasm.br":    "br",
+		"assets/wasm_exec.12345678.js.gz":   "js gzip",
+		"assets/wasm_exec.12345678.js.br":   "js br",
+		"assets/styles.12345678.css.gz":     "css gzip",
+		"assets/styles.12345678.css.br":     "css br",
+		"assets/bundle.12345678.wasm.zstd":  "zstd",
+		"assets/wasm_exec.12345678.js.zstd": "js zstd",
+		"assets/styles.12345678.css.zstd":   "css zstd",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, filepath.FromSlash(path)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func writeValidAssetManifest(t *testing.T, directory string) {
 	t.Helper()
 	content := `{
@@ -59,13 +89,22 @@ func writeValidAssetManifest(t *testing.T, directory string) {
 
 func writeLegacyPackageSignature(t *testing.T, directory string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(directory, legacyPackageManifest), []byte(`{"goframe":true}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, legacyPackageManifest), []byte(`{
+  "name": "demo",
+  "compiler": "tinygo",
+  "wasm": "main.wasm",
+  "assets": ["index.html"],
+  "toolchainVersion": "v0.0.0-test"
+}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(directory, "main.wasm"), []byte("wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(directory, runtimeAssetName), []byte("js"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("<html></html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -193,6 +232,106 @@ func TestExternalWorkspaceOverlapRejected(t *testing.T) {
 	}
 }
 
+func TestPhysicalPathRelationDetectsSymlinkAliasOverlap(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "app-alias")
+	if err := os.Symlink(appDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	overlap, err := physicalPathsOverlap(appDir, filepath.Join(alias, "out"))
+	if err != nil {
+		t.Fatalf("physicalPathsOverlap() error: %v", err)
+	}
+	if !overlap {
+		t.Fatal("physicalPathsOverlap() missed symlink alias overlap")
+	}
+}
+
+func TestExternalWorkspacePhysicalAliasOverlapRejected(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "app-alias")
+	if err := os.Symlink(appDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newBuildLayout(layoutOptions{appDir: appDir, workspace: filepath.Join(alias, "workspace")}); err == nil {
+		t.Fatal("newBuildLayout() accepted external workspace alias into app tree")
+	}
+}
+
+func TestBuildRejectsOutputAliasIntoAppSource(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	writeTestFile(t, appDir, "go.mod", "module example.com/app\n\ngo 1.22\n")
+	writeTestFile(t, appDir, "goframe.json", `{"name":"demo","entry":"."}`)
+	writeTestFile(t, appDir, "main.go", "package main\nfunc main() {}\n")
+	alias := filepath.Join(root, "app-alias")
+	if err := os.Symlink(appDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildApp(buildOptions{appDir: appDir, compiler: "go", outDir: filepath.Join(alias, "out")}); err == nil {
+		t.Fatal("buildApp() accepted output alias into app source")
+	}
+	assertFileContent(t, filepath.Join(appDir, "main.go"), "package main\nfunc main() {}\n")
+	assertFileContent(t, filepath.Join(appDir, "go.mod"), "module example.com/app\n\ngo 1.22\n")
+	assertFileContent(t, filepath.Join(appDir, "goframe.json"), `{"name":"demo","entry":"."}`)
+}
+
+func TestGenerateRejectsOutputAliasIntoAppSource(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMinimalGOXApp(t, appDir)
+	alias := filepath.Join(root, "app-alias")
+	if err := os.Symlink(appDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := generatePath(generateOptions{path: appDir, outDir: filepath.Join(alias, "gen")}, true); err == nil {
+		t.Fatal("generatePath() accepted output alias into app source")
+	}
+	if _, err := os.Stat(filepath.Join(appDir, "gen", "app.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("generated file appeared through alias: %v", err)
+	}
+}
+
+func TestPackageRejectsOutputAliasIntoAppSource(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMinimalGOXApp(t, appDir)
+	alias := filepath.Join(root, "app-alias")
+	if err := os.Symlink(appDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := packageApp(packageOptions{appDir: appDir, compiler: "go", outDir: filepath.Join(alias, "package"), compress: map[string]bool{}}); err == nil {
+		t.Fatal("packageApp() accepted output alias into app source")
+	}
+	if _, err := os.Stat(filepath.Join(appDir, "package")); !os.IsNotExist(err) {
+		t.Fatalf("package output appeared through alias: %v", err)
+	}
+}
+
 func TestCopyAuthoredGoFilesAllowsDefaultHiddenWorkspaceOnly(t *testing.T) {
 	appDir := t.TempDir()
 	writeTestFile(t, appDir, "main.go", "package main\n")
@@ -312,8 +451,8 @@ func TestOwnershipMarkersAreStructured(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
-		{name: "valid current marker", write: writeValidPackageMetadata, owned: true},
-		{name: "valid asset manifest", write: writeValidAssetManifest, owned: true},
+		{name: "valid current package", write: writeCompleteCurrentPackage, owned: true},
+		{name: "valid asset manifest without completion marker", write: writeValidAssetManifest, owned: false},
 		{name: "valid legacy signature", write: writeLegacyPackageSignature, owned: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -321,6 +460,140 @@ func TestOwnershipMarkersAreStructured(t *testing.T) {
 			test.write(t, dir)
 			if got := isGoframeOwnedExport(dir); got != test.owned {
 				t.Fatalf("isGoframeOwnedExport() = %v, want %v", got, test.owned)
+			}
+		})
+	}
+}
+
+func TestCurrentPackageOwnershipRequiresCompanionMetadataAndArtifacts(t *testing.T) {
+	tests := []struct {
+		name  string
+		write func(t *testing.T, dir string)
+	}{
+		{name: "metadata without asset manifest", write: writeValidPackageMetadata},
+		{name: "metadata with mismatched asset manifest", write: func(t *testing.T, dir string) {
+			writeValidPackageMetadata(t, dir)
+			writeValidAssetManifest(t, dir)
+			content, err := os.ReadFile(filepath.Join(dir, assetManifestName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			content = []byte(strings.Replace(string(content), "assets/bundle.12345678.wasm", "assets/other.wasm", 1))
+			if err := os.WriteFile(filepath.Join(dir, assetManifestName), content, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "missing referenced files", write: func(t *testing.T, dir string) {
+			writeValidPackageMetadata(t, dir)
+			writeValidAssetManifest(t, dir)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			test.write(t, dir)
+			ownership := inspectPackageOwnership(dir)
+			if ownership.State != packageIncompleteOrInvalid {
+				t.Fatalf("ownership state = %v (%s), want incomplete/invalid", ownership.State, ownership.Reason)
+			}
+			if isGoframeOwnedExport(dir) {
+				t.Fatal("incomplete package was treated as owned")
+			}
+		})
+	}
+}
+
+func TestAssetManifestAloneDoesNotGrantOwnership(t *testing.T) {
+	dir := t.TempDir()
+	writeValidAssetManifest(t, dir)
+	ownership := inspectPackageOwnership(dir)
+	if ownership.State != packageUnowned {
+		t.Fatalf("ownership state = %v (%s), want unowned", ownership.State, ownership.Reason)
+	}
+	if isGoframeOwnedExport(dir) {
+		t.Fatal("asset manifest alone granted ownership")
+	}
+}
+
+func TestLegacyOwnershipIsFailClosedForGenericGoWASM(t *testing.T) {
+	dir := t.TempDir()
+	for path, content := range map[string]string{
+		legacyPackageManifest: `{"name":"generic wasm app"}`,
+		"main.wasm":           "wasm",
+		runtimeAssetName:      "js",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if isGoframeOwnedExport(dir) {
+		t.Fatal("generic Go/WASM dist was treated as GoFrame-owned legacy package")
+	}
+}
+
+func TestLegacyOwnershipRejectsMalformedOrSymlinkedSignature(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	for _, test := range []struct {
+		name  string
+		write func(t *testing.T, dir string)
+	}{
+		{name: "empty manifest", write: func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, legacyPackageManifest), []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, runtimeAssetName), []byte("js"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "malformed manifest", write: func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, legacyPackageManifest), []byte("{"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, runtimeAssetName), []byte("js"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "manifest symlink", write: func(t *testing.T, dir string) {
+			target := filepath.Join(t.TempDir(), "manifest.json")
+			if err := os.WriteFile(target, []byte(`{"name":"demo","compiler":"tinygo","wasm":"main.wasm","toolchainVersion":"test"}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(dir, legacyPackageManifest)); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "main.wasm"), []byte("wasm"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, runtimeAssetName), []byte("js"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "runtime symlink", write: func(t *testing.T, dir string) {
+			writeLegacyPackageSignature(t, dir)
+			target := filepath.Join(t.TempDir(), "wasm_exec.js")
+			if err := os.WriteFile(target, []byte("js"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(dir, runtimeAssetName)); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(dir, runtimeAssetName)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			test.write(t, dir)
+			if isGoframeOwnedExport(dir) {
+				t.Fatal("invalid legacy signature was treated as owned")
 			}
 		})
 	}
@@ -350,7 +623,7 @@ func TestExportRejectsOverlappingDestination(t *testing.T) {
 	if err := os.MkdirAll(layout.PackageDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeValidPackageMetadata(t, layout.PackageDir)
+	writeCompleteCurrentPackage(t, layout.PackageDir)
 	for _, outDir := range []string{
 		layout.PackageDir,
 		filepath.Join(layout.PackageDir, "nested"),
@@ -361,6 +634,31 @@ func TestExportRejectsOverlappingDestination(t *testing.T) {
 				t.Fatalf("exportApp() accepted overlapping outDir %s", outDir)
 			}
 		})
+	}
+}
+
+func TestExportRejectsPhysicalAliasOverlap(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(layout.PackageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCompleteCurrentPackage(t, layout.PackageDir)
+	alias := filepath.Join(root, "package-alias")
+	if err := os.Symlink(layout.PackageDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := exportApp(exportOptions{appDir: appDir, outDir: filepath.Join(alias, "nested")}); err == nil {
+		t.Fatal("exportApp() accepted output alias into package source")
+	}
+	if _, err := os.Stat(filepath.Join(layout.PackageDir, "nested")); !os.IsNotExist(err) {
+		t.Fatalf("export output appeared through alias: %v", err)
 	}
 }
 
@@ -438,7 +736,7 @@ func TestPublishWritesMetadataLastOnFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "assets", "bundle.wasm"), []byte("wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeValidPackageMetadata(t, source)
+	writeCompleteCurrentPackage(t, source)
 	if err := os.WriteFile(filepath.Join(destination, "assets"), []byte("not-a-directory"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -447,6 +745,62 @@ func TestPublishWritesMetadataLastOnFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destination, packageMetadataName)); !os.IsNotExist(err) {
 		t.Fatalf("metadata published after failure: %v", err)
+	}
+}
+
+func TestPartialPublicationDoesNotGrantOwnership(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	source := t.TempDir()
+	destination := t.TempDir()
+	writeCompleteCurrentPackage(t, source)
+	if err := os.MkdirAll(filepath.Join(destination, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "external.wasm")
+	if err := os.WriteFile(external, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(destination, "assets", "bundle.12345678.wasm")); err != nil {
+		t.Fatal(err)
+	}
+	if err := publishPackageArtifacts(source, destination); err == nil {
+		t.Fatal("publishPackageArtifacts() unexpectedly succeeded")
+	}
+	if _, err := os.Stat(filepath.Join(destination, assetManifestName)); err != nil {
+		t.Fatalf("asset manifest was not copied before injected failure: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, packageMetadataName)); !os.IsNotExist(err) {
+		t.Fatalf("completion metadata exists after partial publish: %v", err)
+	}
+	ownership := inspectPackageOwnership(destination)
+	if ownership.IsOwned() {
+		t.Fatalf("partial package considered owned: %v %s", ownership.State, ownership.Reason)
+	}
+	if err := validatePackageDestination(destination); err == nil {
+		t.Fatal("validatePackageDestination() accepted partial package as reusable output")
+	}
+	assertFileContent(t, external, "keep")
+}
+
+func TestCleanPackageArtifactsRemovesCompletionMarkerFirst(t *testing.T) {
+	destination := t.TempDir()
+	writeCompleteCurrentPackage(t, destination)
+	stale := filepath.Join(destination, "bundle.wasm")
+	if err := os.Mkdir(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "child"), []byte("block remove"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanPackageArtifacts(destination, "bundle.wasm"); err == nil {
+		t.Fatal("cleanPackageArtifacts() unexpectedly succeeded")
+	}
+	if _, err := os.Stat(filepath.Join(destination, packageMetadataName)); !os.IsNotExist(err) {
+		t.Fatalf("completion marker still exists after failed cleanup: %v", err)
+	}
+	if ownership := inspectPackageOwnership(destination); ownership.IsOwned() {
+		t.Fatalf("failed cleanup left directory owned: %v %s", ownership.State, ownership.Reason)
 	}
 }
 

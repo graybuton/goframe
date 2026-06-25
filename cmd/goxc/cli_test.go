@@ -145,6 +145,27 @@ func TestLoadManifestAcceptsLegacyMainWASM(t *testing.T) {
 	}
 }
 
+func TestManifestRejectsNonWASMOutputNames(t *testing.T) {
+	tests := []string{
+		`{"wasm":"main.go"}`,
+		`{"wasm":"go.mod"}`,
+		`{"wasm":"bundle"}`,
+		`{"wasm":"bundle.wasm.gz"}`,
+		`{"wasm":"wasm_exec.js"}`,
+	}
+	for _, content := range tests {
+		t.Run(content, func(t *testing.T) {
+			appDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadManifest(appDir); err == nil {
+				t.Fatalf("loadManifest() accepted unsafe wasm path from %s", content)
+			}
+		})
+	}
+}
+
 func TestManifestRejectsApplicationRootAsOutput(t *testing.T) {
 	appDir := t.TempDir()
 	content := []byte(`{"output":"."}`)
@@ -420,7 +441,7 @@ func TestValidatePackageDestinationRejectsUnownedNonEmptyDirectory(t *testing.T)
 
 func TestValidatePackageDestinationAllowsPreviousGoFramePackage(t *testing.T) {
 	outDir := t.TempDir()
-	writeValidPackageMetadata(t, outDir)
+	writeCompleteCurrentPackage(t, outDir)
 	if err := validatePackageDestination(outDir); err != nil {
 		t.Fatalf("validatePackageDestination(previous package) error: %v", err)
 	}

@@ -42,7 +42,7 @@ func TestExportAllowsPreviousGoframeExport(t *testing.T) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeValidPackageMetadata(t, outDir)
+	writeCompleteCurrentPackage(t, outDir)
 	if err := os.MkdirAll(filepath.Join(outDir, "assets"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +87,7 @@ func createPackagedTestApp(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(layout.PackageDir, "assets"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeValidPackageMetadata(t, layout.PackageDir)
-	writeValidAssetManifest(t, layout.PackageDir)
+	writeCompleteCurrentPackage(t, layout.PackageDir)
 	for path, content := range map[string]string{
 		"index.html":             "<html></html>",
 		"assets/bundle.wasm":     "wasm",

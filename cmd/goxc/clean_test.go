@@ -54,7 +54,7 @@ func TestCleanLegacyRemovesGoframeOwnedDist(t *testing.T) {
 	if err := os.Mkdir(dist, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeValidPackageMetadata(t, dist)
+	writeCompleteCurrentPackage(t, dist)
 	if err := os.WriteFile(filepath.Join(appDir, "app.gox"), []byte("<div></div>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -106,4 +106,29 @@ func TestCleanLegacyPreservesGenericWebManifestDist(t *testing.T) {
 	if content, err := os.ReadFile(userFile); err != nil || string(content) != "keep" {
 		t.Fatalf("generic web manifest dist changed: content=%q err=%v", content, err)
 	}
+}
+
+func TestCleanLegacyPreservesGenericGoWASMDist(t *testing.T) {
+	appDir := t.TempDir()
+	dist := filepath.Join(appDir, "dist")
+	if err := os.Mkdir(dist, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		legacyPackageManifest: `{"name":"generic wasm app"}`,
+		"main.wasm":           "wasm",
+		runtimeAssetName:      "js",
+		"user.txt":            "keep",
+	} {
+		if err := os.WriteFile(filepath.Join(dist, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.gox"), []byte("<div></div>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanApp(cleanOptions{appDir: appDir, legacy: true}); err != nil {
+		t.Fatalf("cleanApp(legacy) error: %v", err)
+	}
+	assertFileContent(t, filepath.Join(dist, "user.txt"), "keep")
 }
