@@ -148,8 +148,10 @@ compiler-facing and experimental rather than stable user APIs.
 Tooling contracts:
 
 - `goframe.json` user-authored manifest input;
-- `asset-manifest.json` generated package metadata;
-- `goframe-package.json` generated package metadata and ownership marker;
+- `asset-manifest.json` generated package metadata and companion entrypoint
+  manifest;
+- `goframe-package.json` generated package metadata and authoritative current
+  package completion/ownership marker;
 - `GOFRAME_WORKSPACE` / `--workspace` external workspace override;
 - default hidden `.goframe` workspace behavior.
 
@@ -211,8 +213,9 @@ VS Code extension:
   belongs to `goxc package`.
 - Explicit `"wasm": "main.wasm"` manifests: still supported, but examples and
   docs use `bundle.wasm`.
-- Legacy `manifest.json` package marker: recognized for migration, but
-  `goframe-package.json` is current.
+- Legacy `manifest.json` package marker: fail-closed migration support only
+  for the historical GoFrame package manifest shape; `goframe-package.json` is
+  current.
 - `goxc generate --in-place`: debug/legacy only. Generated `.gox.go` files
   should live under `.goframe/gen` or an explicit output directory.
 - `UseMount`: deprecated alias for once-after-mount effect behavior.

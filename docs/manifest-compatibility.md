@@ -29,7 +29,7 @@ Supported fields:
 | `entry` | `.` | Go package entry. Supports `.` and relative child package directories such as `./cmd/app`, `cmd/app`, `./src/app`, and `app`. |
 | `output` | `dist` | Legacy/export-oriented output hint. Current package output defaults to `.goframe/package/standalone`; explicit package/export flags are preferred. |
 | `compiler` | `go` | Must be `go` or `tinygo`. CLI `--compiler` overrides it. |
-| `wasm` | `bundle.wasm` | Logical WASM filename. `main.wasm` remains accepted for legacy apps. |
+| `wasm` | `bundle.wasm` | Logical WASM filename. Must be a relative `.wasm` child path. `main.wasm` remains accepted for legacy apps. |
 | `assets` | `["index.html"]` | Static child paths copied by `goxc package`. Missing assets are skipped with a message. |
 
 Validation evidence:
@@ -48,6 +48,8 @@ Current input behavior:
 - absolute paths, raw `..` components, parent traversal, and tool-owned entry
   roots such as `.goframe`, `build`, `dist`, `node_modules`, and `.git` are
   rejected;
+- `wasm` must end in `.wasm`; names such as `main.go`, `go.mod`,
+  `bundle.wasm.gz`, and `wasm_exec.js` are rejected;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 
@@ -83,10 +85,13 @@ Recommended follow-up:
 Status: Ready with limitations.
 
 `asset-manifest.json` is generated package metadata, not a user-authored input
-file. It records final asset paths and entrypoints for packaged output. It is
-also considered package ownership evidence only when it is a regular file with
-versioned, recognizable GoFrame structure; an empty or malformed file with the
-same name is not enough.
+file. It records final asset paths and entrypoints for packaged output.
+
+It is not an authoritative ownership or completion marker. A standalone
+`asset-manifest.json`, even when valid, does not let `goxc package`, `goxc
+export`, or `goxc clean --legacy` treat a directory as GoFrame-owned. Current
+ownership requires complete `goframe-package.json` metadata plus matching
+regular companion files.
 
 Current fields:
 
@@ -111,6 +116,7 @@ Compatibility policy:
 - consumers may read existing fields after public preview;
 - adding fields is backward-compatible;
 - removing or renaming fields requires migration notes;
+- the file is companion metadata, not destructive ownership evidence;
 - hidden staging paths and package internals are not stable.
 
 ## `goframe-package.json`
@@ -138,8 +144,14 @@ Current fields:
 Compatibility policy:
 
 - the ownership-marker role is part of the tooling contract;
-- ownership recognition is fail-closed: the marker must be regular, parseable,
-  versioned metadata with sane entrypoint paths;
+- current package ownership is fail-closed: the marker must be regular,
+  parseable, versioned metadata with sane entrypoint paths;
+- the companion `asset-manifest.json` must be regular, parseable, versioned,
+  and must match the WASM/runtime entrypoints in `goframe-package.json`;
+- referenced HTML, WASM, and runtime files must exist as regular files inside
+  the package root;
+- `goframe-package.json` is published last and removed first during destructive
+  package cleanup so partial packages are not marked complete;
 - adding metadata fields is backward-compatible;
 - removing the marker or changing ownership detection is breaking unless it is
   required for a safety fix;
@@ -149,11 +161,21 @@ Compatibility policy:
 
 Status: Ready with limitations.
 
-Legacy `manifest.json` is recognized only as a previous GoFrame package/export
-marker when the surrounding package has an unmistakable GoFrame legacy
-signature, such as a regular root WASM file plus a regular `wasm_exec.js`
-runtime shim. A generic web app manifest or `{}` file does not grant ownership
-and must not cause `dist/` or package output deletion.
+Repository history shows the historical GoFrame package manifest was a
+`manifest.json` containing GoFrame-specific fields:
+
+- `name`;
+- `compiler`;
+- `wasm`;
+- `assets`;
+- `toolchainVersion`.
+
+Legacy ownership is recognized only for that shape with supported compiler
+value, safe `.wasm` path, regular WASM/runtime companion files, and regular
+declared assets. A generic web manifest, empty `{}`, malformed JSON, symlinked
+manifest, or generic Go/WASM dist containing only `manifest.json`,
+`main.wasm`, and `wasm_exec.js` does not grant ownership and must not cause
+`dist/` or package output deletion.
 
 Evidence:
 

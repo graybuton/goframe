@@ -38,16 +38,17 @@ Only the export step creates `./dist`.
 
 If you intentionally pass `goxc package --out <dir>`, that directory is also
 treated as package output owned by goxc. It must be empty or already contain a
-valid GoFrame package marker; otherwise package fails before removing any
-existing `assets/` directory. Empty `{}` marker placeholders, malformed
-metadata, symlinked markers, and generic web `manifest.json` files are not
-treated as GoFrame ownership. The recommended visible deployment flow remains
-`goxc package` followed by `goxc export`.
+complete current GoFrame package marker; otherwise package fails before
+removing any existing `assets/` directory. Empty `{}` marker placeholders,
+malformed metadata, standalone `asset-manifest.json`, symlinked markers, and
+generic web `manifest.json` files are not treated as GoFrame ownership. The
+recommended visible deployment flow remains `goxc package` followed by
+`goxc export`.
 
 The export directory is tool-owned. If `--out` already exists, is non-empty,
-and does not contain `goframe-package.json`, `asset-manifest.json`, or legacy
-`manifest.json` with recognizable GoFrame package structure from a previous
-GoFrame export, `goxc export` fails before touching it:
+and does not contain complete `goframe-package.json` metadata plus matching
+regular companion files, or a recognized historical GoFrame `manifest.json`
+package signature, `goxc export` fails before touching it:
 
 ```bash
 goxc export ./examples/todo --out ./dist
@@ -157,6 +158,9 @@ CSS preload is included only when CSS assets are declared in `goframe.json`.
 
 In dev packages, hash fields are omitted.
 
+`asset-manifest.json` is companion metadata only. It is not an ownership or
+completion marker without complete `goframe-package.json` metadata.
+
 See [Manifest Compatibility](manifest-compatibility.md) for the input/generated
 metadata compatibility policy.
 
@@ -181,6 +185,12 @@ metadata compatibility policy.
   "generatedAt": "2026-06-17T00:00:00Z"
 }
 ```
+
+`goframe-package.json` is the authoritative current package completion marker.
+`goxc` publishes it last and removes it first during destructive package
+cleanup. A directory is considered a complete current GoFrame package only
+when this marker, the companion asset manifest, and the referenced
+HTML/WASM/runtime files are all regular files inside the package root.
 
 ## Clean App Workspace
 
@@ -210,7 +220,8 @@ Default command outputs:
 `GOFRAME_WORKSPACE=/work/goframe` or `--workspace /work/goframe` moves this
 workspace outside the source tree. With an external workspace, goxc creates a
 safe app-specific subdirectory to avoid collisions between apps. External
-workspaces must not overlap the app source tree.
+workspaces must not overlap the app source tree, including through symlink
+aliases.
 
 `goxc generate --in-place` is available only for debugging or legacy workflows.
 It writes adjacent `.gox.go` files and prints a warning. Normal source trees
@@ -227,8 +238,11 @@ The toolchain rejects symlinked app roots, entry directories, authored source
 files, package assets, package/export roots, and symlinked package sources at
 safety-sensitive boundaries. Cleanup removes final tool-owned symlinks as
 links and rejects intermediate workspace symlinks instead of traversing
-external targets. This is best-effort protection for static repository trees;
-hostile concurrent filesystem mutation is outside the threat model.
+external targets. Explicit build/generate/package/export output roots are
+also compared against app/package roots using physical path resolution so a
+symlink alias cannot point output back into authored source. This is
+best-effort protection for static repository trees; hostile concurrent
+filesystem mutation is outside the threat model.
 
 The materialized hidden workspace supports `"entry": "."` apps and child entry
 packages such as `"./cmd/app"`, `"cmd/app"`, `"./src/app"`, and `"app"` when

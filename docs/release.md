@@ -54,8 +54,8 @@ Before creating a tag:
 - release package layout is checked with `goxc package --asset-hash --preload`
   for affected examples;
 - filesystem/package safety spot checks pass for symlink rejection, ownership
-  markers, output overlap, asset collisions, publish, clean, and serve
-  behavior;
+  markers, physical output overlap aliases, asset collisions, partial publish,
+  clean, legacy ownership, and serve behavior;
 - README, docs, and changelog are updated;
 - no `dist/`, `build/`, `.goframe`, `.gox.go`, `.wasm`, `.wasm.gz`,
   `.wasm.br`, `.wasm.zst`, `node_modules`, `.vsix`, or `.test` files are
@@ -128,11 +128,14 @@ clear about API instability and experimental status.
 
 - `goxc package --asset-hash --preload --compress=gzip,br` checked for
   representative examples;
-- `asset-manifest.json` and `goframe-package.json` present;
-- package/export ownership safety checked with structured markers, not
-  placeholder files;
+- `asset-manifest.json` and `goframe-package.json` present, with
+  `goframe-package.json` published as the authoritative completion marker;
+- package/export ownership safety checked with complete structured metadata,
+  not placeholder files or standalone asset manifests;
 - manifest assets checked for collisions with generated WASM, runtime, and
   compressed sidecar names;
+- explicit output paths checked for physical overlap with authored source or
+  package source;
 - clean workspace checked;
 - sample static-host deploy notes current.
 

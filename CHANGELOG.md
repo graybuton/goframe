@@ -104,12 +104,21 @@
   app/workspace/output roots, symlinked package sources, destination symlink
   writes, source/output overlap, false package ownership markers, and package
   asset namespace collisions with generated WASM/runtime/sidecar files.
-- Package/export ownership detection now requires regular, structured GoFrame
-  metadata instead of trusting placeholder filenames such as `{}` or generic
-  web `manifest.json`.
+- `goxc` now detects physical symlink-alias overlaps for external workspaces
+  and explicit build/generate/package/export outputs, preventing output paths
+  from pointing back into authored source through alternate spelling.
+- Manifest `wasm` values now must be relative `.wasm` child paths, preventing
+  build/package output from targeting authored files such as `main.go`,
+  `go.mod`, or `goframe.json`.
+- Package/export ownership detection now requires complete, regular,
+  structured GoFrame metadata instead of trusting placeholder filenames,
+  standalone `asset-manifest.json`, or generic web/Go-WASM `manifest.json`.
+- Legacy package ownership is fail-closed and recognized only for the
+  historical GoFrame `manifest.json` shape found in repository history.
 - Package publication now validates staged source entries before copying and
-  publishes `goframe-package.json` last, reducing the chance of a failed copy
-  leaving misleading completed package metadata.
+  publishes `goframe-package.json` last. Package cleanup removes that
+  authoritative completion marker before destructive cleanup, reducing the
+  chance of partial package trees being treated as complete.
 - Resource loader panics no longer leave the internal effect slot pending, so a
   same-key rerender after failed state does not automatically restart the same
   panicking loader. Explicit retry remains available through `reload` or key

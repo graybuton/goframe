@@ -18,8 +18,9 @@ MVP 30 closes part of the readiness gap by documenting API tiers, component
 identity, manifest/package compatibility, symlink policy, platform support,
 compatibility/deprecation policy, migration policy, and release checklist. The
 filesystem/package corrective pass hardens the goxc package/export/generate/
-build/clean/serve paths against common symlink traversal, false ownership, path
-overlap, and generated-asset collision mistakes.
+build/clean/serve paths against common symlink traversal, false ownership,
+physical alias overlap, authored-source output, partial package ownership, and
+generated-asset collision mistakes.
 
 ## Current Status
 
@@ -109,11 +110,16 @@ Evidence:
 Decision:
 
 - `goframe.json` is the public input contract;
-- `asset-manifest.json` and `goframe-package.json` are generated metadata and
-  package/export ownership markers;
+- `asset-manifest.json` and `goframe-package.json` are generated metadata, but
+  only complete `goframe-package.json` metadata is the authoritative current
+  package completion marker;
 - package/export ownership is granted only by structured, regular, valid
-  metadata; generic `{}` files and generic web `manifest.json` files are not
-  ownership markers;
+  current metadata with matching companion asset manifest and regular
+  referenced files; generic `{}` files, standalone `asset-manifest.json`, and
+  generic web `manifest.json` files are not ownership markers;
+- legacy ownership is fail-closed and limited to the historical GoFrame
+  `manifest.json` shape found in repository history;
+- manifest `wasm` values must be relative `.wasm` child paths;
 - package assets are planned before publication so user assets cannot collide
   with the generated WASM, `wasm_exec.js`, or compressed sidecars;
 - no mandatory manifest schema version is added in MVP 30.
@@ -133,6 +139,13 @@ Evidence:
   markers;
 - entry/source/assets/package-source symlinks and non-regular files are
   rejected;
+- lexical and physical symlink-alias output overlap is rejected for external
+  workspaces and explicit build/generate/package/export outputs;
+- build/generate explicit outputs cannot physically point back into authored
+  source, and manifest `wasm` cannot name authored files such as `main.go` or
+  `go.mod`;
+- package completion requires complete current metadata, and partial
+  publication without `goframe-package.json` is not considered owned;
 - output overlap and generated asset namespace collisions are rejected before
   publication.
 

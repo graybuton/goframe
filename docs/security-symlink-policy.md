@@ -26,10 +26,14 @@ Normal `generate`, `build`, and `package` commands should not create visible
 Current protection focuses on:
 
 - rejecting manifest paths that are not relative child paths;
+- requiring `wasm` manifest output to be a relative `.wasm` child path;
 - rejecting unknown manifest fields;
 - refusing non-empty non-GoFrame package/export output directories;
 - validating GoFrame ownership markers as regular, structured metadata instead
   of trusting filenames alone;
+- comparing independently supplied roots with physical/canonical path
+  resolution so symlink aliases cannot bypass source/output/workspace overlap
+  checks;
 - rejecting intermediate symlink components below declared app/workspace/output
   roots before reading, writing, copying, deleting, or serving files;
 - publishing generated files through temporary sibling files and replacement so
@@ -45,6 +49,10 @@ Current protection focuses on:
 Manifest fields such as `entry`, `output`, `wasm`, and `assets` are validated
 as relative child paths. Absolute paths, `..`, and paths escaping the
 application directory are rejected.
+
+`wasm` must end in `.wasm`. Names such as `main.go`, `go.mod`,
+`bundle.wasm.gz`, and `wasm_exec.js` are rejected before build/package output
+paths are computed.
 
 `entry` supports `"."` and relative child package directories such as
 `"./cmd/app"`, `"cmd/app"`, `"./src/app"`, and `"app"`. Entries that point to
@@ -83,15 +91,18 @@ Explicit `goxc package --out <dir>` treats `<dir>` as tool-owned package
 output. If the directory is non-empty and does not look like a previous GoFrame
 package, the command fails instead of deleting user files.
 
-GoFrame-owned markers:
+The authoritative current completion marker is `goframe-package.json`.
+Ownership requires that marker to be a regular, valid, supported metadata file
+and that its companion `asset-manifest.json`, WASM entrypoint, runtime
+entrypoint, and HTML entrypoint are present as regular files inside the package
+root. `asset-manifest.json` is generated metadata only; by itself it does not
+grant destructive ownership.
 
-- `goframe-package.json`
-- `asset-manifest.json`
-- legacy `manifest.json`
-
-These markers must be regular files with recognizable GoFrame package
-structure. An empty `{}` file, malformed JSON, symlinked marker, or generic web
-`manifest.json` is not enough to grant ownership.
+Legacy `manifest.json` ownership is fail-closed and recognized only for the
+historical GoFrame package format that contained GoFrame-specific fields such
+as `name`, `compiler`, `wasm`, `assets`, and `toolchainVersion`, plus regular
+WASM/runtime companion files. An empty `{}` file, malformed JSON, symlinked
+marker, or generic web `manifest.json` is not enough to grant ownership.
 
 ## Export Output
 
@@ -146,6 +157,8 @@ Policy:
   symlinks;
 - explicit package/export output directories and intermediate parents must not
   be symlinks;
+- explicit build, generate, package, and export output roots must not
+  physically overlap authored source or package source through a symlink alias;
 - the standalone package directory used as export source must not be a symlink;
 - `goxc clean` removes final tool-owned symlinks as links and rejects
   intermediate workspace symlinks instead of traversing targets;
@@ -182,14 +195,21 @@ Evidence:
 | symlink loop | Ready with limitations | Rejected at Lstat boundaries; broader loops are not supported. |
 | external `GOFRAME_WORKSPACE` | Ready | Allowed and scoped under an app-specific slug when it does not overlap the app tree. |
 | external workspace inside app tree | Ready | Rejected before workspace refresh/copy. |
+| external workspace alias physically inside app tree | Ready | Rejected with canonical path overlap checks. |
 | workspace path collides between apps | Ready | External workspace slug includes a hash of app path. |
 | read-only source tree | Ready with limitations | Use external workspace. |
+| build `--out` alias points inside app tree | Ready | Rejected before compiler publication; manifest `wasm` must be `.wasm`. |
+| generate `--out` alias points inside app tree | Ready | Rejected unless `--in-place` is explicitly used. |
+| package `--out` alias points inside app tree | Ready | Rejected before build/publication. |
+| export `--out` alias overlaps package source/app tree | Ready | Rejected before cleanup/copy. |
 | package output path is symlink | Ready | Rejected. |
 | export destination is symlink | Ready | Rejected. |
 | destination file is symlink | Ready | Rejected before atomic replacement. |
 | package source contains symlink | Ready | Rejected before copy; external content is not published. |
 | package source contains FIFO/socket/device | Ready with limitations | Non-regular entries are rejected; platform-specific special-file coverage may vary. |
 | generic `manifest.json` in `dist` | Ready | Not considered GoFrame-owned; user files are preserved. |
+| generic Go/WASM dist with `manifest.json`, `main.wasm`, and `wasm_exec.js` | Ready | Not considered GoFrame-owned; only historical GoFrame `manifest.json` fields grant legacy ownership. |
+| standalone `asset-manifest.json` | Ready | Metadata only; does not grant ownership without complete `goframe-package.json`. |
 | `clean --legacy` sees symlinked `dist` | Ready with limitations | Final symlink is removed as a link when it is a tool-owned cleanup target; relying on symlinked legacy `dist` is not a supported workflow. |
 | explicit `--out` path | Ready | Must be empty, GoFrame-owned, or rejected; symlink root rejected. |
 | generated `.goframe` path | Ready with limitations | Intermediate symlinks are rejected; final cleanup symlinks are removed as links. |
@@ -203,6 +223,9 @@ Evidence:
 Before publishing, `goxc` validates the staged package tree and rejects symlinks
 and non-regular file entries. Package metadata is copied last so a mid-copy
 failure cannot leave `goframe-package.json` describing a newly completed tree.
+Before destructive cleanup of an existing package, `goxc` removes the
+authoritative `goframe-package.json` marker first. If cleanup fails, the
+directory is no longer considered a complete current package.
 
 This is not a full transactional installer. If a copy fails after old
 package-owned files were cleaned, the destination may need another successful

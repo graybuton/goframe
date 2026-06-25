@@ -55,7 +55,8 @@ Current deprecated/legacy surfaces:
 - `goxc generate --in-place`: debug/legacy only;
 - explicit `wasm: "main.wasm"` manifests: use `bundle.wasm`;
 - legacy package `manifest.json` marker: current metadata is
-  `goframe-package.json`.
+  `goframe-package.json`; legacy ownership is fail-closed and only recognized
+  for the historical GoFrame package manifest shape.
 
 ## Migration Policy
 
@@ -78,6 +79,11 @@ The project may break compatibility without a full deprecation window for:
 - security-sensitive package/export ownership behavior;
 - manifest path canonicalization that rejects ambiguous raw `..` components;
 - package asset namespace collision rejection;
+- physical path overlap rejection for explicit build/generate/package/export
+  outputs and external workspaces;
+- requiring manifest `wasm` values to end in `.wasm`;
+- treating `asset-manifest.json` as companion metadata rather than standalone
+  destructive ownership evidence;
 - CI-only smoke harness internals;
 - generated workspace internals.
 
