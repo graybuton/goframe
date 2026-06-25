@@ -107,6 +107,9 @@ func exportApp(options exportOptions) error {
 	if err := publishPackageArtifacts(layout.PackageDir, options.outDir); err != nil {
 		return err
 	}
+	if err := verifyPublishedPackage(options.outDir); err != nil {
+		return err
+	}
 	fmt.Printf("exported %s -> %s\n", layout.PackageDir, options.outDir)
 	return nil
 }

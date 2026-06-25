@@ -173,6 +173,20 @@ func packageApp(options packageOptions) error {
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return err
 	}
+	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
+	if strings.ToLower(path.Ext(filepath.ToSlash(manifest.WASM))) != ".wasm" || strings.ToLower(path.Ext(wasmLogicalName)) != ".wasm" {
+		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
+	}
+	if wasmLogicalName == runtimeAssetName {
+		return fmt.Errorf("wasm %q in %s collides with runtime asset %s", manifest.WASM, manifestName, runtimeAssetName)
+	}
+	plannedAssets, err := validatePackageAssetPlan(manifest, wasmLogicalName, options)
+	if err != nil {
+		return err
+	}
+	if err := validateRequiredPackageEntrypoints(options.appDir, plannedAssets); err != nil {
+		return err
+	}
 	layout, err := newBuildLayout(layoutOptions{
 		appDir:    options.appDir,
 		compiler:  options.compiler,
@@ -211,17 +225,6 @@ func packageApp(options packageOptions) error {
 	}
 	defer os.RemoveAll(tempDir)
 
-	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
-	if strings.ToLower(path.Ext(filepath.ToSlash(manifest.WASM))) != ".wasm" || strings.ToLower(path.Ext(wasmLogicalName)) != ".wasm" {
-		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
-	}
-	if wasmLogicalName == runtimeAssetName {
-		return fmt.Errorf("wasm %q in %s collides with runtime asset %s", manifest.WASM, manifestName, runtimeAssetName)
-	}
-	plannedAssets, err := validatePackageAssetPlan(manifest, wasmLogicalName, options)
-	if err != nil {
-		return err
-	}
 	tempWASM := filepath.Join(tempDir, wasmLogicalName)
 	fmt.Printf("packaging %s with %s compiler\n", options.appDir, options.compiler)
 	if err := compileWASM(options.compiler, entryPath, tempWASM); err != nil {
@@ -338,6 +341,9 @@ func packageApp(options packageOptions) error {
 	if err := publishPackageArtifacts(stageDir, options.outDir); err != nil {
 		return err
 	}
+	if err := verifyPublishedPackage(options.outDir); err != nil {
+		return err
+	}
 
 	fmt.Printf("packaged %s\n", options.outDir)
 	return nil
@@ -417,6 +423,37 @@ func validatePackageAssetPlan(manifest projectManifest, wasmLogicalName string, 
 	return cleaned, nil
 }
 
+func validateRequiredPackageEntrypoints(appDir string, plannedAssets []string) error {
+	indexCount := 0
+	for _, asset := range plannedAssets {
+		if asset == indexHTMLAssetName {
+			indexCount++
+		}
+	}
+	if indexCount != 1 {
+		return fmt.Errorf("standalone package assets must include %s exactly once", indexHTMLAssetName)
+	}
+
+	source := filepath.Join(appDir, indexHTMLAssetName)
+	if err := validatePathBelowRoot(appDir, source, "required standalone entrypoint index.html", true); err != nil {
+		return err
+	}
+	info, err := os.Lstat(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("required standalone entrypoint %s was not found", indexHTMLAssetName)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect required standalone entrypoint %s: %w", source, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("required standalone entrypoint %s is a symlink", indexHTMLAssetName)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("required standalone entrypoint %s is not a regular file", indexHTMLAssetName)
+	}
+	return nil
+}
+
 func packageOutputDirectory(options packageOptions, layout BuildLayout) string {
 	if options.outDir != "" {
 		return options.outDir
@@ -446,6 +483,7 @@ func cleanPackageArtifacts(directory, wasmName string) error {
 		"wasm_exec.js",
 		"wasm_exec.tiny.js",
 		"service-worker.js",
+		indexHTMLAssetName,
 		"styles.css",
 		legacyPackageManifest,
 		assetManifestName,
@@ -462,6 +500,17 @@ func cleanPackageArtifacts(directory, wasmName string) error {
 		return fmt.Errorf("remove stale package assets directory: %w", err)
 	}
 	return nil
+}
+
+func verifyPublishedPackage(directory string) error {
+	ownership := inspectPackageOwnership(directory)
+	if ownership.State == packageOwnedCurrent {
+		return nil
+	}
+	if err := os.Remove(filepath.Join(directory, packageMetadataName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("published package failed integrity verification: %s; remove completion marker: %w", ownership.Reason, err)
+	}
+	return fmt.Errorf("published package failed integrity verification: %s", ownership.Reason)
 }
 
 func writeJSONFile(path string, value any, description string) error {
