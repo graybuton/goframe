@@ -184,6 +184,9 @@ func packageApp(options packageOptions) error {
 	}
 	explicitOutDir := options.outDir != ""
 	options.outDir = packageOutputDirectory(options, layout)
+	if err := rejectSymlinkPath(options.outDir, "package output directory"); err != nil {
+		return err
+	}
 	if explicitOutDir {
 		if err := validatePackageDestination(options.outDir); err != nil {
 			return err
@@ -239,13 +242,13 @@ func packageApp(options packageOptions) error {
 	copiedAssets := make([]string, 0, len(manifest.Assets))
 	styleRewrites := map[string]string{}
 	for _, asset := range manifest.Assets {
-		asset = path.Clean(filepath.ToSlash(asset))
-		source := filepath.Join(options.appDir, asset)
-		if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
+		asset, source, exists, err := resolvePackageAssetSource(options.appDir, asset)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			fmt.Printf("asset %s not found; skipping\n", source)
 			continue
-		} else if err != nil {
-			return fmt.Errorf("inspect asset %s: %w", source, err)
 		}
 		if asset == indexHTMLAssetName {
 			copiedAssets = append(copiedAssets, asset)
@@ -313,6 +316,20 @@ func packageApp(options packageOptions) error {
 
 	fmt.Printf("packaged %s\n", options.outDir)
 	return nil
+}
+
+func resolvePackageAssetSource(appDir, asset string) (string, string, bool, error) {
+	asset = path.Clean(filepath.ToSlash(asset))
+	source := filepath.Join(appDir, asset)
+	if err := rejectSymlinkPath(source, "asset path"); err != nil {
+		return "", "", false, err
+	}
+	if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
+		return asset, source, false, nil
+	} else if err != nil {
+		return "", "", false, fmt.Errorf("inspect asset %s: %w", source, err)
+	}
+	return asset, source, true, nil
 }
 
 func packageOutputDirectory(options packageOptions, layout BuildLayout) string {

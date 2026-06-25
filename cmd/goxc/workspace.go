@@ -60,6 +60,9 @@ func resolveEntryPackageDir(appDir, entry string) (string, error) {
 	if entry != "." {
 		entryDir = filepath.Join(appDir, filepath.FromSlash(entry))
 	}
+	if err := rejectSymlinkPath(entryDir, "entry directory"); err != nil {
+		return "", err
+	}
 	relative, err := filepath.Rel(appDir, entryDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve entry %q: %w", entry, err)
@@ -105,6 +108,9 @@ func copyAuthoredGoFiles(sourceRoot, destinationRoot string) error {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("source path %s is a symlink; symlinked source files are not supported", sourcePath)
 		}
 		if entry.IsDir() {
 			return nil
@@ -229,6 +235,9 @@ func findGOXFiles(path string) ([]string, error) {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("GOX source path %s is a symlink; symlinked source files are not supported", current)
 		}
 		if !entry.IsDir() && filepath.Ext(current) == ".gox" {
 			files = append(files, current)

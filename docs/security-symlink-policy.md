@@ -119,38 +119,70 @@ infrastructure.
 
 ## Symlink Policy
 
-Current path validation is lexical: paths must be relative child paths and must
-not contain escapes such as `..` or absolute roots.
+Current path validation is lexical first and symlink-aware at safety-sensitive
+boundaries.
 
-The current baseline does not yet deeply specify all symlink behavior. Treat
-the following as not fully hardened:
+Policy:
 
-- symlinked asset files;
-- symlinked app directories;
-- symlinked export directories;
-- symlinks inside `.goframe`;
-- symlinked legacy `dist/` during `clean --legacy`;
-- symlinks that resolve outside the app after lexical validation.
+- entry package directories must not be symlinks;
+- `.go` and `.gox` source files discovered for workspace materialization must
+  not be symlinks;
+- manifest-declared package assets must not be symlinks, including broken
+  symlinks;
+- explicit package/export output directories must not be symlinks;
+- the standalone package directory used as export source must not be a symlink;
+- `goxc clean` removes the symlink itself for tool-owned workspace paths and
+  must not traverse into external symlink targets;
+- explicit external workspaces remain allowed because the user opted into that
+  root directly.
 
-Until explicit tests are added, avoid relying on symlinks for package assets or
-tool-owned output directories.
+The preferred security direction is reject rather than follow when a symlink
+could make source, asset, package, export, or cleanup operations escape the
+declared root.
+
+Evidence:
+
+- `cmd/goxc/symlink_test.go`;
+- `cmd/goxc/workspace.go`;
+- `cmd/goxc/package.go`;
+- `cmd/goxc/export.go`.
+
+## Symlink Matrix
+
+| Scenario | Status | Policy |
+|---|---|---|
+| app root is symlink | Ready with limitations | Not a documented workflow; commands resolve the app path but public support is not promised. |
+| entry directory is symlink | Ready | Rejected. |
+| `.go`/`.gox` source file is symlink | Ready | Rejected during discovery/materialization. |
+| asset is symlink | Ready | Rejected, including broken symlinks. |
+| symlink target stays inside app root | Ready with limitations | Still rejected for entry/source/assets; the policy is simpler and safer. |
+| symlink target escapes app root | Ready | Rejected for entry/source/assets/output roots. |
+| broken symlink | Ready | Rejected for manifest assets and source discovery. |
+| symlink loop | Ready with limitations | Rejected at Lstat boundaries; broader loops are not supported. |
+| external `GOFRAME_WORKSPACE` | Ready | Allowed and scoped under an app-specific slug. |
+| workspace path collides between apps | Ready | External workspace slug includes a hash of app path. |
+| read-only source tree | Ready with limitations | Use external workspace. |
+| package output path is symlink | Ready | Rejected. |
+| export destination is symlink | Ready | Rejected. |
+| `clean --legacy` sees symlinked `dist` | Ready with limitations | Cleanup removes symlink path, not target; relying on symlinked legacy `dist` is not a supported workflow. |
+| explicit `--out` path | Ready | Must be empty, GoFrame-owned, or rejected; symlink root rejected. |
+| generated `.goframe` path | Ready with limitations | Tool-owned; cleanup must not traverse symlink targets. |
 
 ## Current Limitations
 
-- No full `EvalSymlinks` policy for every path boundary yet.
+- Symlinked app roots are not a promised workflow.
 - No production static server hardening beyond local development needs.
 - No signed package/export metadata.
 - No permission model for future Player or `.gfapp` bundles.
 - No full multi-module workspace model.
+- `goxc serve` remains development-only and is not a hardened static server.
 
 ## Recommended Future Tests
 
-Add focused tests before public preview for:
+Keep adding focused tests for:
 
-- asset symlink pointing outside app;
 - app directory symlink;
 - external `GOFRAME_WORKSPACE` symlink;
-- export target symlink;
 - `clean --legacy` with symlinked `dist`;
 - package staging failure with existing package output preserved;
 - serve path traversal behavior through `http.FileServer`.

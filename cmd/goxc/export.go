@@ -68,10 +68,16 @@ func exportApp(options exportOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := rejectSymlinkPath(layout.PackageDir, "standalone package directory"); err != nil {
+		return err
+	}
 	if info, err := os.Stat(layout.PackageDir); err != nil {
 		return fmt.Errorf("no standalone package found; run `goxc package %s` first", options.appDir)
 	} else if !info.IsDir() {
 		return fmt.Errorf("standalone package path is not a directory: %s", layout.PackageDir)
+	}
+	if err := rejectSymlinkPath(options.outDir, "export output directory"); err != nil {
+		return err
 	}
 	if err := validateExportDestination(options.outDir, options.force); err != nil {
 		return err
@@ -90,6 +96,9 @@ func exportApp(options exportOptions) error {
 }
 
 func validateExportDestination(outDir string, force bool) error {
+	if err := rejectSymlinkPath(outDir, "export output directory"); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(outDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -104,6 +113,9 @@ func validateExportDestination(outDir string, force bool) error {
 }
 
 func validatePackageDestination(outDir string) error {
+	if err := rejectSymlinkPath(outDir, "package output directory"); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(outDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
