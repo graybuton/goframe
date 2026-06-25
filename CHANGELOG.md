@@ -82,6 +82,10 @@
   strengthened browser smoke coverage.
 - `docs/tutorial.md` with a recommended learning path through focused,
   reference, pressure, and toolchain examples.
+- MVP 30 public-preview readiness contracts, including API surface
+  classification, component identity policy, manifest/package compatibility,
+  platform support, compatibility/deprecation policy, migration note template,
+  and public-preview release checklist.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
@@ -93,6 +97,9 @@
   the current crashing route from safely navigating back to the issues list, and
   browser smoke covers recovery from `?panic=render` without reloading the
   resource owner.
+- `goxc` now rejects symlinked entry directories, source files, manifest
+  assets, package output roots, and export output roots at safety-sensitive
+  boundaries instead of following them.
 - Resource loader panics no longer leave the internal effect slot pending, so a
   same-key rerender after failed state does not automatically restart the same
   panicking loader. Explicit retry remains available through `reload` or key
