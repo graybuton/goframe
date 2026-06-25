@@ -122,6 +122,32 @@ func App() gf.Node {
 	if err := os.WriteFile(filepath.Join(appDir, "app.gox"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(appDir, indexHTMLAssetName), []byte("<!doctype html><div id=\"root\"></div>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMinimalPackageApp(t *testing.T, appDir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo","compiler":"go","assets":["index.html"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainSource := `//go:build js && wasm
+
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func main() {
+	done := make(chan struct{})
+	gf.Mount("root", App)
+	<-done
+}
+`
+	if err := os.WriteFile(filepath.Join(appDir, "main.go"), []byte(mainSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeMinimalGOXApp(t, appDir)
 }
 
 func assertFileContent(t *testing.T, path string, want string) {
@@ -707,6 +733,165 @@ func TestPackageAssetPlanAllowsDistinctNestedAssets(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredPackageEntrypoints(t *testing.T) {
+	t.Run("valid index", func(t *testing.T) {
+		appDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(appDir, indexHTMLAssetName), []byte("<html></html>"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName, "styles.css"}); err != nil {
+			t.Fatalf("validateRequiredPackageEntrypoints() error: %v", err)
+		}
+	})
+
+	t.Run("missing declaration", func(t *testing.T) {
+		appDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(appDir, indexHTMLAssetName), []byte("<html></html>"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := validateRequiredPackageEntrypoints(appDir, []string{"styles.css"})
+		if err == nil || !strings.Contains(err.Error(), "must include index.html exactly once") {
+			t.Fatalf("error = %v, want required index declaration", err)
+		}
+	})
+
+	t.Run("missing source", func(t *testing.T) {
+		appDir := t.TempDir()
+		err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName})
+		if err == nil || !strings.Contains(err.Error(), "was not found") {
+			t.Fatalf("error = %v, want missing index source", err)
+		}
+	})
+
+	t.Run("directory source", func(t *testing.T) {
+		appDir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(appDir, indexHTMLAssetName), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName})
+		if err == nil || !strings.Contains(err.Error(), "is not a regular file") {
+			t.Fatalf("error = %v, want non-regular index source", err)
+		}
+	})
+}
+
+func TestValidateRequiredPackageEntrypointsRejectsSymlinkIndex(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(root, "external-index.html")
+	if err := os.WriteFile(external, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(appDir, indexHTMLAssetName)); err != nil {
+		t.Fatal(err)
+	}
+	err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName})
+	if err == nil || !strings.Contains(err.Error(), "is a symlink") {
+		t.Fatalf("error = %v, want symlink index source", err)
+	}
+	assertFileContent(t, external, "keep")
+}
+
+func TestPackageRejectsInvalidIndexBeforeOutputMutation(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		manifest string
+		write    func(t *testing.T, appDir string)
+		want     string
+	}{
+		{
+			name:     "explicit empty assets",
+			manifest: `{"name":"demo","compiler":"go","assets":[]}`,
+			write:    func(*testing.T, string) {},
+			want:     "must include index.html exactly once",
+		},
+		{
+			name:     "index omitted",
+			manifest: `{"name":"demo","compiler":"go","assets":["styles.css"]}`,
+			write: func(t *testing.T, appDir string) {
+				writeTestFile(t, appDir, indexHTMLAssetName, "<html></html>")
+				writeTestFile(t, appDir, "styles.css", "body{}")
+			},
+			want: "must include index.html exactly once",
+		},
+		{
+			name:     "declared but missing",
+			manifest: `{"name":"demo","compiler":"go","assets":["index.html"]}`,
+			write:    func(*testing.T, string) {},
+			want:     "was not found",
+		},
+		{
+			name:     "duplicate normalized index",
+			manifest: `{"name":"demo","compiler":"go","assets":["index.html","./index.html"]}`,
+			write: func(t *testing.T, appDir string) {
+				writeTestFile(t, appDir, indexHTMLAssetName, "<html></html>")
+			},
+			want: "collides",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(test.manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			test.write(t, appDir)
+			outDir := filepath.Join(t.TempDir(), "package")
+			err := packageApp(packageOptions{appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("packageApp() error = %v, want %q", err, test.want)
+			}
+			if _, statErr := os.Stat(filepath.Join(appDir, defaultWorkspaceName)); !os.IsNotExist(statErr) {
+				t.Fatalf("workspace was created before required index validation: %v", statErr)
+			}
+			if _, statErr := os.Stat(outDir); !os.IsNotExist(statErr) {
+				t.Fatalf("output was mutated before required index validation: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestPackageInvalidIndexPreservesPreviousCompletePackage(t *testing.T) {
+	appDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo","compiler":"go","assets":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "package")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCompleteCurrentPackage(t, outDir)
+	before := map[string]string{}
+	for _, relative := range []string{
+		indexHTMLAssetName,
+		assetManifestName,
+		packageMetadataName,
+		"assets/bundle.12345678.wasm",
+		"assets/wasm_exec.12345678.js",
+	} {
+		content, err := os.ReadFile(filepath.Join(outDir, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[relative] = string(content)
+	}
+
+	err := packageApp(packageOptions{appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{}})
+	if err == nil || !strings.Contains(err.Error(), "must include index.html exactly once") {
+		t.Fatalf("packageApp() error = %v, want required index validation", err)
+	}
+	for relative, content := range before {
+		assertFileContent(t, filepath.Join(outDir, filepath.FromSlash(relative)), content)
+	}
+	if ownership := inspectPackageOwnership(outDir); ownership.State != packageOwnedCurrent {
+		t.Fatalf("previous package ownership = %v (%s), want current", ownership.State, ownership.Reason)
+	}
+}
+
 func TestPublishRejectsSymlinkedSourceEntries(t *testing.T) {
 	requireSymlinkSupport(t)
 
@@ -801,6 +986,89 @@ func TestCleanPackageArtifactsRemovesCompletionMarkerFirst(t *testing.T) {
 	}
 	if ownership := inspectPackageOwnership(destination); ownership.IsOwned() {
 		t.Fatalf("failed cleanup left directory owned: %v %s", ownership.State, ownership.Reason)
+	}
+}
+
+func TestCleanPackageArtifactsRemovesManagedIndex(t *testing.T) {
+	destination := t.TempDir()
+	writeCompleteCurrentPackage(t, destination)
+	if err := os.WriteFile(filepath.Join(destination, "user.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanPackageArtifacts(destination, "bundle.wasm"); err != nil {
+		t.Fatalf("cleanPackageArtifacts() error: %v", err)
+	}
+	for _, name := range []string{packageMetadataName, indexHTMLAssetName, assetManifestName, assetDirectoryName} {
+		if _, err := os.Stat(filepath.Join(destination, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after cleanup: %v", name, err)
+		}
+	}
+	assertFileContent(t, filepath.Join(destination, "user.txt"), "keep")
+}
+
+func TestVerifyPublishedPackageInvalidatesIncompleteMarker(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(directory, assetDirectoryName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeValidPackageMetadata(t, directory)
+	writeValidAssetManifest(t, directory)
+	if err := os.WriteFile(filepath.Join(directory, "assets", "bundle.12345678.wasm"), []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "assets", "wasm_exec.12345678.js"), []byte("js"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := verifyPublishedPackage(directory)
+	if err == nil || !strings.Contains(err.Error(), "failed integrity verification") {
+		t.Fatalf("verifyPublishedPackage() error = %v, want integrity failure", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(directory, packageMetadataName)); !os.IsNotExist(statErr) {
+		t.Fatalf("completion marker remained after failed verification: %v", statErr)
+	}
+	if ownership := inspectPackageOwnership(directory); ownership.IsOwned() {
+		t.Fatalf("incomplete package considered owned after failed verification: %v %s", ownership.State, ownership.Reason)
+	}
+}
+
+func TestVerifyPublishedPackageAcceptsCompletePackage(t *testing.T) {
+	directory := t.TempDir()
+	writeCompleteCurrentPackage(t, directory)
+	if err := verifyPublishedPackage(directory); err != nil {
+		t.Fatalf("verifyPublishedPackage() error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, packageMetadataName)); err != nil {
+		t.Fatalf("completion marker removed from complete package: %v", err)
+	}
+}
+
+func TestPackageOutputIsImmediatelyOwnedAndExportable(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	if err := packageApp(packageOptions{appDir: appDir, compiler: "go", compress: map[string]bool{}}); err != nil {
+		t.Fatalf("packageApp() error: %v", err)
+	}
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir, compiler: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownership := inspectPackageOwnership(layout.PackageDir); ownership.State != packageOwnedCurrent {
+		t.Fatalf("package ownership = %v (%s), want current", ownership.State, ownership.Reason)
+	}
+	for _, name := range []string{packageMetadataName, assetManifestName, indexHTMLAssetName} {
+		if _, err := os.Stat(filepath.Join(layout.PackageDir, name)); err != nil {
+			t.Fatalf("published package missing %s: %v", name, err)
+		}
+	}
+	outDir := filepath.Join(t.TempDir(), "export")
+	if err := exportApp(exportOptions{appDir: appDir, outDir: outDir}); err != nil {
+		t.Fatalf("exportApp() error: %v", err)
+	}
+	if ownership := inspectPackageOwnership(outDir); ownership.State != packageOwnedCurrent {
+		t.Fatalf("export ownership = %v (%s), want current", ownership.State, ownership.Reason)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, indexHTMLAssetName)); err != nil {
+		t.Fatalf("exported package missing index.html: %v", err)
 	}
 }
 

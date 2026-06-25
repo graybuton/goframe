@@ -411,6 +411,7 @@ func TestCleanPackageArtifactsRemovesOldCompression(t *testing.T) {
 		"main.wasm.gz",
 		"main.wasm.br",
 		"bundle.wasm",
+		"index.html",
 		"asset-manifest.json",
 		"goframe-package.json",
 		filepath.Join("assets", "bundle.oldhash.wasm"),
@@ -422,7 +423,7 @@ func TestCleanPackageArtifactsRemovesOldCompression(t *testing.T) {
 	if err := cleanPackageArtifacts(directory, "bundle.wasm"); err != nil {
 		t.Fatalf("cleanPackageArtifacts() error: %v", err)
 	}
-	for _, name := range []string{"main.wasm", "main.wasm.gz", "main.wasm.br", "bundle.wasm", "asset-manifest.json", "goframe-package.json", "assets"} {
+	for _, name := range []string{"main.wasm", "main.wasm.gz", "main.wasm.br", "bundle.wasm", "index.html", "asset-manifest.json", "goframe-package.json", "assets"} {
 		if _, err := os.Stat(filepath.Join(directory, name)); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists: %v", name, err)
 		}
