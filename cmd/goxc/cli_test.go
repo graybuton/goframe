@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,19 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestCommandUsage(t *testing.T) {
+	for _, command := range []string{"generate", "build", "package", "export", "serve", "size", "doctor", "clean", "version"} {
+		t.Run(command, func(t *testing.T) {
+			var output bytes.Buffer
+			commandUsage(&output, command)
+			got := output.String()
+			if !strings.Contains(got, "usage: goxc "+command) {
+				t.Fatalf("commandUsage(%q) = %q", command, got)
+			}
+		})
+	}
+}
 
 func TestParseBuildOptions(t *testing.T) {
 	options, err := parseBuildOptions([]string{"app", "--compiler=tinygo", "--out=custom"})
