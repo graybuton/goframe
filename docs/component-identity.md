@@ -41,6 +41,36 @@ Direct Go calls such as `Header(HeaderProps{...})` remain ordinary function
 calls. They do not create a component boundary, state scope, or independent
 dirty update target.
 
+## Canonical Policy For Public Preview
+
+Status: Ready with limitations.
+
+Generated and typed component identity follows this policy:
+
+- typed/generated identity is based on canonical Go import path plus component
+  symbol;
+- the import alias is a debug label and generated-code selector, not runtime
+  identity;
+- generated variable names and source filename discriminators are not runtime
+  identity;
+- identical import path plus symbol should produce identical runtime identity;
+- different import paths should produce different runtime identity even when
+  the selected symbol name is the same;
+- semantic import version suffixes such as `/v2` are part of the import path
+  and therefore part of identity;
+- module path rename or fork is an identity change and can remount state;
+- `gf.Component` legacy string identity is namespaced separately from typed
+  identity, so `gf.Component("Header", ...)` does not collide with
+  `gf.ComponentT(gf.NewComponentType("Header", "Header"), ...)`;
+- `gf.ComponentT` identity is explicit and should be preferred by generated
+  code and handwritten component adapters that need stronger identity.
+
+Evidence:
+
+- `pkg/goframe/component_identity_test.go`;
+- `pkg/gox/generate_test.go`;
+- `cmd/goxc/workspace_test.go`.
+
 Package-qualified GOX component tags create the same kind of boundary across
 packages:
 
@@ -126,6 +156,23 @@ Recommendation: keep the token path as the generated default while retaining
 `entry: "."` apps with child packages, and MVP 22 applies the same model to
 child entry packages such as `./cmd/app`. They are not a complete multi-module
 identity policy.
+
+## Multi-Module Conclusion
+
+Status: Blocker for broader package ecosystem claims.
+
+The current policy is strong enough for single-module apps, child entry
+packages, and package-qualified components inside the same Go module. It is
+not a complete reusable package ecosystem or multi-module workspace promise.
+
+Before claiming broad multi-module support, the project still needs to decide:
+
+- how generated identity behaves when multiple module roots are materialized;
+- how replace directives, forks, and local module paths should be described to
+  users;
+- whether public reusable component packages need additional documentation or
+  generated metadata;
+- how migration notes should handle module path rename/remount behavior.
 
 ## Alternative C: Function Identity
 
