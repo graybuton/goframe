@@ -118,6 +118,9 @@ func generatePath(options generateOptions, requireFiles bool) error {
 			return err
 		}
 	} else {
+		if err := ensureNoPhysicalOverlap(outputRoot, appDir, "generated output directory", "application directory"); err != nil {
+			return err
+		}
 		if err := validateExplicitPathRoot(outputRoot, "generated output directory", true); err != nil {
 			return err
 		}

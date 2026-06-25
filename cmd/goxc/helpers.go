@@ -102,8 +102,13 @@ func writeStreamAtomic(destinationPath string, source io.Reader, mode os.FileMod
 }
 
 func samePath(first, second string) bool {
-	firstPath, firstErr := filepath.Abs(first)
-	secondPath, secondErr := filepath.Abs(second)
+	if firstInfo, firstErr := os.Stat(first); firstErr == nil {
+		if secondInfo, secondErr := os.Stat(second); secondErr == nil && os.SameFile(firstInfo, secondInfo) {
+			return true
+		}
+	}
+	firstPath, firstErr := canonicalPathForComparison(first)
+	secondPath, secondErr := canonicalPathForComparison(second)
 	return firstErr == nil && secondErr == nil && firstPath == secondPath
 }
 
@@ -269,6 +274,88 @@ func pathContains(root, child string) bool {
 }
 
 func pathsOverlap(first, second string) bool {
-	relation, err := pathRelation(first, second)
+	relation, err := physicalPathRelation(first, second)
+	if err != nil {
+		return true
+	}
 	return err == nil && relation != "separate"
+}
+
+func ensureNoPhysicalOverlap(first, second, firstDescription, secondDescription string) error {
+	overlap, err := physicalPathsOverlap(first, second)
+	if err != nil {
+		return fmt.Errorf("compare %s %s with %s %s: %w", firstDescription, first, secondDescription, second, err)
+	}
+	if overlap {
+		return fmt.Errorf("%s %s must not overlap %s %s", firstDescription, first, secondDescription, second)
+	}
+	return nil
+}
+
+func physicalPathsOverlap(first, second string) (bool, error) {
+	relation, err := physicalPathRelation(first, second)
+	if err != nil {
+		return false, err
+	}
+	return relation != "separate", nil
+}
+
+func physicalPathRelation(first, second string) (string, error) {
+	firstPath, err := canonicalPathForComparison(first)
+	if err != nil {
+		return "", err
+	}
+	secondPath, err := canonicalPathForComparison(second)
+	if err != nil {
+		return "", err
+	}
+	return pathRelation(firstPath, secondPath)
+}
+
+func canonicalPathForComparison(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	absolute = filepath.Clean(absolute)
+	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
+		return filepath.Clean(resolved), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("resolve symlinks in %s: %w", absolute, err)
+	}
+
+	ancestor, err := nearestExistingAncestor(absolute)
+	if err != nil {
+		return "", err
+	}
+	resolvedAncestor, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		return "", fmt.Errorf("resolve symlinks in %s: %w", ancestor, err)
+	}
+	relative, err := filepath.Rel(ancestor, absolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve missing path tail for %s: %w", absolute, err)
+	}
+	if relative == "." {
+		return filepath.Clean(resolvedAncestor), nil
+	}
+	return filepath.Clean(filepath.Join(resolvedAncestor, relative)), nil
+}
+
+func nearestExistingAncestor(path string) (string, error) {
+	current := filepath.Clean(path)
+	for {
+		_, err := os.Lstat(current)
+		if err == nil {
+			return current, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("inspect %s: %w", current, err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("no existing ancestor found for %s", path)
+		}
+		current = parent
+	}
 }

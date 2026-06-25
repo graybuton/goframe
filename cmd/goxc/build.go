@@ -108,6 +108,9 @@ func buildApp(options buildOptions) (string, error) {
 	outputRoot := layout.BuildDir
 	if options.outDir != "" {
 		outputRoot = options.outDir
+		if err := ensureNoPhysicalOverlap(outputRoot, layout.AppDir, "build output directory", "application directory"); err != nil {
+			return "", err
+		}
 		if err := validateExplicitPathRoot(outputRoot, "build output directory", true); err != nil {
 			return "", err
 		}
@@ -115,6 +118,9 @@ func buildApp(options buildOptions) (string, error) {
 		if err := validatePathBelowRoot(layout.WorkspaceRoot, outputRoot, "build output directory", true); err != nil {
 			return "", err
 		}
+	}
+	if strings.ToLower(filepath.Ext(outputPath)) != ".wasm" {
+		return "", fmt.Errorf("build output %s must end with .wasm", outputPath)
 	}
 	if err := validatePathBelowRoot(outputRoot, outputPath, "build output", true); err != nil {
 		return "", err

@@ -99,8 +99,8 @@ func refreshDirectory(directory string) error {
 
 func validateWorkspaceRoot(layout BuildLayout) error {
 	if layout.ExternalWorkspace {
-		if pathsOverlap(layout.AppDir, layout.WorkspaceRoot) {
-			return fmt.Errorf("workspace root %s must not overlap application directory %s", layout.WorkspaceRoot, layout.AppDir)
+		if err := ensureNoPhysicalOverlap(layout.WorkspaceRoot, layout.AppDir, "workspace root", "application directory"); err != nil {
+			return err
 		}
 		return validatePathBelowRoot(layout.WorkspaceBase, layout.WorkspaceRoot, "workspace root", true)
 	}

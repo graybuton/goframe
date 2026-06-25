@@ -188,8 +188,8 @@ func packageApp(options packageOptions) error {
 	explicitOutDir := options.outDir != ""
 	options.outDir = packageOutputDirectory(options, layout)
 	if explicitOutDir {
-		if pathsOverlap(options.appDir, options.outDir) {
-			return fmt.Errorf("package output directory %s must not overlap application directory %s", options.outDir, options.appDir)
+		if err := ensureNoPhysicalOverlap(options.outDir, layout.AppDir, "package output directory", "application directory"); err != nil {
+			return err
 		}
 		if err := validateExplicitPathRoot(options.outDir, "package output directory", true); err != nil {
 			return err
@@ -212,7 +212,7 @@ func packageApp(options packageOptions) error {
 	defer os.RemoveAll(tempDir)
 
 	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
-	if strings.ToLower(path.Ext(wasmLogicalName)) != ".wasm" {
+	if strings.ToLower(path.Ext(filepath.ToSlash(manifest.WASM))) != ".wasm" || strings.ToLower(path.Ext(wasmLogicalName)) != ".wasm" {
 		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
 	}
 	if wasmLogicalName == runtimeAssetName {
@@ -425,6 +425,9 @@ func packageOutputDirectory(options packageOptions, layout BuildLayout) string {
 }
 
 func cleanPackageArtifacts(directory, wasmName string) error {
+	if err := os.Remove(filepath.Join(directory, packageMetadataName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove stale package artifact %s: %w", packageMetadataName, err)
+	}
 	names := []string{
 		wasmName,
 		wasmName + ".gz",
@@ -446,7 +449,6 @@ func cleanPackageArtifacts(directory, wasmName string) error {
 		"styles.css",
 		legacyPackageManifest,
 		assetManifestName,
-		packageMetadataName,
 	}
 	for _, name := range names {
 		if err := os.Remove(filepath.Join(directory, name)); errors.Is(err, os.ErrNotExist) {
@@ -615,6 +617,11 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 }
 
 func cleanPackageAssetName(name string) (string, error) {
+	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
+		if part == ".." {
+			return "", fmt.Errorf("package asset logical name %q must not contain .. components", name)
+		}
+	}
 	clean := path.Clean(filepath.ToSlash(name))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
 		return "", fmt.Errorf("package asset logical name %q must be a relative child path", name)

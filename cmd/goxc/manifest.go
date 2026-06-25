@@ -83,6 +83,9 @@ func loadManifest(appDir string) (projectManifest, error) {
 			return projectManifest{}, fmt.Errorf("%s %q in %s must be a child path inside the application", name, value, manifestName)
 		}
 	}
+	if strings.ToLower(filepath.Ext(manifest.WASM)) != ".wasm" {
+		return projectManifest{}, fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
+	}
 	if manifest.Compiler != "go" && manifest.Compiler != "tinygo" {
 		return projectManifest{}, fmt.Errorf("compiler %q in %s must be go or tinygo", manifest.Compiler, manifestName)
 	}

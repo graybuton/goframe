@@ -71,12 +71,12 @@ func newBuildLayout(options layoutOptions) (BuildLayout, error) {
 		if err != nil {
 			return BuildLayout{}, fmt.Errorf("resolve workspace directory: %w", err)
 		}
-		if pathsOverlap(appDir, workspaceRoot) {
-			return BuildLayout{}, fmt.Errorf("workspace directory %s must not overlap application directory %s", workspaceRoot, appDir)
+		if err := ensureNoPhysicalOverlap(workspaceRoot, appDir, "workspace directory", "application directory"); err != nil {
+			return BuildLayout{}, err
 		}
 		workspaceRoot = filepath.Join(workspaceRoot, appWorkspaceSlug(appDir))
-		if pathsOverlap(appDir, workspaceRoot) {
-			return BuildLayout{}, fmt.Errorf("workspace root %s must not overlap application directory %s", workspaceRoot, appDir)
+		if err := ensureNoPhysicalOverlap(workspaceRoot, appDir, "workspace root", "application directory"); err != nil {
+			return BuildLayout{}, err
 		}
 	}
 
