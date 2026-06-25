@@ -120,8 +120,13 @@ Decision:
 - legacy ownership is fail-closed and limited to the historical GoFrame
   `manifest.json` shape found in repository history;
 - manifest `wasm` values must be relative `.wasm` child paths;
+- root `index.html` is the required standalone package entrypoint, must be
+  declared exactly once in manifest assets, and must exist as a regular
+  non-symlink file before package compilation starts;
 - package assets are planned before publication so user assets cannot collide
   with the generated WASM, `wasm_exec.js`, or compressed sidecars;
+- successful package/export commands verify that the published output is
+  immediately recognized as a complete current GoFrame package;
 - no mandatory manifest schema version is added in MVP 30.
 
 ## Filesystem And Symlink Safety
@@ -146,6 +151,9 @@ Evidence:
   `go.mod`;
 - package completion requires complete current metadata, and partial
   publication without `goframe-package.json` is not considered owned;
+- stale managed `index.html` is removed during package/export replacement, and
+  invalid input preserves any previous complete package because required
+  entrypoint validation runs before compilation and cleanup;
 - output overlap and generated asset namespace collisions are rejected before
   publication.
 

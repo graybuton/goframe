@@ -119,6 +119,10 @@
   publishes `goframe-package.json` last. Package cleanup removes that
   authoritative completion marker before destructive cleanup, reducing the
   chance of partial package trees being treated as complete.
+- Standalone packages now require a regular root `index.html` declared exactly
+  once in manifest assets before compilation starts. Package/export replacement
+  removes stale managed `index.html`, and successful package/export commands
+  verify current package ownership before printing success.
 - Resource loader panics no longer leave the internal effect slot pending, so a
   same-key rerender after failed state does not automatically restart the same
   panicking loader. Explicit retry remains available through `reload` or key

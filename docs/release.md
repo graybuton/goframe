@@ -130,6 +130,9 @@ clear about API instability and experimental status.
   representative examples;
 - `asset-manifest.json` and `goframe-package.json` present, with
   `goframe-package.json` published as the authoritative completion marker;
+- root `index.html` present as the required standalone HTML entrypoint and
+  managed package artifact;
+- package/export success verified against current package ownership metadata;
 - package/export ownership safety checked with complete structured metadata,
   not placeholder files or standalone asset manifests;
 - manifest assets checked for collisions with generated WASM, runtime, and

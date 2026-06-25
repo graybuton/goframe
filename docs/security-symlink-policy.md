@@ -98,6 +98,11 @@ entrypoint, and HTML entrypoint are present as regular files inside the package
 root. `asset-manifest.json` is generated metadata only; by itself it does not
 grant destructive ownership.
 
+The standalone HTML entrypoint is root `index.html`. It must be declared
+exactly once in manifest assets and must exist as a regular non-symlink file
+before `goxc package` compiles or cleans output. Missing optional assets may
+still be skipped with a message, but missing `index.html` is a package error.
+
 Legacy `manifest.json` ownership is fail-closed and recognized only for the
 historical GoFrame package format that contained GoFrame-specific fields such
 as `name`, `compiler`, `wasm`, `assets`, and `toolchainVersion`, plus regular
@@ -223,9 +228,13 @@ Evidence:
 Before publishing, `goxc` validates the staged package tree and rejects symlinks
 and non-regular file entries. Package metadata is copied last so a mid-copy
 failure cannot leave `goframe-package.json` describing a newly completed tree.
-Before destructive cleanup of an existing package, `goxc` removes the
-authoritative `goframe-package.json` marker first. If cleanup fails, the
-directory is no longer considered a complete current package.
+After publish, package and export commands verify that the destination is
+recognized as a complete current GoFrame package before printing success; if
+verification fails, they remove the completion marker. Before destructive
+cleanup of an existing package, `goxc` removes the authoritative
+`goframe-package.json` marker first, then removes managed artifacts including
+stale root `index.html`. If cleanup fails, the directory is no longer
+considered a complete current package.
 
 This is not a full transactional installer. If a copy fails after old
 package-owned files were cleaned, the destination may need another successful

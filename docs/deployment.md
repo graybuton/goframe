@@ -93,6 +93,15 @@ collide with generated names such as `bundle.wasm`, `wasm_exec.js`, generated
 metadata, or `.gz`/`.br` sidecars. Duplicate assets after path normalization
 are rejected before publication.
 
+`index.html` is the required standalone package entrypoint. It must be
+declared exactly once in `goframe.json` assets after normalization and must
+exist at the app root as a regular non-symlink file. `goxc package` checks this
+before materializing the build workspace or compiling WASM, so a missing or
+invalid `index.html` does not clean or replace a previous complete package.
+Other declared assets remain optional in the current public-preview contract:
+when a non-required CSS/data/image asset is missing, packaging prints a message
+and skips it.
+
 ## HTML Rewriting
 
 Example `index.html` files use explicit package blocks:
@@ -191,6 +200,10 @@ metadata compatibility policy.
 cleanup. A directory is considered a complete current GoFrame package only
 when this marker, the companion asset manifest, and the referenced
 HTML/WASM/runtime files are all regular files inside the package root.
+Package and export commands verify this ownership state after publication and
+before printing success. If verification fails, goxc removes
+`goframe-package.json` so the directory is not marked as a completed current
+package.
 
 ## Clean App Workspace
 
@@ -243,6 +256,12 @@ also compared against app/package roots using physical path resolution so a
 symlink alias cannot point output back into authored source. This is
 best-effort protection for static repository trees; hostile concurrent
 filesystem mutation is outside the threat model.
+
+During package or export replacement, managed standalone artifacts include
+`index.html`, metadata files, generated WASM/runtime assets, compressed
+sidecars, and the `assets/` directory. Stale `index.html` from a previous
+package is removed before the new package is published, after the old
+completion marker has already been invalidated.
 
 The materialized hidden workspace supports `"entry": "."` apps and child entry
 packages such as `"./cmd/app"`, `"cmd/app"`, `"./src/app"`, and `"app"` when

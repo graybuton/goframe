@@ -30,7 +30,7 @@ Supported fields:
 | `output` | `dist` | Legacy/export-oriented output hint. Current package output defaults to `.goframe/package/standalone`; explicit package/export flags are preferred. |
 | `compiler` | `go` | Must be `go` or `tinygo`. CLI `--compiler` overrides it. |
 | `wasm` | `bundle.wasm` | Logical WASM filename. Must be a relative `.wasm` child path. `main.wasm` remains accepted for legacy apps. |
-| `assets` | `["index.html"]` | Static child paths copied by `goxc package`. Missing assets are skipped with a message. |
+| `assets` | `["index.html"]` | Static child paths copied by `goxc package`. Root `index.html` is the required standalone HTML entrypoint and must be declared exactly once. Missing non-required assets are skipped with a message. |
 
 Validation evidence:
 
@@ -50,6 +50,9 @@ Current input behavior:
   rejected;
 - `wasm` must end in `.wasm`; names such as `main.go`, `go.mod`,
   `bundle.wasm.gz`, and `wasm_exec.js` are rejected;
+- standalone packages require a root `index.html` asset declared exactly once;
+- the required `index.html` must exist before compilation and must be a
+  regular non-symlink file;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 
@@ -152,6 +155,11 @@ Compatibility policy:
   the package root;
 - `goframe-package.json` is published last and removed first during destructive
   package cleanup so partial packages are not marked complete;
+- successful `goxc package` and `goxc export` runs verify the published
+  directory as a complete current package before printing success. If
+  verification fails, the completion marker is removed;
+- `index.html` is a managed package artifact and is removed during package or
+  export replacement so stale bootstraps cannot survive a later package run;
 - adding metadata fields is backward-compatible;
 - removing the marker or changing ownership detection is breaking unless it is
   required for a safety fix;
