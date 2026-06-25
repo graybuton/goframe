@@ -420,9 +420,7 @@ func TestValidatePackageDestinationRejectsUnownedNonEmptyDirectory(t *testing.T)
 
 func TestValidatePackageDestinationAllowsPreviousGoFramePackage(t *testing.T) {
 	outDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outDir, packageMetadataName), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeValidPackageMetadata(t, outDir)
 	if err := validatePackageDestination(outDir); err != nil {
 		t.Fatalf("validatePackageDestination(previous package) error: %v", err)
 	}

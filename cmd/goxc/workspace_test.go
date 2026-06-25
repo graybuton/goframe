@@ -298,23 +298,28 @@ func Layout() gf.Node {
 }
 `)
 
-	layout := BuildLayout{
-		AppDir:  appDir,
-		WorkDir: filepath.Join(t.TempDir(), "work"),
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    appDir,
+		workspace: filepath.Join(t.TempDir(), "workspace"),
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	entryDir, err := prepareBuildWorkspace(layout, projectManifest{Entry: "cmd/app"})
 	if err != nil {
 		t.Fatalf("prepareBuildWorkspace(child entry) error: %v", err)
 	}
-	wantEntry := filepath.Join(layout.WorkDir, "apps", "demo", "cmd", "app")
+	config := workspaceModuleConfigForApp(appDir)
+	appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
+	wantEntry := filepath.Join(appWorkDir, "cmd", "app")
 	if entryDir != wantEntry {
 		t.Fatalf("entry dir = %q, want %q", entryDir, wantEntry)
 	}
 	for _, path := range []string{
-		"apps/demo/cmd/app/app.gox.go",
-		"apps/demo/internal/ui/layout.gox.go",
+		"cmd/app/app.gox.go",
+		"internal/ui/layout.gox.go",
 	} {
-		if _, err := os.Stat(filepath.Join(layout.WorkDir, path)); err != nil {
+		if _, err := os.Stat(filepath.Join(appWorkDir, path)); err != nil {
 			t.Fatalf("workspace generated file %s missing: %v", path, err)
 		}
 	}
@@ -342,19 +347,24 @@ func Button() gf.Node {
 }
 `)
 
-	layout := BuildLayout{
-		AppDir:  appDir,
-		WorkDir: filepath.Join(t.TempDir(), "work"),
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    appDir,
+		workspace: filepath.Join(t.TempDir(), "workspace"),
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	entryDir, err := prepareBuildWorkspace(layout, projectManifest{Entry: "./src/app"})
 	if err != nil {
 		t.Fatalf("prepareBuildWorkspace(src entry) error: %v", err)
 	}
-	wantEntry := filepath.Join(layout.WorkDir, "apps", "demo", "src", "app")
+	config := workspaceModuleConfigForApp(appDir)
+	appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
+	wantEntry := filepath.Join(appWorkDir, "src", "app")
 	if entryDir != wantEntry {
 		t.Fatalf("entry dir = %q, want %q", entryDir, wantEntry)
 	}
-	if _, err := os.Stat(filepath.Join(layout.WorkDir, "apps/demo/src/components/button.gox.go")); err != nil {
+	if _, err := os.Stat(filepath.Join(appWorkDir, "src/components/button.gox.go")); err != nil {
 		t.Fatalf("workspace did not generate non-entry package GOX file: %v", err)
 	}
 }
