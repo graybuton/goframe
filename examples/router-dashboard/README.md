@@ -32,15 +32,26 @@ goxc serve ./examples/router-dashboard --port=8080
 
 Open <http://127.0.0.1:8080>.
 
-Try:
+TinyGo is the normal path for the router, resource, query, and form scenarios.
+The intentional panic recovery demo requires a recover-capable Go/WASM build:
+
+```bash
+goxc package ./examples/router-dashboard --compiler=go
+goxc serve ./examples/router-dashboard --port=8080
+```
+
+Try with either build:
 
 - `#/`
 - `#/issues`
 - `#/issues?status=open&q=auth`
 - `#/issues/RD-2`
-- `#/issues/RD-2?panic=render`
 - `#/issues/RD-2/edit`
 - `#/missing`
+
+Try only with the Go/WASM build:
+
+- `#/issues/RD-2?panic=render`
 
 ## What It Demonstrates
 
@@ -167,6 +178,11 @@ The detail route has an intentional render-failure trigger for smoke coverage:
   the route can fail again.
 - Back to issues: navigates to `/issues`, removing the crashing query input and
   proving the shell and resource owner stay alive.
+
+This demo depends on recover-based render containment. Use
+`goxc package ./examples/router-dashboard --compiler=go` for it. The
+size-oriented TinyGo build path does not guarantee recover-based containment
+and may trap instead of rendering the fallback.
 
 This app does not install route loaders, route-level automatic boundaries, or
 server error pages.

@@ -49,6 +49,15 @@ goxc serve ./examples/router-dashboard --port=8080
 
 Open <http://127.0.0.1:8080>.
 
+TinyGo is the normal path for the router, resource, query, and form scenarios.
+The intentional panic recovery demo in the Error Boundaries section requires a
+recover-capable Go/WASM build:
+
+```bash
+goxc package ./examples/router-dashboard --compiler=go
+goxc serve ./examples/router-dashboard --port=8080
+```
+
 Try these routes:
 
 - `#/`
@@ -234,6 +243,17 @@ That query parameter makes the detail route panic during render. The boundary
 shows fallback UI, while the outer shell and component-scoped resource owner
 stay mounted. The resource remains `ready`; this is not an ordinary
 `ResourceFailed` state and it does not reload the data.
+
+Run this demo with the Go/WASM package path:
+
+```bash
+goxc package ./examples/router-dashboard --compiler=go
+goxc serve ./examples/router-dashboard --port=8080
+```
+
+The size-oriented TinyGo build path does not guarantee recover-based
+containment and may trap instead of rendering the fallback. The rest of the
+router/resource/forms tutorial flow works through TinyGo.
 
 The fallback exposes two different actions:
 
