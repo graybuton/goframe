@@ -223,6 +223,28 @@ mutation layer, or persistence story in this tutorial.
 Route content is wrapped in a scoped render Error Boundary. It protects route
 rendering from render panics and keeps the outer shell alive.
 
+The reference app includes an intentional route-render failure for integration
+testing:
+
+```text
+#/issues/RD-2?panic=render
+```
+
+That query parameter makes the detail route panic during render. The boundary
+shows fallback UI, while the outer shell and component-scoped resource owner
+stay mounted. The resource remains `ready`; this is not an ordinary
+`ResourceFailed` state and it does not reload the data.
+
+The fallback exposes two different actions:
+
+- retry the current route, which rerenders the same protected subtree with the
+  same route/query input;
+- navigate safely back to `/issues`, which removes the crashing query input and
+  returns the app to a normal route.
+
+Reset does not fix the cause of an error automatically. If the same route props
+or query still trigger a panic, fallback UI can appear again.
+
 Error Boundaries do not catch:
 
 - ordinary `ResourceFailed` state;

@@ -68,13 +68,16 @@ workspace smoke, a child-entry package smoke, hash-router navigation smoke, and
 the router-dashboard reference app smoke for query filters, form validation,
 single-owner resource loading, no duplicate reloads across navigation/query
 changes, manual reload, explicit resource failure UI, and stable shell
-identity. It also covers the resource example for explicit loading/ready/failed
-state, reload, stale completion guards, and cleanup-after-unmount behavior.
+identity. It also covers route Error Boundary fallback and safe navigation
+recovery in the reference app. It also covers the resource example for explicit
+loading/ready/failed state, reload, stale completion guards, and
+cleanup-after-unmount behavior.
 
-The runtime error containment and Error Boundary fixtures are compiled with the
-Go WASM compiler so `recover` semantics are available. The size-oriented TinyGo
-package path uses trap-style panic behavior, which is documented as a runtime
-error containment limitation.
+The runtime error containment fixture, Error Boundary fixture, and
+router-dashboard reference-app smoke are compiled with the Go WASM compiler
+where recover-based render containment is being asserted. The size-oriented
+TinyGo package path uses trap-style panic behavior, which is documented as a
+runtime error containment limitation.
 
 GOX diagnostic golden tests intentionally assert filenames, line/column
 prefixes, specific unsupported-syntax messages, and source snippets. They are

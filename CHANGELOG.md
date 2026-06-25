@@ -89,6 +89,10 @@
 
 ### Fixed
 
+- The router-dashboard route Error Boundary fallback now distinguishes retrying
+  the current crashing route from safely navigating back to the issues list, and
+  browser smoke covers recovery from `?panic=render` without reloading the
+  resource owner.
 - Resource loader panics no longer leave the internal effect slot pending, so a
   same-key rerender after failed state does not automatically restart the same
   panicking loader. Explicit retry remains available through `reload` or key

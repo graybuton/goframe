@@ -38,6 +38,7 @@ Try:
 - `#/issues`
 - `#/issues?status=open&q=auth`
 - `#/issues/RD-2`
+- `#/issues/RD-2?panic=render`
 - `#/issues/RD-2/edit`
 - `#/missing`
 
@@ -158,6 +159,15 @@ mutation framework.
 Route render failures are handled by `gf.ErrorBoundary`. Ordinary resource
 failure renders `rd-resource-failed` instead.
 
+The detail route has an intentional render-failure trigger for smoke coverage:
+`#/issues/RD-2?panic=render`. The boundary fallback exposes two actions:
+
+- Retry current route: calls the boundary reset callback and rerenders the same
+  protected subtree with the same URL state. If `panic=render` is still present,
+  the route can fail again.
+- Back to issues: navigates to `/issues`, removing the crashing query input and
+  proving the shell and resource owner stay alive.
+
 This app does not install route loaders, route-level automatic boundaries, or
 server error pages.
 
@@ -178,6 +188,8 @@ The browser smoke verifies:
 - navigation and query changes do not reload data;
 - manual reload starts exactly one new generation;
 - resource failure stays outside Error Boundary fallback;
+- route render failure shows boundary fallback and safe navigation restores the
+  issues list without reloading data;
 - detail/edit/form/not-found routes still work after reload.
 
 ## Non-goals
