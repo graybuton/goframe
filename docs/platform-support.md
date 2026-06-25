@@ -1,0 +1,86 @@
+# Platform Support
+
+## Purpose
+
+This document records what GoFrame currently tests, what is expected but not
+verified, and what remains unsupported. It is a public-preview readiness matrix,
+not a production support promise.
+
+Labels:
+
+- CI-tested
+- expected
+- unverified
+- unsupported
+
+## Toolchain Hosts
+
+| Host | Status | Evidence |
+|---|---|---|
+| Linux amd64 | CI-tested | GitHub Actions and local validation run Go, TinyGo, Node, Chrome, size, smoke, and DOM pressure gates. |
+| macOS | expected | Go/TinyGo/Node should work, but there is no CI gate yet. |
+| Windows | unverified | Go code is mostly `filepath`-based, but browser smoke, shell scripts, symlink tests, and extension scripts are not CI-tested on Windows. |
+
+Symlink safety tests skip when `os.Symlink` is unavailable or restricted.
+
+## Compilers
+
+| Compiler target | Status | Notes |
+|---|---|---|
+| Go/WASM | CI-tested for selected smoke fixtures | Used for recover-capable runtime error and Error Boundary scenarios. Larger bundle size is expected. |
+| TinyGo/WASM | CI-tested for packaging, size, and most browser smoke | Preferred size-oriented path. Current CI uses TinyGo `0.41.1`. Default package path uses `-panic=trap`. |
+| Native Go runtime | CI-tested for pure tests | Pure runtime/compiler/tooling tests run with normal Go. Browser runtime requires `js/wasm`. |
+
+Minimum module declaration is `go 1.22`. Current local/CI baselines use newer Go
+toolchains.
+
+## Browser Targets
+
+| Browser | Status | Evidence |
+|---|---|---|
+| Chrome/Chromium | CI-tested | Browser smoke and dashboard DOM pressure use Chrome/CDP. |
+| Firefox | unverified | Runtime uses standard browser APIs but has no CI coverage. |
+| Safari/WebKit | unverified | Runtime uses standard browser APIs but has no CI coverage. |
+| Non-browser WASM hosts | unsupported | Current runtime assumes browser DOM APIs. |
+
+Required browser APIs:
+
+- WebAssembly;
+- DOM node creation and event listeners;
+- `requestAnimationFrame`;
+- `hashchange`;
+- `fetch` for example-local resource transports;
+- `AbortController` for resource example cancellation;
+- localStorage for the Todo example.
+
+## Runtime Behavior Matrix
+
+| Capability | Go/WASM | TinyGo/WASM | Notes |
+|---|---|---|---|
+| rendering/state/effects/context | CI-tested | CI-tested | Main browser app path. |
+| hash router/query helpers | CI-tested | CI-tested | Router smoke uses TinyGo; reference ErrorBoundary route uses Go. |
+| resources | expected | CI-tested | Resource smoke uses TinyGo for lifecycle and stale completion. |
+| runtime panic containment | CI-tested | limited | Recover-based containment is asserted with Go/WASM. TinyGo trap builds may terminate instead. |
+| scoped render Error Boundaries | CI-tested | compile-compatible but not containment proof | Use Go/WASM for intentional panic demos. |
+| fixed-height virtualization | expected | CI-tested | DOM pressure and virtualized smoke use TinyGo. |
+
+## Deployment
+
+Status: Ready with limitations.
+
+Supported deployment shape:
+
+- static hosting of `goxc package` output;
+- hash-based routing, so app routes stay after `#` and do not need server
+  rewrites;
+- correct `application/wasm` MIME type;
+- optional gzip/brotli sidecars from `goxc package --compress=gzip,br`;
+- long-cache immutable headers for hashed assets when deployment
+  infrastructure supports them.
+
+Unsupported:
+
+- production server;
+- TLS/cache/compression negotiation automation;
+- history-mode fallback configuration;
+- SSR/hydration.

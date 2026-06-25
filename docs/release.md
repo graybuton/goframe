@@ -11,22 +11,26 @@ Current milestone tag:
 v0.1.0-mvp10
 ```
 
-Future public experimental releases should use normal semantic tags such as:
+Recommended first public preview tag:
 
 ```text
-v0.1.0
+v0.1.0-preview.1
 ```
 
-Use annotated tags:
+Subsequent previews should increment the pre-release number:
 
-```bash
-git tag -a v0.1.0-mvp10 -m "MVP 10: GOX expression ergonomics and public API cleanup"
+```text
+v0.1.0-preview.2
 ```
 
-Push tags explicitly:
+The current MVP tags remain historical milestone tags. They are not public API
+release tags.
+
+Use annotated, signed tags when possible:
 
 ```bash
-git push origin v0.1.0-mvp10
+git tag -s v0.1.0-preview.1 -m "GoFrame public preview 1"
+git push origin v0.1.0-preview.1
 ```
 
 ## Pre-Release Checklist
@@ -71,3 +75,74 @@ go install github.com/graybuton/goframe/cmd/goxc@latest
 
 For now, release notes can be drafted from `CHANGELOG.md`. Keep milestone notes
 clear about API instability and experimental status.
+
+## Public Preview Checklist
+
+### Repository
+
+- `main` is clean and contains the intended merge commit;
+- no generated artifacts are tracked;
+- module path is `github.com/graybuton/goframe`;
+- release commit and tag are signed;
+- `CHANGELOG.md` is current;
+- no unresolved Critical or High readiness findings remain without explicit
+  release-note acknowledgement.
+
+### API
+
+- exported `pkg/goframe` and `pkg/gox` API inventory reviewed;
+- every new public export is classified in `docs/api-stability.md`;
+- deprecated APIs have replacement guidance;
+- migration notes exist for user-visible breaking changes;
+- manifest/package compatibility policy is current.
+
+### Tests
+
+- `go fmt ./...` and clean diff check;
+- `go test ./...`;
+- `go test -race ./pkg/... ./cmd/...`;
+- `go vet ./...`;
+- `go test -tags=goframe_debug ./...`;
+- GOX golden and error golden tests;
+- browser smoke;
+- TinyGo WASM size budgets;
+- dashboard DOM pressure;
+- artifact and module path gates;
+- docs consistency;
+- package matrix for all examples with TinyGo and selected Go compiler paths.
+
+### Docs
+
+- README current;
+- tutorial current;
+- API stability current;
+- platform support current;
+- public-preview readiness document current;
+- known limitations current;
+- examples aligned with docs.
+
+### Packaging
+
+- `goxc package --asset-hash --preload --compress=gzip,br` checked for
+  representative examples;
+- `asset-manifest.json` and `goframe-package.json` present;
+- export ownership safety checked;
+- clean workspace checked;
+- sample static-host deploy notes current.
+
+### Release Notes
+
+- tag format documented;
+- install command documented;
+- compatibility/deprecation notes included;
+- migration notes linked;
+- rollback/revert plan noted for preview users.
+
+## Versioning Decision
+
+The recommended first public-preview tag is `v0.1.0-preview.1`. It is a Go
+module pre-release tag. Later previews increment the numeric suffix.
+
+`v0.1.0` final should wait until public-preview blockers in
+`docs/public-preview-readiness.md` are closed or consciously accepted in release
+notes.

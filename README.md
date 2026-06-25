@@ -482,6 +482,10 @@ Start here:
 - [Runtime model](docs/runtime-model.md)
 - [GOX language and diagnostics](docs/gox-language.md)
 - [API stability tiers](docs/api-stability.md)
+- [Public Preview Readiness](docs/public-preview-readiness.md)
+- [Compatibility and deprecation policy](docs/compatibility.md)
+- [Migration note template](docs/migrations.md)
+- [Platform support matrix](docs/platform-support.md)
 - [CI and regression gates](docs/ci.md)
 
 Runtime topics:
@@ -502,6 +506,7 @@ Toolchain and delivery:
 
 - [Multi-package GOX workspace](docs/multi-package-workspace.md)
 - [Cache-safe package delivery](docs/deployment.md)
+- [Manifest compatibility](docs/manifest-compatibility.md)
 - [Symlink and file safety policy](docs/security-symlink-policy.md)
 - [Performance baseline](docs/performance-baseline.md)
 - [Release hygiene](docs/release.md)

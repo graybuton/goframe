@@ -150,6 +150,9 @@ CSS preload is included only when CSS assets are declared in `goframe.json`.
 
 In dev packages, hash fields are omitted.
 
+See [Manifest Compatibility](manifest-compatibility.md) for the input/generated
+metadata compatibility policy.
+
 ## Package Metadata
 
 `goframe-package.json` records package-level metadata:
