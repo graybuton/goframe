@@ -248,6 +248,99 @@ func View() gf.Node {
 	}
 }
 
+func TestGenerateQualifiedComponentImportAliasDoesNotDefineIdentity(t *testing.T) {
+	source := []byte(`package demo
+
+import (
+	widgets "github.com/example/app/internal/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func View() gf.Node {
+	return <widgets.Header Title="Hello" />
+}
+`)
+
+	generated, err := GenerateNamed("qualified_alias_rename.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	if !strings.Contains(text, `gf.NewComponentType("github.com/example/app/internal/ui.Header", "widgets.Header")`) {
+		t.Fatalf("generated source does not preserve import-path identity across alias rename:\n%s", text)
+	}
+	if strings.Contains(text, `gf.NewComponentType("widgets.Header"`) {
+		t.Fatalf("generated source used local alias as component identity:\n%s", text)
+	}
+}
+
+func TestGenerateWithOptionsFilenameDoesNotDefineRuntimeIdentity(t *testing.T) {
+	source := []byte(`package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <Header />
+}
+`)
+
+	first, err := GenerateWithOptions(source, GenerateOptions{
+		Filename:        "internal/ui/header.gox",
+		PackageIdentity: "github.com/example/app/internal/ui",
+	})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions(first) error: %v", err)
+	}
+	second, err := GenerateWithOptions(source, GenerateOptions{
+		Filename:        "internal/ui/alt_header.gox",
+		PackageIdentity: "github.com/example/app/internal/ui",
+	})
+	if err != nil {
+		t.Fatalf("GenerateWithOptions(second) error: %v", err)
+	}
+	const want = `gf.NewComponentType("github.com/example/app/internal/ui.Header", "Header")`
+	if strings.Count(string(first), want) != 1 || strings.Count(string(second), want) != 1 {
+		t.Fatalf("generated output missing stable runtime identity:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	if string(first) == string(second) {
+		t.Fatalf("different filenames should still produce distinct generated variable names")
+	}
+}
+
+func TestGenerateQualifiedComponentVersionedImportPathsDiffer(t *testing.T) {
+	source := []byte(`package demo
+
+import (
+	v1 "github.com/example/widgets"
+	v2 "github.com/example/widgets/v2"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func View() gf.Node {
+	return (
+		<div>
+			<v1.Card />
+			<v2.Card />
+		</div>
+	)
+}
+`)
+
+	generated, err := GenerateNamed("qualified_versions.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	text := string(generated)
+	for _, want := range []string{
+		`gf.NewComponentType("github.com/example/widgets.Card", "v1.Card")`,
+		`gf.NewComponentType("github.com/example/widgets/v2.Card", "v2.Card")`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated source does not contain %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestGenerateQualifiedComponentCollisions(t *testing.T) {
 	source := []byte(`package demo
 

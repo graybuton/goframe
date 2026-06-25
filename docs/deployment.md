@@ -38,14 +38,17 @@ Only the export step creates `./dist`.
 
 If you intentionally pass `goxc package --out <dir>`, that directory is also
 treated as package output owned by goxc. It must be empty or already contain a
-GoFrame package marker; otherwise package fails before removing any existing
-`assets/` directory. The recommended visible deployment flow remains
-`goxc package` followed by `goxc export`.
+complete current GoFrame package marker; otherwise package fails before
+removing any existing `assets/` directory. Empty `{}` marker placeholders,
+malformed metadata, standalone `asset-manifest.json`, symlinked markers, and
+generic web `manifest.json` files are not treated as GoFrame ownership. The
+recommended visible deployment flow remains `goxc package` followed by
+`goxc export`.
 
 The export directory is tool-owned. If `--out` already exists, is non-empty,
-and does not contain `goframe-package.json`, `asset-manifest.json`, or legacy
-`manifest.json` from a previous GoFrame export, `goxc export` fails before
-touching it:
+and does not contain complete `goframe-package.json` metadata plus matching
+regular companion files, or a recognized historical GoFrame `manifest.json`
+package signature, `goxc export` fails before touching it:
 
 ```bash
 goxc export ./examples/todo --out ./dist
@@ -84,6 +87,20 @@ examples/todo/.goframe/package/standalone/
 
 CSS assets are emitted under `assets/` too, for example
 `assets/styles.77a1de20.css`.
+
+Before packaging, goxc builds an asset namespace plan. Manifest assets cannot
+collide with generated names such as `bundle.wasm`, `wasm_exec.js`, generated
+metadata, or `.gz`/`.br` sidecars. Duplicate assets after path normalization
+are rejected before publication.
+
+`index.html` is the required standalone package entrypoint. It must be
+declared exactly once in `goframe.json` assets after normalization and must
+exist at the app root as a regular non-symlink file. `goxc package` checks this
+before materializing the build workspace or compiling WASM, so a missing or
+invalid `index.html` does not clean or replace a previous complete package.
+Other declared assets remain optional in the current public-preview contract:
+when a non-required CSS/data/image asset is missing, packaging prints a message
+and skips it.
 
 ## HTML Rewriting
 
@@ -150,6 +167,12 @@ CSS preload is included only when CSS assets are declared in `goframe.json`.
 
 In dev packages, hash fields are omitted.
 
+`asset-manifest.json` is companion metadata only. It is not an ownership or
+completion marker without complete `goframe-package.json` metadata.
+
+See [Manifest Compatibility](manifest-compatibility.md) for the input/generated
+metadata compatibility policy.
+
 ## Package Metadata
 
 `goframe-package.json` records package-level metadata:
@@ -171,6 +194,16 @@ In dev packages, hash fields are omitted.
   "generatedAt": "2026-06-17T00:00:00Z"
 }
 ```
+
+`goframe-package.json` is the authoritative current package completion marker.
+`goxc` publishes it last and removes it first during destructive package
+cleanup. A directory is considered a complete current GoFrame package only
+when this marker, the companion asset manifest, and the referenced
+HTML/WASM/runtime files are all regular files inside the package root.
+Package and export commands verify this ownership state after publication and
+before printing success. If verification fails, goxc removes
+`goframe-package.json` so the directory is not marked as a completed current
+package.
 
 ## Clean App Workspace
 
@@ -199,7 +232,9 @@ Default command outputs:
 
 `GOFRAME_WORKSPACE=/work/goframe` or `--workspace /work/goframe` moves this
 workspace outside the source tree. With an external workspace, goxc creates a
-safe app-specific subdirectory to avoid collisions between apps.
+safe app-specific subdirectory to avoid collisions between apps. External
+workspaces must not overlap the app source tree, including through symlink
+aliases.
 
 `goxc generate --in-place` is available only for debugging or legacy workflows.
 It writes adjacent `.gox.go` files and prints a warning. Normal source trees
@@ -211,6 +246,22 @@ and adjacent legacy `.gox.go` files. `goxc clean <app> --legacy` helps migrate
 old workspaces by removing legacy `build/` and adjacent generated `.gox.go`
 files. Legacy `dist/` is removed only if it looks like a GoFrame export; user
 directories are skipped instead of silently deleted.
+
+The toolchain rejects symlinked app roots, entry directories, authored source
+files, package assets, package/export roots, and symlinked package sources at
+safety-sensitive boundaries. Cleanup removes final tool-owned symlinks as
+links and rejects intermediate workspace symlinks instead of traversing
+external targets. Explicit build/generate/package/export output roots are
+also compared against app/package roots using physical path resolution so a
+symlink alias cannot point output back into authored source. This is
+best-effort protection for static repository trees; hostile concurrent
+filesystem mutation is outside the threat model.
+
+During package or export replacement, managed standalone artifacts include
+`index.html`, metadata files, generated WASM/runtime assets, compressed
+sidecars, and the `assets/` directory. Stale `index.html` from a previous
+package is removed before the new package is published, after the old
+completion marker has already been invalidated.
 
 The materialized hidden workspace supports `"entry": "."` apps and child entry
 packages such as `"./cmd/app"`, `"cmd/app"`, `"./src/app"`, and `"app"` when

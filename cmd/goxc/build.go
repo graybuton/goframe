@@ -97,13 +97,36 @@ func buildApp(options buildOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := validateWorkspaceRoot(layout); err != nil {
+		return "", err
+	}
 	entryPath, err := prepareBuildWorkspace(layout, manifest)
 	if err != nil {
 		return "", fmt.Errorf("prepare build workspace: %w", err)
 	}
 	outputPath := buildOutputPath(options, manifest, layout)
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return "", fmt.Errorf("create build directory: %w", err)
+	outputRoot := layout.BuildDir
+	if options.outDir != "" {
+		outputRoot = options.outDir
+		if err := ensureNoPhysicalOverlap(outputRoot, layout.AppDir, "build output directory", "application directory"); err != nil {
+			return "", err
+		}
+		if err := validateExplicitPathRoot(outputRoot, "build output directory", true); err != nil {
+			return "", err
+		}
+	} else {
+		if err := validatePathBelowRoot(layout.WorkspaceRoot, outputRoot, "build output directory", true); err != nil {
+			return "", err
+		}
+	}
+	if strings.ToLower(filepath.Ext(outputPath)) != ".wasm" {
+		return "", fmt.Errorf("build output %s must end with .wasm", outputPath)
+	}
+	if err := validatePathBelowRoot(outputRoot, outputPath, "build output", true); err != nil {
+		return "", err
+	}
+	if err := mkdirAllBelowRoot(outputRoot, filepath.Dir(outputPath), "build output directory"); err != nil {
+		return "", err
 	}
 
 	fmt.Printf("building %s with %s compiler\n", options.appDir, options.compiler)
@@ -143,9 +166,17 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 		commandDir = filepath.Dir(entryPath)
 		entryArg = "./" + filepath.Base(entryPath)
 	}
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return fmt.Errorf("create compiler output directory: %w", err)
+	outputDir := filepath.Dir(outputPath)
+	temp, err := os.CreateTemp(outputDir, ".goframe-build-*.wasm")
+	if err != nil {
+		return fmt.Errorf("create temporary compiler output: %w", err)
 	}
+	tempPath := temp.Name()
+	if err := temp.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("close temporary compiler output: %w", err)
+	}
+	defer os.Remove(tempPath)
 
 	var command *exec.Cmd
 	if compiler == "go" {
@@ -154,7 +185,7 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 			"-buildvcs=false",
 			"-trimpath",
 			"-ldflags=-s -w -buildid=",
-			"-o", outputPath,
+			"-o", tempPath,
 			entryArg,
 		)
 	} else {
@@ -163,7 +194,7 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 			"-target=wasm",
 			"-no-debug",
 			"-panic=trap",
-			"-o", outputPath,
+			"-o", tempPath,
 			entryArg,
 		)
 	}
@@ -176,6 +207,9 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("%s WASM build failed: %w", compiler, err)
+	}
+	if err := copyFile(tempPath, outputPath); err != nil {
+		return err
 	}
 	return nil
 }
@@ -202,6 +236,9 @@ func validateCompiler(compiler string) error {
 }
 
 func ensureAppDirectory(path string) error {
+	if err := directoryNoFollow(path, "application directory"); err != nil {
+		return fmt.Errorf("open application directory: %w", err)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("open application directory: %w", err)

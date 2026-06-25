@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,19 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestCommandUsage(t *testing.T) {
+	for _, command := range []string{"generate", "build", "package", "export", "serve", "size", "doctor", "clean", "version"} {
+		t.Run(command, func(t *testing.T) {
+			var output bytes.Buffer
+			commandUsage(&output, command)
+			got := output.String()
+			if !strings.Contains(got, "usage: goxc "+command) {
+				t.Fatalf("commandUsage(%q) = %q", command, got)
+			}
+		})
+	}
+}
 
 func TestParseBuildOptions(t *testing.T) {
 	options, err := parseBuildOptions([]string{"app", "--compiler=tinygo", "--out=custom"})
@@ -128,6 +142,27 @@ func TestLoadManifestAcceptsLegacyMainWASM(t *testing.T) {
 	}
 	if manifest.WASM != "main.wasm" {
 		t.Fatalf("WASM = %q, want main.wasm", manifest.WASM)
+	}
+}
+
+func TestManifestRejectsNonWASMOutputNames(t *testing.T) {
+	tests := []string{
+		`{"wasm":"main.go"}`,
+		`{"wasm":"go.mod"}`,
+		`{"wasm":"bundle"}`,
+		`{"wasm":"bundle.wasm.gz"}`,
+		`{"wasm":"wasm_exec.js"}`,
+	}
+	for _, content := range tests {
+		t.Run(content, func(t *testing.T) {
+			appDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadManifest(appDir); err == nil {
+				t.Fatalf("loadManifest() accepted unsafe wasm path from %s", content)
+			}
+		})
 	}
 }
 
@@ -376,6 +411,7 @@ func TestCleanPackageArtifactsRemovesOldCompression(t *testing.T) {
 		"main.wasm.gz",
 		"main.wasm.br",
 		"bundle.wasm",
+		"index.html",
 		"asset-manifest.json",
 		"goframe-package.json",
 		filepath.Join("assets", "bundle.oldhash.wasm"),
@@ -387,7 +423,7 @@ func TestCleanPackageArtifactsRemovesOldCompression(t *testing.T) {
 	if err := cleanPackageArtifacts(directory, "bundle.wasm"); err != nil {
 		t.Fatalf("cleanPackageArtifacts() error: %v", err)
 	}
-	for _, name := range []string{"main.wasm", "main.wasm.gz", "main.wasm.br", "bundle.wasm", "asset-manifest.json", "goframe-package.json", "assets"} {
+	for _, name := range []string{"main.wasm", "main.wasm.gz", "main.wasm.br", "bundle.wasm", "index.html", "asset-manifest.json", "goframe-package.json", "assets"} {
 		if _, err := os.Stat(filepath.Join(directory, name)); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists: %v", name, err)
 		}
@@ -406,9 +442,7 @@ func TestValidatePackageDestinationRejectsUnownedNonEmptyDirectory(t *testing.T)
 
 func TestValidatePackageDestinationAllowsPreviousGoFramePackage(t *testing.T) {
 	outDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outDir, packageMetadataName), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeCompleteCurrentPackage(t, outDir)
 	if err := validatePackageDestination(outDir); err != nil {
 		t.Fatalf("validatePackageDestination(previous package) error: %v", err)
 	}

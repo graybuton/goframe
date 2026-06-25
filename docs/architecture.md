@@ -110,7 +110,8 @@ hints:
 goxc package ./app --asset-hash --preload --compress=gzip,br
 ```
 
-See `docs/deployment.md` for the cache policy and manifest contract.
+See `docs/deployment.md` for cache-safe package delivery and
+`docs/manifest-compatibility.md` for manifest/package compatibility policy.
 
 Use `goxc export ./app --out ./dist` to copy the latest standalone package to a
 deployment directory. Export is intentionally explicit so normal build/package

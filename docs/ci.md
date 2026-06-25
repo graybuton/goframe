@@ -24,6 +24,14 @@ It checks:
 - `go test -tags=goframe_debug ./...`;
 - GOX golden tests, including source-oriented error diagnostics.
 
+The `cmd/goxc` test suite includes manifest/path/package/export/workspace
+regression tests, including root-aware symlink checks for app roots, entry
+directories, source files, manifest assets, package/export roots, generated
+outputs, workspace cleanup behavior, package ownership markers, asset
+namespace collisions, lexical and physical source/output overlap, partial
+publication metadata, required standalone `index.html` integrity, fail-closed
+legacy ownership, and dev-server symlink entries.
+
 ### WASM Size
 
 `.github/workflows/ci-wasm-size.yml` runs on pull requests, pushes to `main`,
@@ -126,6 +134,16 @@ go vet ./...
 go test -tags=goframe_debug ./...
 go test ./pkg/gox -run 'TestGolden|TestErrorGolden'
 ```
+
+Public-preview readiness spot checks:
+
+```bash
+go test ./pkg/gox -run 'Identity|Package|Golden|ErrorGolden|Qualified'
+go test ./cmd/goxc -run 'Physical|Canonical|Alias|Overlap|Build|Generate|Ownership|Completion|Marker|Legacy|Partial|Publish|Cleanup|Manifest|Symlink|Path'
+```
+
+No separate public-preview script is required yet; the readiness checks are
+small enough to stay inside the existing Go test and docs-check gates.
 
 Full local gate, including TinyGo packaging and benchmarks:
 

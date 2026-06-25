@@ -200,6 +200,8 @@ var (
 
 // UseMount runs effect once after this component instance is first mounted.
 // The returned cleanup, when non-nil, runs when the instance unmounts.
+//
+// Deprecated: use UseEffect with no dependency argument or Once.
 func UseMount(effect func() Cleanup) {
 	useEffect(effectMount, effect, Once())
 }

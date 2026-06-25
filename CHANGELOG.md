@@ -82,6 +82,10 @@
   strengthened browser smoke coverage.
 - `docs/tutorial.md` with a recommended learning path through focused,
   reference, pressure, and toolchain examples.
+- MVP 30 public-preview readiness contracts, including API surface
+  classification, component identity policy, manifest/package compatibility,
+  platform support, compatibility/deprecation policy, migration note template,
+  and public-preview release checklist.
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
@@ -93,6 +97,32 @@
   the current crashing route from safely navigating back to the issues list, and
   browser smoke covers recovery from `?panic=render` without reloading the
   resource owner.
+- `goxc` now rejects symlinked entry directories, source files, manifest
+  assets, package output roots, and export output roots at safety-sensitive
+  boundaries instead of following them.
+- `goxc` now rejects intermediate symlink components under declared
+  app/workspace/output roots, symlinked package sources, destination symlink
+  writes, source/output overlap, false package ownership markers, and package
+  asset namespace collisions with generated WASM/runtime/sidecar files.
+- `goxc` now detects physical symlink-alias overlaps for external workspaces
+  and explicit build/generate/package/export outputs, preventing output paths
+  from pointing back into authored source through alternate spelling.
+- Manifest `wasm` values now must be relative `.wasm` child paths, preventing
+  build/package output from targeting authored files such as `main.go`,
+  `go.mod`, or `goframe.json`.
+- Package/export ownership detection now requires complete, regular,
+  structured GoFrame metadata instead of trusting placeholder filenames,
+  standalone `asset-manifest.json`, or generic web/Go-WASM `manifest.json`.
+- Legacy package ownership is fail-closed and recognized only for the
+  historical GoFrame `manifest.json` shape found in repository history.
+- Package publication now validates staged source entries before copying and
+  publishes `goframe-package.json` last. Package cleanup removes that
+  authoritative completion marker before destructive cleanup, reducing the
+  chance of partial package trees being treated as complete.
+- Standalone packages now require a regular root `index.html` declared exactly
+  once in manifest assets before compilation starts. Package/export replacement
+  removes stale managed `index.html`, and successful package/export commands
+  verify current package ownership before printing success.
 - Resource loader panics no longer leave the internal effect slot pending, so a
   same-key rerender after failed state does not automatically restart the same
   panicking loader. Explicit retry remains available through `reload` or key

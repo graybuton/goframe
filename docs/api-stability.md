@@ -44,17 +44,11 @@ After public preview, this policy should be revisited and tightened.
 
 ## Current API Classification
 
-### Public-Candidate
+### User-Facing Public-Candidate
 
 Runtime:
 
 - `gf.Node`
-- `gf.El`
-- `gf.Text`
-- `gf.Fragment`
-- `gf.Child`
-- `gf.Key`
-- `gf.Props`
 - `gf.Component`
 - `gf.C`
 - `gf.NewComponentType`
@@ -64,11 +58,13 @@ Runtime:
 - `gf.UseEffect`
 - `gf.UseUnmount`
 - `gf.Deps`
+- `gf.Once`
 - `gf.EveryRender`
 - `gf.CreateContext`
 - `gf.ProvideContext`
 - `gf.UseContext`
 - `gf.UseContextSelector`
+- props-level `MemoEqual` convention
 - `gf.VirtualList`
 - `gf.VirtualTable`
 - `gf.RoutePath`
@@ -81,6 +77,13 @@ Runtime:
 - `gf.QueryValues`
 - `gf.ParseQuery`
 - `gf.WithQuery`
+- `gf.ResourceStatus`
+- `gf.Resource`
+- `gf.ResourceLoader`
+- `gf.UseResource`
+- `gf.ErrorBoundary`
+- `gf.ErrorBoundaryProps`
+- `gf.ErrorBoundaryContext`
 - basic event facades such as `gf.Event`, `gf.InputEvent`, and
   `gf.ScrollEvent`
 
@@ -99,11 +102,63 @@ Tooling:
 These are public-candidate because examples and docs rely on them, but their
 exact shapes can still change before public preview.
 
-Low-level node helpers such as `gf.El`, `gf.Text`, `gf.Fragment`, `gf.Child`,
-`gf.Key`, `gf.Props`, `gf.If`, `gf.IfElse`, `gf.Map`, and `gf.MapIndexed` are
-also compiler-facing exported primitives. GOX-generated code uses them
-directly, and handwritten low-level Go can use them when needed. Most app code
-should prefer GOX markup for structure.
+### Exported Compiler-Facing / Low-Level
+
+Runtime helpers:
+
+- `gf.El`
+- `gf.Text`
+- `gf.Fragment`
+- `gf.Empty`
+- `gf.Child`
+- `gf.Key`
+- `gf.WithKey`
+- `gf.Props`
+- `gf.If`
+- `gf.IfElse`
+- `gf.Map`
+- `gf.MapIndexed`
+- `gf.ToString`
+- node structs such as `gf.VNode`, `gf.TextNode`, `gf.FragmentNode`,
+  `gf.EmptyNode`, and `gf.KeyedNode`
+
+These remain exported because GOX-generated code and handwritten low-level Go
+need them. Most application authors should prefer GOX markup for structure.
+
+Compiler package:
+
+- `gox.Generate`
+- `gox.GenerateNamed`
+- `gox.GenerateWithOptions`
+- `gox.GenerateOptions`
+- `gox.GenerateFile`
+- `gox.GenerateFileTo`
+- `gox.GenerateFileToWithOptions`
+- `gox.FindFiles`
+- `gox.Codegen`
+- `gox.ParseElement`
+- `gox.Diagnostic`
+- `gox.DiagnosticError`
+
+These are exported for the toolchain and tests. `Generate`, `GenerateNamed`,
+`GenerateWithOptions`, diagnostics, and file generation are tooling contracts.
+The AST, lexer, and parser structs are exported today but should be treated as
+compiler-facing and experimental rather than stable user APIs.
+
+Tooling contracts:
+
+- `goframe.json` user-authored manifest input;
+- `asset-manifest.json` generated package metadata and companion entrypoint
+  manifest;
+- `goframe-package.json` generated package metadata and authoritative current
+  package completion/ownership marker;
+- `GOFRAME_WORKSPACE` / `--workspace` external workspace override;
+- default hidden `.goframe` workspace behavior.
+
+VS Code extension:
+
+- syntax highlighting, snippets, and command wrappers over `goxc` are
+  experimental tooling contracts, not language-server stability promises.
 
 ### Experimental
 
@@ -118,10 +173,9 @@ should prefer GOX markup for structure.
 - Runtime error reporting API and exact phase containment behavior:
   `gf.SetErrorHandler`, `gf.ErrorInfo`, `gf.ErrorHandler`, and
   `gf.ErrorPhase`.
-- Scoped render Error Boundary API: `gf.ErrorBoundary`,
-  `gf.ErrorBoundaryProps`, and `gf.ErrorBoundaryContext`.
-  Internal boundary phases such as protected, captured, and fallback are not
-  public API.
+- Scoped render Error Boundary reset/fallback semantics beyond the current
+  public-candidate API shape. Internal boundary phases such as protected,
+  captured, and fallback are not public API.
 - Component-scoped resource API and exact lifecycle semantics:
   `gf.ResourceStatus`, `gf.Resource`, `gf.ResourceLoader`, and
   `gf.UseResource`.
@@ -133,6 +187,7 @@ should prefer GOX markup for structure.
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands and snippets.
+- `pkg/gox` AST/lexer/parser structures.
 
 ### Internal
 
@@ -147,6 +202,10 @@ should prefer GOX markup for structure.
 - debug globals and browser probe object shapes;
 - package staging directories;
 - smoke harness implementation details.
+- generated component variable names;
+- exact generated `.goframe/gen` filenames;
+- browser debug global object shapes;
+- package/export staging temporary directories.
 
 ### Legacy / Deprecated
 
@@ -154,11 +213,30 @@ should prefer GOX markup for structure.
   belongs to `goxc package`.
 - Explicit `"wasm": "main.wasm"` manifests: still supported, but examples and
   docs use `bundle.wasm`.
-- Legacy `manifest.json` package marker: recognized for migration, but
-  `goframe-package.json` is current.
+- Legacy `manifest.json` package marker: fail-closed migration support only
+  for the historical GoFrame package manifest shape; `goframe-package.json` is
+  current.
 - `goxc generate --in-place`: debug/legacy only. Generated `.gox.go` files
   should live under `.goframe/gen` or an explicit output directory.
 - `UseMount`: deprecated alias for once-after-mount effect behavior.
+- `NoDeps`: deprecated alias for `Once`.
+- `AlwaysDeps`: deprecated alias for `EveryRender`.
+- `DepsOf` and `Dep*` explicit helpers: retained for compatibility; prefer
+  `Deps`.
+- `For` and `ForIndexed`: deprecated aliases for `Map` and `MapIndexed`.
+
+## Questionable APIs And Decisions
+
+| Surface | Decision | Rationale |
+|---|---|---|
+| `Component` vs `ComponentT` | Keep both. | `Component` preserves handwritten compatibility; generated GOX uses typed identity. |
+| `El`/`Text`/`Fragment`/`Props` | Compiler-facing but available. | Needed by generated code and low-level Go; GOX remains the recommended authoring path. |
+| `UseMount`/deps aliases | Deprecated, not removed. | Existing code may use them; replacement APIs are already present. |
+| `ErrorHandler` and ErrorBoundary | Experimental/Public-Candidate split. | Useful and tested, but full route-level/error-boundary policy is not final. |
+| Resources | Experimental. | Component-scoped lifecycle is tested, but no global cache, Suspense, or route loader contract exists. |
+| Router query helpers | Public-Candidate with limitations. | Good for simple URL state; not a typed query-state manager. |
+| Virtualization | Public-Candidate fixed-height contract. | Dynamic measurement and advanced accessibility remain future work. |
+| `pkg/gox` parser/AST exports | Compiler-facing experimental. | Exported today for tooling/tests, but not a stable language-service API. |
 
 ## Deprecation Policy
 

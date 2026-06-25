@@ -173,6 +173,20 @@ func packageApp(options packageOptions) error {
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return err
 	}
+	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
+	if strings.ToLower(path.Ext(filepath.ToSlash(manifest.WASM))) != ".wasm" || strings.ToLower(path.Ext(wasmLogicalName)) != ".wasm" {
+		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
+	}
+	if wasmLogicalName == runtimeAssetName {
+		return fmt.Errorf("wasm %q in %s collides with runtime asset %s", manifest.WASM, manifestName, runtimeAssetName)
+	}
+	plannedAssets, err := validatePackageAssetPlan(manifest, wasmLogicalName, options)
+	if err != nil {
+		return err
+	}
+	if err := validateRequiredPackageEntrypoints(options.appDir, plannedAssets); err != nil {
+		return err
+	}
 	layout, err := newBuildLayout(layoutOptions{
 		appDir:    options.appDir,
 		compiler:  options.compiler,
@@ -182,12 +196,23 @@ func packageApp(options packageOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := validateWorkspaceRoot(layout); err != nil {
+		return err
+	}
 	explicitOutDir := options.outDir != ""
 	options.outDir = packageOutputDirectory(options, layout)
 	if explicitOutDir {
+		if err := ensureNoPhysicalOverlap(options.outDir, layout.AppDir, "package output directory", "application directory"); err != nil {
+			return err
+		}
+		if err := validateExplicitPathRoot(options.outDir, "package output directory", true); err != nil {
+			return err
+		}
 		if err := validatePackageDestination(options.outDir); err != nil {
 			return err
 		}
+	} else if err := validatePathBelowRoot(layout.WorkspaceRoot, options.outDir, "package output directory", true); err != nil {
+		return err
 	}
 	entryPath, err := prepareBuildWorkspace(layout, manifest)
 	if err != nil {
@@ -200,7 +225,6 @@ func packageApp(options packageOptions) error {
 	}
 	defer os.RemoveAll(tempDir)
 
-	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
 	tempWASM := filepath.Join(tempDir, wasmLogicalName)
 	fmt.Printf("packaging %s with %s compiler\n", options.appDir, options.compiler)
 	if err := compileWASM(options.compiler, entryPath, tempWASM); err != nil {
@@ -238,14 +262,14 @@ func packageApp(options packageOptions) error {
 
 	copiedAssets := make([]string, 0, len(manifest.Assets))
 	styleRewrites := map[string]string{}
-	for _, asset := range manifest.Assets {
-		asset = path.Clean(filepath.ToSlash(asset))
-		source := filepath.Join(options.appDir, asset)
-		if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
+	for _, asset := range plannedAssets {
+		asset, source, exists, err := resolvePackageAssetSource(options.appDir, asset)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			fmt.Printf("asset %s not found; skipping\n", source)
 			continue
-		} else if err != nil {
-			return fmt.Errorf("inspect asset %s: %w", source, err)
 		}
 		if asset == indexHTMLAssetName {
 			copiedAssets = append(copiedAssets, asset)
@@ -301,8 +325,15 @@ func packageApp(options packageOptions) error {
 		return err
 	}
 
-	if err := os.MkdirAll(options.outDir, 0o755); err != nil {
-		return fmt.Errorf("create package directory: %w", err)
+	if explicitOutDir {
+		if err := validateExplicitPathRoot(options.outDir, "package output directory", true); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(options.outDir, 0o755); err != nil {
+			return fmt.Errorf("create package directory: %w", err)
+		}
+	} else if err := mkdirAllBelowRoot(layout.WorkspaceRoot, options.outDir, "package output directory"); err != nil {
+		return err
 	}
 	if err := cleanPackageArtifacts(options.outDir, manifest.WASM); err != nil {
 		return err
@@ -310,8 +341,116 @@ func packageApp(options packageOptions) error {
 	if err := publishPackageArtifacts(stageDir, options.outDir); err != nil {
 		return err
 	}
+	if err := verifyPublishedPackage(options.outDir); err != nil {
+		return err
+	}
 
 	fmt.Printf("packaged %s\n", options.outDir)
+	return nil
+}
+
+func resolvePackageAssetSource(appDir, asset string) (string, string, bool, error) {
+	asset = path.Clean(filepath.ToSlash(asset))
+	source := filepath.Join(appDir, asset)
+	if err := validatePathBelowRoot(appDir, source, "asset path", true); err != nil {
+		return "", "", false, err
+	}
+	info, err := os.Lstat(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return asset, source, false, nil
+	} else if err != nil {
+		return "", "", false, fmt.Errorf("inspect asset %s: %w", source, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", "", false, fmt.Errorf("asset path %s is a symlink; symlink paths are not supported", source)
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", false, fmt.Errorf("asset path %s is not a regular file", source)
+	}
+	return asset, source, true, nil
+}
+
+func validatePackageAssetPlan(manifest projectManifest, wasmLogicalName string, options packageOptions) ([]string, error) {
+	occupied := map[string]string{}
+	reserve := func(name, owner string) error {
+		name = path.Clean(filepath.ToSlash(name))
+		if previous, ok := occupied[name]; ok {
+			return fmt.Errorf("package asset %q collides with %s", name, previous)
+		}
+		occupied[name] = owner
+		return nil
+	}
+	for _, name := range []string{wasmLogicalName, runtimeAssetName} {
+		if err := reserve(name, "generated asset"); err != nil {
+			return nil, err
+		}
+		if isCompressiblePackageAsset(name) {
+			if options.compress["gzip"] {
+				if err := reserve(name+".gz", "generated compressed sidecar"); err != nil {
+					return nil, err
+				}
+			}
+			if options.compress["br"] {
+				if err := reserve(name+".br", "generated compressed sidecar"); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	cleaned := make([]string, 0, len(manifest.Assets))
+	for _, raw := range manifest.Assets {
+		asset, err := cleanPackageAssetName(raw)
+		if err != nil {
+			return nil, err
+		}
+		if err := reserve(asset, "manifest asset"); err != nil {
+			return nil, err
+		}
+		if isCompressiblePackageAsset(asset) {
+			if options.compress["gzip"] {
+				if err := reserve(asset+".gz", "manifest compressed sidecar"); err != nil {
+					return nil, err
+				}
+			}
+			if options.compress["br"] {
+				if err := reserve(asset+".br", "manifest compressed sidecar"); err != nil {
+					return nil, err
+				}
+			}
+		}
+		cleaned = append(cleaned, asset)
+	}
+	return cleaned, nil
+}
+
+func validateRequiredPackageEntrypoints(appDir string, plannedAssets []string) error {
+	indexCount := 0
+	for _, asset := range plannedAssets {
+		if asset == indexHTMLAssetName {
+			indexCount++
+		}
+	}
+	if indexCount != 1 {
+		return fmt.Errorf("standalone package assets must include %s exactly once", indexHTMLAssetName)
+	}
+
+	source := filepath.Join(appDir, indexHTMLAssetName)
+	if err := validatePathBelowRoot(appDir, source, "required standalone entrypoint index.html", true); err != nil {
+		return err
+	}
+	info, err := os.Lstat(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("required standalone entrypoint %s was not found", indexHTMLAssetName)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect required standalone entrypoint %s: %w", source, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("required standalone entrypoint %s is a symlink", indexHTMLAssetName)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("required standalone entrypoint %s is not a regular file", indexHTMLAssetName)
+	}
 	return nil
 }
 
@@ -323,6 +462,9 @@ func packageOutputDirectory(options packageOptions, layout BuildLayout) string {
 }
 
 func cleanPackageArtifacts(directory, wasmName string) error {
+	if err := os.Remove(filepath.Join(directory, packageMetadataName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove stale package artifact %s: %w", packageMetadataName, err)
+	}
 	names := []string{
 		wasmName,
 		wasmName + ".gz",
@@ -341,10 +483,10 @@ func cleanPackageArtifacts(directory, wasmName string) error {
 		"wasm_exec.js",
 		"wasm_exec.tiny.js",
 		"service-worker.js",
+		indexHTMLAssetName,
 		"styles.css",
 		legacyPackageManifest,
 		assetManifestName,
-		packageMetadataName,
 	}
 	for _, name := range names {
 		if err := os.Remove(filepath.Join(directory, name)); errors.Is(err, os.ErrNotExist) {
@@ -360,13 +502,24 @@ func cleanPackageArtifacts(directory, wasmName string) error {
 	return nil
 }
 
+func verifyPublishedPackage(directory string) error {
+	ownership := inspectPackageOwnership(directory)
+	if ownership.State == packageOwnedCurrent {
+		return nil
+	}
+	if err := os.Remove(filepath.Join(directory, packageMetadataName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("published package failed integrity verification: %s; remove completion marker: %w", ownership.Reason, err)
+	}
+	return fmt.Errorf("published package failed integrity verification: %s", ownership.Reason)
+}
+
 func writeJSONFile(path string, value any, description string) error {
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", description, err)
 	}
 	content = append(content, '\n')
-	if err := os.WriteFile(path, content, 0o644); err != nil {
+	if err := writeFileAtomic(path, content, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
@@ -381,12 +534,15 @@ type htmlRewriteOptions struct {
 }
 
 func writeRewrittenIndex(sourcePath, destinationPath string, options htmlRewriteOptions) error {
+	if _, err := regularFileNoFollow(sourcePath, "index asset"); err != nil {
+		return err
+	}
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", sourcePath, err)
 	}
 	rewritten := rewriteIndexHTML(string(content), options)
-	if err := os.WriteFile(destinationPath, []byte(rewritten), 0o644); err != nil {
+	if err := writeFileAtomic(destinationPath, []byte(rewritten), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", destinationPath, err)
 	}
 	return nil
@@ -455,6 +611,9 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 	if err != nil {
 		return packageAsset{}, err
 	}
+	if _, err := regularFileNoFollow(sourcePath, "package asset"); err != nil {
+		return packageAsset{}, err
+	}
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return packageAsset{}, fmt.Errorf("read %s: %w", sourcePath, err)
@@ -468,7 +627,7 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o755); err != nil {
 		return packageAsset{}, fmt.Errorf("create package asset directory for %s: %w", outputName, err)
 	}
-	if err := os.WriteFile(destinationPath, content, 0o644); err != nil {
+	if err := writeFileAtomic(destinationPath, content, 0o644); err != nil {
 		return packageAsset{}, fmt.Errorf("write package asset %s: %w", outputName, err)
 	}
 
@@ -507,6 +666,11 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 }
 
 func cleanPackageAssetName(name string) (string, error) {
+	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
+		if part == ".." {
+			return "", fmt.Errorf("package asset logical name %q must not contain .. components", name)
+		}
+	}
 	clean := path.Clean(filepath.ToSlash(name))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
 		return "", fmt.Errorf("package asset logical name %q must be a relative child path", name)
@@ -563,29 +727,61 @@ func containsString(values []string, target string) bool {
 }
 
 func publishPackageArtifacts(sourceDir, destinationDir string) error {
-	return filepath.WalkDir(sourceDir, func(sourcePath string, entry os.DirEntry, err error) error {
+	var directories []string
+	var files []string
+	err := filepath.WalkDir(sourceDir, func(sourcePath string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("inspect package artifact %s: %w", sourcePath, err)
 		}
 		if sourcePath == sourceDir {
 			return nil
 		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("package artifact %s is a symlink; symlink paths are not supported", sourcePath)
+		}
 		relative, err := filepath.Rel(sourceDir, sourcePath)
 		if err != nil {
 			return fmt.Errorf("resolve package artifact %s: %w", sourcePath, err)
 		}
-		destinationPath := filepath.Join(destinationDir, relative)
 		if entry.IsDir() {
-			if err := os.MkdirAll(destinationPath, 0o755); err != nil {
-				return fmt.Errorf("create package artifact directory %s: %w", destinationPath, err)
-			}
+			directories = append(directories, relative)
 			return nil
+		}
+		if _, err := regularFileNoFollow(sourcePath, "package artifact"); err != nil {
+			return err
+		}
+		files = append(files, relative)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	sort.Slice(files, func(first, second int) bool {
+		if files[first] == packageMetadataName {
+			return false
+		}
+		if files[second] == packageMetadataName {
+			return true
+		}
+		return files[first] < files[second]
+	})
+	for _, relative := range directories {
+		destinationPath := filepath.Join(destinationDir, relative)
+		if err := mkdirAllBelowRoot(destinationDir, destinationPath, "package artifact directory"); err != nil {
+			return err
+		}
+	}
+	for _, relative := range files {
+		sourcePath := filepath.Join(sourceDir, relative)
+		destinationPath := filepath.Join(destinationDir, relative)
+		if err := validatePathBelowRoot(destinationDir, destinationPath, "package artifact", true); err != nil {
+			return err
 		}
 		if err := copyFile(sourcePath, destinationPath); err != nil {
 			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func gzipFile(sourcePath, destinationPath string) error {
