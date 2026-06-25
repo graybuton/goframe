@@ -168,6 +168,10 @@ For larger forms:
 - make validation deterministic and synchronous;
 - keep navigation after successful submit explicit with `gf.Navigate`.
 
+`examples/router-dashboard` is the integrated reference for this pattern. Its
+edit route keeps save/reset behavior local to the form and does not pretend to
+be a server mutation or persistence layer.
+
 When a stateful form lives in another Go package, prefer a package-qualified
 component tag:
 

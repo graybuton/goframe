@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document records the measurable baseline through MVP 28. It is a
+This document records the measurable baseline through MVP 29. It is a
 decision aid for future runtime and tooling work, not a claim that GoFrame is
 production-ready.
 
@@ -75,8 +75,7 @@ CDP node drift as an investigation signal, not a failure by itself.
 
 ## Current Baseline
 
-Updated during the Error Boundary hardening pass from local `main` after the
-public preview hardening baseline.
+Updated during MVP 29 from local `main` after the MVP 28 resource baseline.
 
 Tool versions:
 
@@ -130,7 +129,7 @@ TinyGo packaged WASM sizes:
 | multipackage | 94354 | 36850 | 30728 | 33175 |
 | cmdapp | 94380 | 36839 | 30720 | 33124 |
 | router | 114716 | 43602 | 36062 | 39026 |
-| router-dashboard | 164098 | 61873 | 49731 | 53810 |
+| router-dashboard | 225649 | 90888 | 74402 | 79524 |
 | resource | 147562 | 64576 | 54640 | 58090 |
 
 The authoritative gate remains `scripts/size-budget.sh`. This table is a

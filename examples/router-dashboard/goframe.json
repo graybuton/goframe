@@ -6,6 +6,7 @@
   "wasm": "bundle.wasm",
   "assets": [
     "index.html",
-    "styles.css"
+    "styles.css",
+    "data/issues.txt"
   ]
 }

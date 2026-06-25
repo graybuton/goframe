@@ -1,0 +1,35 @@
+package data
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func IssueProvider(props IssueProviderProps) gf.Node {
+	key, setKey := gf.UseState(issueDataKey)
+	attempts, setAttempts := gf.UseState(0)
+	resource, reload := gf.UseResource(key, func(currentKey string, resolve func([]Issue), reject func(error)) gf.Cleanup {
+		setAttempts(attempts + 1)
+		return LoadIssues(currentKey, resolve, reject)
+	})
+
+	repository := IssueRepository{
+		Resource: resource,
+		Attempts: attempts,
+		Reload: reload,
+		Retry: func() {
+			if key != issueDataKey {
+				setKey(issueDataKey)
+				return
+			}
+			reload()
+		},
+		SimulateFailure: func() {
+			if key == issueMissingKey {
+				reload()
+				return
+			}
+			setKey(issueMissingKey)
+		},
+	}
+	gf.ProvideContext(IssueRepositoryContext, repository)
+
+	return <>{props.Children}</>
+}

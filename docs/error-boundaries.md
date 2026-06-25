@@ -148,6 +148,13 @@ actual failing render is still reported through the global handler.
 If the retried subtree panics again, that is a new incident and is reported as
 a new render failure.
 
+Reset retries the same protected subtree. It does not change route params,
+query strings, component props, or app data by itself. If those inputs still
+trigger the same render panic, the boundary can immediately capture another
+incident and show fallback UI again. Apps should provide an explicit escape
+path when the current route state may be the cause, such as a `RouterLink` back
+to a known-safe route.
+
 ## ResetKey
 
 `ResetKey` is an optional string. When it changes while the boundary is failed,
@@ -209,6 +216,15 @@ Apps that want a stable shell can still keep the shell outside `RouterView` and
 put the boundary inside selected route handlers. This keeps routing and error
 UI policy separate. Automatic route-level error pages, route loaders, and
 Suspense-style resource fallback remain future work.
+
+`examples/router-dashboard` follows this model: the stable shell and
+component-scoped data owner remain mounted, route content is wrapped in an
+explicit render boundary, and ordinary `ResourceFailed` state renders a failed
+resource panel instead of switching to boundary fallback.
+
+Its route fallback includes both "Retry current route" and "Back to issues".
+The retry button rerenders the same route, while the safe link removes the
+intentional crashing query parameter used by the smoke test.
 
 The lower-level Go props/`Children` form remains valid for hand-written runtime
 code and tests, but the package-qualified GOX style is the recommended

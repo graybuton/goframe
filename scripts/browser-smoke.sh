@@ -354,10 +354,10 @@ run_with_server ./examples/router "$ROUTER_PORT" "$ROUTER_URL" \
 
 echo
 echo "== Router dashboard debug browser smoke =="
-"$GOXC" package ./examples/router-dashboard --compiler=tinygo
+"$GOXC" package ./examples/router-dashboard --compiler=go
 (
 	cd ./examples/router-dashboard/.goframe/work/dev/examples/router-dashboard/cmd/app
-	tinygo build -target=wasm -no-debug -panic=trap -tags=goframe_debug \
+	GOOS=js GOARCH=wasm go build -tags=goframe_debug \
 		-o "$ROOT_DIR/examples/router-dashboard/.goframe/package/standalone/assets/bundle.wasm" .
 )
 

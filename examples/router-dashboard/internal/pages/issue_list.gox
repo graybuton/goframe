@@ -7,6 +7,15 @@ import (
 )
 
 func IssueList(props IssueListProps) gf.Node {
+	repository := data.UseIssueRepository()
+	if !repository.Ready() {
+		return <data.ResourceStatusPanel />
+	}
+	items := data.FilterIssues(repository.Issues(), data.IssueFilter{
+		Query:  props.Query,
+		Status: props.Status,
+	})
+
 	return (
 		<section class="rd-card" data-testid="rd-issue-list">
 			<div class="rd-section-heading">
@@ -22,14 +31,14 @@ func IssueList(props IssueListProps) gf.Node {
 				Key={filters.FilterKey(props.Query, props.Status)}
 				Query={props.Query}
 				Status={props.Status}
-				ResultCount={len(props.Items)}
-				TotalCount={props.TotalCount}
+				ResultCount={len(items)}
+				TotalCount={len(repository.Issues())}
 			/>
-			{(len(props.Items) == 0) ? (
+			{(len(items) == 0) ? (
 				<p class="rd-empty" data-testid="rd-issue-empty">No issues matched this route query.</p>
 			) : (
 				<ul class="rd-issue-rows">
-					{gf.Map(props.Items, func(issue data.Issue) gf.Node {
+					{gf.Map(items, func(issue data.Issue) gf.Node {
 						return <IssueRow Key={issue.ID} Issue={issue} />
 					})}
 				</ul>

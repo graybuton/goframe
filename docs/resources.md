@@ -200,6 +200,26 @@ hook machinery: one internal state slot stores a small mutable control object,
 and one effect slot starts/cleans generations. No new `componentInstance`
 fields are required.
 
+## Reference App Pattern
+
+`examples/resource` is the focused lifecycle example. It covers reload,
+failure, stale completion, and cleanup-after-unmount scenarios.
+
+`examples/router-dashboard` shows the integration pattern for a small app:
+
+```text
+App
+  -> data.IssueProvider
+    -> stable shell
+      -> RouterView
+```
+
+The resource owner sits outside the route subtree, so navigating between list,
+detail, edit, not-found routes, query filter changes, and browser back/forward
+do not start another loader. Manual reload is explicit and starts a new
+generation. Failed resource state renders application UI and does not activate
+an Error Boundary.
+
 ## TinyGo And Browser Notes
 
 Ordinary loading, resolving, rejecting, cleanup, key changes, manual reload,

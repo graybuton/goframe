@@ -38,10 +38,14 @@ try {
     await navigateToApp(client, withSmokeParam(appURL));
     await waitForAppPage(client, expectedApp);
     await client.evaluate(`window.__routerDashboardSmokeShell = document.querySelector("[data-testid='rd-shell']")`);
+    await waitForResourceStatus(client, "ready");
 
     assertState(await appState(client), {
         route: "home",
         hash: "",
+        resourceStatus: "ready",
+        resourceAttempt: "1",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard initial home");
 
@@ -50,9 +54,12 @@ try {
     assertState(await appState(client), {
         route: "issues",
         hash: "#/issues",
-        rowCount: 8,
+        rowCount: 12,
         queryValue: "",
         statusValue: "all",
+        resourceStatus: "ready",
+        resourceAttempt: "1",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard issues route");
 
@@ -70,20 +77,45 @@ try {
         rowCount: 1,
         queryValue: "auth",
         statusValue: "open",
+        resourceStatus: "ready",
+        resourceAttempt: "1",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard query filter");
+
+    const filteredHash = (await appState(client)).hash;
+    await client.evaluate(`document.querySelector("[data-testid='rd-resource-reload']").click()`);
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.resourceStatus === "loading" || state.resourceAttempt === "2";
+    }, "resource reload starts");
+    await waitForResourceStatus(client, "ready");
+    assertState(await appState(client), {
+        route: "issues",
+        hash: filteredHash,
+        rowCount: 1,
+        queryValue: "auth",
+        statusValue: "open",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        boundaryFallback: false,
+        shellSame: true,
+    }, "router-dashboard resource reload preserves query");
 
     await client.evaluate(`history.back()`);
     await waitForCondition(async () => {
         const state = await appState(client);
-        return state.route === "issues" && state.hash === "#/issues" && state.rowCount === 8;
+        return state.route === "issues" && state.hash === "#/issues" && state.rowCount === 12;
     }, "browser back restores query");
     assertState(await appState(client), {
         route: "issues",
         hash: "#/issues",
-        rowCount: 8,
+        rowCount: 12,
         queryValue: "",
         statusValue: "all",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard browser back");
 
@@ -93,6 +125,9 @@ try {
         route: "details",
         hash: "#/issues/RD-2",
         detailTitle: "Billing dashboard needs clearer empty state",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard detail route");
 
@@ -103,8 +138,108 @@ try {
         hash: "#/issues/RD-2/edit",
         formTitle: "Billing dashboard needs clearer empty state",
         formDirty: "No local changes",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard edit route");
+
+    await client.evaluate(`history.back()`);
+    await waitForRoute(client, "details");
+    assertState(await appState(client), {
+        route: "details",
+        hash: "#/issues/RD-2",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        boundaryFallback: false,
+        shellSame: true,
+    }, "router-dashboard detail route after edit back");
+
+    await client.evaluate(`location.hash = "#/issues/RD-2?panic=render"`);
+    await waitForRoute(client, "boundary");
+    assertState(await appState(client), {
+        route: "boundary",
+        hash: "#/issues/RD-2?panic=render",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        resourceLoading: false,
+        resourceFailed: false,
+        boundaryFallback: true,
+        boundaryResetPresent: true,
+        boundaryBackPresent: true,
+        shellSame: true,
+    }, "router-dashboard route error fallback");
+
+    await client.evaluate(`document.querySelector("[data-testid='rd-boundary-back-to-issues']").click()`);
+    await waitForRoute(client, "issues");
+    assertState(await appState(client), {
+        route: "issues",
+        hash: "#/issues",
+        rowCount: 12,
+        queryValue: "",
+        statusValue: "all",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        boundaryFallback: false,
+        shellSame: true,
+    }, "router-dashboard route error safe recovery");
+
+    await client.evaluate(`document.querySelector("[data-testid='rd-issue-link-RD-2']").click()`);
+    await waitForRoute(client, "details");
+    assertState(await appState(client), {
+        route: "details",
+        hash: "#/issues/RD-2",
+        detailTitle: "Billing dashboard needs clearer empty state",
+        resourceStatus: "ready",
+        resourceAttempt: "2",
+        boundaryFallback: false,
+        shellSame: true,
+    }, "router-dashboard route error post-recovery interaction");
+
+    await client.evaluate(`document.querySelector("[data-testid='rd-resource-fail']").click()`);
+    await waitForResourceStatus(client, "failed");
+    const failed = await appState(client);
+    if (!failed.resourceError.includes("fetch")) {
+        throw new Error(`APP FAILURE: router-dashboard resource failure did not mention fetch: ${JSON.stringify(failed)}`);
+    }
+    assertState(failed, {
+        route: "resource",
+        hash: "#/issues/RD-2",
+        resourceStatus: "failed",
+        resourceAttempt: "3",
+        resourceFailed: true,
+        boundaryFallback: false,
+        shellSame: true,
+    }, "router-dashboard resource failed state");
+
+    await client.evaluate(`document.querySelector("[data-testid='rd-resource-retry']").click()`);
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.resourceStatus === "loading" || state.resourceAttempt === "4";
+    }, "resource retry starts");
+    await waitForResourceStatus(client, "ready");
+    assertState(await appState(client), {
+        route: "details",
+        hash: "#/issues/RD-2",
+        detailTitle: "Billing dashboard needs clearer empty state",
+        resourceStatus: "ready",
+        resourceAttempt: "4",
+        boundaryFallback: false,
+        shellSame: true,
+    }, "router-dashboard resource retry restores data");
+
+    await client.evaluate(`document.querySelector("[data-testid='rd-edit-link']").click()`);
+    await waitForRoute(client, "edit");
+    assertState(await appState(client), {
+        route: "edit",
+        hash: "#/issues/RD-2/edit",
+        formTitle: "Billing dashboard needs clearer empty state",
+        formDirty: "No local changes",
+        resourceStatus: "ready",
+        resourceAttempt: "4",
+        boundaryFallback: false,
+        shellSame: true,
+    }, "router-dashboard edit route after resource retry");
 
     await setInput(client, "[data-testid='rd-field-title']", "");
     await client.evaluate(`document.querySelector("[data-testid='rd-form-submit']").click()`);
@@ -116,6 +251,9 @@ try {
         titleError: "Title is required.",
         formDirty: "Unsaved local changes",
         saved: false,
+        resourceStatus: "ready",
+        resourceAttempt: "4",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard validation error");
 
@@ -128,6 +266,9 @@ try {
         route: "edit",
         titleError: "",
         saved: true,
+        resourceStatus: "ready",
+        resourceAttempt: "4",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard valid submit");
 
@@ -145,6 +286,9 @@ try {
         formDirty: "No local changes",
         saved: false,
         titleError: "",
+        resourceStatus: "ready",
+        resourceAttempt: "4",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard form reset");
 
@@ -154,6 +298,9 @@ try {
         route: "notFound",
         hash: "#/missing",
         notFoundPath: "/missing",
+        resourceStatus: "ready",
+        resourceAttempt: "4",
+        boundaryFallback: false,
         shellSame: true,
     }, "router-dashboard not-found");
 
@@ -178,8 +325,10 @@ async function appState(client) {
         const details = document.querySelector("[data-testid='rd-issue-detail']");
         const edit = document.querySelector("[data-testid='rd-issue-edit']");
         const notFound = document.querySelector("[data-testid='rd-not-found']");
+        const resourcePanel = document.querySelector("[data-testid='rd-resource-loading'], [data-testid='rd-resource-failed']");
+        const boundary = document.querySelector("[data-testid='rd-boundary-fallback']");
         return {
-            route: home ? "home" : issues ? "issues" : details ? "details" : edit ? "edit" : notFound ? "notFound" : "missing",
+            route: home ? "home" : issues ? "issues" : details ? "details" : edit ? "edit" : notFound ? "notFound" : resourcePanel ? "resource" : boundary ? "boundary" : "missing",
             hash: location.hash,
             rowCount: document.querySelectorAll("[data-testid='rd-issue-row']").length,
             queryValue: document.querySelector("[data-testid='rd-filter-query']")?.value ?? "",
@@ -191,6 +340,14 @@ async function appState(client) {
             titleError: document.querySelector("[data-testid='rd-field-error-title']")?.textContent.trim() ?? "",
             saved: Boolean(document.querySelector("[data-testid='rd-form-saved']")),
             notFoundPath: document.querySelector("[data-testid='rd-not-found-path']")?.textContent.trim() ?? "",
+            resourceStatus: document.querySelector("[data-testid='rd-resource-status']")?.textContent.trim() ?? "",
+            resourceAttempt: document.querySelector("[data-testid='rd-resource-attempt']")?.textContent.trim().match(/\\d+/)?.[0] ?? "",
+            resourceLoading: Boolean(document.querySelector("[data-testid='rd-resource-loading']")),
+            resourceFailed: Boolean(document.querySelector("[data-testid='rd-resource-failed']")),
+            resourceError: document.querySelector("[data-testid='rd-resource-error']")?.textContent.trim() ?? "",
+            boundaryFallback: Boolean(boundary),
+            boundaryResetPresent: Boolean(document.querySelector("[data-testid='rd-boundary-reset']")),
+            boundaryBackPresent: Boolean(document.querySelector("[data-testid='rd-boundary-back-to-issues']")),
             shellSame: window.__routerDashboardSmokeShell === document.querySelector("[data-testid='rd-shell']"),
             routerViewRenders: window.goframeComponentRenderCounts?.RouterView ?? 0,
             routerRouteRenders: window.goframeComponentRenderCounts?.RouterRoute ?? 0,
@@ -226,6 +383,12 @@ async function waitForRoute(client, route) {
     await waitForCondition(async () => {
         return (await appState(client)).route === route;
     }, `route ${route}`);
+}
+
+async function waitForResourceStatus(client, status) {
+    await waitForCondition(async () => {
+        return (await appState(client)).resourceStatus === status;
+    }, `resource status ${status}`);
 }
 
 function assertState(actual, expected, label) {
