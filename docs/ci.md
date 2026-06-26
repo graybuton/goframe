@@ -12,6 +12,12 @@ All workflows request read-only repository contents permissions by default.
 
 `.github/workflows/ci-core.yml` runs on pull requests and pushes to `main`.
 
+It uses a small OS matrix:
+
+- `ubuntu-latest`: full `artifact/module path/docs` + existing core gates.
+- `macos-latest`, `windows-latest`: minimal Go/toolchain evidence (core
+  formatting/tests/vet/debug-tag/selected GOX tests).
+
 It checks:
 
 - tracked artifact gate;
@@ -56,7 +62,7 @@ older `main.wasm` packages.
 ### Browser Smoke
 
 `.github/workflows/ci-browser-smoke.yml` runs on pull requests, pushes to
-`main`, and manually through `workflow_dispatch`.
+`main`, and manually through `workflow_dispatch` on `ubuntu-latest` only.
 
 It installs Go, TinyGo `0.41.1`, Node.js 20, Chrome, and compression tools,
 then runs:

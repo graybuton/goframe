@@ -149,8 +149,8 @@ clear about API instability and experimental status.
 - maturity tiers included: public-candidate, experimental frontier,
   compiler-facing, internal, and future vision;
 - platform evidence stated explicitly, including Linux/Chrome as the strongest
-  current evidence and unverified platforms as under-verified rather than
-  rejected;
+  current evidence, minimal macOS/Windows CI check evidence, and non-Chrome
+  browser platforms as explicit deferred scope when unverified;
 - reusable/multi-module component identity scope stated explicitly;
 - experimental surfaces named rather than hidden;
 - future Player/Engine direction bounded as vision, not a preview promise;

@@ -12,7 +12,17 @@ permissions:
 jobs:
   go:
     name: Go and GOX checks
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            full: true
+          - os: macos-latest
+            full: false
+          - os: windows-latest
+            full: false
 
     steps:
       - name: Checkout
@@ -25,17 +35,21 @@ jobs:
           cache: true
 
       - name: Setup Node.js
+        if: matrix.full
         uses: actions/setup-node@v6
         with:
           node-version: '20'
 
       - name: Artifact gate
+        if: matrix.full
         run: scripts/artifact-check.sh
 
       - name: Module path gate
+        if: matrix.full
         run: scripts/module-path-check.sh
 
       - name: Docs consistency
+        if: matrix.full
         run: node scripts/docs-check.mjs
 
       - name: Format
@@ -47,6 +61,7 @@ jobs:
         run: go test ./...
 
       - name: Race test
+        if: matrix.full
         run: go test -race ./pkg/... ./cmd/...
 
       - name: Vet

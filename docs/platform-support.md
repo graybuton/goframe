@@ -6,9 +6,10 @@ This document records what GoFrame currently tests, what is expected but not
 verified, and what remains unsupported. It is a public-preview readiness matrix,
 not a production support promise.
 
-The current strongest evidence is Linux plus Chrome/Chromium. macOS, Windows,
-Firefox, and Safari are not rejected platforms; they are under-verified for the
-first preview until CI or external validation expands.
+The current strongest evidence is Linux plus Chrome/Chromium. macOS and Windows
+now have lightweight CI evidence for core Go/toolchain behavior. Firefox and
+Safari are not rejected platforms; they are explicitly deferred until dedicated
+non-Chrome validation is added.
 
 Labels:
 
@@ -22,8 +23,8 @@ Labels:
 | Host | Status | Evidence |
 |---|---|---|
 | Linux amd64 | CI-tested | GitHub Actions and local validation run Go, TinyGo, Node, Chrome, size, smoke, and DOM pressure gates. |
-| macOS | expected | Go/TinyGo/Node should work, but there is no CI gate yet. |
-| Windows | unverified | Go code is mostly `filepath`-based, but browser smoke, shell scripts, symlink tests, and extension scripts are not CI-tested on Windows. |
+| macOS | CI-tested (minimal) | Core Go/toolchain gates run in CI: `go fmt`, `go test ./...`, `go vet`, `go test -tags=goframe_debug`, and selected GOX golden tests. TinyGo/browser smoke remain Linux-first checks. |
+| Windows | CI-tested (minimal) | Core Go/toolchain gates run in CI: `go fmt`, `go test ./...`, `go vet`, `go test -tags=goframe_debug`, and selected GOX golden tests. TinyGo/browser smoke remain Linux-first checks. |
 
 Symlink safety tests skip when `os.Symlink` is unavailable or restricted.
 
@@ -63,7 +64,7 @@ Required browser APIs:
 |---|---|---|---|
 | rendering/state/effects/context | CI-tested | CI-tested | Main browser app path. |
 | hash router/query helpers | CI-tested | CI-tested | Router smoke uses TinyGo; reference ErrorBoundary route uses Go. |
-| resources | expected | CI-tested | Resource smoke uses TinyGo for lifecycle and stale completion. |
+| resources | expected | CI-tested | Go toolchain tests cover resource example packages; lifecycle smoke remains Linux/Chrome-hosted TinyGo. |
 | runtime panic containment | CI-tested | limited | Recover-based containment is asserted with Go/WASM. TinyGo trap builds may terminate instead. |
 | scoped render Error Boundaries | CI-tested | compile-compatible but not containment proof | Use Go/WASM for intentional panic demos. |
 | fixed-height virtualization | expected | CI-tested | DOM pressure and virtualized smoke use TinyGo. |
