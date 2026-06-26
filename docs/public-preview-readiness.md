@@ -14,7 +14,7 @@ contracts still need final decisions before a preview tag:
 
 - package/manifest schema version decision;
 - multi-module/reusable package identity policy;
-- Windows/macOS support evidence;
+- cross-browser/platform support scope;
 - first public migration notes and release notes;
 - issue-tracker follow-up for remaining compatibility blockers.
 
@@ -64,7 +64,7 @@ the preview smaller.
 | GOX compiler | Ready with limitations | `pkg/gox` golden/error tests, source diagnostics, package-qualified component tests. |
 | Toolchain | Ready with limitations | `cmd/goxc` tests, browser smoke, size budget, package matrix, filesystem/package safety matrix. |
 | Public docs | Ready with limitations | README, tutorial, API stability docs, docs-check. |
-| Platform support | Needs hardening | Chrome/Linux are tested; macOS/Windows/Firefox/Safari are not CI-tested. |
+| Platform support | Needs hardening | Chrome/Linux remains the strongest evidence; macOS/Windows have minimal CI check evidence; Firefox/Safari remain unverified. |
 | Public preview release process | Needs hardening | `docs/release.md` now contains a preview checklist; no preview tag has been cut. |
 
 ## Public Preview Definition
@@ -204,7 +204,6 @@ Remaining risk:
 
 - concurrent filesystem mutation between validation and operation remains out
   of scope;
-- Windows path behavior is not CI-verified;
 - `goxc serve` remains development-server scoped.
 
 ## Platform Support Matrix
@@ -214,13 +213,14 @@ Status: Needs hardening.
 Evidence:
 
 - `docs/platform-support.md`;
-- CI and local validation on Linux/Chrome;
+- CI and local validation on Linux/Chrome and macOS/Windows for core Go/toolchain
+  checks;
 - TinyGo `0.41.1` size and smoke gates;
 - Go/WASM recover-capable smoke fixtures.
 
 Blocker:
 
-- no macOS/Windows/Firefox/Safari CI evidence yet.
+- no dedicated Firefox/Safari browser evidence yet.
 
 ## Browser Support
 
@@ -277,7 +277,7 @@ Recommendation:
 | Severity | Finding | Evidence | Recommendation |
 |---|---|---|---|
 | High | Multi-module/reusable package identity is not final. | `docs/component-identity.md` | Focused MVP before claiming reusable package ecosystem. |
-| High | Platform support is Linux/Chrome-heavy. | `docs/platform-support.md` | Add macOS/Windows and Firefox/Safari verification or mark preview scope narrowly. |
+| High | Browser cross-platform support is partial. | `docs/platform-support.md` | Keep Linux/Chrome as strongest evidence; add focused Firefox/Safari/browser diversity or explicit deferred evidence notes. |
 | Medium | `goframe.json` has no schema version decision. | `docs/manifest-compatibility.md` | Decide optional schema marker before preview. |
 | Medium | Production deployment server remains out of scope. | `docs/deployment.md` | Keep preview messaging static-hosting/hash-router focused. |
 | Medium | Package publication is hardened but not a full transactional installer. | `cmd/goxc/package.go` | Metadata is written last and sources are prevalidated; a future transaction/rollback design can further protect existing packages from mid-copy failures. |
@@ -306,7 +306,7 @@ Immediate public-preview blockers remain:
 
 1. decide manifest schema/version strategy;
 2. decide multi-module/reusable package identity scope;
-3. add platform verification or narrow preview support claims;
+3. add focused Firefox/Safari browser evidence or keep them explicitly deferred.
 4. draft release notes and migration notes for `v0.1.0-preview.1`;
 5. optionally add an exported API classification gate if it remains small and
    robust.

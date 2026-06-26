@@ -249,6 +249,8 @@ func TestCleanManifestEntryRejectsUnsafeEntries(t *testing.T) {
 	tests := []string{
 		"",
 		"/abs/path",
+		"C:/abs/path",
+		`C:\abs\path`,
 		"../outside",
 		"./../outside",
 		"cmd/../outside",

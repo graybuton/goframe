@@ -183,9 +183,14 @@ func TestManifestRejectsEscapingPaths(t *testing.T) {
 		content string
 	}{
 		{name: "entry", content: `{"entry":"../cmd"}`},
+		{name: "entry slash root", content: `{"entry":"/abs/path"}`},
+		{name: "entry drive root", content: `{"entry":"C:/abs/path"}`},
 		{name: "output", content: `{"output":"../dist"}`},
+		{name: "output slash root", content: `{"output":"/dist"}`},
 		{name: "wasm", content: `{"wasm":"../bundle.wasm"}`},
+		{name: "wasm slash root", content: `{"wasm":"/bundle.wasm"}`},
 		{name: "asset", content: `{"assets":["../secret.css"]}`},
+		{name: "asset slash root", content: `{"assets":["/secret.css"]}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
