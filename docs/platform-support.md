@@ -6,6 +6,10 @@ This document records what GoFrame currently tests, what is expected but not
 verified, and what remains unsupported. It is a public-preview readiness matrix,
 not a production support promise.
 
+The current strongest evidence is Linux plus Chrome/Chromium. macOS, Windows,
+Firefox, and Safari are not rejected platforms; they are under-verified for the
+first preview until CI or external validation expands.
+
 Labels:
 
 - CI-tested

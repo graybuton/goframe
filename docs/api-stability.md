@@ -10,20 +10,33 @@ with clear expectations. It does not create a stable 1.0 compatibility promise.
 
 ## Stability Tiers
 
-### Experimental
-
-Can change between MVPs. Changes should be documented, but migration support is
-best-effort.
-
 ### Public-Candidate
 
 Intended direction for user-facing APIs. Changes should include migration
 notes, tests, and a compatibility reason.
 
+### Experimental Frontier
+
+Can change between MVPs. Changes should be documented, but migration support is
+best-effort. Experimental frontier surfaces are real working surfaces, not
+hidden or deprecated features; they need more contract hardening before broad
+preview promises.
+
+### Compiler-Facing / Low-Level
+
+Exported for GOX, `goxc`, generated-code-like use, or third-party tooling. These
+surfaces are not the preferred high-level app authoring path unless explicitly
+documented.
+
 ### Internal
 
 Runtime, compiler, toolchain, or smoke-test implementation details. These are
 not user APIs and may change without compatibility guarantees.
+
+### Future Vision
+
+Strategic direction that should remain visible but is not a current preview
+promise.
 
 ### Legacy / Deprecated
 
@@ -160,7 +173,7 @@ VS Code extension:
 - syntax highlighting, snippets, and command wrappers over `goxc` are
   experimental tooling contracts, not language-server stability promises.
 
-### Experimental
+### Experimental Frontier
 
 - GOX syntax surface.
 - GOX expression ergonomics.
@@ -188,6 +201,22 @@ VS Code extension:
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands and snippets.
 - `pkg/gox` AST/lexer/parser structures.
+
+These surfaces should be hardened, tested, and documented before wider
+promises. They should not be removed from project positioning merely because
+their contracts are still maturing.
+
+### Future Vision
+
+- Player/Engine host and bundle model.
+- `.gfapp` package format.
+- Broader host/runtime story beyond the browser DOM target.
+- Stronger editor tooling such as LSP/formatter behavior.
+- Future package ecosystem and reusable component distribution story.
+- Production deployment/server integration, if the project chooses that path in
+  a later phase.
+
+These are not part of the first public preview promise.
 
 ### Internal
 

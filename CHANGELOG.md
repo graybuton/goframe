@@ -90,6 +90,8 @@
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
 - CI and release hygiene documentation.
+- Pre-preview action plan and vision-preserving preview contract wording that
+  separates first-preview scope from long-term GoFrame platform direction.
 
 ### Fixed
 
