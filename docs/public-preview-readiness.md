@@ -61,7 +61,7 @@ the preview smaller.
 | Area | Status | Evidence |
 |---|---|---|
 | Runtime primitives | Ready with limitations | `pkg/goframe/*_test.go`, `docs/runtime-model.md`, browser smoke. |
-| GOX compiler | Ready with limitations | `pkg/gox` golden/error tests, source diagnostics, package-qualified component tests. |
+| GOX compiler | Ready with limitations | `pkg/gox` golden/error tests, source diagnostics, package-qualified component tests, and initial bounded fuzz seed targets. |
 | Toolchain | Ready with limitations | `cmd/goxc` tests, browser smoke, size budget, package matrix, filesystem/package safety matrix. |
 | Public docs | Ready with limitations | README, tutorial, API stability docs, docs-check. |
 | Platform support | Needs hardening | Chrome/Linux remains the strongest evidence; macOS/Windows have minimal CI check evidence; Firefox/Safari remain unverified. |

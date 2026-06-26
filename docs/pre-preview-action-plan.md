@@ -63,7 +63,8 @@ preview or explicitly scoped in release notes:
 - reusable/multi-module component identity contract;
 - platform/browser evidence beyond Linux/Chrome;
 - manifest/versioning decision for public preview;
-- GOX parser/codegen fuzzing;
+- GOX parser/codegen fuzzing, now reduced by initial bounded fuzz targets but
+  still not a formal exhaustive language verification story;
 - `pkg/gox` file helper safety contract for direct library callers;
 - package publication transactionality;
 - supply-chain scanner evidence;
@@ -154,6 +155,10 @@ Acceptance criteria:
   corpus is checked in;
 - existing golden/error golden fixtures are reused as seeds;
 - CI impact is bounded.
+
+Current status: initial bounded fuzz targets exist for whole-file generation and
+element parser/codegen entry points. Longer fuzz campaigns remain manual and
+future evidence should be added as the language surface grows.
 
 Non-goals:
 
