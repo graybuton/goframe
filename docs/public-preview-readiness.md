@@ -14,7 +14,7 @@ contracts still need final decisions before a preview tag:
 
 - package/manifest schema version decision;
 - multi-module/reusable package identity policy;
-- Windows/macOS support evidence;
+- cross-browser/platform support scope;
 - first public migration notes and release notes;
 - issue-tracker follow-up for remaining compatibility blockers.
 

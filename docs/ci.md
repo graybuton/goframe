@@ -15,7 +15,7 @@ All workflows request read-only repository contents permissions by default.
 It uses a small OS matrix:
 
 - `ubuntu-latest`: full `artifact/module path/docs` + existing core gates.
-- `macos-latest`, `windows-latest`: minimal Go/toolchain evidence (core
+- `macos-15-intel`, `windows-latest`: minimal Go/toolchain evidence (core
   formatting/tests/vet/debug-tag/selected GOX tests).
 
 It checks:

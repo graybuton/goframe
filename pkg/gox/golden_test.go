@@ -22,7 +22,8 @@ func TestGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			generated, err := GenerateNamed(sourcePath, source)
+			displayPath := filepath.ToSlash(sourcePath)
+			generated, err := GenerateNamed(displayPath, source)
 			if err != nil {
 				t.Fatalf("GenerateNamed() error: %v", err)
 			}
@@ -37,8 +38,10 @@ func TestGolden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read golden file: %v; run go test ./pkg/gox -update", err)
 			}
-			if string(generated) != string(golden) {
-				t.Fatalf("generated output differs from %s; run go test ./pkg/gox -update\n--- got ---\n%s\n--- want ---\n%s", goldenPath, generated, golden)
+			got := normalizeGoldenText(generated)
+			want := normalizeGoldenText(golden)
+			if got != want {
+				t.Fatalf("generated output differs from %s; run go test ./pkg/gox -update\n--- got ---\n%s\n--- want ---\n%s", goldenPath, got, want)
 			}
 		})
 	}
@@ -56,13 +59,14 @@ func TestErrorGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = GenerateNamed(sourcePath, source)
+			displayPath := filepath.ToSlash(sourcePath)
+			_, err = GenerateNamed(displayPath, source)
 			if err == nil {
 				t.Fatal("GenerateNamed() returned nil error")
 			}
 			goldenPath := strings.TrimSuffix(sourcePath, ".gox") + ".golden.txt"
 			if *updateGolden {
-				if writeErr := os.WriteFile(goldenPath, []byte(err.Error()+"\n"), 0o644); writeErr != nil {
+				if writeErr := os.WriteFile(goldenPath, []byte(normalizeGoldenText([]byte(err.Error()+"\n"))), 0o644); writeErr != nil {
 					t.Fatal(writeErr)
 				}
 			}
@@ -70,9 +74,15 @@ func TestErrorGolden(t *testing.T) {
 			if readErr != nil {
 				t.Fatalf("read error golden: %v; run go test ./pkg/gox -update", readErr)
 			}
-			if err.Error()+"\n" != string(golden) {
-				t.Fatalf("error differs from golden\n--- got ---\n%s\n--- want ---\n%s", err, golden)
+			got := normalizeGoldenText([]byte(err.Error() + "\n"))
+			want := normalizeGoldenText(golden)
+			if got != want {
+				t.Fatalf("error differs from golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
 			}
 		})
 	}
+}
+
+func normalizeGoldenText(content []byte) string {
+	return strings.ReplaceAll(string(content), "\r\n", "\n")
 }

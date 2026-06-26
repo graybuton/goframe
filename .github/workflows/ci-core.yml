@@ -19,7 +19,7 @@ jobs:
         include:
           - os: ubuntu-latest
             full: true
-          - os: macos-latest
+          - os: macos-15-intel
             full: false
           - os: windows-latest
             full: false

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -117,35 +118,36 @@ func rejectExplicitEmptyEntry(content []byte) error {
 }
 
 func cleanManifestEntry(entry string) (string, error) {
-	if entry == "." {
+	logicalEntry := manifestPath(entry)
+	if logicalEntry == "." {
 		return ".", nil
 	}
-	if entry == "" || filepath.IsAbs(entry) {
+	if entry == "" || manifestPathIsAbs(entry) {
 		return "", fmt.Errorf("must be a relative child package inside the application")
 	}
-	rawParts := strings.Split(filepath.ToSlash(entry), "/")
+	rawParts := strings.Split(logicalEntry, "/")
 	for _, part := range rawParts {
 		if part == ".." {
 			return "", fmt.Errorf("must be a relative child package inside the application")
 		}
 	}
-	entry = filepath.Clean(entry)
+	entry = path.Clean(logicalEntry)
 	if entry == "." {
 		return ".", nil
 	}
-	parts := strings.Split(filepath.ToSlash(entry), "/")
+	parts := strings.Split(entry, "/")
 	for _, part := range parts {
 		if part == ".." {
 			return "", fmt.Errorf("must be a relative child package inside the application")
 		}
 	}
-	if strings.HasPrefix(entry, ".."+string(filepath.Separator)) || entry == ".." {
+	if strings.HasPrefix(entry, "../") || entry == ".." {
 		return "", fmt.Errorf("must be a relative child package inside the application")
 	}
 	if isToolOwnedEntryRoot(parts[0]) {
 		return "", fmt.Errorf("points to a GoFrame-owned or tool-owned directory")
 	}
-	return filepath.ToSlash(entry), nil
+	return entry, nil
 }
 
 func isToolOwnedEntryRoot(root string) bool {
@@ -157,19 +159,35 @@ func isToolOwnedEntryRoot(root string) bool {
 	}
 }
 
-func safeChildPath(path string) bool {
-	return safeRelativePath(path) && filepath.Clean(path) != "."
+func safeChildPath(value string) bool {
+	return safeRelativePath(value) && path.Clean(manifestPath(value)) != "."
 }
 
-func safeRelativePath(path string) bool {
-	if path == "" || filepath.IsAbs(path) {
+func safeRelativePath(value string) bool {
+	if value == "" || manifestPathIsAbs(value) {
 		return false
 	}
-	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+	for _, part := range strings.Split(manifestPath(value), "/") {
 		if part == ".." {
 			return false
 		}
 	}
-	clean := filepath.Clean(path)
-	return clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+	clean := path.Clean(manifestPath(value))
+	return clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+func manifestPath(value string) string {
+	return strings.ReplaceAll(filepath.ToSlash(value), "\\", "/")
+}
+
+func manifestPathIsAbs(value string) bool {
+	logical := manifestPath(value)
+	if strings.HasPrefix(logical, "/") || filepath.IsAbs(value) {
+		return true
+	}
+	if len(logical) >= 2 && logical[1] == ':' {
+		drive := logical[0]
+		return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+	}
+	return false
 }

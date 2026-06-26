@@ -6,10 +6,11 @@ This document records what GoFrame currently tests, what is expected but not
 verified, and what remains unsupported. It is a public-preview readiness matrix,
 not a production support promise.
 
-The current strongest evidence is Linux plus Chrome/Chromium. macOS and Windows
-now have lightweight CI evidence for core Go/toolchain behavior. Firefox and
-Safari are not rejected platforms; they are explicitly deferred until dedicated
-non-Chrome validation is added.
+The current strongest evidence is Linux plus Chrome/Chromium. macOS currently
+has lightweight Intel-runner CI evidence for core Go/toolchain behavior, and
+Windows has lightweight CI evidence for the same layer. Firefox and Safari are
+not rejected platforms; they are explicitly deferred until dedicated non-Chrome
+validation is added.
 
 Labels:
 
@@ -23,7 +24,7 @@ Labels:
 | Host | Status | Evidence |
 |---|---|---|
 | Linux amd64 | CI-tested | GitHub Actions and local validation run Go, TinyGo, Node, Chrome, size, smoke, and DOM pressure gates. |
-| macOS | CI-tested (minimal) | Core Go/toolchain gates run in CI: `go fmt`, `go test ./...`, `go vet`, `go test -tags=goframe_debug`, and selected GOX golden tests. TinyGo/browser smoke remain Linux-first checks. |
+| macOS | CI-tested (minimal, Intel runner) | Core Go/toolchain gates run in CI on `macos-15-intel`: `go fmt`, `go test ./...`, `go vet`, `go test -tags=goframe_debug`, and selected GOX golden tests. TinyGo/browser smoke remain Linux-first checks. |
 | Windows | CI-tested (minimal) | Core Go/toolchain gates run in CI: `go fmt`, `go test ./...`, `go vet`, `go test -tags=goframe_debug`, and selected GOX golden tests. TinyGo/browser smoke remain Linux-first checks. |
 
 Symlink safety tests skip when `os.Symlink` is unavailable or restricted.
