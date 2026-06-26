@@ -99,6 +99,7 @@ Runtime:
 - `gf.ErrorBoundaryContext`
 - basic event facades such as `gf.Event`, `gf.InputEvent`, and
   `gf.ScrollEvent`
+- `gf.ComponentT` and generated typed component identity contracts
 
 Tooling:
 
@@ -178,6 +179,12 @@ VS Code extension:
 - GOX syntax surface.
 - GOX expression ergonomics.
 - GOX package-qualified component tags (`packageAlias.Component`).
+- Component boundary API shape that is already public-facing (for example
+  `gf.ComponentT` and typed identity tokens) can still have experimental
+  semantics in specific lifecycle, remount, and edge-case compatibility areas.
+  The exported surface is documented for preview usage, while deep behavior
+  under module/version/package-path edge cases remains experimental until
+  broader identity guarantees are proven.
 - GOX diagnostic wording beyond the filename/line/column/source-line contract.
 - Context topology behavior and selector limitations.
 - Virtualization details such as fixed-height range buffering and table spacer
