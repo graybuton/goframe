@@ -9,6 +9,10 @@ For the first public preview, the following behavior is considered stable enough
 
 - Handwritten components can still use function-call style:
   `Header(HeaderProps{...})`.
+- Direct Go calls are ordinary function composition and are not runtime component
+  boundaries.
+- They do not create independent component state/effect/context scope, and they do
+  not create an independent dirty-update target.
 - Generated GOX boundaries use explicit typed identity:
   `gf.ComponentT(gf.NewComponentType("importpath.Symbol", "Debug"), props, Header)`.
 - Identity defaults are derived from canonical component import/package path plus symbol name.
@@ -55,7 +59,9 @@ For users running one module/application tree:
 
 ## Experimental frontier under preview
 
-These behaviors are working but not yet a broad portability promise:
+These areas are experimental or only partially evidenced. Single-module
+multi-package composition is covered; broad multi-module or reusable package
+identity is not yet promised.
 
 - Multi-module or module-reused component package identity.
 - Identity under `replace`, workspace aliasing, and non-trivial module path churn.
@@ -66,8 +72,8 @@ These behaviors are working but not yet a broad portability promise:
 ### Practical implication
 
 The API shape is usable and documented.
-The deeper contract under module/path edges remains experimental until the
-`design/component-identity-preview-contract` branch resolves follow-up decisions.
+The deeper contract under module/path edges remains experimental until later
+identity-hardening work explicitly documents and tests those edges.
 
 ## Remount and state expectations
 
@@ -79,10 +85,13 @@ The deeper contract under module/path edges remains experimental until the
 
 ## Public preview recommendation
 
-Use package-qualified GOX tags and typed components for non-trivial, multi-file apps.
-Use `gf.Component` with direct calls for simple compatibility helpers.
+Use package-qualified GOX tags and typed components for non-trivial, multi-file
+apps.
+Use `gf.ComponentT` for runtime-visible typed boundaries, and keep
+`gf.Component` as a compatibility path for direct composition.
+Use direct function calls only for ordinary helper composition.
 Do not assume stable behavior across module path edits, module replacement,
- or cross-module ecosystem sharing in this preview window.
+or cross-module ecosystem sharing in this preview window.
 
 ## Risks and non-goals
 

@@ -99,7 +99,7 @@ Runtime:
 - `gf.ErrorBoundaryContext`
 - basic event facades such as `gf.Event`, `gf.InputEvent`, and
   `gf.ScrollEvent`
-- `gf.ComponentT` and generated typed component identity contracts
+- generated typed component identity contracts
 
 Tooling:
 
