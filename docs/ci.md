@@ -29,6 +29,7 @@ It checks:
 - `go vet ./...`;
 - `go test -tags=goframe_debug ./...`;
 - GOX golden tests, including source-oriented error diagnostics.
+- GOX fuzz seed targets through the normal `go test ./...` seed pass.
 
 The `cmd/goxc` test suite includes manifest/path/package/export/workspace
 regression tests, including root-aware symlink checks for app roots, entry
@@ -147,6 +148,16 @@ Public-preview readiness spot checks:
 go test ./pkg/gox -run 'Identity|Package|Golden|ErrorGolden|Qualified'
 go test ./cmd/goxc -run 'Physical|Canonical|Alias|Overlap|Build|Generate|Ownership|Completion|Marker|Legacy|Partial|Publish|Cleanup|Manifest|Symlink|Path'
 ```
+
+GOX parser/codegen fuzz smoke, for manual use during compiler work:
+
+```bash
+go test ./pkg/gox -run=Fuzz -fuzz=FuzzGenerate -fuzztime=30s
+go test ./pkg/gox -run=Fuzz -fuzz=FuzzParseElement -fuzztime=30s
+```
+
+These targets reuse the existing golden/error fixtures and small inline seeds.
+They are bounded fuzz entry points, not exhaustive GOX language verification.
 
 No separate public-preview script is required yet; the readiness checks are
 small enough to stay inside the existing Go test and docs-check gates.

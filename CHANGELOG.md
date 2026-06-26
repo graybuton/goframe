@@ -92,6 +92,9 @@
 - GitHub Actions workflows for core Go/GOX checks, TinyGo WASM size budgets,
   browser smoke, and VS Code extension compile checks.
 - Core CI matrix now includes minimal macOS and Windows Go/toolchain evidence (`go fmt`, `go test`, `go vet`, debug-tag, and selective GOX tests), while TinyGo/browser smoke evidence remains Linux-first.
+- Initial bounded GOX fuzz targets for whole-file generation and element
+  parser/codegen, seeded from existing golden/error fixtures and small inline
+  snippets.
 - Artifact and module path regression gates.
 - CI and release hygiene documentation.
 - Pre-preview action plan and vision-preserving preview contract wording that
