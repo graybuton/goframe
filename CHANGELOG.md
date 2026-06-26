@@ -37,6 +37,9 @@
   steps, and symlink/file safety policy.
 - Component identity v2 prototype with `gf.NewComponentType`, `gf.ComponentT`,
   generated GOX component tokens, and legacy `gf.Component` compatibility.
+- Component identity preview contract clarifies stable API shape vs experimental
+  edge-case semantics for cross-package identity, remount expectations, and
+  multi-module frontier behavior in docs.
 - Multi-package GOX workspace support for `entry: "."` apps, including hidden
   workspace materialization for child packages, import-path-aware generated
   component identities, and a focused multipackage example plus browser smoke.
@@ -90,6 +93,8 @@
   browser smoke, and VS Code extension compile checks.
 - Artifact and module path regression gates.
 - CI and release hygiene documentation.
+- Pre-preview action plan and vision-preserving preview contract wording that
+  separates first-preview scope from long-term GoFrame platform direction.
 
 ### Fixed
 

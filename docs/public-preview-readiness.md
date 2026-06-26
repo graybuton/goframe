@@ -4,6 +4,10 @@
 
 Status: Needs hardening.
 
+How to read this status: several subsystems are already "Ready with
+limitations", but the project as a public preview remains "Needs hardening"
+until High readiness risks are closed or explicitly scoped in release notes.
+
 GoFrame has enough runtime, GOX, toolchain, examples, and CI coverage to start
 formal public-preview preparation. It is not yet preview-ready because several
 contracts still need final decisions before a preview tag:
@@ -21,6 +25,36 @@ filesystem/package corrective pass hardens the goxc package/export/generate/
 build/clean/serve paths against common symlink traversal, false ownership,
 physical alias overlap, authored-source output, partial package ownership, and
 generated-asset collision mistakes.
+
+The first preview scope is narrower than the project vision. GoFrame remains an
+experimental Go-first application platform; the preview candidate validates the
+current browser/WASM application layer rather than reducing the long-term
+project to a small dashboard-only framework.
+
+See `docs/pre-preview-action-plan.md` for the post-audit action plan.
+
+## Project Vision And First Preview Scope
+
+Project vision:
+
+- GoFrame is an experimental Go-first application platform.
+- Browser/WASM interactive applications are the first validated public layer.
+- Runtime, GOX, `goxc`, packaging, router, resources, Error Boundaries,
+  examples, docs, and release policy are real project layers.
+- Player/Engine, richer host/runtime stories, stronger editor tooling, and a
+  future package ecosystem remain future vision.
+
+First preview scope:
+
+- validate the current browser/WASM layer with clear maturity tiers;
+- keep static hash-router deployment as the documented delivery path;
+- label experimental frontier surfaces honestly instead of hiding them;
+- avoid production, SSR/hydration, history-router, route-loader, server-resource,
+  or Player/Engine promises.
+
+Preview scope is not project scope. Risky but valuable surfaces should be
+hardened, documented, tested, or marked experimental, not removed merely to make
+the preview smaller.
 
 ## Current Status
 
@@ -47,6 +81,15 @@ A first public preview should mean:
 It should not mean production readiness, 1.0 API stability, SSR/hydration,
 history routing, route loaders, Suspense, server resources, or a production
 deployment server.
+
+## Maturity Tiers
+
+| Tier | Meaning | Examples |
+|---|---|---|
+| Core / Public-Candidate | User-facing surfaces with real examples/tests and intended direction, still pre-1.0. | Component model, state/reducer/effects, GOX basic syntax/generation workflow, `goxc generate/build/package/export`, static browser/WASM packaging. |
+| Experimental frontier | Working surfaces that should stay visible while contracts are hardened. | Resources, Error Boundaries, router details, runtime error APIs, virtualization beyond fixed-height guarantees, advanced GOX diagnostics, package metadata details. |
+| Future vision | Strategic direction outside the first preview promise. | Player/Engine, broader host/runtime story, stronger editor tooling, future package ecosystem. |
+| Internal / implementation detail | Implementation and harness details with no compatibility promise. | Hidden `.goframe` workspace layout, mounted tree internals, debug probes, staging directories, smoke harness internals. |
 
 ## API Surface
 
@@ -254,7 +297,12 @@ Recommendation:
 
 ## Recommended Next Stage
 
-MVP 31 should focus on public-preview blockers, not new app features:
+The next branches should follow `docs/pre-preview-action-plan.md`: focus on
+contract, platform evidence, identity, fuzzing, safety closeout, experimental
+surface hardening, and preview release notes rather than deleting working
+surfaces.
+
+Immediate public-preview blockers remain:
 
 1. decide manifest schema/version strategy;
 2. decide multi-module/reusable package identity scope;

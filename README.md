@@ -13,6 +13,11 @@ syntax, manifests, packaging details, and runtime internals may still change
 between MVPs. The browser/WASM target is the current implementation; the
 Player/Engine idea remains future design work, not a shipped product.
 
+The first public preview scope is intentionally narrower than the project
+vision: it should validate the current browser/WASM application layer without
+removing or hiding working experimental surfaces such as the router, resources,
+and Error Boundaries.
+
 ## Status
 
 Current baseline includes:
@@ -483,6 +488,7 @@ Start here:
 - [GOX language and diagnostics](docs/gox-language.md)
 - [API stability tiers](docs/api-stability.md)
 - [Public Preview Readiness](docs/public-preview-readiness.md)
+- [Pre-preview action plan](docs/pre-preview-action-plan.md)
 - [Compatibility and deprecation policy](docs/compatibility.md)
 - [Migration note template](docs/migrations.md)
 - [Platform support matrix](docs/platform-support.md)

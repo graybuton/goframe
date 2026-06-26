@@ -1,6 +1,7 @@
 # GoFrame Player vision
 
-The player is a future architectural direction, not a current implementation:
+The player is a future architectural direction, not a current implementation or
+first-preview promise:
 
 ```text
 .gox source
@@ -25,5 +26,6 @@ include sandboxing, updates, native capabilities, rendering, debugging, bundle
 signing, and portability.
 
 The project should first validate the browser runtime, manifest, toolchain, and
-application model. No custom browser, desktop shell, or player is implemented
-in the current MVP.
+application model. Keeping Player/Engine visible as future vision does not mean
+the first public preview promises a custom browser, desktop shell, `.gfapp`
+runtime, or player implementation.

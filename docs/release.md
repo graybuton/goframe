@@ -146,6 +146,14 @@ clear about API instability and experimental status.
 
 - tag format documented;
 - install command documented;
+- maturity tiers included: public-candidate, experimental frontier,
+  compiler-facing, internal, and future vision;
+- platform evidence stated explicitly, including Linux/Chrome as the strongest
+  current evidence and unverified platforms as under-verified rather than
+  rejected;
+- reusable/multi-module component identity scope stated explicitly;
+- experimental surfaces named rather than hidden;
+- future Player/Engine direction bounded as vision, not a preview promise;
 - compatibility/deprecation notes included;
 - migration notes linked;
 - rollback/revert plan noted for preview users.

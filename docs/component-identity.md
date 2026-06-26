@@ -1,225 +1,108 @@
 # Component Identity
 
-This document records the component identity strategy and the options
-considered through MVP 22.
+This document defines the first-preview component identity contract.
+It distinguishes stable usage guidance from experimental edge-case behavior.
 
-## Current Model
+## What is stable enough for preview users
 
-`goframe` has two compatible component identity paths.
+For the first public preview, the following behavior is considered stable enough to rely on:
 
-Legacy handwritten components identify instances by:
+- Handwritten components can still use function-call style:
+  `Header(HeaderProps{...})`.
+- Direct Go calls are ordinary function composition and are not runtime component
+  boundaries.
+- They do not create independent component state/effect/context scope, and they do
+  not create an independent dirty-update target.
+- Generated GOX boundaries use explicit typed identity:
+  `gf.ComponentT(gf.NewComponentType("importpath.Symbol", "Debug"), props, Header)`.
+- Identity defaults are derived from canonical component import/package path plus symbol name.
+- Import aliases are diagnostic labels and `gf.ComponentT` debug names, not identity keys.
+- Package-qualified GOX tags (`<layout.Shell />`, `<ui.Header />`) are stable when imports resolve to a package identity.
+- Typed identity can be combined with keys (`gf.Key` / `Key`) for explicit list locality control.
 
-```text
-component name + key/position
-```
+GoFrame examples and docs rely on these assumptions when composing multi-package trees inside one app/root.
 
-GOX capitalized tags generate runtime-visible component boundaries:
+## Preview contract by API kind
 
-```go
-gf.Component("Header", HeaderProps{
-	Title: "Demo",
-}, Header)
-```
+### `gf.Component`
 
-Generated GOX now uses explicit component identity tokens:
+- API shape remains public for compatibility and continues to exist.
+- Its identity is the legacy string-based namespace.
+- It is accepted for existing examples and manual wiring.
+- It is a compatibility path, not the recommended basis for stable cross-package identity assertions.
 
-```go
-var _goxComponent_app_Header = gf.NewComponentType("main.Header", "Header")
+### `gf.ComponentT`, `gf.NewComponentType`, generated GOX code
 
-gf.ComponentT(_goxComponent_app_Header, HeaderProps{
-	Title: "Demo",
-}, Header)
-```
+- API shape is public-candidate for the preview phase.
+- Generated token identity is the intended way to reason about component identity.
+- Two tags that resolve to the same import path and symbol share identity.
+- Debug names can differ from import alias without changing runtime identity.
+- Variable naming in generated code is not part of runtime identity.
 
-The mounted runtime reuses an existing component instance when:
+### Package-qualified tags and `PackageIdentity`
 
-- the component identity is the same;
-- the key is the same when a key is present;
-- otherwise the sibling position is the same.
+- Generated tags use package import resolution from GOX selectors and the supplied
+  `PackageIdentity` in `gox` generation options when explicit.
+- For cross-package composition in the same app, this gives predictable reuse and avoids local alias collisions.
+- `PackageIdentity` exists to make emitted identity deterministic where default resolution
+  cannot infer module-relative canonical package import path.
 
-Direct Go calls such as `Header(HeaderProps{...})` remain ordinary function
-calls. They do not create a component boundary, state scope, or independent
-dirty update target.
+## Stable preview expectations
 
-## Canonical Policy For Public Preview
+For users running one module/application tree:
 
-Status: Ready with limitations.
+- Same canonical component identity + same key preserves component instance.
+- Different package-qualified identity, even with same symbol name, does not.
+- Duplicate symbol names in different packages do not collide.
+- Same package path with alias changes (`ui.Header` vs `widgets.Header`) should not alter identity.
+- Direct `v2` path suffixes are part of the identity key.
 
-Generated and typed component identity follows this policy:
+## Experimental frontier under preview
 
-- typed/generated identity is based on canonical Go import path plus component
-  symbol;
-- the import alias is a debug label and generated-code selector, not runtime
-  identity;
-- generated variable names and source filename discriminators are not runtime
-  identity;
-- identical import path plus symbol should produce identical runtime identity;
-- different import paths should produce different runtime identity even when
-  the selected symbol name is the same;
-- semantic import version suffixes such as `/v2` are part of the import path
-  and therefore part of identity;
-- module path rename or fork is an identity change and can remount state;
-- `gf.Component` legacy string identity is namespaced separately from typed
-  identity, so `gf.Component("Header", ...)` does not collide with
-  `gf.ComponentT(gf.NewComponentType("Header", "Header"), ...)`;
-- `gf.ComponentT` identity is explicit and should be preferred by generated
-  code and handwritten component adapters that need stronger identity.
+These areas are experimental or only partially evidenced. Single-module
+multi-package composition is covered; broad multi-module or reusable package
+identity is not yet promised.
 
-Evidence:
+- Multi-module or module-reused component package identity.
+- Identity under `replace`, workspace aliasing, and non-trivial module path churn.
+- Remount behavior for module/version and package relocation edges.
+- Legacy `gf.Component` behavior as a full cross-package identity strategy.
+- Reusing generated component tokens across independently built package sets.
 
-- `pkg/goframe/component_identity_test.go`;
-- `pkg/gox/generate_test.go`;
-- `cmd/goxc/workspace_test.go`.
+### Practical implication
 
-Package-qualified GOX component tags create the same kind of boundary across
-packages:
+The API shape is usable and documented.
+The deeper contract under module/path edges remains experimental until later
+identity-hardening work explicitly documents and tests those edges.
 
-```gox
-<ui.Header Title="Demo" />
-```
+## Remount and state expectations
 
-When `ui` imports `github.com/example/app/internal/ui`, generated identity is:
+- Preserve state when identity and key are stable across renders.
+- Remount is expected when identity changes or key changes.
+- A module or import path change is treated as an identity change and may remount.
+- Render-time component renaming changes identity.
+- Stateful components without keys can still remount when sibling position changes.
 
-```text
-github.com/example/app/internal/ui.Header
-```
+## Public preview recommendation
 
-The debug label remains `ui.Header` so browser smoke and debug counters stay
-readable when several packages define a `Header`.
+Use package-qualified GOX tags and typed components for non-trivial, multi-file
+apps.
+Use `gf.ComponentT` for runtime-visible typed boundaries, and keep
+`gf.Component` as a compatibility path for direct composition.
+Use direct function calls only for ordinary helper composition.
+Do not assume stable behavior across module path edits, module replacement,
+or cross-module ecosystem sharing in this preview window.
 
-## Risks
+## Risks and non-goals
 
-Name-based identity is compact and easy to debug, but it has limits:
+- No new migration layer is introduced in preview.
+- No broader reusable package ecosystem promise.
+- No hidden identity migration protocol.
+- No production/1.0 compatibility commitment.
 
-- two different component functions can use the same declared name;
-- package path is not part of legacy string identity;
-- the runtime does not know the Go function implementation behind a name;
-- renaming a component resets its identity;
-- duplicate sibling keys are still a user error, although debug builds now
-  warn about them.
+## Evidence
 
-These risks are acceptable for the current MVP examples but should be revisited
-before larger applications or reusable component packages.
-
-## Alternative A: Keep Name/Key/Position
-
-Pros:
-
-- smallest runtime shape;
-- works with current GOX codegen;
-- readable debug output;
-- no migration cost;
-- TinyGo-friendly.
-
-Cons:
-
-- possible collisions across packages or generated code;
-- function implementation is not part of identity;
-- name changes are identity changes.
-
-This remains the legacy compatibility strategy. Generated GOX now uses the
-typed token path by default.
-
-## Alternative B: Generated Stable Type Token
-
-GOX codegen now emits prototype component tokens:
-
-```go
-var _goxComponentHeader = gf.NewComponentType("main.Header", "Header")
-
-gf.ComponentT(_goxComponentHeader, HeaderProps{
-	Title: "Demo",
-}, Header)
-```
-
-Pros:
-
-- can include package/import context;
-- avoids accidental same-name collisions;
-- does not require comparing Go function values;
-- can preserve readable names for debug output.
-
-Remaining cons:
-
-- `goxc` generated ids use package import path plus component name when the
-  module path is known;
-- package-qualified component tags use the resolved import path plus selected
-  component name, not the local alias alone;
-- lower-level generation helpers can still fall back to package name plus
-  component name;
-- token variable names are generated-code details;
-- multi-module workspace support still needs more identity design;
-- may increase bundle size if token metadata grows.
-
-Recommendation: keep the token path as the generated default while retaining
-`gf.Component` as compatibility API. MVP 20's import-aware `goxc` ids cover
-`entry: "."` apps with child packages, and MVP 22 applies the same model to
-child entry packages such as `./cmd/app`. They are not a complete multi-module
-identity policy.
-
-## Multi-Module Conclusion
-
-Status: Blocker for broader package ecosystem claims.
-
-The current policy is strong enough for single-module apps, child entry
-packages, and package-qualified components inside the same Go module. It is
-not a complete reusable package ecosystem or multi-module workspace promise.
-
-Before claiming broad multi-module support, the project still needs to decide:
-
-- how generated identity behaves when multiple module roots are materialized;
-- how replace directives, forks, and local module paths should be described to
-  users;
-- whether public reusable component packages need additional documentation or
-  generated metadata;
-- how migration notes should handle module path rename/remount behavior.
-
-## Alternative C: Function Identity
-
-Using Go function identity directly is not recommended now.
-
-Go function values are not comparable except to `nil`. Reflection or unsafe
-runtime tricks would be needed to derive implementation identity, and both are
-bad fits for this project:
-
-- `reflect` is intentionally kept out of the production runtime;
-- unsafe/runtime internals are risky across Go and TinyGo;
-- TinyGo compatibility is uncertain;
-- the likely size cost is not worth it for the current MVP.
-
-## Recommendation
-
-Use generated typed identity for GOX, with these hardening rules:
-
-- keep generated identity ids stable within an application;
-- use keys for reordered lists;
-- treat duplicate keys as a bug;
-- keep duplicate-key diagnostics in `goframe_debug` builds only;
-- revisit multi-module and reusable component package identity before claiming
-  a public package ecosystem.
-
-## Migration Plan For Tokens
-
-The current migration path:
-
-1. Keep the optional token API while keeping `gf.Component`:
-
-   ```go
-   gf.NewComponentType("main.Header", "Header")
-   ```
-
-2. Use `gf.ComponentT` in generated GOX output.
-3. Keep string-based `gf.Component` as a compatibility API.
-4. Measure TinyGo sizes after token codegen changes.
-5. Continue hardening import-path identity before claiming reusable component
-   package or multi-module workspace support.
-
-## Size Considerations
-
-Any identity strategy must preserve the current size posture:
-
-- no `reflect`;
-- no `unsafe` runtime identity tricks;
-- no large metadata tables;
-- debug diagnostics behind `goframe_debug`;
-- measured TinyGo budget checks before and after the change.
+- `pkg/goframe/component.go`
+- `pkg/goframe/component_identity_test.go`
+- `pkg/gox/generate_test.go`
+- `pkg/goxc/workspace_test.go`
