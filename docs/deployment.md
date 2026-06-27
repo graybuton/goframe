@@ -309,10 +309,11 @@ Route query state also lives in the hash, for example
 `#/issues?status=open&q=auth`. The server still receives only the original
 `index.html` request.
 
-Path/history-mode routing is not implemented. If a future app wants clean URLs
-such as `/issues/42`, the server or CDN would need a fallback that serves
-`index.html` for application routes. `goxc serve` remains development-only and
-does not configure a production fallback policy.
+Path/history-mode routing is not implemented. Clean URLs such as `/issues/42`
+are outside the current preview router contract; deployments that implement
+them independently need a server or CDN fallback that serves `index.html` for
+application routes. `goxc serve` remains development-only and does not
+configure a production fallback policy.
 
 ## Not In MVP 13
 

@@ -73,8 +73,8 @@ preview or explicitly scoped in release notes:
 
 The manifest/versioning risk is reduced for `v0.1.0-preview.1` by the
 versionless `goframe.json` decision and the preview-facing `"assets":
-"./assets"` directory contract. Future schema markers remain a migration topic,
-not a first-preview blocker.
+"./assets"` directory contract. Schema markers are deferred; a mandatory
+user-authored marker would require migration notes and a compatibility window.
 
 These are contract and evidence risks, not reasons to reduce GoFrame to a
 smaller product category.
@@ -162,8 +162,8 @@ Acceptance criteria:
 - CI impact is bounded.
 
 Current status: initial bounded fuzz targets exist for whole-file generation and
-element parser/codegen entry points. Longer fuzz campaigns remain manual and
-future evidence should be added as the language surface grows.
+element parser/codegen entry points. Longer fuzz campaigns remain manual; the
+current evidence is intentionally bounded.
 
 Non-goals:
 

@@ -405,7 +405,8 @@ func App() gf.Node {
 ```
 
 The MVP router is hash-based. Path/history mode, file-based routing, loaders,
-route middleware, and automatic route-level boundaries remain future work.
+route middleware, and automatic route-level boundaries are not part of the
+current preview contract.
 
 For small URL-driven state, routes expose query helpers:
 

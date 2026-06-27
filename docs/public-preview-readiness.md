@@ -113,7 +113,7 @@ Decision:
 
 - keep API shape unchanged in MVP 30;
 - classify surfaces more explicitly;
-- require future public exports to be classified before preview.
+- new public exports need explicit classification before preview.
 
 ## Component Identity
 
@@ -281,7 +281,7 @@ Recommendation:
 | High | Multi-module/reusable package identity is not final. | `docs/component-identity.md` | Focused MVP before claiming reusable package ecosystem. |
 | High | Browser cross-platform support is partial. | `docs/platform-support.md` | Keep Linux/Chrome as strongest evidence; add focused Firefox/Safari/browser diversity or explicit deferred evidence notes. |
 | Medium | Production deployment server remains out of scope. | `docs/deployment.md` | Keep preview messaging static-hosting/hash-router focused. |
-| Medium | Package publication is hardened but not a full transactional installer. | `cmd/goxc/package.go` | Metadata is written last and sources are prevalidated; a future transaction/rollback design can further protect existing packages from mid-copy failures. |
+| Medium | Package publication is hardened but not a full transactional installer. | `cmd/goxc/package.go` | Metadata is written last and sources are prevalidated; full transaction/rollback semantics remain out of scope for the current preview. |
 | Documentation-only | Public API classification must be kept current. | `docs/api-stability.md` | Optional exported-symbol classification gate can be added later. |
 
 ## Deferred Non-goals
