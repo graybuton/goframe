@@ -177,6 +177,44 @@ func TestRouterViewCreatesRouteBoundaryKeyedByPattern(t *testing.T) {
 	}
 }
 
+func TestRouteMatchKeyUsesPatternForRemountPolicy(t *testing.T) {
+	routes := []Route{
+		RoutePath("/issues", routeTestNode("issues")),
+		RoutePath("/issues/:id", routeTestNode("details")),
+		NotFoundRoute(routeTestNode("missing")),
+	}
+
+	first, ok := matchRouterTarget(routes, "#/issues/1")
+	if !ok {
+		t.Fatal("expected first detail route match")
+	}
+	second, ok := matchRouterTarget(routes, "#/issues/2?tab=activity")
+	if !ok {
+		t.Fatal("expected second detail route match")
+	}
+	list, ok := matchRouterTarget(routes, "#/issues")
+	if !ok {
+		t.Fatal("expected list route match")
+	}
+	missing, ok := matchRouterTarget(routes, "#/unknown")
+	if !ok {
+		t.Fatal("expected not-found route match")
+	}
+
+	if first.key != "route:/issues/:id" || second.key != first.key {
+		t.Fatalf("detail route keys = %q/%q, want same pattern key", first.key, second.key)
+	}
+	if first.context.Param("id") != "1" || second.context.Param("id") != "2" || second.context.RawQuery != "tab=activity" {
+		t.Fatalf("detail contexts = %#v %#v", first.context, second.context)
+	}
+	if list.key == first.key || list.key != "route:/issues" {
+		t.Fatalf("list key = %q, want distinct route:/issues", list.key)
+	}
+	if missing.key != "route:not-found" || missing.context.Path != "/unknown" {
+		t.Fatalf("not-found match = %#v", missing)
+	}
+}
+
 func TestRouteContextParamHandlesNilParams(t *testing.T) {
 	if got := (RouteContext{}).Param("id"); got != "" {
 		t.Fatalf("nil params Param = %q, want empty", got)
