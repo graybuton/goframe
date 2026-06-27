@@ -38,8 +38,9 @@ The recommended Go-first layout is:
 ```text
 app/
 ├── goframe.json
-├── index.html
-├── styles.css
+├── assets/
+│   ├── index.html
+│   └── styles.css
 ├── cmd/app/
 │   ├── main.go
 │   └── app.gox

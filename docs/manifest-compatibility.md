@@ -30,7 +30,7 @@ Supported fields:
 | `output` | `dist` | Legacy/export-oriented output hint. Current package output defaults to `.goframe/package/standalone`; explicit package/export flags are preferred. |
 | `compiler` | `go` | Must be `go` or `tinygo`. CLI `--compiler` overrides it. |
 | `wasm` | `bundle.wasm` | Logical WASM filename. Must be a relative `.wasm` child path. `main.wasm` remains accepted for legacy apps. |
-| `assets` | `["index.html"]` | Static child paths copied by `goxc package`. Root `index.html` is the required standalone HTML entrypoint and must be declared exactly once. Missing non-required assets are skipped with a message. |
+| `assets` | auto | Static assets contract. Recommended form is a relative directory string such as `"./assets"`. Legacy explicit lists such as `["index.html", "styles.css"]` remain supported. Omitted or `null` auto-detects `./assets`, then root `index.html`, then generated default HTML. Empty `[]` means no user static assets and still generates runnable default HTML. |
 
 Validation evidence:
 
@@ -50,9 +50,18 @@ Current input behavior:
   rejected;
 - `wasm` must end in `.wasm`; names such as `main.go`, `go.mod`,
   `bundle.wasm.gz`, and `wasm_exec.js` are rejected;
-- standalone packages require a root `index.html` asset declared exactly once;
-- the required `index.html` must exist before compilation and must be a
-  regular non-symlink file;
+- `assets` accepts omitted/`null`, a directory string, or an explicit path
+  list. Other JSON shapes are rejected;
+- directory mode walks a regular non-symlink asset directory recursively. Asset
+  logical names are relative to that directory, so `assets/data/issues.txt`
+  packages as `assets/data/issues.txt`;
+- `assets/index.html` in directory mode is a custom root HTML template and is
+  written to package root `index.html`, not `assets/index.html`;
+- if no custom HTML template is selected, `goxc package` generates a default
+  standalone `index.html` with a `root` mount element and final runtime/WASM
+  paths;
+- custom `index.html` templates must exist before compilation and must be
+  regular non-symlink files;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 
@@ -71,17 +80,17 @@ Compatibility policy:
 
 ## Schema Version Decision
 
-Status: Needs hardening.
+Status: Ready with limitations.
 
-There is no required `version` field in `goframe.json` today. MVP 30 does not
-add one because doing so would either be optional metadata with limited value
-or a breaking input requirement.
+There is no required `version` field in `goframe.json` for
+`v0.1.0-preview.1`. The preview contract keeps user-authored manifests
+versionless. Absence of a user-authored manifest version is supported preview
+behavior, not a warning or deprecation signal.
 
-Recommended follow-up:
-
-- decide before public preview whether a future optional `version` marker is
-  useful for diagnostics;
-- do not make it mandatory without a migration note and compatibility window.
+Generated `asset-manifest.json` and `goframe-package.json` remain versioned
+tooling metadata. User-authored schema or version markers are not part of the
+current preview contract. Making such a marker mandatory would be a breaking
+manifest change and would require migration notes and a compatibility window.
 
 ## `asset-manifest.json`
 

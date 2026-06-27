@@ -161,7 +161,8 @@ compiler-facing and experimental rather than stable user APIs.
 
 Tooling contracts:
 
-- `goframe.json` user-authored manifest input;
+- `goframe.json` user-authored manifest input, including preview-facing
+  `"assets": "./assets"` directory mode and legacy explicit asset lists;
 - `asset-manifest.json` generated package metadata and companion entrypoint
   manifest;
 - `goframe-package.json` generated package metadata and authoritative current
@@ -249,6 +250,8 @@ These are not part of the first public preview promise.
   belongs to `goxc package`.
 - Explicit `"wasm": "main.wasm"` manifests: still supported, but examples and
   docs use `bundle.wasm`.
+- Explicit asset list manifests such as `"assets": ["index.html"]`: still
+  supported, but examples and docs use `"assets": "./assets"`.
 - Legacy `manifest.json` package marker: fail-closed migration support only
   for the historical GoFrame package manifest shape; `goframe-package.json` is
   current.

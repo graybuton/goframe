@@ -47,8 +47,8 @@ Current protection focuses on:
 ## Manifest Paths
 
 Manifest fields such as `entry`, `output`, `wasm`, and `assets` are validated
-as relative child paths. Absolute paths, `..`, and paths escaping the
-application directory are rejected.
+as relative child paths. Absolute paths, slash-root paths, drive-root paths,
+raw `..`, and paths escaping the application directory are rejected.
 
 `wasm` must end in `.wasm`. Names such as `main.go`, `go.mod`,
 `bundle.wasm.gz`, and `wasm_exec.js` are rejected before build/package output
@@ -98,10 +98,12 @@ entrypoint, and HTML entrypoint are present as regular files inside the package
 root. `asset-manifest.json` is generated metadata only; by itself it does not
 grant destructive ownership.
 
-The standalone HTML entrypoint is root `index.html`. It must be declared
-exactly once in manifest assets and must exist as a regular non-symlink file
-before `goxc package` compiles or cleans output. Missing optional assets may
-still be skipped with a message, but missing `index.html` is a package error.
+The standalone HTML entrypoint is package root `index.html`. If a custom
+template is selected through root `index.html`, explicit list mode, or
+`assets/index.html` in directory mode, it must exist as a regular non-symlink
+file before `goxc package` compiles or cleans output. If no custom template is
+selected, `goxc package` generates a default `index.html`. Missing non-index
+explicit-list assets may still be skipped with a message.
 
 Legacy `manifest.json` ownership is fail-closed and recognized only for the
 historical GoFrame package format that contained GoFrame-specific fields such
@@ -158,8 +160,8 @@ Policy:
 - entry package directories must not be symlinks;
 - `.go` and `.gox` source files discovered for workspace materialization must
   not be symlinks;
-- manifest-declared package assets must not be symlinks, including broken
-  symlinks;
+- manifest-declared package asset directories, package assets, and custom HTML
+  templates must not be symlinks, including broken symlinks;
 - explicit package/export output directories and intermediate parents must not
   be symlinks;
 - explicit build, generate, package, and export output roots must not
@@ -193,6 +195,7 @@ Evidence:
 | entry directory is symlink | Ready | Rejected. |
 | intermediate entry component is symlink | Ready | Rejected before read/copy/generation. |
 | `.go`/`.gox` source file is symlink | Ready | Rejected during discovery/materialization and direct-file generation. |
+| asset directory is symlink | Ready | Rejected in explicit directory mode and auto-detected `./assets` mode. |
 | asset is symlink | Ready | Rejected, including broken symlinks. |
 | symlink target stays inside app root | Ready with limitations | Still rejected for entry/source/assets; the policy is simpler and safer. |
 | symlink target escapes app root | Ready | Rejected for entry/source/assets/output roots. |
@@ -256,7 +259,8 @@ operation boundary, but full adversarial filesystem mutation is out of scope.
 - No permission model for future Player or `.gfapp` bundles.
 - No full multi-module workspace model.
 - `goxc serve` remains development-only and is not a hardened static server.
-- Windows filesystem behavior is not CI-verified.
+- Windows has minimal Go/toolchain CI evidence, but full filesystem and browser
+  parity remain under-verified.
 
 ## Recommended Future Tests
 

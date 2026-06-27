@@ -82,8 +82,8 @@ The project may break compatibility without a full deprecation window for:
 - physical path overlap rejection for explicit build/generate/package/export
   outputs and external workspaces;
 - requiring manifest `wasm` values to end in `.wasm`;
-- requiring standalone package assets to declare a regular root `index.html`
-  entrypoint exactly once;
+- replacing the old required-root-`index.html` manifest behavior with
+  directory-mode assets and generated default HTML;
 - treating `asset-manifest.json` as companion metadata rather than standalone
   destructive ownership evidence;
 - CI-only smoke harness internals;

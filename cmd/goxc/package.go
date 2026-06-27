@@ -41,6 +41,18 @@ type packageOptions struct {
 	preload   bool
 }
 
+type packageAssetPlan struct {
+	Assets          []plannedPackageAsset
+	CustomIndexPath string
+	GenerateIndex   bool
+}
+
+type plannedPackageAsset struct {
+	LogicalName string
+	SourcePath  string
+	Exists      bool
+}
+
 type assetManifest struct {
 	Version     int                     `json:"version"`
 	Assets      map[string]packageAsset `json:"assets"`
@@ -180,11 +192,8 @@ func packageApp(options packageOptions) error {
 	if wasmLogicalName == runtimeAssetName {
 		return fmt.Errorf("wasm %q in %s collides with runtime asset %s", manifest.WASM, manifestName, runtimeAssetName)
 	}
-	plannedAssets, err := validatePackageAssetPlan(manifest, wasmLogicalName, options)
+	assetPlan, err := planPackageAssets(options.appDir, manifest, wasmLogicalName, options)
 	if err != nil {
-		return err
-	}
-	if err := validateRequiredPackageEntrypoints(options.appDir, plannedAssets); err != nil {
 		return err
 	}
 	layout, err := newBuildLayout(layoutOptions{
@@ -260,44 +269,41 @@ func packageApp(options packageOptions) error {
 	assets[runtimeAssetName] = runtimeAsset
 	entrypoints.Runtime = runtimeAsset.Path
 
-	copiedAssets := make([]string, 0, len(manifest.Assets))
 	styleRewrites := map[string]string{}
-	for _, asset := range plannedAssets {
-		asset, source, exists, err := resolvePackageAssetSource(options.appDir, asset)
+	for _, planned := range assetPlan.Assets {
+		if !planned.Exists {
+			fmt.Printf("asset %s not found; skipping\n", planned.SourcePath)
+			continue
+		}
+		packaged, err := writePackageAsset(planned.SourcePath, assetsDir, planned.LogicalName, options)
 		if err != nil {
 			return err
 		}
-		if !exists {
-			fmt.Printf("asset %s not found; skipping\n", source)
-			continue
-		}
-		if asset == indexHTMLAssetName {
-			copiedAssets = append(copiedAssets, asset)
-			continue
-		}
-		packaged, err := writePackageAsset(source, assetsDir, asset, options)
-		if err != nil {
-			return err
-		}
-		assets[asset] = packaged
-		if strings.EqualFold(path.Ext(asset), ".css") {
+		assets[planned.LogicalName] = packaged
+		if strings.EqualFold(path.Ext(planned.LogicalName), ".css") {
 			entrypoints.Styles = append(entrypoints.Styles, packaged.Path)
-			styleRewrites[asset] = packaged.Path
+			styleRewrites[planned.LogicalName] = packaged.Path
 		}
-		copiedAssets = append(copiedAssets, asset)
 	}
 
 	sort.Strings(entrypoints.Styles)
-	if containsString(copiedAssets, indexHTMLAssetName) {
-		if err := writeRewrittenIndex(filepath.Join(options.appDir, indexHTMLAssetName), filepath.Join(stageDir, indexHTMLAssetName), htmlRewriteOptions{
-			preload:       options.preload,
-			wasmPath:      wasmAsset.Path,
-			runtimePath:   runtimeAsset.Path,
-			styleRewrites: styleRewrites,
-			stylePaths:    entrypoints.Styles,
-		}); err != nil {
+	indexOptions := htmlRewriteOptions{
+		preload:       options.preload,
+		wasmPath:      wasmAsset.Path,
+		runtimePath:   runtimeAsset.Path,
+		styleRewrites: styleRewrites,
+		stylePaths:    entrypoints.Styles,
+	}
+	if assetPlan.CustomIndexPath != "" {
+		if err := writeRewrittenIndex(assetPlan.CustomIndexPath, filepath.Join(stageDir, indexHTMLAssetName), indexOptions); err != nil {
 			return err
 		}
+	} else if assetPlan.GenerateIndex {
+		if err := writeGeneratedIndex(filepath.Join(stageDir, indexHTMLAssetName), indexOptions); err != nil {
+			return err
+		}
+	} else {
+		return errors.New("package asset plan did not provide an index.html source or generated fallback")
 	}
 
 	if err := writeJSONFile(filepath.Join(stageDir, assetManifestName), assetManifest{
@@ -350,108 +356,252 @@ func packageApp(options packageOptions) error {
 }
 
 func resolvePackageAssetSource(appDir, asset string) (string, string, bool, error) {
-	asset = path.Clean(filepath.ToSlash(asset))
-	source := filepath.Join(appDir, asset)
-	if err := validatePathBelowRoot(appDir, source, "asset path", true); err != nil {
+	asset, err := cleanPackageAssetName(asset)
+	if err != nil {
 		return "", "", false, err
 	}
-	info, err := os.Lstat(source)
-	if errors.Is(err, os.ErrNotExist) {
-		return asset, source, false, nil
-	} else if err != nil {
-		return "", "", false, fmt.Errorf("inspect asset %s: %w", source, err)
+	source, exists, err := inspectPackageAssetSource(appDir, asset)
+	if err != nil {
+		return "", "", false, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", "", false, fmt.Errorf("asset path %s is a symlink; symlink paths are not supported", source)
-	}
-	if !info.Mode().IsRegular() {
-		return "", "", false, fmt.Errorf("asset path %s is not a regular file", source)
-	}
-	return asset, source, true, nil
+	return asset, source, exists, nil
 }
 
-func validatePackageAssetPlan(manifest projectManifest, wasmLogicalName string, options packageOptions) ([]string, error) {
-	occupied := map[string]string{}
-	reserve := func(name, owner string) error {
-		name = path.Clean(filepath.ToSlash(name))
-		if previous, ok := occupied[name]; ok {
-			return fmt.Errorf("package asset %q collides with %s", name, previous)
-		}
-		occupied[name] = owner
-		return nil
-	}
-	for _, name := range []string{wasmLogicalName, runtimeAssetName} {
-		if err := reserve(name, "generated asset"); err != nil {
-			return nil, err
-		}
-		if isCompressiblePackageAsset(name) {
-			if options.compress["gzip"] {
-				if err := reserve(name+".gz", "generated compressed sidecar"); err != nil {
-					return nil, err
-				}
-			}
-			if options.compress["br"] {
-				if err := reserve(name+".br", "generated compressed sidecar"); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-	cleaned := make([]string, 0, len(manifest.Assets))
-	for _, raw := range manifest.Assets {
-		asset, err := cleanPackageAssetName(raw)
-		if err != nil {
-			return nil, err
-		}
-		if err := reserve(asset, "manifest asset"); err != nil {
-			return nil, err
-		}
-		if isCompressiblePackageAsset(asset) {
-			if options.compress["gzip"] {
-				if err := reserve(asset+".gz", "manifest compressed sidecar"); err != nil {
-					return nil, err
-				}
-			}
-			if options.compress["br"] {
-				if err := reserve(asset+".br", "manifest compressed sidecar"); err != nil {
-					return nil, err
-				}
-			}
-		}
-		cleaned = append(cleaned, asset)
-	}
-	return cleaned, nil
+type packageAssetPlanner struct {
+	appDir   string
+	options  packageOptions
+	occupied map[string]string
+	plan     packageAssetPlan
 }
 
-func validateRequiredPackageEntrypoints(appDir string, plannedAssets []string) error {
-	indexCount := 0
-	for _, asset := range plannedAssets {
-		if asset == indexHTMLAssetName {
-			indexCount++
+func planPackageAssets(appDir string, manifest projectManifest, wasmLogicalName string, options packageOptions) (packageAssetPlan, error) {
+	planner, err := newPackageAssetPlanner(appDir, wasmLogicalName, options)
+	if err != nil {
+		return packageAssetPlan{}, err
+	}
+	switch manifest.Assets.Mode {
+	case manifestAssetsAuto:
+		if err := planner.addAutoAssets(); err != nil {
+			return packageAssetPlan{}, err
+		}
+	case manifestAssetsDirectory:
+		if err := planner.addDirectoryAssets(manifest.Assets.Directory); err != nil {
+			return packageAssetPlan{}, err
+		}
+	case manifestAssetsList:
+		if err := planner.addListedAssets(manifest.Assets.List); err != nil {
+			return packageAssetPlan{}, err
+		}
+	default:
+		return packageAssetPlan{}, fmt.Errorf("assets in %s has unsupported internal mode", manifestName)
+	}
+	return planner.finish(), nil
+}
+
+func newPackageAssetPlanner(appDir, wasmLogicalName string, options packageOptions) (*packageAssetPlanner, error) {
+	planner := &packageAssetPlanner{
+		appDir:   appDir,
+		options:  options,
+		occupied: map[string]string{},
+	}
+	for _, name := range []string{wasmLogicalName, runtimeAssetName, assetManifestName, packageMetadataName} {
+		if err := planner.reserveAsset(name, "generated asset"); err != nil {
+			return nil, err
 		}
 	}
-	if indexCount != 1 {
-		return fmt.Errorf("standalone package assets must include %s exactly once", indexHTMLAssetName)
+	return planner, nil
+}
+
+func (planner *packageAssetPlanner) addAutoAssets() error {
+	directory := filepath.Join(planner.appDir, assetDirectoryName)
+	info, err := os.Lstat(directory)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("asset directory %s is a symlink; symlink paths are not supported", directory)
+		}
+		if info.IsDir() {
+			return planner.addDirectoryAssets(assetDirectoryName)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect asset directory %s: %w", directory, err)
 	}
 
-	source := filepath.Join(appDir, indexHTMLAssetName)
-	if err := validatePathBelowRoot(appDir, source, "required standalone entrypoint index.html", true); err != nil {
+	source, exists, err := inspectPackageAssetSource(planner.appDir, indexHTMLAssetName)
+	if err != nil {
 		return err
 	}
-	info, err := os.Lstat(source)
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("required standalone entrypoint %s was not found", indexHTMLAssetName)
-	}
-	if err != nil {
-		return fmt.Errorf("inspect required standalone entrypoint %s: %w", source, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("required standalone entrypoint %s is a symlink", indexHTMLAssetName)
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("required standalone entrypoint %s is not a regular file", indexHTMLAssetName)
+	if exists {
+		return planner.setCustomIndex(source)
 	}
 	return nil
+}
+
+func (planner *packageAssetPlanner) addDirectoryAssets(directory string) error {
+	directory, err := cleanManifestAssetDirectory(directory)
+	if err != nil {
+		return fmt.Errorf("assets %q in %s %s", directory, manifestName, err)
+	}
+	sourceRoot := filepath.Join(planner.appDir, filepath.FromSlash(directory))
+	if err := validatePathBelowRoot(planner.appDir, sourceRoot, "asset directory", false); err != nil {
+		return err
+	}
+	if err := directoryNoFollow(sourceRoot, "asset directory"); err != nil {
+		return err
+	}
+	return filepath.WalkDir(sourceRoot, func(sourcePath string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("inspect asset path %s: %w", sourcePath, err)
+		}
+		if sourcePath == sourceRoot {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("asset path %s is a symlink; symlink paths are not supported", sourcePath)
+		}
+		relative, err := filepath.Rel(sourceRoot, sourcePath)
+		if err != nil {
+			return fmt.Errorf("resolve asset path %s: %w", sourcePath, err)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := regularFileNoFollow(sourcePath, "asset path")
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("asset path %s is not a regular file", sourcePath)
+		}
+		logical := filepath.ToSlash(relative)
+		if logical == indexHTMLAssetName {
+			return planner.setCustomIndex(sourcePath)
+		}
+		return planner.addAsset(logical, sourcePath, true)
+	})
+}
+
+func (planner *packageAssetPlanner) addListedAssets(assets []string) error {
+	for _, raw := range assets {
+		asset, err := cleanPackageAssetName(raw)
+		if err != nil {
+			return err
+		}
+		source, exists, err := inspectPackageAssetSource(planner.appDir, asset)
+		if err != nil {
+			return err
+		}
+		if asset == indexHTMLAssetName {
+			if !exists {
+				return fmt.Errorf("custom standalone entrypoint %s was not found", indexHTMLAssetName)
+			}
+			if err := planner.setCustomIndex(source); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := planner.addAsset(asset, source, exists); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (planner *packageAssetPlanner) addAsset(logicalName, sourcePath string, exists bool) error {
+	logicalName, err := cleanPackageAssetName(logicalName)
+	if err != nil {
+		return err
+	}
+	if err := planner.reserveAsset(logicalName, "manifest asset"); err != nil {
+		return err
+	}
+	planner.plan.Assets = append(planner.plan.Assets, plannedPackageAsset{
+		LogicalName: logicalName,
+		SourcePath:  sourcePath,
+		Exists:      exists,
+	})
+	return nil
+}
+
+func (planner *packageAssetPlanner) reserveAsset(name, owner string) error {
+	name, err := cleanPackageAssetName(name)
+	if err != nil {
+		return err
+	}
+	if previous, ok := planner.occupied[name]; ok {
+		return fmt.Errorf("package asset %q collides with %s", name, previous)
+	}
+	planner.occupied[name] = owner
+	if isCompressiblePackageAsset(name) {
+		if planner.options.compress["gzip"] {
+			if err := planner.reserveSidecar(name+".gz", owner+" compressed sidecar"); err != nil {
+				return err
+			}
+		}
+		if planner.options.compress["br"] {
+			if err := planner.reserveSidecar(name+".br", owner+" compressed sidecar"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (planner *packageAssetPlanner) reserveSidecar(name, owner string) error {
+	name, err := cleanPackageAssetName(name)
+	if err != nil {
+		return err
+	}
+	if previous, ok := planner.occupied[name]; ok {
+		return fmt.Errorf("package asset %q collides with %s", name, previous)
+	}
+	planner.occupied[name] = owner
+	return nil
+}
+
+func (planner *packageAssetPlanner) setCustomIndex(sourcePath string) error {
+	if planner.plan.CustomIndexPath != "" {
+		return fmt.Errorf("package asset %q collides with existing HTML entrypoint", indexHTMLAssetName)
+	}
+	if _, err := regularFileNoFollow(sourcePath, "index asset"); err != nil {
+		return err
+	}
+	planner.plan.CustomIndexPath = sourcePath
+	planner.plan.GenerateIndex = false
+	return nil
+}
+
+func (planner *packageAssetPlanner) finish() packageAssetPlan {
+	sort.Slice(planner.plan.Assets, func(first, second int) bool {
+		return planner.plan.Assets[first].LogicalName < planner.plan.Assets[second].LogicalName
+	})
+	if planner.plan.CustomIndexPath == "" {
+		planner.plan.GenerateIndex = true
+	}
+	return planner.plan
+}
+
+func inspectPackageAssetSource(appDir, asset string) (string, bool, error) {
+	asset, err := cleanManifestAssetPath(asset)
+	if err != nil {
+		return "", false, err
+	}
+	source := filepath.Join(appDir, filepath.FromSlash(asset))
+	if err := validatePathBelowRoot(appDir, source, "asset path", true); err != nil {
+		return "", false, err
+	}
+	info, err := os.Lstat(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return source, false, nil
+	} else if err != nil {
+		return "", false, fmt.Errorf("inspect asset %s: %w", source, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", false, fmt.Errorf("asset path %s is a symlink; symlink paths are not supported", source)
+	}
+	if !info.Mode().IsRegular() {
+		return "", false, fmt.Errorf("asset path %s is not a regular file", source)
+	}
+	return source, true, nil
 }
 
 func packageOutputDirectory(options packageOptions, layout BuildLayout) string {
@@ -548,34 +698,62 @@ func writeRewrittenIndex(sourcePath, destinationPath string, options htmlRewrite
 	return nil
 }
 
-func rewriteIndexHTML(content string, options htmlRewriteOptions) string {
-	preload := ""
-	if options.preload {
-		lines := []string{
-			fmt.Sprintf(`<link rel="preload" href="%s" as="fetch" type="application/wasm" crossorigin>`, options.wasmPath),
-			fmt.Sprintf(`<link rel="preload" href="%s" as="script">`, options.runtimePath),
-		}
-		for _, style := range options.stylePaths {
-			lines = append(lines, fmt.Sprintf(`<link rel="preload" href="%s" as="style">`, style))
-		}
-		preload = strings.Join(lines, "\n")
+func writeGeneratedIndex(destinationPath string, options htmlRewriteOptions) error {
+	content := generateIndexHTML(options)
+	if err := writeFileAtomic(destinationPath, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", destinationPath, err)
 	}
+	return nil
+}
+
+func generateIndexHTML(options htmlRewriteOptions) string {
+	var builder strings.Builder
+	builder.WriteString("<!doctype html>\n")
+	builder.WriteString("<html lang=\"en\">\n")
+	builder.WriteString("<head>\n")
+	builder.WriteString("    <meta charset=\"utf-8\" />\n")
+	builder.WriteString("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n")
+	builder.WriteString("    <title>goframe app</title>\n")
+	if preload := preloadHTML(options); preload != "" {
+		for _, line := range strings.Split(preload, "\n") {
+			builder.WriteString("    ")
+			builder.WriteString(line)
+			builder.WriteString("\n")
+		}
+	}
+	for _, style := range options.stylePaths {
+		builder.WriteString(fmt.Sprintf("    <link rel=\"stylesheet\" href=\"%s\" />\n", style))
+	}
+	builder.WriteString("</head>\n")
+	builder.WriteString("<body>\n")
+	builder.WriteString("    <div id=\"root\">Loading...</div>\n")
+	builder.WriteString("    ")
+	builder.WriteString(runtimeHTML(options))
+	builder.WriteString("\n")
+	for _, line := range strings.Split(bootstrapHTML(options), "\n") {
+		builder.WriteString("    ")
+		builder.WriteString(line)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</body>\n")
+	builder.WriteString("</html>\n")
+	return builder.String()
+}
+
+func rewriteIndexHTML(content string, options htmlRewriteOptions) string {
+	preload := preloadHTML(options)
 	content, replaced := replaceHTMLBlock(content, preloadBlockName, preload)
 	if !replaced && preload != "" {
 		content = strings.Replace(content, "</head>", preload+"\n</head>", 1)
 	}
 
-	runtime := fmt.Sprintf(`<script src="%s"></script>`, options.runtimePath)
+	runtime := runtimeHTML(options)
 	content, replaced = replaceHTMLBlock(content, runtimeBlockName, runtime)
 	if !replaced {
 		content = strings.ReplaceAll(content, runtimeAssetName, options.runtimePath)
 	}
 
-	bootstrap := fmt.Sprintf(`<script>
-    const go = new Go();
-    WebAssembly.instantiateStreaming(fetch("%s"), go.importObject)
-        .then((result) => go.run(result.instance));
-</script>`, options.wasmPath)
+	bootstrap := bootstrapHTML(options)
 	content, replaced = replaceHTMLBlock(content, bootstrapBlockName, bootstrap)
 	if !replaced {
 		content = strings.ReplaceAll(content, "main.wasm", options.wasmPath)
@@ -587,6 +765,32 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) string {
 		content = strings.ReplaceAll(content, `href="./`+source+`"`, `href="`+destination+`"`)
 	}
 	return content
+}
+
+func preloadHTML(options htmlRewriteOptions) string {
+	if !options.preload {
+		return ""
+	}
+	lines := []string{
+		fmt.Sprintf(`<link rel="preload" href="%s" as="fetch" type="application/wasm" crossorigin>`, options.wasmPath),
+		fmt.Sprintf(`<link rel="preload" href="%s" as="script">`, options.runtimePath),
+	}
+	for _, style := range options.stylePaths {
+		lines = append(lines, fmt.Sprintf(`<link rel="preload" href="%s" as="style">`, style))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func runtimeHTML(options htmlRewriteOptions) string {
+	return fmt.Sprintf(`<script src="%s"></script>`, options.runtimePath)
+}
+
+func bootstrapHTML(options htmlRewriteOptions) string {
+	return fmt.Sprintf(`<script>
+    const go = new Go();
+    WebAssembly.instantiateStreaming(fetch("%s"), go.importObject)
+        .then((result) => go.run(result.instance));
+</script>`, options.wasmPath)
 }
 
 func replaceHTMLBlock(content, name, replacement string) (string, bool) {
@@ -715,15 +919,6 @@ func isCompressiblePackageAsset(name string) bool {
 	default:
 		return false
 	}
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func publishPackageArtifacts(sourceDir, destinationDir string) error {

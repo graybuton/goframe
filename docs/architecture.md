@@ -139,7 +139,9 @@ An optional `goframe.json` describes application defaults:
 - package output directory;
 - preferred compiler;
 - normalized WASM filename, defaulting to `bundle.wasm`;
-- static assets copied by packaging.
+- static assets copied by packaging. The recommended preview shape is an
+  asset directory such as `"assets": "./assets"`; legacy explicit path lists
+  remain supported.
 
 CLI flags override manifest defaults. Paths in the manifest must remain inside
 the application directory. Unknown manifest fields are rejected so typos fail

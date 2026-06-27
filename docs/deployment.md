@@ -93,18 +93,35 @@ collide with generated names such as `bundle.wasm`, `wasm_exec.js`, generated
 metadata, or `.gz`/`.br` sidecars. Duplicate assets after path normalization
 are rejected before publication.
 
-`index.html` is the required standalone package entrypoint. It must be
-declared exactly once in `goframe.json` assets after normalization and must
-exist at the app root as a regular non-symlink file. `goxc package` checks this
-before materializing the build workspace or compiling WASM, so a missing or
-invalid `index.html` does not clean or replace a previous complete package.
-Other declared assets remain optional in the current public-preview contract:
-when a non-required CSS/data/image asset is missing, packaging prints a message
-and skips it.
+The recommended preview manifest uses an asset directory:
+
+```json
+{
+  "entry": "./cmd/app",
+  "compiler": "tinygo",
+  "assets": "./assets"
+}
+```
+
+Files inside that directory are packaged relative to the directory root:
+`assets/styles.css` becomes package `assets/styles.css`, and
+`assets/data/issues.txt` becomes package `assets/data/issues.txt`. If
+`assets/index.html` exists, it is the custom standalone HTML template and is
+published as package root `index.html`. It is not copied to
+`assets/index.html`.
+
+If no custom HTML template is selected, `goxc package` generates a default
+root `index.html` with a `root` mount element, final runtime/WASM paths,
+optional preload hints, and stylesheet links for packaged CSS assets. Legacy
+explicit lists such as `"assets": ["index.html", "styles.css"]` remain
+supported. In that mode, listed `index.html` is a custom template and must
+exist as a regular non-symlink file; if it is omitted, generated HTML is used.
+Missing non-index listed assets remain optional in the current public-preview
+contract: packaging prints a message and skips them.
 
 ## HTML Rewriting
 
-Example `index.html` files use explicit package blocks:
+Custom `index.html` files may use explicit package blocks:
 
 ```html
 <!-- goframe:preload -->
@@ -138,7 +155,8 @@ assets:
 <link rel="preload" href="assets/styles.77a1de20.css" as="style">
 ```
 
-CSS preload is included only when CSS assets are declared in `goframe.json`.
+CSS preload is included only when CSS assets are packaged through the manifest
+asset directory or explicit asset list.
 
 ## Asset Manifest
 
@@ -291,10 +309,11 @@ Route query state also lives in the hash, for example
 `#/issues?status=open&q=auth`. The server still receives only the original
 `index.html` request.
 
-Path/history-mode routing is not implemented. If a future app wants clean URLs
-such as `/issues/42`, the server or CDN would need a fallback that serves
-`index.html` for application routes. `goxc serve` remains development-only and
-does not configure a production fallback policy.
+Path/history-mode routing is not implemented. Clean URLs such as `/issues/42`
+are outside the current preview router contract; deployments that implement
+them independently need a server or CDN fallback that serves `index.html` for
+application routes. `goxc serve` remains development-only and does not
+configure a production fallback policy.
 
 ## Not In MVP 13
 

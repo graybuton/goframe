@@ -70,10 +70,11 @@ Try only with the Go/WASM build:
 ```text
 examples/router-dashboard/
 ├── goframe.json
-├── index.html
-├── styles.css
-├── data/
-│   └── issues.txt
+├── assets/
+│   ├── index.html
+│   ├── styles.css
+│   └── data/
+│       └── issues.txt
 ├── cmd/app/
 │   ├── app.gox
 │   ├── main.go
@@ -86,13 +87,13 @@ examples/router-dashboard/
     └── pages/
 ```
 
-`data/issues.txt` is copied into the packaged app and fetched from the same
-origin as `assets/data/issues.txt`.
+Source `assets/data/issues.txt` is copied into the packaged app at the same
+logical path and fetched from the same origin.
 
 ## Data Flow
 
 ```text
-packaged data/issues.txt
+packaged assets/data/issues.txt
   -> example-local browser fetch loader
   -> data.ParseIssues
   -> data.IssueProvider

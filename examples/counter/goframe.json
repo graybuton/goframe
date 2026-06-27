@@ -1,10 +1,4 @@
 {
-  "name": "counter",
-  "entry": ".",
-  "output": "dist",
   "compiler": "tinygo",
-  "wasm": "bundle.wasm",
-  "assets": [
-    "index.html"
-  ]
+  "assets": "./assets"
 }

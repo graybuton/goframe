@@ -215,8 +215,9 @@ app/
 ├── goframe.json
 ├── app.gox
 ├── main.go
-├── index.html
-└── styles.css
+└── assets/
+    ├── index.html
+    └── styles.css
 ```
 
 For larger apps, the recommended Go-first layout is a child executable entry
@@ -225,8 +226,9 @@ package plus app-private internal packages:
 ```text
 app/
 ├── goframe.json
-├── index.html
-├── styles.css
+├── assets/
+│   ├── index.html
+│   └── styles.css
 ├── cmd/app/
 │   ├── main.go
 │   └── app.gox
@@ -239,10 +241,9 @@ app/
 
 ```json
 {
-  "name": "app",
   "entry": "./cmd/app",
   "compiler": "tinygo",
-  "assets": ["index.html", "styles.css"]
+  "assets": "./assets"
 }
 ```
 
@@ -404,7 +405,8 @@ func App() gf.Node {
 ```
 
 The MVP router is hash-based. Path/history mode, file-based routing, loaders,
-route middleware, and automatic route-level boundaries remain future work.
+route middleware, and automatic route-level boundaries are not part of the
+current preview contract.
 
 For small URL-driven state, routes expose query helpers:
 
@@ -473,6 +475,10 @@ Common commands:
     ├── bundle.wasm
     └── wasm_exec.js
 ```
+
+Use `"assets": "./assets"` for app static files. If `assets/index.html` exists,
+it is rewritten as the package root HTML entrypoint; otherwise `goxc package`
+generates a default `index.html`.
 
 `goxc serve` is development-only. Production compression negotiation, cache
 headers, TLS, access control, and static-server hardening belong to deployment

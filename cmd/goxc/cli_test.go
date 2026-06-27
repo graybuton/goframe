@@ -130,6 +130,65 @@ func TestLoadManifestDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadManifestAssetsUnionForms(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content string
+		mode    manifestAssetMode
+		dir     string
+		list    []string
+	}{
+		{
+			name:    "omitted",
+			content: `{}`,
+			mode:    manifestAssetsAuto,
+		},
+		{
+			name:    "null",
+			content: `{"assets":null}`,
+			mode:    manifestAssetsAuto,
+		},
+		{
+			name:    "directory",
+			content: `{"assets":"./assets"}`,
+			mode:    manifestAssetsDirectory,
+			dir:     "assets",
+		},
+		{
+			name:    "directory without dot",
+			content: `{"assets":"assets"}`,
+			mode:    manifestAssetsDirectory,
+			dir:     "assets",
+		},
+		{
+			name:    "list",
+			content: `{"assets":["index.html","styles.css"]}`,
+			mode:    manifestAssetsList,
+			list:    []string{"index.html", "styles.css"},
+		},
+		{
+			name:    "empty list",
+			content: `{"assets":[]}`,
+			mode:    manifestAssetsList,
+			list:    []string{},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(test.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			manifest, err := loadManifest(appDir)
+			if err != nil {
+				t.Fatalf("loadManifest() error: %v", err)
+			}
+			if manifest.Assets.Mode != test.mode || manifest.Assets.Directory != test.dir || strings.Join(manifest.Assets.List, ",") != strings.Join(test.list, ",") {
+				t.Fatalf("assets = %+v, want mode:%v dir:%q list:%#v", manifest.Assets, test.mode, test.dir, test.list)
+			}
+		})
+	}
+}
+
 func TestLoadManifestAcceptsLegacyMainWASM(t *testing.T) {
 	appDir := t.TempDir()
 	content := []byte(`{"wasm":"main.wasm"}`)
@@ -191,6 +250,10 @@ func TestManifestRejectsEscapingPaths(t *testing.T) {
 		{name: "wasm slash root", content: `{"wasm":"/bundle.wasm"}`},
 		{name: "asset", content: `{"assets":["../secret.css"]}`},
 		{name: "asset slash root", content: `{"assets":["/secret.css"]}`},
+		{name: "asset directory parent", content: `{"assets":"../assets"}`},
+		{name: "asset directory slash root", content: `{"assets":"/assets"}`},
+		{name: "asset directory drive root", content: `{"assets":"C:/assets"}`},
+		{name: "asset directory tool root", content: `{"assets":".goframe/assets"}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
