@@ -76,8 +76,12 @@ go install github.com/graybuton/goframe/cmd/goxc@latest
 
 ## After Tagging
 
-For now, release notes can be drafted from `CHANGELOG.md`. Keep milestone notes
-clear about API instability and experimental status.
+Use the dedicated release notes document for the preview tag:
+`docs/release-notes-v0.1.0-preview.1.md`. `CHANGELOG.md` remains the factual
+change log; release notes should summarize preview scope, maturity tiers,
+validation evidence, compatibility notes, and known limitations.
+`docs/evaluator-guide.md` is the evaluator-facing quick path for trying the
+preview.
 
 ## Public Preview Checklist
 
@@ -120,6 +124,8 @@ clear about API instability and experimental status.
 ### Docs
 
 - README current;
+- evaluator guide current;
+- release notes current;
 - tutorial current;
 - API stability current;
 - platform support current;

@@ -253,15 +253,19 @@ Non-goals:
 - no production support claim;
 - no final `v0.1.0` stability promise.
 
+Current status: release notes and evaluator guidance are prepared as docs-only
+preview material. The preview tag itself is not created by this planning work.
+The release story preserves the broader GoFrame platform vision while limiting
+`v0.1.0-preview.1` claims to the evidenced browser/WASM layer.
+
 ## Preview Verdict
 
 | Decision target | Verdict | Meaning |
 |---|---|---|
 | Continued development | Go | The project direction is coherent and the audited baseline is strong enough for continued feature and hardening work. |
-| Narrow evaluator preview | Conditional Go | Reasonable after contract, platform, and identity closeout, with Linux/Chrome evidence and explicit maturity tiers. |
-| Broad public preview | No-Go until High risks are addressed or explicitly scoped | Multi-module/reusable identity and platform evidence are not yet broad-preview complete. |
+| Narrow evaluator preview | Conditional Go | Reasonable with release notes, evaluator guide, Linux/Chrome evidence, minimal macOS/Windows Go/toolchain evidence, and explicit maturity tiers. |
+| Broad support claims | No-Go | Multi-module/reusable identity and non-Chrome browser evidence remain scoped limitations rather than broad support claims. |
 | Production use | No-Go | GoFrame remains experimental and does not provide production server, SSR/hydration, history routing, route loaders, or a 1.0 API promise. |
 
-The broad-preview No-Go is not a rejection of GoFrame's ambition. It means the
-project should harden and label its current browser/WASM layer before widening
-public promises.
+The preview limitations are not a rejection of GoFrame's ambition. They keep the
+current browser/WASM layer honest before any wider public promises.

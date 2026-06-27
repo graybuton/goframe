@@ -90,6 +90,9 @@
 - Runtime experimental-surface hardening coverage for resource reload/stale
   callback edges, ErrorBoundary reset/new-incident behavior, router route-key
   remount policy, and preview contract docs alignment.
+- `v0.1.0-preview.1` release-story docs, including draft release notes,
+  evaluator guidance, compatibility/readiness alignment, and fact-first preview
+  documentation cleanup.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
