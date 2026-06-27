@@ -84,6 +84,9 @@
 - Package preview closeout coverage for manifest/assets error paths, generated
   and custom package `index.html` output, versioned metadata presence,
   package ownership verification, and fact-checked package/manifest docs.
+- Preview tooling closeout coverage for `pkg/gox` trusted-filesystem file
+  helper classification, export destination false-marker rejection, package
+  publication limitation wording, and lightweight supply-chain/tooling evidence.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,

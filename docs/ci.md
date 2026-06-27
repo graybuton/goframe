@@ -128,6 +128,20 @@ Security alerts and security updates should be enabled from the GitHub
 repository security settings. Recommended labels are `dependencies`,
 `github-actions`, `go`, `vscode`, and `npm`.
 
+Current supply-chain evidence is lightweight:
+
+- GitHub Actions workflows use read-only repository contents permissions by
+  default;
+- Dependabot checks GitHub Actions, Go modules, and VS Code extension npm
+  dependencies;
+- the VS Code extension workflow installs from `package-lock.json` with
+  `npm ci`;
+- the root Go module currently has no third-party module requirements beyond
+  the standard library.
+
+No SBOM, package signing, or heavyweight dependency scanner is part of the
+current preview CI contract.
+
 ## Local Checks
 
 Core local verification:

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"go/parser"
 	gotoken "go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -71,6 +73,93 @@ func App() gf.Node {
 	}
 	if !strings.Contains(string(generated), "if count < max") {
 		t.Fatalf("Go comparison was not preserved:\n%s", generated)
+	}
+}
+
+func TestGenerateFileToWithOptionsWritesExplicitOutput(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "src", "view.gox")
+	outputPath := filepath.Join(root, "generated", "view.gox.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <Card />
+}
+`)
+	if err := os.WriteFile(sourcePath, source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wrote, err := GenerateFileToWithOptions(sourcePath, outputPath, GenerateOptions{
+		Filename:        "internal/ui/view.gox",
+		PackageIdentity: "github.com/example/app/internal/ui",
+	})
+	if err != nil {
+		t.Fatalf("GenerateFileToWithOptions() error: %v", err)
+	}
+	if wrote != outputPath {
+		t.Fatalf("generated path = %q, want %q", wrote, outputPath)
+	}
+	generated, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read generated output: %v", err)
+	}
+	text := string(generated)
+	for _, want := range []string{
+		generatedHeader,
+		`gf.NewComponentType("github.com/example/app/internal/ui.Card", "Card")`,
+		`gf.ComponentT(_goxComponent_view_Card`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFindFilesReturnsStableGOXFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{
+		"b.gox",
+		"a.gox",
+		"nested/c.gox",
+		"nested/ignore.txt",
+	} {
+		fullPath := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, err := FindFiles(root)
+	if err != nil {
+		t.Fatalf("FindFiles(directory) error: %v", err)
+	}
+	want := []string{
+		filepath.Join(root, "a.gox"),
+		filepath.Join(root, "b.gox"),
+		filepath.Join(root, "nested", "c.gox"),
+	}
+	if strings.Join(files, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("FindFiles() = %#v, want %#v", files, want)
+	}
+
+	direct, err := FindFiles(filepath.Join(root, "a.gox"))
+	if err != nil {
+		t.Fatalf("FindFiles(file) error: %v", err)
+	}
+	if len(direct) != 1 || direct[0] != filepath.Join(root, "a.gox") {
+		t.Fatalf("FindFiles(file) = %#v", direct)
+	}
+	if _, err := FindFiles(filepath.Join(root, "nested", "ignore.txt")); err == nil {
+		t.Fatal("FindFiles(non-gox file) returned nil error")
 	}
 }
 

@@ -154,10 +154,19 @@ Compiler package:
 - `gox.Diagnostic`
 - `gox.DiagnosticError`
 
-These are exported for the toolchain and tests. `Generate`, `GenerateNamed`,
-`GenerateWithOptions`, diagnostics, and file generation are tooling contracts.
-The AST, lexer, and parser structs are exported today but should be treated as
-compiler-facing and experimental rather than stable user APIs.
+These are exported for the toolchain, editor integrations, and tests.
+`Generate`, `GenerateNamed`, and `GenerateWithOptions` are the primary
+in-memory generation boundary for callers that choose their own source bytes.
+`GenerateFile`, `GenerateFileTo`, `GenerateFileToWithOptions`, and `FindFiles`
+are trusted-filesystem convenience helpers for tooling/editor/test workflows.
+They use ordinary standard-library file operations and do not inherit `goxc`'s
+root-aware symlink rejection, physical output-overlap checks, package ownership
+checks, or package publication guarantees. Use `goxc` or add a caller-side
+filesystem policy when processing untrusted repository trees.
+
+Diagnostics and file generation are tooling contracts. The AST, lexer, and
+parser structs are exported today but should be treated as compiler-facing and
+experimental rather than stable user APIs.
 
 Tooling contracts:
 
@@ -276,6 +285,7 @@ These are not part of the first public preview promise.
 | Router query helpers | Public-Candidate with limitations. | Good for simple URL state; not a typed query-state manager. |
 | Virtualization | Public-Candidate fixed-height contract. | Dynamic measurement and advanced accessibility remain future work. |
 | `pkg/gox` parser/AST exports | Compiler-facing experimental. | Exported today for tooling/tests, but not a stable language-service API. |
+| `pkg/gox` file helpers | Trusted-filesystem convenience. | Useful for editor/test tooling; hardened untrusted filesystem handling belongs to `goxc` or caller-side policy. |
 
 ## Deprecation Policy
 
@@ -284,7 +294,7 @@ For now, deprecations should:
 - keep a clear warning or documentation note;
 - have a replacement path;
 - remain covered by tests if behavior is still accepted;
-- be removed only in a planned cleanup MVP.
+- be removed only in a documented cleanup stage.
 
 ## What Is Not Stable Yet
 

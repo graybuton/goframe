@@ -641,6 +641,21 @@ func TestPackageDestinationFalseMarkerPreservesFiles(t *testing.T) {
 	assertFileContent(t, userFile, "keep")
 }
 
+func TestExportDestinationFalseMarkerPreservesFiles(t *testing.T) {
+	outDir := t.TempDir()
+	userFile := filepath.Join(outDir, "user.txt")
+	if err := os.WriteFile(filepath.Join(outDir, packageMetadataName), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userFile, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateExportDestination(outDir, false); err == nil {
+		t.Fatal("validateExportDestination() accepted false marker")
+	}
+	assertFileContent(t, userFile, "keep")
+}
+
 func TestExportRejectsOverlappingDestination(t *testing.T) {
 	appDir := t.TempDir()
 	layout, err := newBuildLayout(layoutOptions{appDir: appDir})

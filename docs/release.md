@@ -94,6 +94,7 @@ clear about API instability and experimental status.
 ### API
 
 - exported `pkg/goframe` and `pkg/gox` API inventory reviewed;
+- `pkg/gox` in-memory APIs and trusted-filesystem file helpers classified;
 - every new public export is classified in `docs/api-stability.md`;
 - deprecated APIs have replacement guidance;
 - migration notes exist for user-visible breaking changes;
@@ -155,6 +156,8 @@ clear about API instability and experimental status.
 - experimental surfaces named rather than hidden;
 - future Player/Engine direction bounded as vision, not a preview promise;
 - compatibility/deprecation notes included;
+- supply-chain/tooling evidence stated as lightweight CI/Dependabot/lockfile
+  coverage, with no SBOM or scanner claim in the current preview contract;
 - migration notes linked;
 - rollback/revert plan noted for preview users.
 
