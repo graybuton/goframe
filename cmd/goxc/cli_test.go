@@ -189,6 +189,25 @@ func TestLoadManifestAssetsUnionForms(t *testing.T) {
 	}
 }
 
+func TestLoadManifestRejectsInvalidAssetsType(t *testing.T) {
+	for _, content := range []string{
+		`{"assets":42}`,
+		`{"assets":true}`,
+		`{"assets":{"dir":"assets"}}`,
+	} {
+		t.Run(content, func(t *testing.T) {
+			appDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadManifest(appDir)
+			if err == nil || !strings.Contains(err.Error(), "assets must be a string directory, array of paths, null, or omitted") {
+				t.Fatalf("loadManifest() error = %v, want assets type guidance", err)
+			}
+		})
+	}
+}
+
 func TestLoadManifestAcceptsLegacyMainWASM(t *testing.T) {
 	appDir := t.TempDir()
 	content := []byte(`{"wasm":"main.wasm"}`)

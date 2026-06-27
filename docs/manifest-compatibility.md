@@ -211,7 +211,7 @@ Breaking manifest/package changes require:
 
 ## Current Limitations
 
-- No mandatory user-authored schema version yet.
+- No mandatory user-authored schema version in `v0.1.0-preview.1`.
 - No signed package metadata.
 - No machine-readable JSON schema file.
 - Generated workspace layout under `.goframe` remains internal.

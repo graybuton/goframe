@@ -315,8 +315,11 @@ them independently need a server or CDN fallback that serves `index.html` for
 application routes. `goxc serve` remains development-only and does not
 configure a production fallback policy.
 
-## Not In MVP 13
+## Not In The Current Preview Package Contract
 
-Bundle splitting is intentionally not part of this stage. It needs an app graph,
-route/loading model, loader design, and probably path/history routing,
-SSR/hydration, or Player decisions first.
+The current package contract does not include bundle splitting, asset imports
+from Go/GOX, glob asset patterns, route loaders, SSR/hydration, production
+server fallback automation, or Player/Engine packaging semantics. The package
+surface is limited to explicit app manifests, generated or custom
+`index.html`, static assets under package `assets/`, versioned generated
+metadata, and exportable static browser/WASM artifacts.
