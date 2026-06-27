@@ -36,8 +36,8 @@ regression tests, including root-aware symlink checks for app roots, entry
 directories, source files, manifest assets, package/export roots, generated
 outputs, workspace cleanup behavior, package ownership markers, asset
 namespace collisions, lexical and physical source/output overlap, partial
-publication metadata, required standalone `index.html` integrity, fail-closed
-legacy ownership, and dev-server symlink entries.
+publication metadata, custom/generated standalone `index.html` integrity,
+fail-closed legacy ownership, and dev-server symlink entries.
 
 ### WASM Size
 

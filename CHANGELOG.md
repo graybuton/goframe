@@ -78,6 +78,9 @@
 - Component-scoped resource prototype with `gf.UseResource`, explicit
   loading/ready/failed state, stale completion guards, cleanup/cancellation
   semantics, and a focused resource example plus browser smoke coverage.
+- Preview-facing manifest asset directory contract for `goframe.json`, including
+  `"assets": "./assets"`, legacy explicit asset list compatibility, automatic
+  default `index.html` generation, and updated examples/docs.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,

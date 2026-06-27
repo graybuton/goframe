@@ -703,79 +703,48 @@ func TestPackageRejectsExplicitOutputInsideApp(t *testing.T) {
 
 func TestPackageAssetPlanRejectsReservedAndDuplicateNames(t *testing.T) {
 	tests := []projectManifest{
-		{WASM: "bundle.wasm", Assets: []string{"bundle.wasm"}},
-		{WASM: "bundle.wasm", Assets: []string{"wasm_exec.js"}},
-		{WASM: "bundle.wasm", Assets: []string{"bundle.wasm.gz"}},
-		{WASM: "bundle.wasm", Assets: []string{"styles.css", "./styles.css"}},
-		{WASM: "bundle.wasm", Assets: []string{"a/../styles.css", "styles.css"}},
-		{WASM: "wasm_exec.js", Assets: []string{"index.html"}},
+		{WASM: "bundle.wasm", Assets: listManifestAssets([]string{"bundle.wasm"})},
+		{WASM: "bundle.wasm", Assets: listManifestAssets([]string{"wasm_exec.js"})},
+		{WASM: "bundle.wasm", Assets: listManifestAssets([]string{"bundle.wasm.gz"})},
+		{WASM: "bundle.wasm", Assets: listManifestAssets([]string{"asset-manifest.json"})},
+		{WASM: "bundle.wasm", Assets: listManifestAssets([]string{"goframe-package.json"})},
+		{WASM: "bundle.wasm", Assets: listManifestAssets([]string{"styles.css", "./styles.css"})},
+		{WASM: "wasm_exec.js", Assets: listManifestAssets([]string{})},
 	}
 	for _, manifest := range tests {
-		t.Run(strings.Join(manifest.Assets, ","), func(t *testing.T) {
-			if _, err := validatePackageAssetPlan(manifest, filepath.Base(manifest.WASM), packageOptions{compress: map[string]bool{"gzip": true}}); err == nil {
-				t.Fatalf("validatePackageAssetPlan() accepted manifest %+v", manifest)
+		t.Run(strings.Join(manifest.Assets.List, ","), func(t *testing.T) {
+			appDir := t.TempDir()
+			if _, err := planPackageAssets(appDir, manifest, filepath.Base(manifest.WASM), packageOptions{compress: map[string]bool{"gzip": true}}); err == nil {
+				t.Fatalf("planPackageAssets() accepted manifest %+v", manifest)
 			}
 		})
 	}
 }
 
 func TestPackageAssetPlanAllowsDistinctNestedAssets(t *testing.T) {
-	assets, err := validatePackageAssetPlan(projectManifest{
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, indexHTMLAssetName, "<html></html>")
+	plan, err := planPackageAssets(appDir, projectManifest{
 		WASM:   "bundle.wasm",
-		Assets: []string{"index.html", "styles/app.css", "images/logo.svg"},
+		Assets: listManifestAssets([]string{"index.html", "styles/app.css", "images/logo.svg"}),
 	}, "bundle.wasm", packageOptions{compress: map[string]bool{"gzip": true, "br": true}})
 	if err != nil {
-		t.Fatalf("validatePackageAssetPlan() rejected distinct nested assets: %v", err)
+		t.Fatalf("planPackageAssets() rejected distinct nested assets: %v", err)
 	}
-	want := []string{"index.html", "styles/app.css", "images/logo.svg"}
-	if strings.Join(assets, ",") != strings.Join(want, ",") {
-		t.Fatalf("assets = %#v, want %#v", assets, want)
+	if plan.CustomIndexPath == "" || plan.GenerateIndex {
+		t.Fatalf("index plan = custom:%q generated:%v, want custom index", plan.CustomIndexPath, plan.GenerateIndex)
+	}
+	got := []string{}
+	for _, asset := range plan.Assets {
+		got = append(got, asset.LogicalName)
+	}
+	want := []string{"images/logo.svg", "styles/app.css"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("assets = %#v, want %#v", got, want)
 	}
 }
 
-func TestValidateRequiredPackageEntrypoints(t *testing.T) {
-	t.Run("valid index", func(t *testing.T) {
-		appDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(appDir, indexHTMLAssetName), []byte("<html></html>"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName, "styles.css"}); err != nil {
-			t.Fatalf("validateRequiredPackageEntrypoints() error: %v", err)
-		}
-	})
-
-	t.Run("missing declaration", func(t *testing.T) {
-		appDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(appDir, indexHTMLAssetName), []byte("<html></html>"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		err := validateRequiredPackageEntrypoints(appDir, []string{"styles.css"})
-		if err == nil || !strings.Contains(err.Error(), "must include index.html exactly once") {
-			t.Fatalf("error = %v, want required index declaration", err)
-		}
-	})
-
-	t.Run("missing source", func(t *testing.T) {
-		appDir := t.TempDir()
-		err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName})
-		if err == nil || !strings.Contains(err.Error(), "was not found") {
-			t.Fatalf("error = %v, want missing index source", err)
-		}
-	})
-
-	t.Run("directory source", func(t *testing.T) {
-		appDir := t.TempDir()
-		if err := os.Mkdir(filepath.Join(appDir, indexHTMLAssetName), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName})
-		if err == nil || !strings.Contains(err.Error(), "is not a regular file") {
-			t.Fatalf("error = %v, want non-regular index source", err)
-		}
-	})
-}
-
-func TestValidateRequiredPackageEntrypointsRejectsSymlinkIndex(t *testing.T) {
+func TestPackageAssetPlanRejectsSymlinkIndex(t *testing.T) {
 	requireSymlinkSupport(t)
 
 	root := t.TempDir()
@@ -790,35 +759,226 @@ func TestValidateRequiredPackageEntrypointsRejectsSymlinkIndex(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(appDir, indexHTMLAssetName)); err != nil {
 		t.Fatal(err)
 	}
-	err := validateRequiredPackageEntrypoints(appDir, []string{indexHTMLAssetName})
+	_, err := planPackageAssets(appDir, projectManifest{
+		WASM:   "bundle.wasm",
+		Assets: listManifestAssets([]string{indexHTMLAssetName}),
+	}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
 	if err == nil || !strings.Contains(err.Error(), "is a symlink") {
 		t.Fatalf("error = %v, want symlink index source", err)
 	}
 	assertFileContent(t, external, "keep")
 }
 
-func TestPackageRejectsInvalidIndexBeforeOutputMutation(t *testing.T) {
+func TestPackageAssetPlanDirectoryMode(t *testing.T) {
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, "assets/index.html", "<html></html>")
+	writeTestFile(t, appDir, "assets/styles.css", "body{}")
+	writeTestFile(t, appDir, "assets/data/issues.txt", "RD-1")
+	plan, err := planPackageAssets(appDir, projectManifest{
+		WASM:   "bundle.wasm",
+		Assets: directoryManifestAssets("./assets"),
+	}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
+	if err != nil {
+		t.Fatalf("planPackageAssets(directory) error: %v", err)
+	}
+	if plan.CustomIndexPath != filepath.Join(appDir, "assets", "index.html") || plan.GenerateIndex {
+		t.Fatalf("index plan = custom:%q generated:%v", plan.CustomIndexPath, plan.GenerateIndex)
+	}
+	got := []string{}
+	for _, asset := range plan.Assets {
+		got = append(got, asset.LogicalName)
+	}
+	want := []string{"data/issues.txt", "styles.css"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("assets = %#v, want %#v", got, want)
+	}
+}
+
+func TestPackageAssetPlanAutoAndGeneratedIndex(t *testing.T) {
+	t.Run("auto assets directory", func(t *testing.T) {
+		appDir := t.TempDir()
+		writeTestFile(t, appDir, "assets/styles.css", "body{}")
+		plan, err := planPackageAssets(appDir, projectManifest{WASM: "bundle.wasm", Assets: autoManifestAssets()}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
+		if err != nil {
+			t.Fatalf("planPackageAssets(auto assets dir) error: %v", err)
+		}
+		if !plan.GenerateIndex || len(plan.Assets) != 1 || plan.Assets[0].LogicalName != "styles.css" {
+			t.Fatalf("plan = %+v, want generated index with styles.css", plan)
+		}
+	})
+
+	t.Run("auto root index fallback", func(t *testing.T) {
+		appDir := t.TempDir()
+		writeTestFile(t, appDir, indexHTMLAssetName, "<html></html>")
+		plan, err := planPackageAssets(appDir, projectManifest{WASM: "bundle.wasm", Assets: autoManifestAssets()}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
+		if err != nil {
+			t.Fatalf("planPackageAssets(auto root index) error: %v", err)
+		}
+		if plan.CustomIndexPath != filepath.Join(appDir, indexHTMLAssetName) || plan.GenerateIndex {
+			t.Fatalf("plan = %+v, want custom root index", plan)
+		}
+	})
+
+	t.Run("empty list generates index", func(t *testing.T) {
+		appDir := t.TempDir()
+		plan, err := planPackageAssets(appDir, projectManifest{WASM: "bundle.wasm", Assets: listManifestAssets([]string{})}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
+		if err != nil {
+			t.Fatalf("planPackageAssets(empty list) error: %v", err)
+		}
+		if !plan.GenerateIndex || plan.CustomIndexPath != "" || len(plan.Assets) != 0 {
+			t.Fatalf("plan = %+v, want generated index only", plan)
+		}
+	})
+}
+
+func TestPackageAssetPlanRejectsSymlinkedAssetDirectory(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	external := filepath.Join(root, "external-assets")
+	if err := os.MkdirAll(external, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(appDir, assetDirectoryName)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := planPackageAssets(appDir, projectManifest{WASM: "bundle.wasm", Assets: directoryManifestAssets("assets")}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("planPackageAssets() error = %v, want symlink rejection", err)
+	}
+	_, err = planPackageAssets(appDir, projectManifest{WASM: "bundle.wasm", Assets: autoManifestAssets()}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("planPackageAssets(auto) error = %v, want symlink rejection", err)
+	}
+}
+
+func TestPackageAssetPlanRejectsSymlinkedDirectoryAsset(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.MkdirAll(filepath.Join(appDir, assetDirectoryName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(root, "external.css")
+	if err := os.WriteFile(external, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(appDir, assetDirectoryName, "styles.css")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := planPackageAssets(appDir, projectManifest{WASM: "bundle.wasm", Assets: directoryManifestAssets("assets")}, "bundle.wasm", packageOptions{compress: map[string]bool{}})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("planPackageAssets() error = %v, want symlink rejection", err)
+	}
+	assertFileContent(t, external, "keep")
+}
+
+func TestGeneratedIndexHTMLIncludesRuntimeWASMStylesAndPreload(t *testing.T) {
+	html := generateIndexHTML(htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.12345678.wasm",
+		runtimePath: "assets/wasm_exec.87654321.js",
+		stylePaths:  []string{"assets/app.11111111.css", "assets/theme.22222222.css"},
+	})
+	for _, want := range []string{
+		`<div id="root">Loading...</div>`,
+		`<link rel="preload" href="assets/bundle.12345678.wasm" as="fetch" type="application/wasm" crossorigin>`,
+		`<link rel="preload" href="assets/wasm_exec.87654321.js" as="script">`,
+		`<link rel="preload" href="assets/app.11111111.css" as="style">`,
+		`<link rel="stylesheet" href="assets/app.11111111.css" />`,
+		`<script src="assets/wasm_exec.87654321.js"></script>`,
+		`fetch("assets/bundle.12345678.wasm")`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("generated index missing %q:\n%s", want, html)
+		}
+	}
+}
+
+func TestPackageGeneratesDefaultIndexForEmptyAssets(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	if err := os.Remove(filepath.Join(appDir, indexHTMLAssetName)); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, manifestName, `{"name":"demo","compiler":"go","assets":[]}`)
+	outDir := filepath.Join(t.TempDir(), "package")
+	if err := packageApp(packageOptions{appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{}}); err != nil {
+		t.Fatalf("packageApp() error: %v", err)
+	}
+	index, err := os.ReadFile(filepath.Join(outDir, indexHTMLAssetName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`<div id="root">Loading...</div>`, `assets/wasm_exec.js`, `fetch("assets/bundle.wasm")`} {
+		if !strings.Contains(string(index), want) {
+			t.Fatalf("generated index missing %q:\n%s", want, index)
+		}
+	}
+}
+
+func TestPackageDirectoryModePublishesAssetsRelativeToDirectory(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	if err := os.Remove(filepath.Join(appDir, indexHTMLAssetName)); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, manifestName, `{"name":"demo","compiler":"go","assets":"./assets"}`)
+	writeTestFile(t, appDir, "assets/styles.css", "body{}")
+	writeTestFile(t, appDir, "assets/data/issues.txt", "RD-1")
+	outDir := filepath.Join(t.TempDir(), "package")
+	if err := packageApp(packageOptions{appDir: appDir, compiler: "go", outDir: outDir, preload: true, compress: map[string]bool{}}); err != nil {
+		t.Fatalf("packageApp() error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, assetDirectoryName, "data", "issues.txt")); err != nil {
+		t.Fatalf("packaged data asset missing: %v", err)
+	}
+	index, err := os.ReadFile(filepath.Join(outDir, indexHTMLAssetName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), `href="assets/styles.css"`) || !strings.Contains(string(index), `as="style"`) {
+		t.Fatalf("generated index missing CSS link/preload path:\n%s", index)
+	}
+}
+
+func TestPackageDirectoryModePublishesCustomIndexAtRoot(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	if err := os.Remove(filepath.Join(appDir, indexHTMLAssetName)); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, manifestName, `{"name":"demo","compiler":"go","assets":"assets"}`)
+	writeTestFile(t, appDir, "assets/index.html", `<!doctype html><title>custom</title><link rel="stylesheet" href="styles.css"><div id="root"></div><script src="wasm_exec.js"></script><script>fetch("bundle.wasm")</script>`)
+	writeTestFile(t, appDir, "assets/styles.css", "body{}")
+	outDir := filepath.Join(t.TempDir(), "package")
+	if err := packageApp(packageOptions{appDir: appDir, compiler: "go", outDir: outDir, assetHash: true, compress: map[string]bool{}}); err != nil {
+		t.Fatalf("packageApp() error: %v", err)
+	}
+	index, err := os.ReadFile(filepath.Join(outDir, indexHTMLAssetName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), "<title>custom</title>") || !strings.Contains(string(index), `href="assets/styles.`) {
+		t.Fatalf("custom index was not rewritten at package root:\n%s", index)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, assetDirectoryName, indexHTMLAssetName)); !os.IsNotExist(err) {
+		t.Fatalf("assets/index.html was copied into package assets: %v", err)
+	}
+}
+
+func TestPackageRejectsInvalidCustomIndexBeforeOutputMutation(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		manifest string
 		write    func(t *testing.T, appDir string)
 		want     string
 	}{
-		{
-			name:     "explicit empty assets",
-			manifest: `{"name":"demo","compiler":"go","assets":[]}`,
-			write:    func(*testing.T, string) {},
-			want:     "must include index.html exactly once",
-		},
-		{
-			name:     "index omitted",
-			manifest: `{"name":"demo","compiler":"go","assets":["styles.css"]}`,
-			write: func(t *testing.T, appDir string) {
-				writeTestFile(t, appDir, indexHTMLAssetName, "<html></html>")
-				writeTestFile(t, appDir, "styles.css", "body{}")
-			},
-			want: "must include index.html exactly once",
-		},
 		{
 			name:     "declared but missing",
 			manifest: `{"name":"demo","compiler":"go","assets":["index.html"]}`,
@@ -846,10 +1006,10 @@ func TestPackageRejectsInvalidIndexBeforeOutputMutation(t *testing.T) {
 				t.Fatalf("packageApp() error = %v, want %q", err, test.want)
 			}
 			if _, statErr := os.Stat(filepath.Join(appDir, defaultWorkspaceName)); !os.IsNotExist(statErr) {
-				t.Fatalf("workspace was created before required index validation: %v", statErr)
+				t.Fatalf("workspace was created before custom index validation: %v", statErr)
 			}
 			if _, statErr := os.Stat(outDir); !os.IsNotExist(statErr) {
-				t.Fatalf("output was mutated before required index validation: %v", statErr)
+				t.Fatalf("output was mutated before custom index validation: %v", statErr)
 			}
 		})
 	}
@@ -857,7 +1017,7 @@ func TestPackageRejectsInvalidIndexBeforeOutputMutation(t *testing.T) {
 
 func TestPackageInvalidIndexPreservesPreviousCompletePackage(t *testing.T) {
 	appDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo","compiler":"go","assets":[]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, manifestName), []byte(`{"name":"demo","compiler":"go","assets":["index.html"]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	outDir := filepath.Join(t.TempDir(), "package")
@@ -881,8 +1041,8 @@ func TestPackageInvalidIndexPreservesPreviousCompletePackage(t *testing.T) {
 	}
 
 	err := packageApp(packageOptions{appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{}})
-	if err == nil || !strings.Contains(err.Error(), "must include index.html exactly once") {
-		t.Fatalf("packageApp() error = %v, want required index validation", err)
+	if err == nil || !strings.Contains(err.Error(), "was not found") {
+		t.Fatalf("packageApp() error = %v, want missing index validation", err)
 	}
 	for relative, content := range before {
 		assertFileContent(t, filepath.Join(outDir, filepath.FromSlash(relative)), content)

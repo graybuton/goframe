@@ -15,12 +15,57 @@ import (
 const manifestName = "goframe.json"
 
 type projectManifest struct {
-	Name     string   `json:"name"`
-	Entry    string   `json:"entry"`
-	Output   string   `json:"output"`
-	Compiler string   `json:"compiler"`
-	WASM     string   `json:"wasm"`
-	Assets   []string `json:"assets"`
+	Name     string         `json:"name"`
+	Entry    string         `json:"entry"`
+	Output   string         `json:"output"`
+	Compiler string         `json:"compiler"`
+	WASM     string         `json:"wasm"`
+	Assets   manifestAssets `json:"assets"`
+}
+
+type manifestAssetMode uint8
+
+const (
+	manifestAssetsAuto manifestAssetMode = iota
+	manifestAssetsDirectory
+	manifestAssetsList
+)
+
+type manifestAssets struct {
+	Mode      manifestAssetMode
+	Directory string
+	List      []string
+}
+
+func autoManifestAssets() manifestAssets {
+	return manifestAssets{Mode: manifestAssetsAuto}
+}
+
+func directoryManifestAssets(directory string) manifestAssets {
+	return manifestAssets{Mode: manifestAssetsDirectory, Directory: directory}
+}
+
+func listManifestAssets(assets []string) manifestAssets {
+	return manifestAssets{Mode: manifestAssetsList, List: assets}
+}
+
+func (assets *manifestAssets) UnmarshalJSON(content []byte) error {
+	content = bytes.TrimSpace(content)
+	if bytes.Equal(content, []byte("null")) {
+		*assets = autoManifestAssets()
+		return nil
+	}
+	var directory string
+	if err := json.Unmarshal(content, &directory); err == nil {
+		*assets = directoryManifestAssets(directory)
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(content, &list); err == nil {
+		*assets = listManifestAssets(list)
+		return nil
+	}
+	return fmt.Errorf("assets must be a string directory, array of paths, null, or omitted")
 }
 
 func loadManifest(appDir string) (projectManifest, error) {
@@ -30,7 +75,7 @@ func loadManifest(appDir string) (projectManifest, error) {
 		Output:   "dist",
 		Compiler: "go",
 		WASM:     "bundle.wasm",
-		Assets:   []string{"index.html"},
+		Assets:   autoManifestAssets(),
 	}
 
 	content, err := os.ReadFile(filepath.Join(appDir, manifestName))
@@ -67,9 +112,6 @@ func loadManifest(appDir string) (projectManifest, error) {
 	if manifest.WASM == "" {
 		manifest.WASM = "bundle.wasm"
 	}
-	if manifest.Assets == nil {
-		manifest.Assets = []string{"index.html"}
-	}
 
 	entry, err := cleanManifestEntry(manifest.Entry)
 	if err != nil {
@@ -90,10 +132,24 @@ func loadManifest(appDir string) (projectManifest, error) {
 	if manifest.Compiler != "go" && manifest.Compiler != "tinygo" {
 		return projectManifest{}, fmt.Errorf("compiler %q in %s must be go or tinygo", manifest.Compiler, manifestName)
 	}
-	for _, asset := range manifest.Assets {
-		if !safeChildPath(asset) {
-			return projectManifest{}, fmt.Errorf("asset %q in %s must be a child path inside the application", asset, manifestName)
+	switch manifest.Assets.Mode {
+	case manifestAssetsAuto:
+	case manifestAssetsDirectory:
+		directory, err := cleanManifestAssetDirectory(manifest.Assets.Directory)
+		if err != nil {
+			return projectManifest{}, fmt.Errorf("assets %q in %s %s", manifest.Assets.Directory, manifestName, err)
 		}
+		manifest.Assets.Directory = directory
+	case manifestAssetsList:
+		for index, asset := range manifest.Assets.List {
+			cleaned, err := cleanManifestAssetPath(asset)
+			if err != nil {
+				return projectManifest{}, fmt.Errorf("asset %q in %s %s", asset, manifestName, err)
+			}
+			manifest.Assets.List[index] = cleaned
+		}
+	default:
+		return projectManifest{}, fmt.Errorf("assets in %s has unsupported internal mode", manifestName)
 	}
 	return manifest, nil
 }
@@ -157,6 +213,29 @@ func isToolOwnedEntryRoot(root string) bool {
 	default:
 		return false
 	}
+}
+
+func cleanManifestAssetDirectory(directory string) (string, error) {
+	cleaned, err := cleanManifestAssetPath(directory)
+	if err != nil {
+		return "", err
+	}
+	if cleaned == indexHTMLAssetName {
+		return "", fmt.Errorf("must be a relative child directory, not a file")
+	}
+	return cleaned, nil
+}
+
+func cleanManifestAssetPath(value string) (string, error) {
+	if !safeChildPath(value) {
+		return "", fmt.Errorf("must be a child path inside the application")
+	}
+	cleaned := path.Clean(manifestPath(value))
+	parts := strings.Split(cleaned, "/")
+	if len(parts) > 0 && isToolOwnedEntryRoot(parts[0]) {
+		return "", fmt.Errorf("points to a GoFrame-owned or tool-owned directory")
+	}
+	return cleaned, nil
 }
 
 func safeChildPath(value string) bool {

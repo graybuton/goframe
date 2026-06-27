@@ -1,11 +1,4 @@
 {
-  "name": "context",
-  "entry": ".",
-  "output": "dist",
   "compiler": "tinygo",
-  "wasm": "bundle.wasm",
-  "assets": [
-    "index.html",
-    "styles.css"
-  ]
+  "assets": "./assets"
 }

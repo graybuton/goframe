@@ -30,7 +30,7 @@ func TestParseIssuesValidInput(t *testing.T) {
 }
 
 func TestParseIssuesPackagedDataset(t *testing.T) {
-	path := filepath.Join("..", "..", "data", "issues.txt")
+	path := filepath.Join("..", "..", "assets", "data", "issues.txt")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", path, err)

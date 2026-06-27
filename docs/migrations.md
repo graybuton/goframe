@@ -47,6 +47,16 @@ Status: legacy compatibility retained.
 New examples and docs use `bundle.wasm`. Explicit manifests that set
 `"wasm": "main.wasm"` still load and package.
 
+### Explicit asset lists to asset directory mode
+
+Status: legacy compatibility retained.
+
+New examples and docs use `"assets": "./assets"` and keep static files under
+an app-local `assets/` directory. Existing manifests such as
+`"assets": ["index.html", "styles.css"]` still load and package. If no custom
+HTML template is selected, `goxc package` generates a default root
+`index.html`.
+
 ### Adjacent generated files to `.goframe`
 
 Status: legacy/debug compatibility retained.

@@ -74,10 +74,11 @@ The reference app uses the recommended Go-first child-entry layout:
 ```text
 examples/router-dashboard/
 ├── goframe.json
-├── index.html
-├── styles.css
-├── data/
-│   └── issues.txt
+├── assets/
+│   ├── index.html
+│   ├── styles.css
+│   └── data/
+│       └── issues.txt
 ├── cmd/app/
 │   ├── main.go
 │   └── app.gox
@@ -187,8 +188,8 @@ that components read and write deliberately.
 ## Component-Scoped Resource
 
 The reference app has one stable resource owner. It loads the packaged
-`data/issues.txt` asset once and distributes the explicit resource state
-through app-local context.
+`assets/data/issues.txt` asset once and distributes the explicit resource
+state through app-local context.
 
 Important properties:
 
