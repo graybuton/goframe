@@ -88,7 +88,8 @@ goxc package ./examples/router-dashboard --compiler=go
 goxc serve ./examples/router-dashboard --port=8080
 ```
 
-See the [tutorial](tutorial.md) for the guided reference-app walkthrough.
+See the [evaluator guide](evaluator-guide.md) for a shorter evaluation path and
+the [tutorial](tutorial.md) for the guided reference-app walkthrough.
 
 ## Compatibility Notes
 
