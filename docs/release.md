@@ -108,6 +108,8 @@ clear about API instability and experimental status.
 - `go vet ./...`;
 - `go test -tags=goframe_debug ./...`;
 - GOX golden and error golden tests;
+- focused runtime experimental-surface tests for resources, ErrorBoundaries,
+  runtime error reporting, and router matching/remount policy;
 - browser smoke;
 - TinyGo WASM size budgets;
 - dashboard DOM pressure;

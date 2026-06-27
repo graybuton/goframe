@@ -269,7 +269,8 @@ var router = gf.NewHashRouter([]gf.Route{
 subscribes to `hashchange`, and renders the matched route handler. The route
 subtree is keyed by route pattern. Navigating between different patterns
 remounts the route subtree; navigating between the same pattern with different
-params updates the route context and may preserve route-local state.
+params or query text updates the route context and may preserve route-local
+state. The not-found route uses its own fallback route key.
 
 `RouteContext.RawQuery` stores query text after `?`, and
 `RouteContext.Query()` parses it into `QueryValues` for small URL-driven state
@@ -300,6 +301,8 @@ no global cache or shared registry: two components that use the same key own
 independent resources. Changing the key or calling `reload` invalidates the
 current generation, returns to loading state, runs the previous cleanup exactly
 once, and ignores stale completions before they can dirty the component.
+Reload also clears the previous `Value` and `Err` from the public snapshot while
+the new generation is loading.
 
 Loaders are transport-agnostic. Browser `fetch`, parsing, timers, abort
 controllers, local storage, or test fakes live in application/example code.
@@ -406,7 +409,9 @@ Boundary, the runtime renders `gf.Empty()` for that pass. With a nearest active
 `gf.ErrorBoundary`, the failed render still returns `gf.Empty()` immediately,
 but the boundary records the incident, cancels pending effects under the
 protected subtree, and patches to fallback UI. Manual reset or `ResetKey`
-clears the incident and remounts children fresh.
+clears the incident and remounts children fresh. Reset retries the same
+protected subtree; if the same props, route params, or query values still cause
+a render panic, the retry is a new incident rather than an automatic recovery.
 
 Error Boundary state is internally modeled as protected, captured, or fallback.
 The displaying boundary is skipped while rendering its fallback subtree, so a
