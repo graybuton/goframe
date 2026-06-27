@@ -442,11 +442,21 @@ func (planner *packageAssetPlanner) addDirectoryAssets(directory string) error {
 		return fmt.Errorf("assets %q in %s %s", directory, manifestName, err)
 	}
 	sourceRoot := filepath.Join(planner.appDir, filepath.FromSlash(directory))
-	if err := validatePathBelowRoot(planner.appDir, sourceRoot, "asset directory", false); err != nil {
+	if err := validatePathBelowRoot(planner.appDir, sourceRoot, "asset directory", true); err != nil {
 		return err
 	}
-	if err := directoryNoFollow(sourceRoot, "asset directory"); err != nil {
-		return err
+	info, err := os.Lstat(sourceRoot)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("asset directory %s does not exist", sourceRoot)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect asset directory %s: %w", sourceRoot, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("asset directory %s is a symlink; symlink paths are not supported", sourceRoot)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("asset directory %s is not a directory", sourceRoot)
 	}
 	return filepath.WalkDir(sourceRoot, func(sourcePath string, entry os.DirEntry, err error) error {
 		if err != nil {

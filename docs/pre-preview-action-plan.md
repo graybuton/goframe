@@ -62,7 +62,7 @@ preview or explicitly scoped in release notes:
 
 - reusable/multi-module component identity contract;
 - platform/browser evidence beyond Linux/Chrome;
-- manifest/versioning decision for public preview;
+- manifest/package contract evidence for public preview;
 - GOX parser/codegen fuzzing, now reduced by initial bounded fuzz targets but
   still not a formal exhaustive language verification story;
 - `pkg/gox` file helper safety contract for direct library callers;
@@ -71,10 +71,12 @@ preview or explicitly scoped in release notes:
 - CLI/helper direct coverage;
 - docs/status clarity.
 
-The manifest/versioning risk is reduced for `v0.1.0-preview.1` by the
-versionless `goframe.json` decision and the preview-facing `"assets":
-"./assets"` directory contract. Schema markers are deferred; a mandatory
-user-authored marker would require migration notes and a compatibility window.
+The manifest/package risk is reduced for `v0.1.0-preview.1` by the versionless
+`goframe.json` decision, the preview-facing `"assets": "./assets"` directory
+contract, default `index.html` generation, package metadata verification, and
+focused package output contract tests. User-authored schema markers are not
+part of the current preview contract; making one mandatory would require
+migration notes and a compatibility window.
 
 These are contract and evidence risks, not reasons to reduce GoFrame to a
 smaller product category.
@@ -186,6 +188,13 @@ Acceptance criteria:
 - package publication limitation is either accepted in release notes or moved
   toward transactional replacement;
 - command-level coverage is improved where it protects user-facing behavior.
+
+Current package/manifest closeout status: the preview-facing assets contract,
+generated/custom package `index.html` behavior, package metadata verification,
+and CLI package validation coverage are covered by
+`toolchain/package-preview-closeout`. Remaining items in this area are limited
+to documented package publication transactionality and direct `pkg/gox` file
+helper safety classification.
 
 Non-goals:
 

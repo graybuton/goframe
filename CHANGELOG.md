@@ -81,6 +81,9 @@
 - Preview-facing manifest asset directory contract for `goframe.json`, including
   `"assets": "./assets"`, legacy explicit asset list compatibility, automatic
   default `index.html` generation, and updated examples/docs.
+- Package preview closeout coverage for manifest/assets error paths, generated
+  and custom package `index.html` output, versioned metadata presence,
+  package ownership verification, and fact-checked package/manifest docs.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
