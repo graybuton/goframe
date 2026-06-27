@@ -87,6 +87,9 @@
 - Preview tooling closeout coverage for `pkg/gox` trusted-filesystem file
   helper classification, export destination false-marker rejection, package
   publication limitation wording, and lightweight supply-chain/tooling evidence.
+- Runtime experimental-surface hardening coverage for resource reload/stale
+  callback edges, ErrorBoundary reset/new-incident behavior, router route-key
+  remount policy, and preview contract docs alignment.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,

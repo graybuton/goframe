@@ -284,6 +284,51 @@ func TestUseResourceManualReloadInvalidatesLateCallbacks(t *testing.T) {
 	}
 }
 
+func TestUseResourceReloadClearsReadySnapshotAndIgnoresLateCallbacks(t *testing.T) {
+	resetEffectsForTest()
+	loader := &resourceTestLoader{}
+	schedules := 0
+	var reload func()
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceReloadReady", func() Node {
+		resource, reload = UseResource("same", loader.load)
+		return Empty()
+	}, func(*componentInstance) {
+		schedules++
+	})
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	oldResolve := loader.resolves[0]
+	oldReject := loader.rejects[0]
+	oldResolve("ready")
+	renderComponentInstance(instance)
+	if !resource.Ready() || resource.Value != "ready" || resource.Err != nil {
+		t.Fatalf("resource before reload = %#v, want ready", resource)
+	}
+
+	reload()
+	renderComponentInstance(instance)
+	if !resource.Loading() || resource.Value != "" || resource.Err != nil {
+		t.Fatalf("resource after reload render = %#v, want loading zero snapshot", resource)
+	}
+	oldReject(errors.New("late failure"))
+	oldResolve("late ready")
+	if schedules != 2 || instance.dirty {
+		t.Fatalf("late callbacks schedules=%d dirty=%v, want no extra dirty update after reload", schedules, instance.dirty)
+	}
+
+	flushPendingEffects()
+	if loader.cleanups != 1 || len(loader.starts) != 2 {
+		t.Fatalf("cleanups=%d starts=%d, want cleanup old and start new", loader.cleanups, len(loader.starts))
+	}
+	loader.resolves[1]("ready again")
+	renderComponentInstance(instance)
+	if !resource.Ready() || resource.Value != "ready again" || resource.Err != nil {
+		t.Fatalf("resource after reload resolve = %#v, want ready again", resource)
+	}
+}
+
 func TestUseResourceOldReloadClosureUsesLatestKey(t *testing.T) {
 	resetEffectsForTest()
 	loader := &resourceTestLoader{}
@@ -392,6 +437,38 @@ func TestUseResourceCleanupTriggeredCompletionIsIgnored(t *testing.T) {
 	}
 	if !resource.Loading() {
 		t.Fatalf("resource after key change cleanup = %#v, want loading", resource)
+	}
+}
+
+func TestUseResourceCleanupTriggeredRejectIsIgnored(t *testing.T) {
+	resetEffectsForTest()
+	loader := &resourceTestLoader{}
+	key := "a"
+	schedules := 0
+	var oldReject func(error)
+	var resource Resource[string]
+	loader.cleanup = func() {
+		oldReject(errors.New("from-cleanup"))
+	}
+	instance := testComponentInstance("ResourceCleanupReject", func() Node {
+		resource, _ = UseResource(key, loader.load)
+		return Empty()
+	}, func(*componentInstance) {
+		schedules++
+	})
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	oldReject = loader.rejects[0]
+	key = "b"
+	renderComponentInstance(instance)
+	flushPendingEffects()
+
+	if schedules != 0 || instance.dirty {
+		t.Fatalf("cleanup-triggered reject schedules=%d dirty=%v, want no stale update", schedules, instance.dirty)
+	}
+	if !resource.Loading() || resource.Err != nil {
+		t.Fatalf("resource after key change cleanup reject = %#v, want loading without error", resource)
 	}
 }
 

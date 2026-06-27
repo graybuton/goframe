@@ -202,16 +202,27 @@ VS Code extension:
 - Component identity id format for generated GOX component tokens.
 - Runtime error reporting API and exact phase containment behavior:
   `gf.SetErrorHandler`, `gf.ErrorInfo`, `gf.ErrorHandler`, and
-  `gf.ErrorPhase`.
+  `gf.ErrorPhase`. Current tests cover event, effect, cleanup, memo, context,
+  virtual callback, render, and boundary-related reporting paths, but this is
+  still not a production error framework.
 - Scoped render Error Boundary reset/fallback semantics beyond the current
   public-candidate API shape. Internal boundary phases such as protected,
-  captured, and fallback are not public API.
+  captured, and fallback are not public API. Current tests cover containment,
+  nested fallback bubbling, reset, `ResetKey`, pending effect cancellation, and
+  cleanup release for failed subtrees.
 - Component-scoped resource API and exact lifecycle semantics:
   `gf.ResourceStatus`, `gf.Resource`, `gf.ResourceLoader`, and
-  `gf.UseResource`.
+  `gf.UseResource`. Current tests cover loading/ready/failed state, reload,
+  key changes, stale completions, cleanup, loader panic containment, and
+  ErrorBoundary interaction. Global caching, deduplication, retry policy,
+  route loaders, and Suspense-style semantics are outside the preview
+  contract.
 - Hash router details such as route remount policy, declaration-order matching
   edge cases, link props, query helper edge cases, and browser listener
-  internals.
+  internals. Current tests cover route matching, params, query helpers,
+  not-found fallback, hash hrefs, and route subtree keys by route pattern;
+  browser back/forward and listener behavior are covered by smoke tests rather
+  than a stable low-level listener API.
 - Form and validation patterns. MVP 25 documents controlled-input patterns but
   intentionally does not add a runtime form framework.
 - Package manifest field stability.

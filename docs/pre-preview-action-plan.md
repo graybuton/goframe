@@ -224,6 +224,10 @@ Acceptance criteria:
 - any risky edge behavior is tested or documented;
 - examples continue to show the integrated platform path.
 
+Current status: focused runtime tests cover resource reload and stale-callback
+edges, ErrorBoundary reset/new-incident behavior, and router route-key/remount
+policy. The runtime API shape remains unchanged.
+
 Non-goals:
 
 - no Suspense, route loaders, global cache, server resources, or full

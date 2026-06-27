@@ -273,6 +273,45 @@ func TestErrorBoundaryManualResetRemountsProtectedSubtree(t *testing.T) {
 	reset()
 }
 
+func TestErrorBoundaryResetAllowsNewIncident(t *testing.T) {
+	resetRuntimeBoundaryTestState()
+	errors := captureRuntimeErrors(t)
+	var reset func()
+	boundary := testErrorBoundaryInstance("", func(ctx ErrorBoundaryContext) Node {
+		reset = ctx.Reset
+		return Text("fallback")
+	}, nil)
+	renderComponentInstance(boundary)
+
+	renderComponentInstance(testComponentInstanceWithParent("RiskyFirst", boundary, func() Node {
+		panic("first")
+	}))
+	renderComponentInstance(boundary)
+	if boundary.errorBoundary.phase != errorBoundaryFallback || reset == nil {
+		t.Fatalf("boundary phase=%d reset nil=%v, want fallback with reset", boundary.errorBoundary.phase, reset == nil)
+	}
+
+	reset()
+	renderComponentInstance(boundary)
+	if boundary.errorBoundary.phase != errorBoundaryProtected {
+		t.Fatalf("boundary phase after reset = %d, want protected", boundary.errorBoundary.phase)
+	}
+
+	renderComponentInstance(testComponentInstanceWithParent("RiskySecond", boundary, func() Node {
+		panic("second")
+	}))
+	renderComponentInstance(boundary)
+
+	if got := boundary.errorBoundary.info.Panic; got != "second" {
+		t.Fatalf("captured panic after reset = %v, want second", got)
+	}
+	if len(errors()) != 2 {
+		t.Fatalf("runtime reports = %d, want first and second incidents: %#v", len(errors()), errors())
+	}
+	requireRuntimeError(t, errors(), ErrorPhaseRender, "RiskyFirst", "component render", "first")
+	requireRuntimeError(t, errors(), ErrorPhaseRender, "RiskySecond", "component render", "second")
+}
+
 func TestErrorBoundaryResetKeyClearsFailedBoundaryOnly(t *testing.T) {
 	resetRuntimeBoundaryTestState()
 	boundary := testErrorBoundaryInstance("a", func(ErrorBoundaryContext) Node {

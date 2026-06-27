@@ -32,6 +32,10 @@ The preview tooling closeout classifies exported `pkg/gox` file helpers as
 trusted-filesystem convenience APIs, records package publication as
 metadata-last/fail-closed rather than transactional rollback, and documents the
 current lightweight supply-chain evidence.
+The runtime experimental-surface hardening pass adds focused evidence for
+resource reload/stale-callback behavior, ErrorBoundary reset/new-incident
+behavior, and router route-key/remount policy without changing public runtime
+APIs.
 
 The first preview scope is narrower than the project vision. GoFrame remains an
 experimental Go-first application platform; the preview candidate validates the
@@ -266,6 +270,38 @@ Status: Ready with limitations.
 Chrome/Chromium is CI-tested. Firefox and Safari are unverified. The runtime
 requires browser DOM APIs, WebAssembly, `requestAnimationFrame`, `hashchange`,
 and example-specific APIs such as `fetch` and `AbortController`.
+
+## Runtime Experimental Surfaces
+
+Status: Ready with limitations.
+
+Evidence:
+
+- `pkg/goframe/resource_test.go`;
+- `pkg/goframe/error_boundary_test.go`;
+- `pkg/goframe/error_handling_test.go`;
+- `pkg/goframe/router_test.go`;
+- `pkg/goframe/router_query_test.go`;
+- router, resource, runtime-error, and ErrorBoundary browser smoke fixtures.
+
+Decision:
+
+- resources remain component-scoped: no global cache, deduplication, automatic
+  retry, polling, Suspense, server resource, or route-loader contract exists;
+- resource reload/key changes invalidate old generations, clear the public
+  snapshot back to loading state, run cleanup once for the invalidated
+  generation, and ignore stale callbacks;
+- ordinary `ResourceFailed` state is application UI state, not an ErrorBoundary
+  failure;
+- ErrorBoundaries remain scoped render fallback primitives. Reset retries the
+  same protected subtree and a repeated panic is a new incident; reset does not
+  change route params, query values, resource state, or application data;
+- the router remains hash-based. Route matching, params, query helpers,
+  not-found fallback, and route keys by route pattern are covered; history mode,
+  file routing, middleware, route loaders, and production server fallback are
+  outside the current preview contract;
+- runtime error APIs remain phase-specific reporting/containment hooks, not a
+  production observability or recovery framework.
 
 ## Compatibility And Deprecation Policy
 
