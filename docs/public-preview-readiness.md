@@ -2,20 +2,22 @@
 
 ## Executive Summary
 
-Status: Needs hardening.
+Status: Conditional Go for a `v0.1.0-preview.1` evaluator preview; No-Go for
+production.
 
-How to read this status: several subsystems are already "Ready with
-limitations", but the project as a public preview remains "Needs hardening"
-until High readiness risks are closed or explicitly scoped in release notes.
+How to read this status: the current repository has enough documented evidence
+for a narrow evaluator preview of the browser/WASM layer. This is not a
+production-readiness statement, a 1.0 compatibility promise, or a claim of
+complete browser/platform support.
 
-GoFrame has enough runtime, GOX, toolchain, examples, and CI coverage to start
-formal public-preview preparation. It is not yet preview-ready because several
-contracts still need final decisions before a preview tag:
+GoFrame has enough runtime, GOX, toolchain, examples, and CI coverage to
+prepare a fact-first `v0.1.0-preview.1` release package. The remaining
+limitations must stay visible in release notes and evaluator guidance:
 
-- multi-module/reusable package identity policy;
-- cross-browser/platform support scope;
-- first public migration notes and release notes;
-- issue-tracker follow-up for remaining compatibility blockers.
+- broad reusable multi-module component identity is outside the preview promise;
+- Firefox and Safari are unverified in current CI evidence;
+- production deployment/server support is outside the preview scope;
+- the release tag is not cut by this readiness document.
 
 MVP 30 closes part of the readiness gap by documenting API tiers, component
 identity, manifest/package compatibility, symlink policy, platform support,
@@ -75,8 +77,8 @@ the preview smaller.
 | GOX compiler | Ready with limitations | `pkg/gox` golden/error tests, source diagnostics, package-qualified component tests, and initial bounded fuzz seed targets. |
 | Toolchain | Ready with limitations | `cmd/goxc` tests, browser smoke, size budget, package matrix, filesystem/package safety matrix. |
 | Public docs | Ready with limitations | README, tutorial, API stability docs, docs-check. |
-| Platform support | Needs hardening | Chrome/Linux remains the strongest evidence; macOS/Windows have minimal CI check evidence; Firefox/Safari remain unverified. |
-| Public preview release process | Needs hardening | `docs/release.md` now contains a preview checklist; no preview tag has been cut. |
+| Platform support | Ready with limitations | Chrome/Linux remains the strongest evidence; macOS/Windows have minimal CI check evidence; Firefox/Safari remain unverified and scoped in release notes. |
+| Public preview release process | Ready with limitations | `docs/release.md` contains a preview checklist, `docs/release-notes-v0.1.0-preview.1.md` contains draft release notes, and `docs/evaluator-guide.md` contains evaluator guidance. No preview tag has been cut. |
 
 ## Public Preview Definition
 
@@ -249,7 +251,7 @@ Remaining risk:
 
 ## Platform Support Matrix
 
-Status: Needs hardening.
+Status: Ready with limitations.
 
 Evidence:
 
@@ -259,7 +261,7 @@ Evidence:
 - TinyGo `0.41.1` size and smoke gates;
 - Go/WASM recover-capable smoke fixtures.
 
-Blocker:
+Limitation:
 
 - no dedicated Firefox/Safari browser evidence yet.
 
@@ -345,12 +347,12 @@ Recommendation:
 - later previews: `v0.1.0-preview.2`, etc.;
 - final `v0.1.0` only after blockers are closed.
 
-## Known Blockers And Limitations
+## Known Limitations For Preview Notes
 
 | Severity | Finding | Evidence | Recommendation |
 |---|---|---|---|
-| High | Multi-module/reusable package identity is not final. | `docs/component-identity.md` | Current preview does not claim a broad reusable component package ecosystem. |
-| High | Browser cross-platform support is partial. | `docs/platform-support.md` | Current preview notes must state Linux/Chrome as strongest evidence and Firefox/Safari as unverified. |
+| High if unscoped | Multi-module/reusable package identity is not final. | `docs/component-identity.md` | Current preview does not claim a broad reusable component package ecosystem. |
+| High if unscoped | Browser cross-platform support is partial. | `docs/platform-support.md` | Current preview notes state Linux/Chrome as strongest evidence and Firefox/Safari as unverified. |
 | Medium | Production deployment server remains out of scope. | `docs/deployment.md` | Keep preview messaging static-hosting/hash-router focused. |
 | Medium | Package publication is hardened but not a full transactional installer. | `cmd/goxc/package.go`, `docs/security-symlink-policy.md` | Current preview contract is metadata-last, marker-first cleanup, fail-closed ownership verification; rollback installer semantics are out of scope. |
 | Medium | Supply-chain evidence is lightweight. | `docs/ci.md` | Current preview evidence is read-only workflow permissions, Dependabot configuration, `npm ci` from lockfile, and stdlib-only root Go module; SBOM/scanner gates are not part of the preview contract. |
@@ -368,17 +370,14 @@ Recommendation:
 - production deployment server;
 - full multi-module monorepo support.
 
-## Recommended Next Stage
+## Release Story Status
 
-The next branches should follow `docs/pre-preview-action-plan.md`: focus on
-contract, platform evidence, identity, fuzzing, safety closeout, experimental
-surface hardening, and preview release notes rather than deleting working
-surfaces.
+The preview release story is documented in:
 
-Immediate public-preview blockers remain:
+- `docs/release-notes-v0.1.0-preview.1.md`;
+- `docs/evaluator-guide.md`;
+- `docs/migrations.md`;
+- `docs/release.md`.
 
-1. decide multi-module/reusable package identity scope;
-2. add focused Firefox/Safari browser evidence or keep them explicitly deferred.
-3. draft release notes and migration notes for `v0.1.0-preview.1`;
-4. optionally add an exported API classification gate if it remains small and
-   robust.
+The tag is not cut by these documents. The current readiness result is an
+evaluator-preview package with explicit limitations, not production readiness.
