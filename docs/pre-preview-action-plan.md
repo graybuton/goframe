@@ -65,9 +65,14 @@ preview or explicitly scoped in release notes:
 - manifest/package contract evidence for public preview;
 - GOX parser/codegen fuzzing, now reduced by initial bounded fuzz targets but
   still not a formal exhaustive language verification story;
-- `pkg/gox` file helper safety contract for direct library callers;
-- package publication transactionality;
-- supply-chain scanner evidence;
+- `pkg/gox` file helper safety contract for direct library callers, now
+  classified as trusted-filesystem convenience rather than a hardened command
+  boundary;
+- package publication transactionality, now documented as metadata-last,
+  marker-first cleanup, and fail-closed ownership verification rather than a
+  rollback installer;
+- supply-chain/tooling evidence, currently limited to CI gates, Dependabot,
+  lockfile-based VS Code extension installs, and a stdlib-only root Go module;
 - CLI/helper direct coverage;
 - docs/status clarity.
 
@@ -183,18 +188,21 @@ belongs to tooling.
 
 Acceptance criteria:
 
-- decide whether exported `pkg/gox` file helpers are hardened or documented as
-  trusted-filesystem convenience helpers;
-- package publication limitation is either accepted in release notes or moved
-  toward transactional replacement;
-- command-level coverage is improved where it protects user-facing behavior.
+- exported `pkg/gox` file helpers are documented as trusted-filesystem
+  convenience helpers, while in-memory `pkg/gox` APIs remain the safer boundary
+  for callers that control source bytes;
+- package publication limitation is accepted in release/release-readiness docs
+  as metadata-last/fail-closed behavior, not transactional rollback;
+- command-level coverage is improved where it protects user-facing behavior;
+- current supply-chain/tooling evidence is stated without scanner or signing
+  claims.
 
 Current package/manifest closeout status: the preview-facing assets contract,
 generated/custom package `index.html` behavior, package metadata verification,
 and CLI package validation coverage are covered by
-`toolchain/package-preview-closeout`. Remaining items in this area are limited
-to documented package publication transactionality and direct `pkg/gox` file
-helper safety classification.
+`toolchain/package-preview-closeout`. Toolchain closeout further classifies
+direct `pkg/gox` file helpers, documents publication transactionality limits,
+and records lightweight supply-chain/tooling evidence.
 
 Non-goals:
 

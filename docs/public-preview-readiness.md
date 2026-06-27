@@ -28,6 +28,10 @@ generated-asset collision mistakes.
 The package preview closeout fixes the `v0.1.0-preview.1` manifest/assets
 contract around versionless `goframe.json`, directory-mode assets, generated
 default `index.html`, package metadata verification, and CLI error coverage.
+The preview tooling closeout classifies exported `pkg/gox` file helpers as
+trusted-filesystem convenience APIs, records package publication as
+metadata-last/fail-closed rather than transactional rollback, and documents the
+current lightweight supply-chain evidence.
 
 The first preview scope is narrower than the project vision. GoFrame remains an
 experimental Go-first application platform; the preview candidate validates the
@@ -117,6 +121,30 @@ Decision:
 - keep API shape unchanged in MVP 30;
 - classify surfaces more explicitly;
 - new public exports need explicit classification before preview.
+
+## GOX File Helper Contract
+
+Status: Ready with limitations.
+
+Evidence:
+
+- `docs/api-stability.md`;
+- `pkg/gox/generate.go`;
+- `pkg/gox/generate_test.go`;
+- `cmd/goxc/workspace.go`;
+- `cmd/goxc/filesystem_safety_test.go`.
+
+Decision:
+
+- `gox.Generate`, `gox.GenerateNamed`, and `gox.GenerateWithOptions` are the
+  in-memory compiler boundary for callers that control source bytes;
+- `gox.GenerateFile`, `gox.GenerateFileTo`,
+  `gox.GenerateFileToWithOptions`, and `gox.FindFiles` are
+  trusted-filesystem convenience helpers for tooling/editor/test workflows;
+- those file helpers do not claim `goxc`'s root-aware symlink, physical
+  overlap, package ownership, or publication guarantees;
+- `goxc` remains the hardened command path for application/workspace/package
+  workflows.
 
 ## Component Identity
 
@@ -253,7 +281,7 @@ Decision:
 
 - pre-preview breaking changes remain allowed but documented;
 - post-preview Public-Candidate changes require migration notes;
-- deprecated APIs should survive at least one planned release stage unless
+- deprecated APIs should survive at least one documented release stage unless
   safety requires immediate removal.
 
 ## Migration Policy
@@ -281,15 +309,16 @@ Recommendation:
 - later previews: `v0.1.0-preview.2`, etc.;
 - final `v0.1.0` only after blockers are closed.
 
-## Known Blockers
+## Known Blockers And Limitations
 
 | Severity | Finding | Evidence | Recommendation |
 |---|---|---|---|
-| High | Multi-module/reusable package identity is not final. | `docs/component-identity.md` | Focused MVP before claiming reusable package ecosystem. |
-| High | Browser cross-platform support is partial. | `docs/platform-support.md` | Keep Linux/Chrome as strongest evidence; add focused Firefox/Safari/browser diversity or explicit deferred evidence notes. |
+| High | Multi-module/reusable package identity is not final. | `docs/component-identity.md` | Current preview does not claim a broad reusable component package ecosystem. |
+| High | Browser cross-platform support is partial. | `docs/platform-support.md` | Current preview notes must state Linux/Chrome as strongest evidence and Firefox/Safari as unverified. |
 | Medium | Production deployment server remains out of scope. | `docs/deployment.md` | Keep preview messaging static-hosting/hash-router focused. |
-| Medium | Package publication is hardened but not a full transactional installer. | `cmd/goxc/package.go` | Metadata is written last and sources are prevalidated; full transaction/rollback semantics remain out of scope for the current preview. |
-| Documentation-only | Public API classification must be kept current. | `docs/api-stability.md` | Optional exported-symbol classification gate can be added later. |
+| Medium | Package publication is hardened but not a full transactional installer. | `cmd/goxc/package.go`, `docs/security-symlink-policy.md` | Current preview contract is metadata-last, marker-first cleanup, fail-closed ownership verification; rollback installer semantics are out of scope. |
+| Medium | Supply-chain evidence is lightweight. | `docs/ci.md` | Current preview evidence is read-only workflow permissions, Dependabot configuration, `npm ci` from lockfile, and stdlib-only root Go module; SBOM/scanner gates are not part of the preview contract. |
+| Documentation-only | Public API classification must be kept current. | `docs/api-stability.md` | Classification remains a manual docs/review gate in the current preview. |
 
 ## Deferred Non-goals
 

@@ -44,6 +44,18 @@ Current protection focuses on:
 - cleaning only known GoFrame-owned artifacts;
 - binding the development server to `127.0.0.1`.
 
+## Scope Boundary For `pkg/gox`
+
+This policy applies to `goxc` command paths. Exported `pkg/gox` file helpers
+such as `GenerateFile`, `GenerateFileTo`, `GenerateFileToWithOptions`, and
+`FindFiles` are trusted-filesystem convenience helpers for tooling, editor, and
+test workflows. They use ordinary standard-library filesystem operations and
+do not provide the root-aware symlink, physical overlap, package ownership, or
+publication checks described here.
+
+For untrusted repository trees, use `goxc` command paths or add a caller-side
+filesystem policy around the in-memory `pkg/gox` APIs.
+
 ## Manifest Paths
 
 Manifest fields such as `entry`, `output`, `wasm`, and `assets` are validated
@@ -175,9 +187,9 @@ Policy:
   root directly, but the final app-scoped workspace root must not overlap the
   app source tree.
 
-The preferred security direction is reject rather than follow when a symlink
-could make source, asset, package, export, or cleanup operations escape the
-declared root.
+The current `goxc` policy is reject rather than follow when a symlink could
+make source, asset, package, export, or cleanup operations escape the declared
+root.
 
 Evidence:
 
@@ -256,20 +268,11 @@ operation boundary, but full adversarial filesystem mutation is out of scope.
 
 - No production static server hardening beyond local development needs.
 - No signed package/export metadata.
-- No permission model for future Player or `.gfapp` bundles.
+- No Player or `.gfapp` permission model in the current preview contract.
 - No full multi-module workspace model.
 - `goxc serve` remains development-only and is not a hardened static server.
 - Windows has minimal Go/toolchain CI evidence, but full filesystem and browser
   parity remain under-verified.
-
-## Recommended Future Tests
-
-Keep adding focused tests for:
-
-- Windows path edge cases;
-- package rollback behavior when replacing an existing valid package;
-- additional special file types where the platform can create them safely;
-- serve path traversal behavior on non-Linux platforms.
 
 ## Non-Goals
 
