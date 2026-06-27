@@ -144,12 +144,6 @@
 - The resource example browser loader now releases cancelled promise/timer
   callbacks on inactive response paths.
 
-### Planned
-
-- CI pipeline tuning after the first public pull requests.
-- Release packaging decisions for `goxc`.
-- Dashboard-sized benchmark exploration.
-
 ## v0.1.0-mvp10 - 2026-06-17
 
 ### Added

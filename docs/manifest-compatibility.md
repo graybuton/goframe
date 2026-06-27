@@ -84,13 +84,13 @@ Status: Ready with limitations.
 
 There is no required `version` field in `goframe.json` for
 `v0.1.0-preview.1`. The preview contract keeps user-authored manifests
-versionless while generated package metadata remains versioned.
+versionless. Absence of a user-authored manifest version is supported preview
+behavior, not a warning or deprecation signal.
 
-Future follow-up:
-
-- optional manifest schema/version markers may be considered later;
-- mandatory user-authored schema versions require migration notes and a
-  compatibility window.
+Generated `asset-manifest.json` and `goframe-package.json` remain versioned
+tooling metadata. User-authored schema or version markers are not part of the
+current preview contract. Making such a marker mandatory would be a breaking
+manifest change and would require migration notes and a compatibility window.
 
 ## `asset-manifest.json`
 
