@@ -103,6 +103,10 @@ func TestStaticHandlerRejectsBackslashPaths(t *testing.T) {
 	directory := t.TempDir()
 	writeServeFixture(t, directory, "public.txt", "public")
 
+	// The "\\" escape in this Go string literal is one URL backslash rune.
+	const oneBackslashPath = "/..\\secret.txt"
+	assertSingleBackslashFixture(t, oneBackslashPath)
+
 	for _, tt := range []struct {
 		name   string
 		mutate func(*http.Request)
@@ -110,13 +114,13 @@ func TestStaticHandlerRejectsBackslashPaths(t *testing.T) {
 		{
 			name: "decoded path",
 			mutate: func(request *http.Request) {
-				request.URL.Path = `/..\secret.txt`
+				request.URL.Path = oneBackslashPath
 			},
 		},
 		{
 			name: "raw path",
 			mutate: func(request *http.Request) {
-				request.URL.RawPath = `/..\secret.txt`
+				request.URL.RawPath = oneBackslashPath
 			},
 		},
 	} {
@@ -129,6 +133,43 @@ func TestStaticHandlerRejectsBackslashPaths(t *testing.T) {
 				t.Fatalf("status = %d, want 404", response.Code)
 			}
 		})
+	}
+}
+
+func TestStaticHandlerRejectsSymlinkEntry(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "serve")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(root, "external.txt")
+	if err := os.WriteFile(external, []byte("external"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(directory, "link.txt")); err != nil {
+		t.Skipf("symlink creation is not available: %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	staticHandler(directory).ServeHTTP(response, httptest.NewRequest("GET", "/link.txt", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("symlink entry status = %d, want 404", response.Code)
+	}
+	if got := response.Body.String(); got == "external" {
+		t.Fatalf("served symlink target body: %q", got)
+	}
+}
+
+func assertSingleBackslashFixture(t *testing.T, value string) {
+	t.Helper()
+	count := 0
+	for _, r := range value {
+		if r == '\\' {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("test fixture must contain exactly one backslash rune, got %d in %q", count, value)
 	}
 }
 

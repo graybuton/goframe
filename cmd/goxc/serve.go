@@ -160,7 +160,7 @@ func sanitizeServePath(requestPath, rawPath string) (string, error) {
 	if requestPath == "" {
 		requestPath = "/"
 	}
-	if strings.Contains(requestPath, `\`) || strings.Contains(rawPath, `\`) {
+	if strings.ContainsRune(requestPath, '\\') || strings.ContainsRune(rawPath, '\\') {
 		return "", errors.New("serve path contains backslash")
 	}
 	if !strings.HasPrefix(requestPath, "/") {
