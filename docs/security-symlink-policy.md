@@ -42,7 +42,8 @@ Current protection focuses on:
   overwrite generated WASM, runtime shims, metadata, or compressed sidecars;
 - using staging directories before publishing packages;
 - cleaning only known GoFrame-owned artifacts;
-- binding the development server to `127.0.0.1`.
+- binding the development server to `127.0.0.1` and rejecting traversal,
+  backslash, and symlink paths below the served package root.
 
 ## Scope Boundary For `pkg/gox`
 
@@ -153,11 +154,13 @@ looks GoFrame-owned. User-owned `dist/` directories are left alone.
 
 `goxc serve` is development-only. It serves from `.goframe/package/standalone`
 or an explicit `--dir`, binds to localhost, and sets common content types for
-WASM, JavaScript, CSS, gzip, and brotli sidecars.
+WASM, JavaScript, CSS, gzip, and brotli sidecars. Request paths are normalized
+as slash paths; traversal attempts, backslash paths, symlinked roots, and
+symlinked entries below the served root return 404.
 
 It is not a production server. Production compression negotiation, cache
-headers, TLS, path hardening, and access controls belong to deployment
-infrastructure.
+headers, TLS, broader static-server hardening, and access controls belong to
+deployment infrastructure.
 
 ## Symlink Policy
 
@@ -181,8 +184,8 @@ Policy:
 - the standalone package directory used as export source must not be a symlink;
 - `goxc clean` removes final tool-owned symlinks as links and rejects
   intermediate workspace symlinks instead of traversing targets;
-- `goxc serve` rejects symlinked roots and symlinked entries inside the served
-  tree;
+- `goxc serve` rejects traversal, backslash paths, symlinked roots, and
+  symlinked entries inside the served tree;
 - explicit external workspaces remain allowed because the user opted into that
   root directly, but the final app-scoped workspace root must not overlap the
   app source tree.
@@ -236,6 +239,7 @@ Evidence:
 | user asset named `bundle.wasm` or `wasm_exec.js` | Ready | Rejected as a generated namespace collision. |
 | user asset compressed sidecar collision | Ready | Rejected before package publication. |
 | export source/output overlap | Ready | Rejected before cleanup/copy. |
+| serve traversal or backslash path | Ready with limitations | Dev server returns 404 after slash-path normalization; it remains development-only. |
 | serve tree symlink entry | Ready with limitations | Dev server returns 404 for symlink entries; it remains development-only. |
 
 ## Package Publication Integrity
