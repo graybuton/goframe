@@ -1,0 +1,89 @@
+name: Bug report
+description: Report a reproducible problem in GoFrame.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. GoFrame is an experimental preview project, so precise reproduction details are especially helpful.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - runtime
+        - GOX
+        - goxc
+        - docs
+        - examples
+        - CI
+        - VS Code extension
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: List the smallest steps or commands that reproduce the issue.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the fields that apply.
+      value: |
+        - OS:
+        - Go version:
+        - TinyGo version, if relevant:
+        - Browser, if relevant:
+        - goxc version/commit/tag:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Paste relevant command output, browser console output, or stack traces.
+      render: text
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal example or link
+      description: Link a small repository, paste a small snippet, or describe why a minimal example is not available.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I understand GoFrame is experimental and the preview is not a production-readiness claim.
+          required: true
+        - label: I searched existing issues and pull requests for a similar report.
+          required: true
+        - label: I included enough environment and reproduction information for maintainers to investigate.
+          required: true
