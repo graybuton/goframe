@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose a scoped improvement or new capability for GoFrame.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are welcome, but they are not preview promises. Please keep the proposal tied to a concrete problem and the current experimental scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem or maintainer pain does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_scope
+    attributes:
+      label: Proposed scope
+      description: Describe the smallest useful shape of the change.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - runtime
+        - GOX
+        - goxc
+        - docs
+        - examples
+        - CI
+        - VS Code extension
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround
+      description: How do users handle this today, if at all?
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility or preview-scope impact
+      description: Note possible API, manifest, package, docs, CI, or example impact.
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What should this request explicitly not try to solve?
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I understand v0.1.0-preview.1 is experimental and this request is not a preview promise.
+          required: true
+        - label: I described the smallest useful scope rather than a broad rewrite.
+          required: true
+        - label: I noted compatibility or preview-scope impact where relevant.
+          required: true
