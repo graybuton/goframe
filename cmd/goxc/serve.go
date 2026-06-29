@@ -113,7 +113,16 @@ func serve(options serveOptions) error {
 func staticHandler(directory string) http.Handler {
 	files := http.FileServer(http.Dir(directory))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		localPath := filepath.Join(directory, filepath.FromSlash(strings.TrimPrefix(pathpkg.Clean("/"+request.URL.Path), "/")))
+		if request.URL == nil {
+			http.NotFound(response, request)
+			return
+		}
+		sanitizedPath, err := sanitizeServePath(request.URL.Path, request.URL.RawPath)
+		if err != nil {
+			http.NotFound(response, request)
+			return
+		}
+		localPath := filepath.Join(directory, filepath.FromSlash(strings.TrimPrefix(sanitizedPath, "/")))
 		if err := validatePathBelowRoot(directory, localPath, "serve path", false); err != nil {
 			http.NotFound(response, request)
 			return
@@ -122,7 +131,7 @@ func staticHandler(directory string) http.Handler {
 			http.NotFound(response, request)
 			return
 		}
-		path := request.URL.Path
+		path := sanitizedPath
 		if strings.HasSuffix(path, ".br") {
 			response.Header().Set("Content-Encoding", "br")
 			path = strings.TrimSuffix(path, ".br")
@@ -138,6 +147,36 @@ func staticHandler(directory string) http.Handler {
 		case strings.HasSuffix(path, ".css"):
 			response.Header().Set("Content-Type", "text/css")
 		}
-		files.ServeHTTP(response, request)
+		sanitizedRequest := request.Clone(request.Context())
+		urlCopy := *request.URL
+		urlCopy.Path = sanitizedPath
+		urlCopy.RawPath = ""
+		sanitizedRequest.URL = &urlCopy
+		files.ServeHTTP(response, sanitizedRequest)
 	})
+}
+
+func sanitizeServePath(requestPath, rawPath string) (string, error) {
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	if strings.ContainsRune(requestPath, '\\') || strings.ContainsRune(rawPath, '\\') {
+		return "", errors.New("serve path contains backslash")
+	}
+	if !strings.HasPrefix(requestPath, "/") {
+		return "", errors.New("serve path must start with /")
+	}
+	for _, segment := range strings.Split(requestPath, "/") {
+		if segment == ".." {
+			return "", errors.New("serve path must not contain parent traversal")
+		}
+	}
+	cleaned := pathpkg.Clean(requestPath)
+	if cleaned == "." {
+		return "/", nil
+	}
+	if !strings.HasPrefix(cleaned, "/") {
+		cleaned = "/" + cleaned
+	}
+	return cleaned, nil
 }
