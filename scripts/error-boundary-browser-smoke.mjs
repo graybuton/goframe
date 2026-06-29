@@ -381,9 +381,9 @@ function connect(url) {
                         returnByValue: true,
                     });
                     if (response.exceptionDetails) {
-                        throw new Error(response.exceptionDetails.text);
+                        throw new Error(`browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
                     }
-                    return response.result.result.value;
+                    return response.result.value;
                 },
                 async callFunction(functionDeclaration, ...args) {
                     if (!this.globalObjectID) {
@@ -391,10 +391,10 @@ function connect(url) {
                             expression: "globalThis",
                             returnByValue: false,
                         });
-                        if (globalResponse.result.exceptionDetails) {
-                            throw new Error(globalResponse.result.exceptionDetails.text);
+                        if (globalResponse.exceptionDetails) {
+                            throw new Error(`browser evaluation failed: ${JSON.stringify(globalResponse.exceptionDetails)}`);
                         }
-                        this.globalObjectID = globalResponse.result.result.objectId;
+                        this.globalObjectID = globalResponse.result.objectId;
                     }
                     const response = await this.call("Runtime.callFunctionOn", {
                         objectId: this.globalObjectID,
@@ -403,10 +403,10 @@ function connect(url) {
                         awaitPromise: true,
                         returnByValue: true,
                     });
-                    if (response.result.exceptionDetails) {
-                        throw new Error(response.result.exceptionDetails.text);
+                    if (response.exceptionDetails) {
+                        throw new Error(`browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
                     }
-                    return response.result.result.value;
+                    return response.result.value;
                 },
                 close() {
                     socket.close();
@@ -425,7 +425,7 @@ function connect(url) {
                 request.reject(new Error(message.error.message));
                 return;
             }
-            request.resolve(message);
+            request.resolve(message.result);
         });
     });
 }
