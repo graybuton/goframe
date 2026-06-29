@@ -523,44 +523,44 @@ async function clearClientStorage(client) {
 }
 
 async function setInputValue(client, selector, value) {
-    await client.evaluate(`(() => {
-        const input = document.querySelector(${JSON.stringify(selector)});
+    await client.callFunction(`function(selector, value) {
+        const input = document.querySelector(selector);
         input.focus();
-        input.value = ${JSON.stringify(value)};
+        input.value = value;
         input.dispatchEvent(new Event("input", { bubbles: true }));
         return true;
-    })()`);
+    }`, selector, value);
     await wait(140);
 }
 
 async function setSelectValue(client, selector, value) {
-    await client.evaluate(`(() => {
-        const select = document.querySelector(${JSON.stringify(selector)});
-        select.value = ${JSON.stringify(value)};
+    await client.callFunction(`function(selector, value) {
+        const select = document.querySelector(selector);
+        select.value = value;
         select.dispatchEvent(new Event("change", { bubbles: true }));
         return true;
-    })()`);
+    }`, selector, value);
     await wait(140);
 }
 
 async function clickButtonByText(client, text) {
-    await client.evaluate(`(() => {
-        const button = [...document.querySelectorAll("button")].find((node) => node.textContent.trim() === ${JSON.stringify(text)});
+    await client.callFunction(`function(text) {
+        const button = [...document.querySelectorAll("button")].find((node) => node.textContent.trim() === text);
         if (!button) return false;
         button.click();
         return true;
-    })()`);
+    }`, text);
 }
 
 async function metricValue(client, label) {
-    return await client.evaluate(`(() => {
+    return await client.callFunction(`function(label) {
         for (const card of document.querySelectorAll(".metric-card")) {
-            if (card.querySelector("span")?.textContent === ${JSON.stringify(label)}) {
+            if (card.querySelector("span")?.textContent === label) {
                 return Number(card.querySelector("strong")?.textContent);
             }
         }
         return -1;
-    })()`);
+    }`, label);
 }
 
 async function firstRowStatus(client) {
@@ -568,16 +568,18 @@ async function firstRowStatus(client) {
 }
 
 async function startScenario(client, label) {
-    await client.evaluate(`(() => {
+    await client.callFunction(`function(label) {
         const audit = window.__dashboardAudit;
         if (!audit) return false;
-        audit.start(${JSON.stringify(label)});
+        audit.start(label);
         return true;
-    })()`);
+    }`, label);
 }
 
 async function finishScenario(client, label) {
-    const report = await client.evaluate(`(() => window.__dashboardAudit.finish(${JSON.stringify(label)}))()`);
+    const report = await client.callFunction(`function(label) {
+        return window.__dashboardAudit.finish(label);
+    }`, label);
     performanceReports.push(report);
     console.log(`dashboard perf ${label}: ${JSON.stringify(report)}`);
     return report;
@@ -703,12 +705,12 @@ function assertWithinRowScrollReport(report, beforeState, state) {
 }
 
 async function captureVirtualTableDom(client, key) {
-    return await client.evaluate(`(() => {
+    return await client.callFunction(`function(key) {
         const tbody = document.querySelector("[data-testid='issue-table'] tbody");
         const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
         const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
         const rows = [...document.querySelectorAll(".issue-row")];
-        window[${JSON.stringify(key)}] = {
+        window[key] = {
             top,
             bottom,
             rowIDs: rows.map((node) => node.id),
@@ -722,12 +724,12 @@ async function captureVirtualTableDom(client, key) {
             topExists: Boolean(top),
             bottomExists: Boolean(bottom),
         };
-    })()`);
+    }`, key);
 }
 
 async function readVirtualTableDom(client, key) {
-    return await client.evaluate(`(() => {
-        const before = window[${JSON.stringify(key)}] || {};
+    return await client.callFunction(`function(key) {
+        const before = window[key] || {};
         const tbody = document.querySelector("[data-testid='issue-table'] tbody");
         const top = tbody?.querySelector(".gf-virtual-table-spacer-top") || null;
         const bottom = tbody?.querySelector(".gf-virtual-table-spacer-bottom") || null;
@@ -742,7 +744,7 @@ async function readVirtualTableDom(client, key) {
             rowIDsSame: JSON.stringify(before.rowIDs || []) === JSON.stringify(rows.map((node) => node.id)),
             childCountSame: before.childCount === (tbody?.children.length ?? 0),
         };
-    })()`);
+    }`, key);
 }
 
 function assertInsideBufferScrollReport(report, beforeState, state) {
@@ -987,6 +989,21 @@ async function connect(url) {
             pending.set(id, { resolve, reject });
             socket.send(JSON.stringify({ id, method, params }));
         });
+    let globalObjectID = "";
+    const getGlobalObjectID = async () => {
+        if (globalObjectID) {
+            return globalObjectID;
+        }
+        const result = await call("Runtime.evaluate", {
+            expression: "globalThis",
+            returnByValue: false,
+        });
+        if (result.exceptionDetails) {
+            throw new Error(`browser evaluation failed: ${JSON.stringify(result.exceptionDetails)}`);
+        }
+        globalObjectID = result.result.objectId;
+        return globalObjectID;
+    };
 
     return {
         call,
@@ -994,6 +1011,19 @@ async function connect(url) {
         evaluate: async (expression) => {
             const result = await call("Runtime.evaluate", {
                 expression,
+                returnByValue: true,
+                awaitPromise: true,
+            });
+            if (result.exceptionDetails) {
+                throw new Error(`browser evaluation failed: ${JSON.stringify(result.exceptionDetails)}`);
+            }
+            return result.result.value;
+        },
+        callFunction: async (functionDeclaration, ...args) => {
+            const result = await call("Runtime.callFunctionOn", {
+                objectId: await getGlobalObjectID(),
+                functionDeclaration,
+                arguments: args.map((value) => ({ value })),
                 returnByValue: true,
                 awaitPromise: true,
             });

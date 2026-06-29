@@ -79,40 +79,45 @@ try {
 }
 
 async function click(client, selector) {
-    const result = await client.evaluate(`(() => {
-        const element = document.querySelector(${JSON.stringify(selector)});
+    const result = await client.callFunction(`function(selector) {
+        const element = document.querySelector(selector);
         if (!element) return false;
         element.click();
         return true;
-    })()`);
+    }`, selector);
     if (!result) {
         throw new Error(`APP FAILURE: missing element for click ${selector}`);
     }
 }
 
 async function waitForReport(client, phase, label) {
-    await waitUntil(client, label, `(() => {
-        const reports = globalThis.goframeRuntimeErrorReports || [];
-        return reports.some((report) => report.phase === ${JSON.stringify(phase)});
-    })()`);
+    await waitUntil(client, label, () =>
+        client.callFunction(`function(phase) {
+            const reports = globalThis.goframeRuntimeErrorReports || [];
+            return reports.some((report) => report.phase === phase);
+        }`, phase));
 }
 
 async function waitForText(client, selector, expected, label) {
-    await waitUntil(client, label, `(() => {
-        const element = document.querySelector(${JSON.stringify(selector)});
-        return element ? element.textContent === ${JSON.stringify(expected)} : false;
-    })()`);
+    await waitUntil(client, label, () =>
+        client.callFunction(`function(selector, expected) {
+            const element = document.querySelector(selector);
+            return element ? element.textContent === expected : false;
+        }`, selector, expected));
 }
 
 async function waitForAbsent(client, selector, label) {
-    await waitUntil(client, label, `(() => !document.querySelector(${JSON.stringify(selector)}))()`);
+    await waitUntil(client, label, () =>
+        client.callFunction(`function(selector) {
+            return !document.querySelector(selector);
+        }`, selector));
 }
 
-async function waitUntil(client, label, expression) {
+async function waitUntil(client, label, predicate) {
     const started = Date.now();
     let lastValue = null;
     while (Date.now() - started < 5000) {
-        lastValue = await client.evaluate(expression);
+        lastValue = await predicate();
         if (lastValue === true) {
             return;
         }
@@ -262,9 +267,32 @@ function connect(url) {
                         returnByValue: true,
                     });
                     if (response.exceptionDetails) {
-                        throw new Error(response.exceptionDetails.text);
+                        throw new Error(`browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
                     }
-                    return response.result.result.value;
+                    return response.result.value;
+                },
+                async callFunction(functionDeclaration, ...args) {
+                    if (!this.globalObjectID) {
+                        const globalResponse = await this.call("Runtime.evaluate", {
+                            expression: "globalThis",
+                            returnByValue: false,
+                        });
+                        if (globalResponse.exceptionDetails) {
+                            throw new Error(`browser evaluation failed: ${JSON.stringify(globalResponse.exceptionDetails)}`);
+                        }
+                        this.globalObjectID = globalResponse.result.objectId;
+                    }
+                    const response = await this.call("Runtime.callFunctionOn", {
+                        objectId: this.globalObjectID,
+                        functionDeclaration,
+                        arguments: args.map((value) => ({ value })),
+                        awaitPromise: true,
+                        returnByValue: true,
+                    });
+                    if (response.exceptionDetails) {
+                        throw new Error(`browser evaluation failed: ${JSON.stringify(response.exceptionDetails)}`);
+                    }
+                    return response.result.value;
                 },
                 close() {
                     socket.close();
@@ -283,7 +311,7 @@ function connect(url) {
                 request.reject(new Error(message.error.message));
                 return;
             }
-            request.resolve(message);
+            request.resolve(message.result);
         });
     });
 }

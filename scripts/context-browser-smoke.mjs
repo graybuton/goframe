@@ -171,24 +171,26 @@ async function contextState(client) {
 }
 
 async function setSelectValue(client, selector, value) {
-    await client.evaluate(`(() => {
-        const select = document.querySelector(${JSON.stringify(selector)});
-        select.value = ${JSON.stringify(value)};
+    await client.callFunction(`function(selector, value) {
+        const select = document.querySelector(selector);
+        select.value = value;
         select.dispatchEvent(new Event("change", { bubbles: true }));
         return true;
-    })()`);
+    }`, selector, value);
     await wait(140);
 }
 
 async function startScenario(client, label) {
-    await client.evaluate(`(() => {
-        window.__contextAudit.start(${JSON.stringify(label)});
+    await client.callFunction(`function(label) {
+        window.__contextAudit.start(label);
         return true;
-    })()`);
+    }`, label);
 }
 
 async function finishScenario(client, label) {
-    const report = await client.evaluate(`(() => window.__contextAudit.finish(${JSON.stringify(label)}))()`);
+    const report = await client.callFunction(`function(label) {
+        return window.__contextAudit.finish(label);
+    }`, label);
     console.log(`context perf ${label}: ${JSON.stringify(report)}`);
     return report;
 }
@@ -385,6 +387,21 @@ async function connect(url) {
             pending.set(id, { resolve, reject });
             socket.send(JSON.stringify({ id, method, params }));
         });
+    let globalObjectID = "";
+    const getGlobalObjectID = async () => {
+        if (globalObjectID) {
+            return globalObjectID;
+        }
+        const result = await call("Runtime.evaluate", {
+            expression: "globalThis",
+            returnByValue: false,
+        });
+        if (result.exceptionDetails) {
+            throw new Error(`browser evaluation failed: ${JSON.stringify(result.exceptionDetails)}`);
+        }
+        globalObjectID = result.result.objectId;
+        return globalObjectID;
+    };
 
     return {
         call,
@@ -392,6 +409,19 @@ async function connect(url) {
         evaluate: async (expression) => {
             const result = await call("Runtime.evaluate", {
                 expression,
+                returnByValue: true,
+                awaitPromise: true,
+            });
+            if (result.exceptionDetails) {
+                throw new Error(`browser evaluation failed: ${JSON.stringify(result.exceptionDetails)}`);
+            }
+            return result.result.value;
+        },
+        callFunction: async (functionDeclaration, ...args) => {
+            const result = await call("Runtime.callFunctionOn", {
+                objectId: await getGlobalObjectID(),
+                functionDeclaration,
+                arguments: args.map((value) => ({ value })),
                 returnByValue: true,
                 awaitPromise: true,
             });
