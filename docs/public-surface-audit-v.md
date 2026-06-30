@@ -67,7 +67,7 @@ Updated documentation to reflect the current project surface:
 
 - current MVP 22 size and DOM pressure baseline in
   `docs/performance-baseline.md`;
-- current TinyGo example sizes and roadmap framing in `docs/architecture.md`;
+- current TinyGo example sizes and project-vision framing in `docs/architecture.md`;
 - typed component identity wording in `docs/component-identity.md`;
 - docs consistency checks in `docs/ci.md`.
 

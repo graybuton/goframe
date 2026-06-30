@@ -305,14 +305,15 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
 - `goxc serve` is a development server without compression negotiation.
 - Debug-tag performance probes are observations, not rigorous benchmarks.
 
-## Roadmap
+## Preview Boundaries
 
-1. Keep public docs, examples, and regression gates aligned with the actual
-   toolchain surface.
-2. Harden component identity and workspace behavior before claiming reusable
-   package ecosystem support.
-3. Add deeper symlink/path-safety tests before public preview.
-4. Continue measuring size, DOM pressure, and browser smoke invariants before
-   taking on larger features.
-5. Explore path/history routing, Player/Engine, SSR/hydration, and `.gfapp`
-   only as separate design efforts, not incidental cleanup.
+- Public docs, examples, and regression gates describe the current toolchain
+  surface.
+- Reusable package ecosystem support is outside the current preview contract.
+- Filesystem safety evidence is scoped to the documented `goxc` checks and
+  supported command paths; hostile concurrent filesystem mutation remains out
+  of scope.
+- Size, DOM pressure, and browser smoke results are current evidence, not
+  production benchmarks.
+- Path/history routing, Player/Engine, SSR/hydration, and `.gfapp` are outside
+  the current preview contract.

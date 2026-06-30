@@ -23,8 +23,8 @@ preview scope must not be confused with a smaller project vision.
 GoFrame should not remove or hide working surfaces merely because they are not
 perfect yet. Valuable but risky areas should be hardened, documented, tested, or
 marked experimental. The project remains an ambitious Go-first application
-platform; preview contracts should make maturity visible rather than amputating
-the roadmap.
+platform; preview contracts should make maturity visible rather than narrowing
+the project vision.
 
 ## Current Product Identity
 
@@ -86,7 +86,7 @@ migration notes and a compatibility window.
 These are contract and evidence risks, not reasons to reduce GoFrame to a
 smaller product category.
 
-## What We Will Not Do
+## Current Non-Goals
 
 - No feature removal just to reduce audit surface.
 - No runtime/toolchain rewrites in this docs/planning phase.
@@ -95,7 +95,7 @@ smaller product category.
 - No SSR, hydration, history-router, route-loader, server-resource, or
   Player/Engine promises for the first preview.
 
-## Roadmap
+## Focused Branch Sequence
 
 ### 1. `docs/vision-preserving-preview-contract`
 
