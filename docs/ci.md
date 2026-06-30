@@ -72,6 +72,12 @@ then runs:
 scripts/browser-smoke.sh
 ```
 
+The current smoke harness is Chrome/Chromium-specific. The Node scripts launch
+Chrome with a remote debugging port and use the Chrome DevTools Protocol over
+WebSocket for DOM probes, event simulation, runtime error collection, and DOM
+pressure metrics. Firefox, Safari/WebKit, and other non-Chrome engines do not
+have automated browser-smoke evidence in the current preview CI contract.
+
 The smoke script chooses dynamic ports, verifies the expected app origin before
 storage cleanup, checks WASM MIME type, and separates harness failures from app
 failures. It currently covers Todo reconciliation, duplicate-key debug
@@ -226,6 +232,7 @@ Local checks use:
 - curl for smoke server readiness checks.
 
 Set `CHROME=/path/to/chrome` when Chrome is not available as `google-chrome`.
+There is no local non-Chrome smoke command in the current preview contract.
 
 ## Size Budget Failures
 

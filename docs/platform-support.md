@@ -9,8 +9,9 @@ not a production support promise.
 The current strongest evidence is Linux plus Chrome/Chromium. macOS currently
 has lightweight Intel-runner CI evidence for core Go/toolchain behavior, and
 Windows has lightweight CI evidence for the same layer. Firefox and Safari are
-not rejected platforms; they are explicitly deferred until dedicated non-Chrome
-validation is added.
+not rejected platforms, but they are outside the current preview evidence.
+The browser smoke harness is Chrome DevTools Protocol based, so non-Chrome
+behavior is not claimed by `v0.1.0-preview.*`.
 
 Labels:
 
@@ -45,9 +46,17 @@ toolchains.
 | Browser | Status | Evidence |
 |---|---|---|
 | Chrome/Chromium | CI-tested | Browser smoke and dashboard DOM pressure use Chrome/CDP. |
-| Firefox | unverified | Runtime uses standard browser APIs but has no CI coverage. |
-| Safari/WebKit | unverified | Runtime uses standard browser APIs but has no CI coverage. |
+| Firefox | unverified | Runtime uses standard browser APIs, but current CI has no Firefox smoke or package-load evidence. |
+| Safari/WebKit | unverified | Runtime uses standard browser APIs, but current CI has no Safari/WebKit smoke or package-load evidence. |
 | Non-browser WASM hosts | unsupported | Current runtime assumes browser DOM APIs. |
+
+Current non-Chrome boundary:
+
+- browser smoke scripts launch Chrome/Chromium and talk to the Chrome DevTools
+  Protocol over WebSocket;
+- the repository does not currently include a Playwright, WebDriver, Marionette,
+  or WebKit automation harness;
+- `v0.1.0-preview.*` does not claim equivalent Firefox or Safari behavior.
 
 Required browser APIs:
 
