@@ -532,6 +532,7 @@ Project audits and future design:
 - [Foundation Audit IV](docs/foundation-audit-iv.md)
 - [Public Surface Audit V](docs/public-surface-audit-v.md)
 - [Public Preview Hardening I](docs/public-preview-hardening-i.md)
+- [Post-preview v0.2 technical focus](docs/post-preview-v0.2-focus.md)
 - [Future GoFrame Player vision](docs/player-vision.md)
 
 Examples:
