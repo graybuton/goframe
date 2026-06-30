@@ -1,8 +1,5 @@
 # Release Notes: v0.1.0-preview.1
 
-Status: draft release notes. No `v0.1.0-preview.1` tag is created by this
-document.
-
 ## Summary
 
 GoFrame is an experimental Go-first application platform. This preview
