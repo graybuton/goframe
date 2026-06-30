@@ -26,7 +26,7 @@ Before public preview:
 After public preview:
 
 - Public-Candidate APIs should not break without a migration note;
-- deprecated APIs should remain for at least one planned release stage unless
+- deprecated APIs should remain for at least one documented release stage unless
   safety requires faster removal;
 - CLI command and flag changes should include replacement commands;
 - user-authored manifest compatibility should be stricter than generated

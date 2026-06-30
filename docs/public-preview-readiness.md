@@ -209,7 +209,7 @@ Decision:
   non-regular assets, omitted/`null`/empty assets behavior, custom and
   generated `index.html`, versioned metadata presence, and immediate package
   ownership verification;
-- package assets are planned before publication so user assets cannot collide
+- package asset planning runs before publication so user assets cannot collide
   with the generated WASM, `wasm_exec.js`, or compressed sidecars;
 - successful package/export commands verify that the published output is
   immediately recognized as a complete current GoFrame package;
