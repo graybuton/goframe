@@ -93,6 +93,9 @@
 - `v0.1.0-preview.1` release-story docs, including draft release notes,
   evaluator guidance, compatibility/readiness alignment, and fact-first preview
   documentation cleanup.
+- `v0.1.0-preview.2` maintenance release notes documenting post-preview.1
+  community health files, `goxc serve` path hardening, browser smoke CodeQL
+  eval-pattern cleanup, and no runtime/API/GOX/package semantics expansion.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
