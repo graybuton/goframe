@@ -17,10 +17,15 @@ For the first public preview, the following behavior is considered stable enough
   `gf.ComponentT(gf.NewComponentType("importpath.Symbol", "Debug"), props, Header)`.
 - Identity defaults are derived from canonical component import/package path plus symbol name.
 - Import aliases are diagnostic labels and `gf.ComponentT` debug names, not identity keys.
-- Package-qualified GOX tags (`<layout.Shell />`, `<ui.Header />`) are stable when imports resolve to a package identity.
+- Package-qualified GOX tags (`<layout.Shell />`, `<ui.Header />`) are stable
+  inside the current app/workspace model when imports resolve to a package
+  identity.
 - Typed identity can be combined with keys (`gf.Key` / `Key`) for explicit list locality control.
 
-GoFrame examples and docs rely on these assumptions when composing multi-package trees inside one app/root.
+GoFrame examples and docs rely on these assumptions when composing
+multi-package trees inside one app/root. The `multipackage` and `cmdapp`
+examples exercise app/workspace composition; they do not claim a stable
+reusable component package ecosystem across independently versioned modules.
 
 ## Preview contract by API kind
 
@@ -59,9 +64,9 @@ For users running one module/application tree:
 
 ## Experimental frontier under preview
 
-These areas are experimental or only partially evidenced. Single-module
-multi-package composition is covered; broad multi-module or reusable package
-identity is not yet promised.
+These areas are experimental or only partially evidenced. Current preview
+evidence covers single-module app/workspace composition; broad multi-module or
+reusable package identity is outside the current preview contract.
 
 - Multi-module or module-reused component package identity.
 - Identity under `replace`, workspace aliasing, and non-trivial module path churn.
@@ -71,9 +76,9 @@ identity is not yet promised.
 
 ### Practical implication
 
-The API shape is usable and documented.
-The deeper contract under module/path edges remains experimental until later
-identity-hardening work explicitly documents and tests those edges.
+The API shape is usable and documented. The deeper contract under module/path
+edges remains experimental and requires dedicated design/test evidence before
+being claimed.
 
 ## Remount and state expectations
 
@@ -91,7 +96,7 @@ Use `gf.ComponentT` for runtime-visible typed boundaries, and keep
 `gf.Component` as a compatibility path for direct composition.
 Use direct function calls only for ordinary helper composition.
 Do not assume stable behavior across module path edits, module replacement,
-or cross-module ecosystem sharing in this preview window.
+or cross-module ecosystem sharing in the current preview contract.
 
 ## Risks and non-goals
 

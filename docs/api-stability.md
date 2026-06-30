@@ -193,8 +193,8 @@ VS Code extension:
   `gf.ComponentT` and typed identity tokens) can still have experimental
   semantics in specific lifecycle, remount, and edge-case compatibility areas.
   The exported surface is documented for preview usage, while deep behavior
-  under module/version/package-path edge cases remains experimental until
-  broader identity guarantees are proven.
+  under module/version/package-path edge cases remains experimental and outside
+  the current preview promise.
 - GOX diagnostic wording beyond the filename/line/column/source-line contract.
 - Context topology behavior and selector limitations.
 - Virtualization details such as fixed-height range buffering and table spacer
@@ -240,9 +240,8 @@ their contracts are still maturing.
 - `.gfapp` package format.
 - Broader host/runtime story beyond the browser DOM target.
 - Stronger editor tooling such as LSP/formatter behavior.
-- Future package ecosystem and reusable component distribution story.
-- Production deployment/server integration, if the project chooses that path in
-  a later phase.
+- Broader package ecosystem and reusable component distribution story.
+- Production deployment/server integration.
 
 These are not part of the first public preview promise.
 
@@ -330,15 +329,13 @@ Not stable:
 - automatic route-level Error Boundaries;
 - production deployment server behavior.
 
-## Road To Public Preview
+## Current Preview Boundaries
 
-Before public preview, GoFrame should have:
+The current preview does not claim:
 
-- a component identity decision for multi-module workspaces and reusable
-  component packages;
-- a symlink/file safety test matrix;
-- clearer package manifest compatibility policy;
-- stable migration notes for GOX syntax changes;
-- documented browser support expectations;
-- repeatable performance baseline updates;
-- explicit public/deprecated/internal API review.
+- broad multi-module workspace identity;
+- stable reusable component package identity across independently versioned
+  modules;
+- equivalent Firefox/Safari/browser engine evidence;
+- production deployment/server behavior;
+- 1.0 API compatibility.
