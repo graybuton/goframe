@@ -183,6 +183,160 @@ func Layout(props LayoutProps) gf.Node {
 	}
 }
 
+func TestGenerateIntoDirectoryCharacterizesExternalModuleComponentIdentity(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	writeExternalCardModule(t, root, "ui", "example.com/ui", "ui")
+	writeExternalCardModule(t, root, "otherui", "example.com/otherui", "otherui")
+	writeExternalCardModule(t, root, "ui-v2", "example.com/ui/v2", "ui")
+	writeTestFile(t, appDir, "go.mod", `module example.com/app
+
+go 1.22
+
+require (
+	example.com/otherui v0.0.0
+	example.com/ui v0.0.0
+	example.com/ui/v2 v2.0.0
+)
+
+replace example.com/ui => ../ui
+replace example.com/otherui => ../otherui
+replace example.com/ui/v2 => ../ui-v2
+`)
+	writeTestFile(t, appDir, "app.gox", `package main
+
+import (
+	ui "example.com/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func App() gf.Node {
+	return <ui.Card Title="App" />
+}
+`)
+	writeTestFile(t, appDir, "alias.gox", `package main
+
+import (
+	widgets "example.com/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func AliasView() gf.Node {
+	return <widgets.Card Title="Alias" />
+}
+`)
+	writeTestFile(t, appDir, "external_cards.gox", `package main
+
+import (
+	other "example.com/otherui"
+	ui "example.com/ui"
+	uiv2 "example.com/ui/v2"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func Cards() gf.Node {
+	return (
+		<section>
+			<ui.Card Title="UI" />
+			<other.Card Title="Other" />
+			<uiv2.Card Title="V2" />
+		</section>
+	)
+}
+`)
+
+	destination := t.TempDir()
+	if err := generateIntoDirectory(appDir, destination, true); err != nil {
+		t.Fatalf("generateIntoDirectory() error: %v", err)
+	}
+
+	assertGeneratedFileContains(t, filepath.Join(destination, "app.gox.go"),
+		`gf.NewComponentType("example.com/ui.Card", "ui.Card")`,
+		`gf.ComponentT(_goxComponent_app_ui_Card, ui.CardProps{`,
+	)
+	assertGeneratedFileContains(t, filepath.Join(destination, "alias.gox.go"),
+		`gf.NewComponentType("example.com/ui.Card", "widgets.Card")`,
+		`gf.ComponentT(_goxComponent_alias_widgets_Card, widgets.CardProps{`,
+	)
+	assertGeneratedFileContains(t, filepath.Join(destination, "external_cards.gox.go"),
+		`gf.NewComponentType("example.com/ui.Card", "ui.Card")`,
+		`gf.NewComponentType("example.com/otherui.Card", "other.Card")`,
+		`gf.NewComponentType("example.com/ui/v2.Card", "uiv2.Card")`,
+	)
+	aliasContent, err := os.ReadFile(filepath.Join(destination, "alias.gox.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(aliasContent), `gf.NewComponentType("widgets.Card"`) {
+		t.Fatalf("alias-generated output used the import alias as identity:\n%s", aliasContent)
+	}
+}
+
+func TestPrepareBuildWorkspaceCharacterizesExternalModuleGOXBoundary(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	writeExternalCardModule(t, root, "ui", "example.com/ui", "ui")
+	writeTestFile(t, filepath.Join(root, "ui"), "card.gox", `package ui
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func ExternalGOX() gf.Node {
+	return <Card Title="external gox" />
+}
+`)
+	writeTestFile(t, appDir, "go.mod", `module example.com/app
+
+go 1.22
+
+require example.com/ui v0.0.0
+
+replace example.com/ui => ../ui
+`)
+	writeTestFile(t, appDir, "main.go", "package main\n")
+	writeTestFile(t, appDir, "app.gox", `package main
+
+import (
+	ui "example.com/ui"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func App() gf.Node {
+	return <ui.Card Title="App" />
+}
+`)
+
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    appDir,
+		workspace: filepath.Join(t.TempDir(), "workspace"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareBuildWorkspace(layout, projectManifest{Entry: "."}); err != nil {
+		t.Fatalf("prepareBuildWorkspace() error: %v", err)
+	}
+
+	workspaceGoMod, err := os.ReadFile(filepath.Join(layout.WorkDir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceGoModText := string(workspaceGoMod)
+	if strings.Contains(workspaceGoModText, "example.com/ui") {
+		t.Fatalf("workspace go.mod unexpectedly preserved external module directive:\n%s", workspaceGoModText)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ui", "card.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("external dependency GOX source was generated next to dependency source: %v", err)
+	}
+	config := workspaceModuleConfigForApp(appDir)
+	appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
+	if _, err := os.Stat(filepath.Join(appWorkDir, "app.gox.go")); err != nil {
+		t.Fatalf("app GOX output missing from workspace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(layout.WorkDir, "ui", "card.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("external dependency GOX source was materialized inside workspace: %v", err)
+	}
+}
+
 func TestGenerateIntoDirectoryReportsOriginalGOXSource(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/example/root\n\ngo 1.22\n"), 0o644); err != nil {
@@ -412,5 +566,36 @@ func writeTestFile(t *testing.T, root, relative, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeExternalCardModule(t *testing.T, root, directory, modulePath, packageName string) {
+	t.Helper()
+	moduleDir := filepath.Join(root, directory)
+	writeTestFile(t, moduleDir, "go.mod", "module "+modulePath+"\n\ngo 1.22\n")
+	writeTestFile(t, moduleDir, "card.go", `package `+packageName+`
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type CardProps struct {
+	Title string
+}
+
+func Card(props CardProps) gf.Node {
+	return gf.Text(props.Title)
+}
+`)
+}
+
+func assertGeneratedFileContains(t *testing.T, path string, wants ...string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated file %s: %v", path, err)
+	}
+	for _, want := range wants {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("generated file %s missing %q:\n%s", path, want, content)
+		}
 	}
 }
