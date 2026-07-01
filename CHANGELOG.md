@@ -99,6 +99,10 @@
 - Post-preview v0.2 focus documentation selecting reusable component/package
   identity as the next design/test focus without behavior changes or preview
   promise expansion.
+- `goxc` build workspace materialization now preserves app module
+  `require`/`replace` directives for external Go package resolution, rewrites
+  relative local replace targets to the original module locations, and keeps
+  external dependency `.gox` generation outside the current workspace model.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
