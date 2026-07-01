@@ -90,6 +90,13 @@ The build package is `examples/cmdapp/.goframe/work/dev/examples/cmdapp/cmd/app`
 GOX discovery remains app-root-wide so imported internal packages get their
 generated files too.
 
+When an app imports ordinary Go packages from external modules, `goxc`
+preserves the nearest app module's `require` and `replace` directives in the
+materialized workspace. Relative local `replace` targets are rewritten so they
+still point at the original target after `go.mod` is written under
+`.goframe/work/<profile>`. This supports normal Go package resolution for
+external Go component packages declared by the app module.
+
 This model is intentionally used instead of a Go overlay because TinyGo
 support for overlays is not part of the current baseline.
 
@@ -245,11 +252,13 @@ goxc serve ./examples/router-dashboard --port=8080
 - No XML-style namespace tags with `:`.
 - No arbitrary selector chains beyond `packageAlias.Component`.
 - No full multi-module monorepo story.
+- No generated GOX materialization for raw `.gox` files inside external
+  dependencies. External dependencies are resolved as ordinary Go modules.
 - No file-based router or framework-level layout convention. The hash router
   uses ordinary Go route declarations and stable shell composition.
-- External module dependencies in app packages are not deeply exercised yet.
-  The current path is focused on packages below the app root plus the GoFrame
-  runtime dependency.
+- App module `require` / `replace` directives are preserved for normal Go
+  dependency resolution, but that is not a stable reusable package ecosystem or
+  full multi-module workspace claim.
 - Generated component type variable names are internal and not stable API.
 
 ## Example

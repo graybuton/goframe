@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -272,7 +273,7 @@ func Cards() gf.Node {
 	}
 }
 
-func TestPrepareBuildWorkspaceCharacterizesExternalModuleGOXBoundary(t *testing.T) {
+func TestPrepareBuildWorkspacePreservesExternalModuleDependencies(t *testing.T) {
 	root := t.TempDir()
 	appDir := filepath.Join(root, "app")
 	writeExternalCardModule(t, root, "ui", "example.com/ui", "ui")
@@ -288,9 +289,13 @@ func ExternalGOX() gf.Node {
 
 go 1.22
 
-require example.com/ui v0.0.0
+require (
+	example.com/ui v0.0.0
+)
 
-replace example.com/ui => ../ui
+replace (
+	example.com/ui => ../ui
+)
 `)
 	writeTestFile(t, appDir, "main.go", "package main\n")
 	writeTestFile(t, appDir, "app.gox", `package main
@@ -312,7 +317,8 @@ func App() gf.Node {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareBuildWorkspace(layout, projectManifest{Entry: "."}); err != nil {
+	entryDir, err := prepareBuildWorkspace(layout, projectManifest{Entry: "."})
+	if err != nil {
 		t.Fatalf("prepareBuildWorkspace() error: %v", err)
 	}
 
@@ -321,19 +327,68 @@ func App() gf.Node {
 		t.Fatal(err)
 	}
 	workspaceGoModText := string(workspaceGoMod)
-	if strings.Contains(workspaceGoModText, "example.com/ui") {
-		t.Fatalf("workspace go.mod unexpectedly preserved external module directive:\n%s", workspaceGoModText)
+	replaceTarget := filepath.ToSlash(filepath.Join(root, "ui"))
+	for _, want := range []string{
+		"require (\n\texample.com/ui v0.0.0\n)",
+		"replace (\n\texample.com/ui => " + replaceTarget + "\n)",
+	} {
+		if !strings.Contains(workspaceGoModText, want) {
+			t.Fatalf("workspace go.mod missing %q:\n%s", want, workspaceGoModText)
+		}
+	}
+	if strings.Contains(workspaceGoModText, "=> ../ui") {
+		t.Fatalf("workspace go.mod preserved stale relative replace target:\n%s", workspaceGoModText)
 	}
 	if _, err := os.Stat(filepath.Join(root, "ui", "card.gox.go")); !os.IsNotExist(err) {
 		t.Fatalf("external dependency GOX source was generated next to dependency source: %v", err)
 	}
 	config := workspaceModuleConfigForApp(appDir)
 	appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
-	if _, err := os.Stat(filepath.Join(appWorkDir, "app.gox.go")); err != nil {
-		t.Fatalf("app GOX output missing from workspace: %v", err)
-	}
+	assertGeneratedFileContains(t, filepath.Join(appWorkDir, "app.gox.go"),
+		`gf.NewComponentType("example.com/ui.Card", "ui.Card")`,
+	)
 	if _, err := os.Stat(filepath.Join(layout.WorkDir, "ui", "card.gox.go")); !os.IsNotExist(err) {
 		t.Fatalf("external dependency GOX source was materialized inside workspace: %v", err)
+	}
+	runGoListInWorkspace(t, entryDir)
+}
+
+func TestWriteWorkspaceGoModPreservesSingleLineExternalModuleDirectives(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	writeTestFile(t, appDir, "go.mod", `module example.com/app
+
+go 1.22
+
+require example.com/ui v0.0.0
+
+replace example.com/ui => ../ui
+`)
+	writeTestFile(t, appDir, "go.sum", "example.com/ui v0.0.0 h1:local\n")
+
+	workDir := t.TempDir()
+	if err := writeWorkspaceGoMod(workDir, appDir); err != nil {
+		t.Fatalf("writeWorkspaceGoMod() error: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(workDir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, want := range []string{
+		"require (\n\texample.com/ui v0.0.0\n)",
+		"replace (\n\texample.com/ui => " + filepath.ToSlash(filepath.Join(root, "ui")) + "\n)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("workspace go.mod missing %q:\n%s", want, text)
+		}
+	}
+	goSum, err := os.ReadFile(filepath.Join(workDir, "go.sum"))
+	if err != nil {
+		t.Fatalf("workspace go.sum missing: %v", err)
+	}
+	if string(goSum) != "example.com/ui v0.0.0 h1:local\n" {
+		t.Fatalf("workspace go.sum = %q", goSum)
 	}
 }
 
@@ -597,5 +652,21 @@ func assertGeneratedFileContains(t *testing.T, path string, wants ...string) {
 		if !strings.Contains(string(content), want) {
 			t.Fatalf("generated file %s missing %q:\n%s", path, want, content)
 		}
+	}
+}
+
+func runGoListInWorkspace(t *testing.T, dir string) {
+	t.Helper()
+	command := exec.Command("go", "list", "-deps", ".")
+	command.Dir = dir
+	command.Env = append(os.Environ(),
+		"GOPROXY=off",
+		"GOSUMDB=off",
+		"GOWORK=off",
+		"GOFLAGS=-mod=mod",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list in workspace failed: %v\n%s", err, output)
 	}
 }

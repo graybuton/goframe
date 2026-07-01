@@ -218,6 +218,10 @@ func generateFileSafely(file, output string, options gox.GenerateOptions) error 
 
 func writeWorkspaceGoMod(workDir, appDir string) error {
 	config := workspaceModuleConfigForApp(appDir)
+	appModule, err := readWorkspaceModuleDirectives(config.ModuleRoot)
+	if err != nil {
+		return err
+	}
 	content := strings.Builder{}
 	modulePath := config.ModulePath
 	if modulePath == "" {
@@ -225,6 +229,7 @@ func writeWorkspaceGoMod(workDir, appDir string) error {
 	}
 	content.WriteString("module " + modulePath + "\n\n")
 	content.WriteString("go 1.22\n\n")
+	writeWorkspaceRequires(&content, appModule.Requires)
 	if modulePath != canonicalModulePath {
 		if repoRoot, ok := findRepositoryRootForWorkspace(appDir); ok {
 			content.WriteString("require " + canonicalModulePath + " v0.0.0\n")
@@ -240,8 +245,12 @@ func writeWorkspaceGoMod(workDir, appDir string) error {
 			content.WriteString("require " + canonicalModulePath + " " + version + "\n")
 		}
 	}
+	writeWorkspaceReplaces(&content, appModule.Replaces)
 	if err := os.WriteFile(filepath.Join(workDir, "go.mod"), []byte(content.String()), 0o644); err != nil {
 		return fmt.Errorf("write workspace go.mod: %w", err)
+	}
+	if err := copyWorkspaceGoSum(workDir, config.ModuleRoot); err != nil {
+		return err
 	}
 	return nil
 }
