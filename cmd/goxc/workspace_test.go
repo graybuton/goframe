@@ -320,13 +320,9 @@ func App() gf.Node {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, unexpected := range []string{
-		"require example.com/ui",
-		"replace example.com/ui",
-	} {
-		if strings.Contains(string(workspaceGoMod), unexpected) {
-			t.Fatalf("workspace go.mod unexpectedly preserved external module directive %q:\n%s", unexpected, workspaceGoMod)
-		}
+	workspaceGoModText := string(workspaceGoMod)
+	if strings.Contains(workspaceGoModText, "example.com/ui") {
+		t.Fatalf("workspace go.mod unexpectedly preserved external module directive:\n%s", workspaceGoModText)
 	}
 	if _, err := os.Stat(filepath.Join(root, "ui", "card.gox.go")); !os.IsNotExist(err) {
 		t.Fatalf("external dependency GOX source was generated next to dependency source: %v", err)
