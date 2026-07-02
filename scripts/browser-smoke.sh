@@ -388,6 +388,11 @@ export GOFRAME_BACKEND_CHROME_DEBUG_PORT="${GOFRAME_BACKEND_CHROME_DEBUG_PORT:-$
 node --experimental-websocket scripts/backend-integration-smoke.mjs
 
 echo
+echo "== Server-backed reference browser smoke =="
+export GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT="${GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+node --experimental-websocket scripts/server-backed-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
