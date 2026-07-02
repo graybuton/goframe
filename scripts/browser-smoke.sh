@@ -383,6 +383,11 @@ run_with_server ./examples/resource "$RESOURCE_PORT" "$RESOURCE_URL" \
 	node --experimental-websocket scripts/resource-browser-smoke.mjs
 
 echo
+echo "== Go backend integration browser smoke =="
+export GOFRAME_BACKEND_CHROME_DEBUG_PORT="${GOFRAME_BACKEND_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+node --experimental-websocket scripts/backend-integration-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
