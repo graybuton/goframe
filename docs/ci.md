@@ -93,11 +93,10 @@ identity. It also covers route Error Boundary fallback and safe navigation
 recovery in the reference app. It also covers the resource example for explicit
 loading/ready/failed state, reload, stale completion guards, and
 cleanup-after-unmount behavior.
-It also records a narrow Go `net/http` backend integration boundary: a
-packaged GoFrame app is served by a same-origin Go backend and renders data
-from a fixture-local `/api/...` endpoint without adding a GoFrame server API.
-The persistent `examples/server-backed` smoke covers the same boundary as a
-reviewable example with a small form-driven same-origin API request.
+The persistent `examples/server-backed` smoke records a narrow Go `net/http`
+backend integration boundary. A packaged GoFrame browser/WASM app is served by
+a same-origin Go backend and renders data from `/api/greeting` before and after
+a small form-driven request. This does not add a GoFrame server API.
 
 The runtime error containment fixture, Error Boundary fixture, and
 router-dashboard reference-app smoke are compiled with the Go WASM compiler

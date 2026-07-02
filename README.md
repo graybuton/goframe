@@ -552,6 +552,7 @@ Examples:
 - [Router example](examples/router/README.md)
 - [Router dashboard reference example](examples/router-dashboard/README.md)
 - [Resource loading example](examples/resource/README.md)
+- [Server-backed reference example](examples/server-backed/README.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 
 ## Current Limitations
@@ -610,7 +611,11 @@ Package all examples:
 ```bash
 for app in examples/*; do
 	if [ -f "$app/goframe.json" ]; then
-		goxc package "$app" --compiler=tinygo --asset-hash --preload --compress=gzip,br
+		compiler=tinygo
+		case "$app" in
+			examples/server-backed) compiler=go ;;
+		esac
+		goxc package "$app" --compiler="$compiler" --asset-hash --preload --compress=gzip,br
 	fi
 done
 ```
