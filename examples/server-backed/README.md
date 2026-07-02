@@ -9,7 +9,9 @@ This example shows a narrow integration pattern:
 - browser-side data loading through an example-local fetch bridge and
   `gf.UseResource`;
 - a controlled backend failure and recovery path through the same resource/form
-  state.
+  state;
+- delayed stale backend response handling without overwriting newer rendered
+  data.
 
 It is a reference fixture, not a GoFrame server framework.
 
@@ -40,6 +42,8 @@ Open <http://127.0.0.1:8080>.
   and update rendered UI after form submission.
 - The app renders the existing `gf.UseResource` failed state for a controlled
   backend error and recovers after a later valid submission.
+- A delayed backend response can be superseded by a newer valid submission
+  without replacing the newer rendered greeting.
 - The browser fetch bridge lives in this example; it is not a runtime API.
 
 ## Project Structure
@@ -67,8 +71,8 @@ node --experimental-websocket scripts/server-backed-browser-smoke.mjs
 
 The browser smoke packages the example, starts the Go backend on a dynamic
 localhost port, opens the app through Chrome/CDP, and verifies initial backend
-data, updated backend data, controlled backend failure UI, and recovery after a
-later valid form submission.
+data, updated backend data, delayed stale response no-overwrite behavior,
+controlled backend failure UI, and recovery after a later valid form submission.
 
 ## Non-goals
 

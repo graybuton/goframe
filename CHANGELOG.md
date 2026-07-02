@@ -117,6 +117,9 @@
   production/fullstack claim.
 - Server-backed reference fixture now covers a controlled backend API failure
   and recovery through existing resource/form state in browser smoke.
+- Server-backed browser smoke now covers delayed stale backend response
+  no-overwrite behavior through existing resource/form state and the
+  example-local fetch bridge.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
