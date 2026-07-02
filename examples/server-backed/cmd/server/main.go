@@ -46,6 +46,11 @@ func greetingHandler(response http.ResponseWriter, request *http.Request) {
 	}
 	response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	response.Header().Set("Cache-Control", "no-store")
+	if name == "fail" {
+		response.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(response, "controlled backend failure")
+		return
+	}
 	fmt.Fprintf(response, "Hello, %s, from Go backend!", name)
 }
 
