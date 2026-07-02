@@ -160,7 +160,8 @@ for trying the preview.
 - tag format documented;
 - install command documented;
 - maturity tiers included: public-candidate, experimental frontier,
-  compiler-facing, internal, and future vision;
+  compiler-facing, internal, and outside-current-contract / inactive-direction
+  scope;
 - platform evidence stated explicitly, including Linux/Chrome as the strongest
   current evidence, minimal macOS/Windows CI check evidence, and non-Chrome
   browser platforms as explicit deferred scope when unverified;
