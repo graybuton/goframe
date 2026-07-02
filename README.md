@@ -1,7 +1,7 @@
 # goframe
 
-GoFrame is an experimental Go-first application platform for interactive
-browser apps. It combines:
+GoFrame is an experimental Go-first web application framework and toolchain for
+interactive browser/WASM apps. It combines:
 
 - the `goframe` runtime library;
 - JSX-like `.gox` markup embedded in Go files;
@@ -10,13 +10,15 @@ browser apps. It combines:
 
 GoFrame is not production-ready. Some APIs are public-candidate, but the GOX
 syntax, manifests, packaging details, and runtime internals may still change
-between MVPs. The browser/WASM target is the current implementation; the
-Player/Engine idea remains future design work, not a shipped product.
+between MVPs. The browser/WASM target is the current validated implementation;
+Player/Engine and `.gfapp` are inactive directions, not shipped products or
+preview promises.
 
 The first public preview scope is intentionally narrower than the project
-vision: it should validate the current browser/WASM application layer without
-removing or hiding working experimental surfaces such as the router, resources,
-and Error Boundaries.
+direction: it should validate the current browser/WASM application layer
+without removing or hiding working experimental surfaces such as the router,
+resources, and Error Boundaries. Staged Go backend integration is a direction
+that requires evidence before it becomes a preview feature claim.
 
 ## Status
 
@@ -38,12 +40,12 @@ Current baseline includes:
 - CI gates for Go/GOX tests, TinyGo size budgets, browser smoke, artifact
   checks, module path checks, and docs consistency.
 
-Non-goals for the current project surface include SSR, hydration,
-Player/Engine implementation, path/history-mode routing, file-based routing,
-route loaders, Suspense-style resources, global resource caching, dynamic
-virtualization, infinite loading, LSP, formatter, XML-style namespace tags,
-spread props, schema validation framework, production deployment server, and
-full multi-module monorepo support.
+Non-goals for the current project surface include SSR, hydration, fullstack
+server APIs, Player/Engine, `.gfapp`, path/history-mode routing, file-based
+routing, route loaders, Suspense-style resources, global resource caching,
+dynamic virtualization, infinite loading, LSP, formatter, XML-style namespace
+tags, spread props, schema validation framework, production deployment server,
+and full multi-module monorepo support.
 
 ## What Is GoFrame?
 
@@ -533,7 +535,7 @@ Project audits and future design:
 - [Public Surface Audit V](docs/public-surface-audit-v.md)
 - [Public Preview Hardening I](docs/public-preview-hardening-i.md)
 - [Post-preview v0.2 technical focus](docs/post-preview-v0.2-focus.md)
-- [Future GoFrame Player vision](docs/player-vision.md)
+- [Inactive GoFrame Player/Engine note](docs/player-vision.md)
 
 Examples:
 
@@ -556,7 +558,8 @@ Examples:
 - Hash router only; no SSR, hydration, path/history-mode server fallback,
   file-based routing, route loaders, hot reload, CSS-in-Go, or production
   deployment server.
-- No Player/Engine implementation or `.gfapp` package format yet.
+- Player/Engine and `.gfapp` are inactive directions outside the current
+  preview contract.
 - No XML-style namespace tags, arbitrary selector chains, spread props,
   template-block loops, formatter, or LSP.
 - No full multi-module monorepo story.

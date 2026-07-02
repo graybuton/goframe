@@ -160,13 +160,14 @@ for trying the preview.
 - tag format documented;
 - install command documented;
 - maturity tiers included: public-candidate, experimental frontier,
-  compiler-facing, internal, and future vision;
+  compiler-facing, internal, and outside-current-contract / inactive-direction
+  scope;
 - platform evidence stated explicitly, including Linux/Chrome as the strongest
   current evidence, minimal macOS/Windows CI check evidence, and non-Chrome
   browser platforms as explicit deferred scope when unverified;
 - reusable/multi-module component identity scope stated explicitly;
 - experimental surfaces named rather than hidden;
-- future Player/Engine direction bounded as vision, not a preview promise;
+- Player/Engine bounded as inactive and not a preview promise;
 - compatibility/deprecation notes included;
 - supply-chain/tooling evidence stated as lightweight CI/Dependabot/lockfile
   coverage, with no SBOM or scanner claim in the current preview contract;

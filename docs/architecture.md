@@ -3,9 +3,10 @@
 ## Platform boundaries
 
 goframe is not intended to be a tiny replacement for React on static websites.
-goframe is an experimental Go-first application platform for interactive apps.
+goframe is an experimental Go-first web application framework and toolchain for
+interactive browser/WASM apps.
 
-The project now separates four concepts:
+The active architecture separates four concepts:
 
 ```text
 GOX language
@@ -19,14 +20,15 @@ goxc toolchain
 
 VS Code GOX extension
    syntax highlighting, snippets, language configuration, and goxc commands
-
-GoFrame Player / Engine
-   a possible future host for portable application bundles
 ```
 
 `goframe` is the library imported by applications. `goxc` is the installed
 developer tool. This distinction avoids treating the runtime package as a CLI
 product.
+
+Player/Engine, `.gfapp`, portable host/runtime packaging, and desktop/mobile
+shells are inactive directions, not active architecture layers or preview
+promises.
 
 The VS Code extension is deliberately a thin developer-experience layer over
 GOX and `goxc`. TextMate scopes provide heuristic highlighting, while terminal
@@ -315,5 +317,7 @@ See [lifecycle and effects](effects.md) for the MVP 9 side-effect model.
   of scope.
 - Size, DOM pressure, and browser smoke results are current evidence, not
   production benchmarks.
-- Path/history routing, Player/Engine, SSR/hydration, and `.gfapp` are outside
-  the current preview contract.
+- Path/history routing and SSR/hydration are outside the current preview
+  contract.
+- Player/Engine, `.gfapp`, portable host/runtime packaging, and desktop/mobile
+  shells are inactive directions.

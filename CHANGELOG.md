@@ -103,6 +103,9 @@
   `require`/`replace` directives for external Go package resolution, rewrites
   relative local replace targets to the original module locations, and keeps
   external dependency `.gox` generation outside the current workspace model.
+- Strategy documentation now positions GoFrame as a web-first Go application
+  framework and toolchain, marks Player/Engine and `.gfapp` as inactive
+  directions, and keeps preview promises limited to current evidence.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
