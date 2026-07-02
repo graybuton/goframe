@@ -1,0 +1,93 @@
+package main
+
+import (
+	"net/url"
+	"strings"
+
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func App() gf.Node {
+	name, setName := gf.UseState("GoFrame")
+	submittedName, setSubmittedName := gf.UseState("GoFrame")
+	resource, reload := gf.UseResource(greetingPath(submittedName), loadGreeting)
+
+	submitGreeting := func(event gf.Event) {
+		event.PreventDefault()
+		next := strings.TrimSpace(name)
+		if next == "" {
+			next = "GoFrame"
+			setName(next)
+		}
+		if next == submittedName {
+			reload()
+			return
+		}
+		setSubmittedName(next)
+	}
+
+	return (
+		<main class="server-backed-app" data-testid="server-backed-app">
+			<section class="hero">
+				<p class="eyebrow">Server-backed reference</p>
+				<h1>GoFrame app served by a Go backend</h1>
+				<p class="muted">
+					This browser/WASM app is packaged by goxc, served by a plain
+					Go net/http backend, and reads from a same-origin API endpoint.
+				</p>
+			</section>
+
+			<section class="panel">
+				<h2>Same-origin greeting</h2>
+				<form class="greeting-form" data-testid="greeting-form" OnSubmit={submitGreeting}>
+					<label class="field">
+						<span>Name</span>
+						<input
+							data-testid="greeting-name"
+							Type="text"
+							Value={name}
+							OnInput={func(event gf.InputEvent) {
+								setName(event.Value())
+							}}
+						/>
+					</label>
+					<button data-testid="greeting-submit" Type="submit">Ask backend</button>
+				</form>
+
+				<p class="muted" data-testid="greeting-resource-key">{greetingPath(submittedName)}</p>
+				<p class="muted" data-testid="greeting-status">{greetingStatus(resource)}</p>
+
+				{resource.Loading() && (
+					<p class="status loading" data-testid="greeting-loading">Loading backend greeting...</p>
+				)}
+				{resource.Failed() && (
+					<div class="status failed" data-testid="greeting-error">{greetingErrorText(resource)}</div>
+				)}
+				{resource.Ready() && (
+					<p class="status message" data-testid="greeting-message">{resource.Value}</p>
+				)}
+			</section>
+		</main>
+	)
+}
+
+func greetingPath(name string) string {
+	return "/api/greeting?name=" + url.QueryEscape(name)
+}
+
+func greetingStatus(resource gf.Resource[string]) string {
+	if resource.Ready() {
+		return "ready"
+	}
+	if resource.Failed() {
+		return "failed"
+	}
+	return "loading"
+}
+
+func greetingErrorText(resource gf.Resource[string]) string {
+	if resource.Err == nil {
+		return ""
+	}
+	return resource.Err.Error()
+}

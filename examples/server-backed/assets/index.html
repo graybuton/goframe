@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GoFrame Server-Backed Example</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div id="root">Loading...</div>
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
+    <script>
+      const go = new Go();
+      WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+        .then((result) => go.run(result.instance))
+        .catch((error) => {
+          console.error("[goframe] startup failed", error);
+          document.getElementById("root").textContent = "Failed to start goframe. See console.";
+        });
+    </script>
+    <!-- /goframe:bootstrap -->
+  </body>
+</html>

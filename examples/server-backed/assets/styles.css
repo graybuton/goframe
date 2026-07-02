@@ -1,0 +1,101 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f4f7fb;
+  color: #172033;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  background: #1c64f2;
+  color: #fff;
+  cursor: pointer;
+  padding: 0.6rem 1rem;
+}
+
+input {
+  border: 1px solid #c8d3e6;
+  border-radius: 14px;
+  min-width: 14rem;
+  padding: 0.58rem 0.75rem;
+}
+
+.server-backed-app {
+  margin: 0 auto;
+  max-width: 820px;
+  padding: 2rem;
+}
+
+.hero,
+.panel {
+  background: #fff;
+  border: 1px solid #d9e2ef;
+  border-radius: 24px;
+  box-shadow: 0 18px 45px rgba(34, 54, 84, 0.08);
+  margin-bottom: 1rem;
+  padding: 1.4rem;
+}
+
+.eyebrow,
+.muted {
+  color: #61708a;
+}
+
+.eyebrow {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0 0 0.5rem;
+}
+
+.greeting-form {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.status {
+  border-radius: 16px;
+  margin: 1rem 0 0;
+  padding: 0.9rem;
+}
+
+.status.loading {
+  background: #eef5ff;
+  color: #2457a6;
+}
+
+.status.failed {
+  background: #fff1f2;
+  color: #a22836;
+}
+
+.message {
+  background: #edfdf3;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  font-weight: 700;
+}

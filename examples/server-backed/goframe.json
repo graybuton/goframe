@@ -1,0 +1,5 @@
+{
+  "entry": "./cmd/app",
+  "compiler": "go",
+  "assets": "./assets"
+}
