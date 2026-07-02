@@ -234,16 +234,21 @@ These surfaces should be hardened, tested, and documented before wider
 promises. They should not be removed from project positioning merely because
 their contracts are still maturing.
 
-### Future Vision
+### Inactive Or Outside Current Contract
 
-- Player/Engine host and bundle model.
-- `.gfapp` package format.
-- Broader host/runtime story beyond the browser DOM target.
-- Stronger editor tooling such as LSP/formatter behavior.
-- Broader package ecosystem and reusable component distribution story.
-- Production deployment/server integration.
+- Player/Engine host and bundle model: inactive direction.
+- `.gfapp` package format: inactive direction.
+- Portable host/runtime story beyond the browser DOM target: inactive
+  direction.
+- Fullstack/backend integration: not a current feature claim.
+- Stronger editor tooling such as LSP/formatter behavior: outside the current
+  preview contract.
+- Broader package ecosystem and reusable component distribution story: outside
+  the current preview contract.
+- Production deployment/server integration: outside the current preview
+  contract.
 
-These are not part of the first public preview promise.
+These are not part of the current preview promise.
 
 ### Internal
 
@@ -318,6 +323,8 @@ Not stable:
   resource story;
 - SSR/hydration;
 - Player/Engine or `.gfapp` format;
+- portable host/runtime packaging;
+- fullstack/server APIs;
 - multi-module app support;
 - final public component package identity policy;
 - dynamic virtualization measurement;

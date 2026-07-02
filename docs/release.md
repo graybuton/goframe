@@ -166,7 +166,7 @@ for trying the preview.
   browser platforms as explicit deferred scope when unverified;
 - reusable/multi-module component identity scope stated explicitly;
 - experimental surfaces named rather than hidden;
-- future Player/Engine direction bounded as vision, not a preview promise;
+- Player/Engine bounded as inactive and not a preview promise;
 - compatibility/deprecation notes included;
 - supply-chain/tooling evidence stated as lightweight CI/Dependabot/lockfile
   coverage, with no SBOM or scanner claim in the current preview contract;

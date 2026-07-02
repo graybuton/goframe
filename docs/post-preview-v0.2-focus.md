@@ -50,7 +50,7 @@ The first post-preview hardening pass has recorded these boundaries:
 | Actual non-Chrome browser evidence | Deferred from this v0.2 focus. Firefox and Safari remain outside current preview evidence. |
 | Production deployment/server story | Outside the current preview contract. `goxc serve` remains development-only. |
 | Router/history/SSR/hydration | Outside this v0.2 focus. The current router is hash-based and does not claim SSR, hydration, path/history routing, or server fallback automation. |
-| Player/Engine / `.gfapp` | Visible project vision, outside the current preview contract and outside this v0.2 focus. |
+| Player/Engine / `.gfapp` | Inactive direction, outside the current preview contract and outside this v0.2 focus. |
 | Performance/DOM pressure evidence expansion | Deferred from this v0.2 focus. Existing size, browser smoke, and DOM pressure evidence remain the current baseline. |
 
 ## Selected v0.2 Focus
