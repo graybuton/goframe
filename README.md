@@ -494,6 +494,7 @@ Start here:
 - [Evaluator guide](docs/evaluator-guide.md)
 - [v0.1.0-preview.1 release notes](docs/release-notes-v0.1.0-preview.1.md)
 - [v0.1.0-preview.2 release notes](docs/release-notes-v0.1.0-preview.2.md)
+- [v0.2.0-preview.1 release notes](docs/release-notes-v0.2.0-preview.1.md)
 - [Architecture and toolchain boundaries](docs/architecture.md)
 - [Runtime model](docs/runtime-model.md)
 - [GOX language and diagnostics](docs/gox-language.md)

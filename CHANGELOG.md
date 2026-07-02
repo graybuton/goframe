@@ -106,6 +106,11 @@
 - Strategy documentation now positions GoFrame as a web-first Go application
   framework and toolchain, marks Player/Engine and `.gfapp` as inactive
   directions, and keeps preview promises limited to current evidence.
+- `v0.2.0-preview.1` release notes document the web-first strategy closeout,
+  external Go component package identity/workspace/build evidence, inactive
+  Player/Engine status, and explicit limits around raw external `.gox`, remote
+  modules, fullstack/server APIs, production readiness, and broad reusable
+  package ecosystem stability.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
