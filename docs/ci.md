@@ -96,6 +96,8 @@ cleanup-after-unmount behavior.
 It also records a narrow Go `net/http` backend integration boundary: a
 packaged GoFrame app is served by a same-origin Go backend and renders data
 from a fixture-local `/api/...` endpoint without adding a GoFrame server API.
+The persistent `examples/server-backed` smoke covers the same boundary as a
+reviewable example with a small form-driven same-origin API request.
 
 The runtime error containment fixture, Error Boundary fixture, and
 router-dashboard reference-app smoke are compiled with the Go WASM compiler

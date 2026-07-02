@@ -189,6 +189,7 @@ For the guided path, read [GoFrame Tutorial](docs/tutorial.md).
 |---|---|---|
 | `examples/dashboard` | Reducer dispatch, explicit memoization, virtual table, dashboard pressure smoke. | `goxc package ./examples/dashboard --compiler=tinygo` |
 | `examples/router-dashboard` | Flagship reference app: router, query-state filters, component-scoped resource data, forms, validation, Error Boundary, and Go-first layout. | `goxc package ./examples/router-dashboard --compiler=tinygo` |
+| `examples/server-backed` | Server-backed reference fixture: packaged browser/WASM app served by plain Go `net/http` with a same-origin API. | `goxc package ./examples/server-backed --compiler=go` |
 
 Serve any packaged example with:
 

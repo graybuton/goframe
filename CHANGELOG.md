@@ -111,6 +111,10 @@
   Player/Engine status, and explicit limits around raw external `.gox`, remote
   modules, fullstack/server APIs, production readiness, and broad reusable
   package ecosystem stability.
+- Server-backed reference fixture showing a packaged browser/WASM app served by
+  a plain Go `net/http` backend with a same-origin `/api/greeting` resource/form
+  flow and browser smoke coverage, without adding a GoFrame server framework or
+  production/fullstack claim.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
