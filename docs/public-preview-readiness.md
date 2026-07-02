@@ -39,23 +39,27 @@ resource reload/stale-callback behavior, ErrorBoundary reset/new-incident
 behavior, and router route-key/remount policy without changing public runtime
 APIs.
 
-The first preview scope is narrower than the project vision. GoFrame remains an
-experimental Go-first application platform; the preview candidate validates the
-current browser/WASM application layer rather than reducing the long-term
-project to a small dashboard-only framework.
+The first preview scope is narrower than the project direction. GoFrame remains
+an experimental Go-first web application framework and toolchain; the preview
+candidate validates the current browser/WASM application layer rather than
+reducing the project to a small dashboard-only framework.
 
 See `docs/pre-preview-action-plan.md` for the post-audit action plan.
 
 ## Project Vision And First Preview Scope
 
-Project vision:
+Project direction:
 
-- GoFrame is an experimental Go-first application platform.
+- GoFrame is an experimental Go-first web application framework and toolchain.
 - Browser/WASM interactive applications are the first validated public layer.
 - Runtime, GOX, `goxc`, packaging, router, resources, Error Boundaries,
   examples, docs, and release policy are real project layers.
-- Player/Engine, richer host/runtime stories, stronger editor tooling, and a
-  future package ecosystem remain future vision.
+- Staged Go backend integration is a direction that requires evidence before it
+  becomes a preview feature claim.
+- Player/Engine, `.gfapp`, portable host/runtime packaging, desktop/mobile
+  shells, and custom app engines are inactive directions, not preview promises.
+- Stronger editor tooling and a broader package ecosystem remain outside the
+  current preview contract.
 
 First preview scope:
 
@@ -101,7 +105,7 @@ deployment server.
 |---|---|---|
 | Core / Public-Candidate | User-facing surfaces with real examples/tests and intended direction, still pre-1.0. | Component model, state/reducer/effects, GOX basic syntax/generation workflow, `goxc generate/build/package/export`, static browser/WASM packaging. |
 | Experimental frontier | Working surfaces that should stay visible while contracts are hardened. | Resources, Error Boundaries, router details, runtime error APIs, virtualization beyond fixed-height guarantees, advanced GOX diagnostics, package metadata details. |
-| Future vision | Strategic direction outside the first preview promise. | Player/Engine, broader host/runtime story, stronger editor tooling, future package ecosystem. |
+| Outside current contract / inactive direction | Strategic directions and inactive options outside the first preview promise. | Staged Go backend integration, stronger editor tooling, broader package ecosystem, Player/Engine, `.gfapp`, portable host/runtime packaging. |
 | Internal / implementation detail | Implementation and harness details with no compatibility promise. | Hidden `.goframe` workspace layout, mounted tree internals, debug probes, staging directories, smoke harness internals. |
 
 ## API Surface
