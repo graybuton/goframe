@@ -21,6 +21,9 @@ const expectedApp = new URL(appURL);
 const initialMessage = "Hello, GoFrame, from Go backend!";
 const updatedName = "Ada";
 const updatedMessage = "Hello, Ada, from Go backend!";
+const failureName = "fail";
+const failureStatus = "failed";
+const failureMessage = "backend returned HTTP 500";
 
 let backend = null;
 let browser = null;
@@ -53,6 +56,7 @@ try {
     await waitForHTTP(`http://127.0.0.1:${backendPort}/`, () => backend.exitCode !== null, "server-backed backend");
     await assertBackendAPI("GoFrame", initialMessage);
     await assertBackendAPI(updatedName, updatedMessage);
+    await assertBackendAPIFailure(failureName, 500);
 
     browser = spawn(chrome, [
         "--headless",
@@ -107,6 +111,43 @@ try {
         input: updatedName,
     }, "server-backed form submit render");
 
+    await setGreetingName(client, failureName);
+    await waitForCondition(async () => {
+        return (await appState(client, updatedMessage)).input === failureName;
+    }, "controlled failure input update");
+    await wait(100);
+    await submitGreeting(client);
+    await waitForFailure(client, failureMessage, "controlled backend failure");
+    assertState(await appState(client, updatedMessage), {
+        app: true,
+        ready: false,
+        failed: true,
+        status: failureStatus,
+        input: failureName,
+        error: failureMessage,
+        errorNonEmpty: true,
+    }, "server-backed controlled failure render");
+
+    await setGreetingName(client, updatedName);
+    await waitForCondition(async () => {
+        return (await appState(client, updatedMessage)).input === updatedName;
+    }, "recovery input update");
+    await wait(100);
+    await submitGreeting(client);
+    await waitForGreeting(client, updatedMessage, "recovered backend greeting");
+    assertState(await appState(client, updatedMessage), {
+        app: true,
+        ready: true,
+        failed: false,
+        status: "ready",
+        message: updatedMessage,
+        messageMatches: true,
+        origin: expectedApp.origin,
+        input: updatedName,
+        error: "",
+        errorNonEmpty: false,
+    }, "server-backed recovery render");
+
     client.close();
     console.log("Server-backed browser smoke: ok");
 } finally {
@@ -125,6 +166,19 @@ async function assertBackendAPI(name, expected) {
     const text = await response.text();
     if (text !== expected) {
         throw new Error(`HARNESS FAILURE: backend API returned ${JSON.stringify(text)}, want ${JSON.stringify(expected)}`);
+    }
+}
+
+async function assertBackendAPIFailure(name, status) {
+    const url = new URL(`http://127.0.0.1:${backendPort}/api/greeting`);
+    url.searchParams.set("name", name);
+    const response = await fetch(url);
+    if (response.status !== status) {
+        throw new Error(`HARNESS FAILURE: backend API returned HTTP ${response.status}, want ${status}`);
+    }
+    const text = await response.text();
+    if (!text.trim()) {
+        throw new Error("HARNESS FAILURE: backend API failure response body was empty");
     }
 }
 
@@ -162,9 +216,17 @@ async function waitForGreeting(client, expected, label) {
     }, label);
 }
 
+async function waitForFailure(client, expectedError, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client, updatedMessage);
+        return state.failed && state.status === failureStatus && state.error === expectedError;
+    }, label);
+}
+
 async function appState(client, expected) {
     return await client.callFunction(`function(expected) {
         const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() ?? "";
+        const error = document.querySelector("[data-testid='greeting-error']")?.textContent.trim() ?? "";
         return {
             app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
             loading: Boolean(document.querySelector("[data-testid='greeting-loading']")),
@@ -175,6 +237,8 @@ async function appState(client, expected) {
             key: document.querySelector("[data-testid='greeting-resource-key']")?.textContent.trim() ?? "",
             message,
             messageMatches: message === expected,
+            error,
+            errorNonEmpty: error.length > 0,
             origin: window.location.origin,
         };
     }`, expected);

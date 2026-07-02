@@ -3,6 +3,7 @@
 package main
 
 import (
+	"strconv"
 	"syscall/js"
 
 	gf "github.com/graybuton/goframe/pkg/goframe"
@@ -62,9 +63,10 @@ func loadGreeting(key string, resolve func(string), reject func(error)) gf.Clean
 		}
 		response := args[0]
 		if !response.Get("ok").Bool() {
+			status := response.Get("status").Int()
 			active = false
 			releasePromiseFuncs()
-			reject(apiError("fetch returned a non-ok response"))
+			reject(apiError("backend returned HTTP " + strconv.Itoa(status)))
 			return nil
 		}
 		response.Call("text").Call("then", textThen).Call("catch", catchFunc)
