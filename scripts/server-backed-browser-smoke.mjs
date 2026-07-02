@@ -21,6 +21,10 @@ const expectedApp = new URL(appURL);
 const initialMessage = "Hello, GoFrame, from Go backend!";
 const updatedName = "Ada";
 const updatedMessage = "Hello, Ada, from Go backend!";
+const slowName = "slow";
+const slowMessage = "Hello, slow, from Go backend!";
+const slowDelayMS = 750;
+const staleSettleMS = slowDelayMS + 300;
 const failureName = "fail";
 const failureStatus = "failed";
 const failureMessage = "backend returned HTTP 500";
@@ -56,6 +60,7 @@ try {
     await waitForHTTP(`http://127.0.0.1:${backendPort}/`, () => backend.exitCode !== null, "server-backed backend");
     await assertBackendAPI("GoFrame", initialMessage);
     await assertBackendAPI(updatedName, updatedMessage);
+    await assertBackendAPI(slowName, slowMessage);
     await assertBackendAPIFailure(failureName, 500);
 
     browser = spawn(chrome, [
@@ -110,6 +115,39 @@ try {
         origin: expectedApp.origin,
         input: updatedName,
     }, "server-backed form submit render");
+
+    await setGreetingName(client, slowName);
+    await waitForCondition(async () => {
+        return (await appState(client, updatedMessage, slowMessage, "name=slow")).input === slowName;
+    }, "slow input update");
+    await submitGreeting(client);
+    await waitForSlowActive(client);
+
+    await setGreetingName(client, updatedName);
+    await waitForCondition(async () => {
+        return (await appState(client, updatedMessage, slowMessage, "name=slow")).input === updatedName;
+    }, "newer Ada input update during slow request");
+    await wait(100);
+    await submitGreeting(client);
+    await waitForCondition(async () => {
+        const state = await appState(client, updatedMessage, slowMessage, "name=Ada");
+        return state.input === updatedName && state.keyContainsExpected;
+    }, "newer Ada resource key after slow request");
+    await waitForGreeting(client, updatedMessage, "newer Ada backend greeting after slow request");
+    await wait(staleSettleMS);
+    assertState(await appState(client, updatedMessage, slowMessage, "name=Ada"), {
+        app: true,
+        ready: true,
+        failed: false,
+        status: "ready",
+        message: updatedMessage,
+        messageMatches: true,
+        messageNotStale: true,
+        input: updatedName,
+        keyContainsExpected: true,
+        error: "",
+        errorNonEmpty: false,
+    }, "server-backed stale slow result ignored");
 
     await setGreetingName(client, failureName);
     await waitForCondition(async () => {
@@ -216,6 +254,18 @@ async function waitForGreeting(client, expected, label) {
     }, label);
 }
 
+async function waitForSlowActive(client) {
+    await waitForCondition(async () => {
+        const state = await appState(client, updatedMessage, slowMessage, "name=slow");
+        return state.input === slowName &&
+            state.keyContainsExpected &&
+            state.status === "loading" &&
+            state.loading &&
+            !state.ready &&
+            !state.failed;
+    }, "slow backend request active");
+}
+
 async function waitForFailure(client, expectedError, label) {
     await waitForCondition(async () => {
         const state = await appState(client, updatedMessage);
@@ -223,10 +273,11 @@ async function waitForFailure(client, expectedError, label) {
     }, label);
 }
 
-async function appState(client, expected) {
-    return await client.callFunction(`function(expected) {
+async function appState(client, expected, stale = "", keyPart = "") {
+    return await client.callFunction(`function(expected, stale, keyPart) {
         const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() ?? "";
         const error = document.querySelector("[data-testid='greeting-error']")?.textContent.trim() ?? "";
+        const key = document.querySelector("[data-testid='greeting-resource-key']")?.textContent.trim() ?? "";
         return {
             app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
             loading: Boolean(document.querySelector("[data-testid='greeting-loading']")),
@@ -234,14 +285,16 @@ async function appState(client, expected) {
             failed: Boolean(document.querySelector("[data-testid='greeting-error']")),
             status: document.querySelector("[data-testid='greeting-status']")?.textContent.trim() ?? "",
             input: document.querySelector("[data-testid='greeting-name']")?.value ?? "",
-            key: document.querySelector("[data-testid='greeting-resource-key']")?.textContent.trim() ?? "",
+            key,
+            keyContainsExpected: keyPart === "" || key.includes(keyPart),
             message,
             messageMatches: message === expected,
+            messageNotStale: stale === "" || message !== stale,
             error,
             errorNonEmpty: error.length > 0,
             origin: window.location.origin,
         };
-    }`, expected);
+    }`, expected, stale, keyPart);
 }
 
 function assertState(actual, expected, label) {

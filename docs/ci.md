@@ -97,8 +97,8 @@ The persistent `examples/server-backed` smoke records a narrow Go `net/http`
 backend integration boundary. A packaged GoFrame browser/WASM app is served by
 a same-origin Go backend and renders data from `/api/greeting` before and after
 a small form-driven request. The same smoke covers a controlled backend failure
-state and recovery after a later valid form submission. This does not add a
-GoFrame server API.
+state, delayed stale request no-overwrite behavior, and recovery after a later
+valid form submission. This does not add a GoFrame server API.
 
 The runtime error containment fixture, Error Boundary fixture, and
 router-dashboard reference-app smoke are compiled with the Go WASM compiler

@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+const slowGreetingDelay = 750 * time.Millisecond
 
 func main() {
 	packageDir := flag.String("package", "", "packaged GoFrame standalone directory")
@@ -50,6 +53,13 @@ func greetingHandler(response http.ResponseWriter, request *http.Request) {
 		response.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(response, "controlled backend failure")
 		return
+	}
+	if name == "slow" {
+		select {
+		case <-time.After(slowGreetingDelay):
+		case <-request.Context().Done():
+			return
+		}
 	}
 	fmt.Fprintf(response, "Hello, %s, from Go backend!", name)
 }
