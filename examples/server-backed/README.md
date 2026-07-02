@@ -7,7 +7,9 @@ This example shows a narrow integration pattern:
 - static serving of the packaged standalone app;
 - a same-origin `/api/greeting` endpoint;
 - browser-side data loading through an example-local fetch bridge and
-  `gf.UseResource`.
+  `gf.UseResource`;
+- a controlled backend failure and recovery path through the same resource/form
+  state.
 
 It is a reference fixture, not a GoFrame server framework.
 
@@ -36,6 +38,8 @@ Open <http://127.0.0.1:8080>.
 - The backend can expose a same-origin API endpoint beside the packaged app.
 - The app can use existing GoFrame resource/form patterns to load backend data
   and update rendered UI after form submission.
+- The app renders the existing `gf.UseResource` failed state for a controlled
+  backend error and recovers after a later valid submission.
 - The browser fetch bridge lives in this example; it is not a runtime API.
 
 ## Project Structure
@@ -62,8 +66,9 @@ node --experimental-websocket scripts/server-backed-browser-smoke.mjs
 ```
 
 The browser smoke packages the example, starts the Go backend on a dynamic
-localhost port, opens the app through Chrome/CDP, and verifies that backend
-data renders before and after the form submits a new name.
+localhost port, opens the app through Chrome/CDP, and verifies initial backend
+data, updated backend data, controlled backend failure UI, and recovery after a
+later valid form submission.
 
 ## Non-goals
 

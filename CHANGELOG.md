@@ -115,6 +115,8 @@
   a plain Go `net/http` backend with a same-origin `/api/greeting` resource/form
   flow and browser smoke coverage, without adding a GoFrame server framework or
   production/fullstack claim.
+- Server-backed reference fixture now covers a controlled backend API failure
+  and recovery through existing resource/form state in browser smoke.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
