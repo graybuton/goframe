@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
 
@@ -10,16 +10,17 @@ if (typeof WebSocket === "undefined") {
 }
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const appDir = join(rootDir, "examples", "server-backed");
+const packageDir = join(appDir, ".goframe", "package", "standalone");
 const chrome = process.env.CHROME ?? "google-chrome";
-const debugPort = Number(process.env.GOFRAME_BACKEND_CHROME_DEBUG_PORT ?? await pickFreePort());
-const backendPort = Number(process.env.GOFRAME_BACKEND_SMOKE_PORT ?? await pickFreePort());
-const expectedMessage = "Hello from Go backend";
-const tempRoot = await mkdtempCompat("goframe-backend-smoke-");
-const appDir = join(tempRoot, "app");
-const backendDir = join(tempRoot, "backend");
-const profile = join(tempRoot, "chrome-profile");
+const debugPort = Number(process.env.GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT ?? await pickFreePort());
+const backendPort = Number(process.env.GOFRAME_SERVER_BACKED_SMOKE_PORT ?? await pickFreePort());
+const profile = await mkdtempCompat("goframe-server-backed-smoke-");
 const appURL = `http://127.0.0.1:${backendPort}/?smoke=${Date.now()}`;
 const expectedApp = new URL(appURL);
+const initialMessage = "Hello, GoFrame, from Go backend!";
+const updatedName = "Ada";
+const updatedMessage = "Hello, Ada, from Go backend!";
 
 let backend = null;
 let browser = null;
@@ -28,10 +29,8 @@ let browserError = "";
 let browserExit = null;
 
 try {
-    await createFixture();
-    await runCommand("go", ["run", "./cmd/goxc", "package", appDir, "--compiler=go"], { cwd: rootDir });
+    await runCommand("go", ["run", "./cmd/goxc", "package", "./examples/server-backed", "--compiler=go"], { cwd: rootDir });
 
-    const packageDir = join(appDir, ".goframe", "package", "standalone");
     const packageInfo = await stat(packageDir);
     if (!packageInfo.isDirectory()) {
         throw new Error(`HARNESS FAILURE: package output is not a directory: ${packageDir}`);
@@ -39,11 +38,11 @@ try {
 
     backend = spawn("go", [
         "run",
-        ".",
+        "./examples/server-backed/cmd/server",
         `--package=${packageDir}`,
         `--addr=127.0.0.1:${backendPort}`,
     ], {
-        cwd: backendDir,
+        cwd: rootDir,
         detached: true,
         stdio: ["ignore", "ignore", "pipe"],
     });
@@ -51,15 +50,9 @@ try {
         backendError += chunk;
     });
 
-    await waitForHTTP(`http://127.0.0.1:${backendPort}/`, () => backend.exitCode !== null, "backend");
-    const apiResponse = await fetch(`http://127.0.0.1:${backendPort}/api/message`);
-    if (!apiResponse.ok) {
-        throw new Error(`HARNESS FAILURE: backend API returned HTTP ${apiResponse.status}`);
-    }
-    const apiText = await apiResponse.text();
-    if (apiText !== expectedMessage) {
-        throw new Error(`HARNESS FAILURE: backend API returned ${JSON.stringify(apiText)}, want ${JSON.stringify(expectedMessage)}`);
-    }
+    await waitForHTTP(`http://127.0.0.1:${backendPort}/`, () => backend.exitCode !== null, "server-backed backend");
+    await assertBackendAPI("GoFrame", initialMessage);
+    await assertBackendAPI(updatedName, updatedMessage);
 
     browser = spawn(chrome, [
         "--headless",
@@ -84,274 +77,102 @@ try {
     await client.call("Page.enable");
     await navigateToApp(client, appURL);
     await waitForAppPage(client, expectedApp);
-    await waitForCondition(async () => {
-        const state = await appState(client, expectedMessage);
-        return state.ready && state.messageMatches && state.origin === expectedApp.origin;
-    }, "backend message render");
-
-    const state = await appState(client, expectedMessage);
-    assertState(state, {
+    await waitForGreeting(client, initialMessage, "initial backend greeting");
+    assertState(await appState(client, initialMessage), {
         app: true,
         ready: true,
         failed: false,
         status: "ready",
-        message: expectedMessage,
+        message: initialMessage,
         messageMatches: true,
         origin: expectedApp.origin,
-    }, "backend integration render");
+        input: "GoFrame",
+    }, "server-backed initial render");
+
+    await setGreetingName(client, updatedName);
+    await waitForCondition(async () => {
+        return (await appState(client, initialMessage)).input === updatedName;
+    }, "controlled input update");
+    await wait(100);
+    await submitGreeting(client);
+    await waitForGreeting(client, updatedMessage, "updated backend greeting");
+    assertState(await appState(client, updatedMessage), {
+        app: true,
+        ready: true,
+        failed: false,
+        status: "ready",
+        message: updatedMessage,
+        messageMatches: true,
+        origin: expectedApp.origin,
+        input: updatedName,
+    }, "server-backed form submit render");
 
     client.close();
-    console.log("Backend integration browser smoke: ok");
+    console.log("Server-backed browser smoke: ok");
 } finally {
     await stopProcess(browser, { processGroup: false });
     await stopProcess(backend, { processGroup: true });
-    await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 
-async function createFixture() {
-    await mkdir(appDir, { recursive: true });
-    await mkdir(backendDir, { recursive: true });
-
-    await writeFile(join(appDir, "go.mod"), `module example.com/backend-smoke
-
-go 1.22
-
-require github.com/graybuton/goframe v0.0.0
-
-replace github.com/graybuton/goframe => ${goModPath(rootDir)}
-`);
-    await writeFile(join(appDir, "main.go"), `//go:build js && wasm
-
-package main
-
-import gf "github.com/graybuton/goframe/pkg/goframe"
-
-func main() {
-\tdone := make(chan struct{})
-\tgf.Mount("root", App)
-\t<-done
-}
-`);
-    await writeFile(join(appDir, "app.gox"), `package main
-
-import gf "github.com/graybuton/goframe/pkg/goframe"
-
-func App() gf.Node {
-\tresource, _ := gf.UseResource("/api/message", loadMessage)
-
-\treturn (
-\t\t<main data-testid="backend-app">
-\t\t\t<h1>Go backend integration boundary</h1>
-\t\t\t<p data-testid="backend-status">{messageStatus(resource)}</p>
-\t\t\t{resource.Loading() && (
-\t\t\t\t<p data-testid="backend-loading">Loading same-origin API...</p>
-\t\t\t)}
-\t\t\t{resource.Failed() && (
-\t\t\t\t<p data-testid="backend-error">{messageError(resource)}</p>
-\t\t\t)}
-\t\t\t{resource.Ready() && (
-\t\t\t\t<p data-testid="backend-message">{resource.Value}</p>
-\t\t\t)}
-\t\t</main>
-\t)
+async function assertBackendAPI(name, expected) {
+    const url = new URL(`http://127.0.0.1:${backendPort}/api/greeting`);
+    url.searchParams.set("name", name);
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`HARNESS FAILURE: backend API returned HTTP ${response.status}`);
+    }
+    const text = await response.text();
+    if (text !== expected) {
+        throw new Error(`HARNESS FAILURE: backend API returned ${JSON.stringify(text)}, want ${JSON.stringify(expected)}`);
+    }
 }
 
-func messageStatus(resource gf.Resource[string]) string {
-\tif resource.Ready() {
-\t\treturn "ready"
-\t}
-\tif resource.Failed() {
-\t\treturn "failed"
-\t}
-\treturn "loading"
+async function setGreetingName(client, name) {
+    return await client.callFunction(`function(name) {
+        const input = document.querySelector("[data-testid='greeting-name']");
+        if (!input) {
+            return { ok: false, reason: "missing input" };
+        }
+        input.value = name;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return { ok: true, value: input.value };
+    }`, name);
 }
 
-func messageError(resource gf.Resource[string]) string {
-\tif resource.Err == nil {
-\t\treturn ""
-\t}
-\treturn resource.Err.Error()
-}
-`);
-    await writeFile(join(appDir, "fetch_js.go"), `//go:build js && wasm
-
-package main
-
-import (
-\t"syscall/js"
-
-\tgf "github.com/graybuton/goframe/pkg/goframe"
-)
-
-func loadMessage(key string, resolve func(string), reject func(error)) gf.Cleanup {
-\tactive := true
-\treleasedPromiseFuncs := false
-\tvar responseThen js.Func
-\tvar textThen js.Func
-\tvar catchFunc js.Func
-
-\treleasePromiseFuncs := func() {
-\t\tif releasedPromiseFuncs {
-\t\t\treturn
-\t\t}
-\t\treleasedPromiseFuncs = true
-\t\tresponseThen.Release()
-\t\ttextThen.Release()
-\t\tcatchFunc.Release()
-\t}
-\tcomplete := func(text string) {
-\t\tif !active {
-\t\t\treturn
-\t\t}
-\t\tactive = false
-\t\tresolve(text)
-\t}
-
-\ttextThen = js.FuncOf(func(this js.Value, args []js.Value) any {
-\t\ttext := ""
-\t\tif len(args) > 0 && args[0].Type() == js.TypeString {
-\t\t\ttext = args[0].String()
-\t\t}
-\t\treleasePromiseFuncs()
-\t\tcomplete(text)
-\t\treturn nil
-\t})
-\tcatchFunc = js.FuncOf(func(this js.Value, args []js.Value) any {
-\t\treleasePromiseFuncs()
-\t\tif active {
-\t\t\tactive = false
-\t\t\treject(fetchError("fetch failed"))
-\t\t}
-\t\treturn nil
-\t})
-\tresponseThen = js.FuncOf(func(this js.Value, args []js.Value) any {
-\t\tif !active {
-\t\t\treleasePromiseFuncs()
-\t\t\treturn nil
-\t\t}
-\t\tif len(args) == 0 {
-\t\t\tactive = false
-\t\t\treleasePromiseFuncs()
-\t\t\treject(fetchError("fetch returned no response"))
-\t\t\treturn nil
-\t\t}
-\t\tresponse := args[0]
-\t\tif !response.Get("ok").Bool() {
-\t\t\tactive = false
-\t\t\treleasePromiseFuncs()
-\t\t\treject(fetchError("fetch returned a non-ok response"))
-\t\t\treturn nil
-\t\t}
-\t\tresponse.Call("text").Call("then", textThen).Call("catch", catchFunc)
-\t\treturn nil
-\t})
-
-\tcontroller := js.Global().Get("AbortController").New()
-\toptions := js.Global().Get("Object").New()
-\toptions.Set("signal", controller.Get("signal"))
-\tjs.Global().Call("fetch", key, options).Call("then", responseThen).Call("catch", catchFunc)
-
-\treturn func() {
-\t\tif !active {
-\t\t\treturn
-\t\t}
-\t\tactive = false
-\t\tcontroller.Call("abort")
-\t}
-}
-`);
-    await writeFile(join(appDir, "fetch_stub.go"), `//go:build !js || !wasm
-
-package main
-
-import gf "github.com/graybuton/goframe/pkg/goframe"
-
-func loadMessage(key string, resolve func(string), reject func(error)) gf.Cleanup {
-\treject(fetchError("browser fetch is available only in browser/WASM builds"))
-\treturn nil
-}
-`);
-    await writeFile(join(appDir, "fetch_error.go"), `package main
-
-type fetchError string
-
-func (err fetchError) Error() string {
-\treturn string(err)
-}
-`);
-
-    await writeFile(join(backendDir, "go.mod"), `module example.com/backend-smoke-server
-
-go 1.22
-`);
-    await writeFile(join(backendDir, "main.go"), `package main
-
-import (
-\t"flag"
-\t"fmt"
-\t"log"
-\t"net/http"
-\t"os"
-\t"path/filepath"
-\t"strings"
-)
-
-func main() {
-\tpackageDir := flag.String("package", "", "packaged GoFrame standalone directory")
-\taddr := flag.String("addr", "127.0.0.1:0", "listen address")
-\tflag.Parse()
-\tif *packageDir == "" {
-\t\tlog.Fatal("--package is required")
-\t}
-\tinfo, err := os.Stat(*packageDir)
-\tif err != nil {
-\t\tlog.Fatal(err)
-\t}
-\tif !info.IsDir() {
-\t\tlog.Fatalf("%s is not a directory", *packageDir)
-\t}
-
-\tmux := http.NewServeMux()
-\tmux.HandleFunc("/api/message", func(response http.ResponseWriter, request *http.Request) {
-\t\tif request.Method != http.MethodGet {
-\t\t\tresponse.WriteHeader(http.StatusMethodNotAllowed)
-\t\t\treturn
-\t\t}
-\t\tresponse.Header().Set("Content-Type", "text/plain; charset=utf-8")
-\t\tresponse.Header().Set("Cache-Control", "no-store")
-\t\tfmt.Fprint(response, "Hello from Go backend")
-\t})
-\tmux.Handle("/", staticPackageHandler(*packageDir))
-
-\tserver := &http.Server{Addr: *addr, Handler: mux}
-\tlog.Printf("serving %s at http://%s", *packageDir, *addr)
-\tlog.Fatal(server.ListenAndServe())
+async function submitGreeting(client) {
+    return await client.callFunction(`function() {
+        const form = document.querySelector("[data-testid='greeting-form']");
+        if (!form) {
+            return { ok: false, reason: "missing form" };
+        }
+        if (typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+        } else {
+            form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        }
+        return { ok: true };
+    }`);
 }
 
-func staticPackageHandler(packageDir string) http.Handler {
-\tfiles := http.FileServer(http.Dir(packageDir))
-\treturn http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-\t\tif strings.HasSuffix(request.URL.Path, ".wasm") {
-\t\t\tresponse.Header().Set("Content-Type", "application/wasm")
-\t\t}
-\t\tif request.URL.Path == "/" || filepath.Ext(request.URL.Path) == "" {
-\t\t\tresponse.Header().Set("Cache-Control", "no-store")
-\t\t}
-\t\tfiles.ServeHTTP(response, request)
-\t})
-}
-`);
+async function waitForGreeting(client, expected, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client, expected);
+        return state.ready && state.messageMatches && state.origin === expectedApp.origin;
+    }, label);
 }
 
 async function appState(client, expected) {
     return await client.callFunction(`function(expected) {
-        const message = document.querySelector("[data-testid='backend-message']")?.textContent.trim() ?? "";
+        const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() ?? "";
         return {
-            app: Boolean(document.querySelector("[data-testid='backend-app']")),
-            loading: Boolean(document.querySelector("[data-testid='backend-loading']")),
-            ready: Boolean(document.querySelector("[data-testid='backend-message']")),
-            failed: Boolean(document.querySelector("[data-testid='backend-error']")),
-            status: document.querySelector("[data-testid='backend-status']")?.textContent.trim() ?? "",
+            app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
+            loading: Boolean(document.querySelector("[data-testid='greeting-loading']")),
+            ready: Boolean(document.querySelector("[data-testid='greeting-message']")),
+            failed: Boolean(document.querySelector("[data-testid='greeting-error']")),
+            status: document.querySelector("[data-testid='greeting-status']")?.textContent.trim() ?? "",
+            input: document.querySelector("[data-testid='greeting-name']")?.value ?? "",
+            key: document.querySelector("[data-testid='greeting-resource-key']")?.textContent.trim() ?? "",
             message,
             messageMatches: message === expected,
             origin: window.location.origin,
@@ -422,7 +243,7 @@ async function pageState(client) {
         protocol: window.location.protocol,
         readyState: document.readyState,
         root: Boolean(document.querySelector("#root")),
-        app: Boolean(document.querySelector("[data-testid='backend-app']")),
+        app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
     }))()`);
 }
 
@@ -506,6 +327,7 @@ async function connect(url) {
             pending.set(id, { resolve, reject });
             socket.send(JSON.stringify({ id, method, params }));
         });
+
     let globalObjectID = "";
     const getGlobalObjectID = async () => {
         if (globalObjectID) {
@@ -618,23 +440,34 @@ async function stopProcess(child, options) {
         exited.then(() => true),
         wait(2000).then(() => false),
     ]);
-    if (stopped) {
-        return;
+    if (!stopped && child.exitCode === null) {
+        terminate(child, options.processGroup, "SIGKILL");
+        await Promise.race([exited, wait(1000)]);
     }
-    terminate(child, options.processGroup, "SIGKILL");
-    await Promise.race([exited, wait(1000)]);
 }
 
 function terminate(child, processGroup, signal) {
-    if (processGroup && child.pid) {
-        try {
+    try {
+        if (processGroup) {
             process.kill(-child.pid, signal);
             return;
-        } catch {
-            // Fall back to the direct child when process-group signaling is unavailable.
         }
+    } catch {
+        // Fall back to direct process termination below.
     }
-    child.kill(signal);
+    try {
+        child.kill(signal);
+    } catch {
+        // The process may have exited between checks.
+    }
+}
+
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function mkdtempCompat(prefix) {
+    return mkdtemp(join(tmpdir(), prefix));
 }
 
 function pickFreePort() {
@@ -646,16 +479,4 @@ function pickFreePort() {
             server.close(() => resolve(address.port));
         });
     });
-}
-
-async function mkdtempCompat(prefix) {
-    return await mkdtemp(join(tmpdir(), prefix));
-}
-
-function goModPath(path) {
-    return path.split(sep).join("/");
-}
-
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }

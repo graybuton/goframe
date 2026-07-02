@@ -189,6 +189,7 @@ For the guided path, read [GoFrame Tutorial](docs/tutorial.md).
 |---|---|---|
 | `examples/dashboard` | Reducer dispatch, explicit memoization, virtual table, dashboard pressure smoke. | `goxc package ./examples/dashboard --compiler=tinygo` |
 | `examples/router-dashboard` | Flagship reference app: router, query-state filters, component-scoped resource data, forms, validation, Error Boundary, and Go-first layout. | `goxc package ./examples/router-dashboard --compiler=tinygo` |
+| `examples/server-backed` | Server-backed reference fixture: packaged browser/WASM app served by plain Go `net/http` with a same-origin API. | `goxc package ./examples/server-backed --compiler=go` |
 
 Serve any packaged example with:
 
@@ -551,6 +552,7 @@ Examples:
 - [Router example](examples/router/README.md)
 - [Router dashboard reference example](examples/router-dashboard/README.md)
 - [Resource loading example](examples/resource/README.md)
+- [Server-backed reference example](examples/server-backed/README.md)
 - [VS Code GOX extension](extensions/vscode-gox/README.md)
 
 ## Current Limitations
@@ -609,7 +611,11 @@ Package all examples:
 ```bash
 for app in examples/*; do
 	if [ -f "$app/goframe.json" ]; then
-		goxc package "$app" --compiler=tinygo --asset-hash --preload --compress=gzip,br
+		compiler=tinygo
+		case "$app" in
+			examples/server-backed) compiler=go ;;
+		esac
+		goxc package "$app" --compiler="$compiler" --asset-hash --preload --compress=gzip,br
 	fi
 done
 ```
