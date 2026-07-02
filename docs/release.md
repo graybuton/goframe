@@ -81,6 +81,7 @@ Current preview release note documents:
 
 - `docs/release-notes-v0.1.0-preview.1.md`
 - `docs/release-notes-v0.1.0-preview.2.md`
+- `docs/release-notes-v0.2.0-preview.1.md`
 
 `CHANGELOG.md` remains the factual change log; release notes should summarize
 preview scope, maturity tiers, validation evidence, compatibility notes, and
