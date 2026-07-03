@@ -1055,6 +1055,9 @@ func TestPackageDirectoryModePublishesAssetsRelativeToDirectory(t *testing.T) {
 	if metadata.Version != 1 || metadata.Entrypoints.HTML != indexHTMLAssetName || metadata.Entrypoints.WASM != manifest.Entrypoints.WASM || metadata.Entrypoints.Runtime != manifest.Entrypoints.Runtime {
 		t.Fatalf("package metadata = %+v, want versioned matching entrypoints", metadata)
 	}
+	if metadata.ToolchainVersion != "devel" {
+		t.Fatalf("package metadata toolchainVersion = %q, want devel", metadata.ToolchainVersion)
+	}
 	if ownership := inspectPackageOwnership(outDir); ownership.State != packageOwnedCurrent {
 		t.Fatalf("package ownership = %v (%s), want current", ownership.State, ownership.Reason)
 	}
