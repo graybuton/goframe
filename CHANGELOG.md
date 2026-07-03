@@ -193,11 +193,12 @@
   panicking.
 - The resource example browser loader now releases cancelled promise/timer
   callbacks on inactive response paths.
-- `goxc version` now reports the tagged module version from Go build
-  information for module installs and `devel` for local checkout builds,
-  fixing the stale `0.1.0` CLI self-report in `v0.2.0-preview.2`. No runtime,
-  GOX, package/build/export/serve, example, or script behavior changed outside
-  the version command.
+- `goxc version` and generated `goframe-package.json` metadata now report the
+  tagged module version from Go build information for module installs and
+  `devel` for local checkout builds, fixing the stale `0.1.0` self-report in
+  `v0.2.0-preview.2`. No runtime, GOX, package workflow/layout,
+  build/export/serve, example, or script behavior changed outside toolchain
+  version self-reporting.
 
 ## v0.1.0-mvp10 - 2026-06-17
 
