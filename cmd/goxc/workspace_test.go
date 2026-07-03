@@ -659,11 +659,12 @@ func runGoListInWorkspace(t *testing.T, dir string) {
 	t.Helper()
 	command := exec.Command("go", "list", "-deps", ".")
 	command.Dir = dir
+	goFlags := strings.TrimSpace(os.Getenv("GOFLAGS") + " -mod=mod -buildvcs=false")
 	command.Env = append(os.Environ(),
 		"GOPROXY=off",
 		"GOSUMDB=off",
 		"GOWORK=off",
-		"GOFLAGS=-mod=mod",
+		"GOFLAGS="+goFlags,
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
