@@ -127,6 +127,10 @@
 - Resource example issue loading now composes `gf.FetchText` for packaged text
   transport while keeping issue parsing, slow-delay, stale completion, and
   cleanup-after-unmount evidence local to the example.
+- `v0.2.0-preview.2` release notes summarize the server-backed browser/WASM
+  evidence, experimental `gf.FetchText`, resource example adoption, and
+  `goxc` workspace VCS-stamping baseline fix while keeping fullstack/server,
+  route-loader, JSON/data framework, and production-server claims out of scope.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
