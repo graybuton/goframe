@@ -2,9 +2,10 @@
 
 This focused example demonstrates the experimental `gf.UseResource` primitive.
 
-It loads small packaged text assets through browser `fetch`, but the runtime
-resource API itself is transport-agnostic. The fetch, parsing, delay, and abort
-logic live in the example under `internal/data`.
+It loads small packaged text assets through experimental `gf.FetchText`, while
+the runtime resource API itself remains transport-light. The example keeps
+issue parsing, `slow:` key handling, delayed completion, and lifecycle cleanup
+logic local under `internal/data`.
 
 For an integrated app that combines resources with router/query/forms/Error
 Boundary patterns, start with `examples/router-dashboard`.
@@ -26,4 +27,4 @@ goxc serve ./examples/resource --port=8080
 - Loader panic semantics are covered by runtime tests; this TinyGo browser
   smoke focuses on ordinary resource lifecycle behavior.
 - There is no cache, Suspense, route loader, retry policy, JSON helper, or
-  runtime fetch API in this MVP.
+  higher-level data framework in this example.
