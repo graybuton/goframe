@@ -575,9 +575,10 @@ Examples:
 - Error Boundaries are render-only and recover-based. Default TinyGo
   `panic=trap` builds compile the API but are not the proof path for boundary
   containment.
-- Resources are component-scoped and explicit-state only. There is no global
-  resource cache, Suspense-style render blocking, route loader framework, or
-  runtime fetch/JSON API.
+- Resources are component-scoped and explicit-state only. `gf.FetchText` is a
+  low-level experimental browser text loader; there is no global resource
+  cache, Suspense-style render blocking, route loader framework, JSON/data
+  framework, or higher-level fetch API.
 - Duplicate key diagnostics are debug-only.
 - TinyGo compatibility remains version- and feature-dependent.
 
