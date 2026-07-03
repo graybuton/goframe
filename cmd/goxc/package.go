@@ -317,7 +317,7 @@ func packageApp(options packageOptions) error {
 		Version:          1,
 		Name:             manifest.Name,
 		Compiler:         options.compiler,
-		ToolchainVersion: version,
+		ToolchainVersion: goxcVersion(),
 		AssetsDir:        assetDirectoryName,
 		HashAssets:       options.assetHash,
 		Preload:          options.preload,
