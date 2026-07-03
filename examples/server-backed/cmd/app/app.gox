@@ -10,7 +10,7 @@ import (
 func App() gf.Node {
 	name, setName := gf.UseState("GoFrame")
 	submittedName, setSubmittedName := gf.UseState("GoFrame")
-	resource, reload := gf.UseResource(greetingPath(submittedName), loadGreeting)
+	resource, reload := gf.UseResource(greetingPath(submittedName), gf.FetchText)
 
 	submitGreeting := func(event gf.Event) {
 		event.PreventDefault()

@@ -217,6 +217,10 @@ VS Code extension:
   ErrorBoundary interaction. Global caching, deduplication, retry policy,
   route loaders, and Suspense-style semantics are outside the preview
   contract.
+- Experimental browser text fetch helper: `gf.FetchText`. It is a low-level
+  `ResourceLoader[string]`-compatible helper for browser/WASM text responses.
+  It does not establish JSON loading, route loader, cache, retry, server API,
+  SSR, hydration, or production server contracts.
 - Hash router details such as route remount policy, declaration-order matching
   edge cases, link props, query helper edge cases, and browser listener
   internals. Current tests cover route matching, params, query helpers,
@@ -296,7 +300,7 @@ These are not part of the current preview promise.
 | `El`/`Text`/`Fragment`/`Props` | Compiler-facing but available. | Needed by generated code and low-level Go; GOX remains the recommended authoring path. |
 | `UseMount`/deps aliases | Deprecated, not removed. | Existing code may use them; replacement APIs are already present. |
 | `ErrorHandler` and ErrorBoundary | Experimental/Public-Candidate split. | Useful and tested, but full route-level/error-boundary policy is not final. |
-| Resources | Experimental. | Component-scoped lifecycle is tested, but no global cache, Suspense, or route loader contract exists. |
+| Resources | Experimental. | Component-scoped lifecycle and the text-only `gf.FetchText` helper are tested, but no global cache, Suspense, JSON/data framework, or route loader contract exists. |
 | Router query helpers | Public-Candidate with limitations. | Good for simple URL state; not a typed query-state manager. |
 | Virtualization | Public-Candidate fixed-height contract. | Dynamic measurement and advanced accessibility remain future work. |
 | `pkg/gox` parser/AST exports | Compiler-facing experimental. | Exported today for tooling/tests, but not a stable language-service API. |
@@ -319,8 +323,8 @@ Not stable:
 - file-based routing, route loaders, route middleware, and route-level error
   boundary policy;
 - schema validation or a form framework;
-- global resource cache, transport helpers, route loaders, and Suspense-style
-  resource story;
+- global resource cache, higher-level transport helpers, route loaders, and
+  Suspense-style resource story;
 - SSR/hydration;
 - Player/Engine or `.gfapp` format;
 - portable host/runtime packaging;

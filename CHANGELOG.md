@@ -119,7 +119,11 @@
   and recovery through existing resource/form state in browser smoke.
 - Server-backed browser smoke now covers delayed stale backend response
   no-overwrite behavior through existing resource/form state and the
-  example-local fetch bridge.
+  browser text fetch path.
+- Experimental `gf.FetchText` browser/WASM text loader for `gf.UseResource`,
+  with the server-backed reference fixture migrated to the low-level helper
+  without adding JSON, cache, route-loader, server-framework, or production
+  server behavior.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,

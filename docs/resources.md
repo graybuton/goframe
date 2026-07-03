@@ -10,9 +10,10 @@ work. They model a single explicit state machine:
 - failed.
 
 They do not add Suspense, async rendering, route loaders, server resources, a
-global cache, request deduplication, retries, polling, or a browser fetch API.
-The runtime stays transport-agnostic: a loader may use browser `fetch`, a
-timer, local storage, a host bridge, or any other callback source.
+global cache, request deduplication, retries, polling, JSON loading, or a data
+framework. The runtime stays transport-light: `gf.FetchText` covers the narrow
+browser/WASM text-fetch case, while custom loaders may use timers, local
+storage, host bridges, or other callback sources.
 
 ## API
 
@@ -45,6 +46,12 @@ func UseResource[T any](
     key string,
     loader ResourceLoader[T],
 ) (Resource[T], func())
+
+func FetchText(
+    key string,
+    resolve func(string),
+    reject func(error),
+) Cleanup
 ```
 
 The returned function requests a manual reload for the current component
@@ -52,6 +59,28 @@ instance. Calling an old reload closure after later renders uses the latest
 component resource state. Calling it after unmount is a no-op.
 
 `key` is a string and may be empty. A nil loader is a runtime invariant panic.
+
+## Browser Text Loader
+
+`gf.FetchText` is an experimental browser/WASM helper for the
+`ResourceLoader[string]` shape. It uses browser `fetch` for the provided key,
+reads successful responses with `response.text()`, and resolves the text.
+
+The cleanup returned by `FetchText` aborts the in-flight browser request with
+`AbortController` and prevents later promise callbacks from resolving or
+rejecting the resource generation.
+
+Non-OK HTTP responses reject with an ordinary error whose text includes the
+HTTP status code. Fetch/network failures also reject with an ordinary error.
+The helper does not expose response bodies for non-OK responses.
+
+Host builds compile with a stub. The stub rejects with a clear error that
+`FetchText` is available only in browser/WASM builds and returns a safe no-op
+cleanup.
+
+`FetchText` is intentionally text-only. It does not provide JSON parsing,
+request caching, retry/backoff, deduplication, route loaders, server APIs,
+auth/session behavior, SSR, hydration, or production server behavior.
 
 ## Status Model
 
@@ -245,7 +274,7 @@ MVP 28 intentionally does not provide:
 - route loaders;
 - server resources or server functions;
 - `context.Context` cancellation;
-- browser `fetch` or JSON helpers in `pkg/goframe`.
+- JSON helpers or a higher-level fetch/data framework in `pkg/goframe`.
 
 ## Future Work
 

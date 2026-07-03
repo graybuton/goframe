@@ -6,7 +6,7 @@ This example shows a narrow integration pattern:
 - a plain Go `net/http` backend;
 - static serving of the packaged standalone app;
 - a same-origin `/api/greeting` endpoint;
-- browser-side data loading through an example-local fetch bridge and
+- browser-side text loading through experimental `gf.FetchText` and
   `gf.UseResource`;
 - a controlled backend failure and recovery path through the same resource/form
   state;
@@ -40,11 +40,14 @@ Open <http://127.0.0.1:8080>.
 - The backend can expose a same-origin API endpoint beside the packaged app.
 - The app can use existing GoFrame resource/form patterns to load backend data
   and update rendered UI after form submission.
+- The browser text fetch uses `gf.FetchText`; app-specific URL/key construction
+  stays local to the example.
 - The app renders the existing `gf.UseResource` failed state for a controlled
   backend error and recovers after a later valid submission.
 - A delayed backend response can be superseded by a newer valid submission
   without replacing the newer rendered greeting.
-- The browser fetch bridge lives in this example; it is not a runtime API.
+- `gf.FetchText` is a low-level text loader, not a server framework or data
+  framework.
 
 ## Project Structure
 
@@ -85,4 +88,5 @@ This example intentionally does not provide:
 - SSR or hydration;
 - route loaders;
 - auth/session helpers;
-- a global resource cache.
+- a global resource cache;
+- JSON/data framework behavior.

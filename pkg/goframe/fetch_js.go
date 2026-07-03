@@ -1,15 +1,19 @@
 //go:build js && wasm
 
-package main
+package goframe
 
 import (
+	"errors"
 	"strconv"
 	"syscall/js"
-
-	gf "github.com/graybuton/goframe/pkg/goframe"
 )
 
-func loadGreeting(key string, resolve func(string), reject func(error)) gf.Cleanup {
+// FetchText loads key with browser fetch and resolves the response body text.
+//
+// FetchText is an experimental browser/WASM ResourceLoader-compatible helper.
+// Cleanup aborts the in-flight fetch and prevents later completion callbacks
+// from resolving or rejecting the resource generation.
+func FetchText(key string, resolve func(string), reject func(error)) Cleanup {
 	active := true
 	releasedPromiseFuncs := false
 	var responseThen js.Func
@@ -32,6 +36,13 @@ func loadGreeting(key string, resolve func(string), reject func(error)) gf.Clean
 		active = false
 		resolve(text)
 	}
+	fail := func(err error) {
+		if !active {
+			return
+		}
+		active = false
+		reject(err)
+	}
 
 	textThen = js.FuncOf(func(this js.Value, args []js.Value) any {
 		text := ""
@@ -44,10 +55,7 @@ func loadGreeting(key string, resolve func(string), reject func(error)) gf.Clean
 	})
 	catchFunc = js.FuncOf(func(this js.Value, args []js.Value) any {
 		releasePromiseFuncs()
-		if active {
-			active = false
-			reject(apiError("fetch failed"))
-		}
+		fail(errors.New("goframe: fetch failed"))
 		return nil
 	})
 	responseThen = js.FuncOf(func(this js.Value, args []js.Value) any {
@@ -56,17 +64,15 @@ func loadGreeting(key string, resolve func(string), reject func(error)) gf.Clean
 			return nil
 		}
 		if len(args) == 0 {
-			active = false
 			releasePromiseFuncs()
-			reject(apiError("fetch returned no response"))
+			fail(errors.New("goframe: fetch returned no response"))
 			return nil
 		}
 		response := args[0]
 		if !response.Get("ok").Bool() {
 			status := response.Get("status").Int()
-			active = false
 			releasePromiseFuncs()
-			reject(apiError("backend returned HTTP " + strconv.Itoa(status)))
+			fail(errors.New("goframe: fetch returned HTTP " + strconv.Itoa(status)))
 			return nil
 		}
 		response.Call("text").Call("then", textThen).Call("catch", catchFunc)
