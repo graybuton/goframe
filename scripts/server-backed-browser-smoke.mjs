@@ -27,7 +27,7 @@ const slowDelayMS = 750;
 const staleSettleMS = slowDelayMS + 300;
 const failureName = "fail";
 const failureStatus = "failed";
-const failureMessage = "backend returned HTTP 500";
+const failureMessage = "goframe: fetch returned HTTP 500";
 
 let backend = null;
 let browser = null;
