@@ -234,6 +234,11 @@ fields are required.
 `examples/resource` is the focused lifecycle example. It covers reload,
 failure, stale completion, and cleanup-after-unmount scenarios.
 
+The example composes `gf.FetchText` with local issue parsing, `slow:` key
+normalization, delayed completion, and timer cleanup. Browser text transport is
+shared through the experimental helper; example-specific parsing and lifecycle
+demonstration remain local to the example.
+
 `examples/router-dashboard` shows the integration pattern for a small app:
 
 ```text

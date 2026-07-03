@@ -124,6 +124,9 @@
   with the server-backed reference fixture migrated to the low-level helper
   without adding JSON, cache, route-loader, server-framework, or production
   server behavior.
+- Resource example issue loading now composes `gf.FetchText` for packaged text
+  transport while keeping issue parsing, slow-delay, stale completion, and
+  cleanup-after-unmount evidence local to the example.
 - MVP 29 reference app consolidation: `examples/router-dashboard` now serves as
   the flagship integrated tutorial app with packaged data, one app-local
   resource owner, explicit loading/failed UI, manual reload, query filters,
