@@ -200,7 +200,7 @@ metadata compatibility policy.
   "version": 1,
   "name": "todo",
   "compiler": "tinygo",
-  "toolchainVersion": "0.1.0",
+  "toolchainVersion": "devel",
   "assetsDir": "assets",
   "hashAssets": true,
   "preload": true,
@@ -212,6 +212,9 @@ metadata compatibility policy.
   "generatedAt": "2026-06-17T00:00:00Z"
 }
 ```
+
+Local checkout builds write `devel`; tagged module installs write the module
+version recorded in Go build information, such as `v0.2.0-preview.3`.
 
 `goframe-package.json` is the authoritative current package completion marker.
 `goxc` publishes it last and removes it first during destructive package
