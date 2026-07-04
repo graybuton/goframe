@@ -2,8 +2,8 @@ package goframe
 
 import "testing"
 
-var benchmarkSplitPropsDOM map[string]domProp
-var benchmarkSplitPropsEvents map[string]any
+var benchmarkSplitPropsDOM splitDOMProps
+var benchmarkSplitPropsEvents splitEventProps
 
 func TestSplitPropsContract(t *testing.T) {
 	clickHandler := &struct{ name string }{"click"}
@@ -48,12 +48,12 @@ func TestSplitPropsContract(t *testing.T) {
 		t.Fatalf("dom length = %d, want %d: %#v", len(dom), len(wantDOM), dom)
 	}
 	for name, want := range wantDOM {
-		if got, ok := dom[name]; !ok || got != want {
+		if got, ok := dom.get(name); !ok || got != want {
 			t.Fatalf("dom[%q] = %#v, %v; want %#v, true", name, got, ok, want)
 		}
 	}
 	for _, name := range []string{"checked", "data-nil", "data-bool-skipped"} {
-		if _, exists := dom[name]; exists {
+		if dom.has(name) {
 			t.Fatalf("dom[%q] should be absent", name)
 		}
 	}
@@ -61,13 +61,13 @@ func TestSplitPropsContract(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("events length = %d, want 2: %#v", len(events), events)
 	}
-	if got := events["click"]; got != clickHandler {
+	if got, ok := events.get("click"); !ok || got != clickHandler {
 		t.Fatalf("events[click] = %#v, want original click handler", got)
 	}
-	if got := events["input"]; got != inputHandler {
+	if got, ok := events.get("input"); !ok || got != inputHandler {
 		t.Fatalf("events[input] = %#v, want original input handler", got)
 	}
-	if _, exists := events["change"]; exists {
+	if _, exists := events.get("change"); exists {
 		t.Fatalf("events[change] should be absent")
 	}
 }
@@ -89,6 +89,32 @@ func TestSplitPropsEmptyProps(t *testing.T) {
 				t.Fatalf("events = %#v, want empty", events)
 			}
 		})
+	}
+}
+
+func TestSplitPropsDeduplicatesNormalizedNames(t *testing.T) {
+	clickHandler := &struct{ name string }{"click"}
+	lowerClickHandler := &struct{ name string }{"lower-click"}
+
+	dom, events := splitProps(Props{
+		"class":     "base",
+		"className": "primary",
+		"OnClick":   clickHandler,
+		"onclick":   lowerClickHandler,
+	})
+
+	if len(dom) != 1 {
+		t.Fatalf("dom length = %d, want 1: %#v", len(dom), dom)
+	}
+	if got, ok := dom.get("class"); !ok || (got != (domProp{value: "base"}) && got != (domProp{value: "primary"})) {
+		t.Fatalf("dom[class] = %#v, %v; want one normalized class prop", got, ok)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("events length = %d, want 1: %#v", len(events), events)
+	}
+	if got, ok := events.get("click"); !ok || (got != any(clickHandler) && got != any(lowerClickHandler)) {
+		t.Fatalf("events[click] = %#v, %v; want one normalized click callback", got, ok)
 	}
 }
 

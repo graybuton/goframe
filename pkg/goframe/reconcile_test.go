@@ -135,19 +135,21 @@ func TestSplitPropsNormalizesDOMAndEvents(t *testing.T) {
 		"onInput":     func(InputEvent) {},
 	})
 
-	if got := dom["class"]; got != (domProp{value: "primary"}) {
-		t.Fatalf("class = %#v", got)
+	if got, ok := dom.get("class"); !ok || got != (domProp{value: "primary"}) {
+		t.Fatalf("class = %#v, %v", got, ok)
 	}
-	if got := dom["value"]; got != (domProp{value: "task"}) {
-		t.Fatalf("value = %#v", got)
+	if got, ok := dom.get("value"); !ok || got != (domProp{value: "task"}) {
+		t.Fatalf("value = %#v, %v", got, ok)
 	}
-	if got := dom["disabled"]; got != (domProp{boolean: true}) {
-		t.Fatalf("disabled = %#v", got)
+	if got, ok := dom.get("disabled"); !ok || got != (domProp{boolean: true}) {
+		t.Fatalf("disabled = %#v, %v", got, ok)
 	}
-	if _, exists := dom["placeholder"]; exists {
+	if dom.has("placeholder") {
 		t.Fatal("false placeholder should be absent")
 	}
-	if len(events) != 2 || events["click"] == nil || events["input"] == nil {
+	click, clickExists := events.get("click")
+	input, inputExists := events.get("input")
+	if len(events) != 2 || !clickExists || click == nil || !inputExists || input == nil {
 		t.Fatalf("events = %#v", events)
 	}
 }
@@ -162,13 +164,13 @@ func TestSplitPropsHandlesUncomparableValues(t *testing.T) {
 	if len(events) != 0 {
 		t.Fatalf("events = %#v, want none", events)
 	}
-	if got := dom["data-slice"]; got != (domProp{}) {
-		t.Fatalf("data-slice = %#v, want empty string prop", got)
+	if got, ok := dom.get("data-slice"); !ok || got != (domProp{}) {
+		t.Fatalf("data-slice = %#v, %v; want empty string prop", got, ok)
 	}
-	if got := dom["data-map"]; got != (domProp{}) {
-		t.Fatalf("data-map = %#v, want empty string prop", got)
+	if got, ok := dom.get("data-map"); !ok || got != (domProp{}) {
+		t.Fatalf("data-map = %#v, %v; want empty string prop", got, ok)
 	}
-	if _, exists := dom["hidden"]; exists {
+	if dom.has("hidden") {
 		t.Fatal("false prop should be absent")
 	}
 }
