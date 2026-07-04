@@ -73,8 +73,12 @@ func normalizeAttributeName(name string) string {
 }
 
 func splitProps(props Props) (map[string]domProp, map[string]any) {
-	dom := make(map[string]domProp)
-	events := make(map[string]any)
+	if len(props) == 0 {
+		return nil, nil
+	}
+
+	var dom map[string]domProp
+	var events map[string]any
 	for name, value := range props {
 		if value == nil {
 			continue
@@ -83,15 +87,24 @@ func splitProps(props Props) (map[string]domProp, map[string]any) {
 			continue
 		}
 		if eventName, ok := eventNameForProp(name); ok {
+			if events == nil {
+				events = make(map[string]any)
+			}
 			events[eventName] = value
 			continue
 		}
 		name = normalizeAttributeName(name)
 		if boolean, ok := value.(bool); ok {
 			if boolean {
+				if dom == nil {
+					dom = make(map[string]domProp)
+				}
 				dom[name] = domProp{boolean: true}
 			}
 			continue
+		}
+		if dom == nil {
+			dom = make(map[string]domProp)
 		}
 		dom[name] = domProp{value: ToString(value)}
 	}
