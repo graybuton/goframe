@@ -56,16 +56,52 @@ func TestMatchChildIndices(t *testing.T) {
 			want: []int{0, 1, noChildMatch},
 		},
 		{
+			name: "stable keyed order",
+			old:  []string{"a", "b", "c", "d"},
+			new:  []string{"a", "b", "c", "d"},
+			want: []int{0, 1, 2, 3},
+		},
+		{
+			name: "reverse keyed order",
+			old:  []string{"a", "b", "c", "d"},
+			new:  []string{"d", "c", "b", "a"},
+			want: []int{3, 2, 1, 0},
+		},
+		{
+			name: "rotate keyed order left",
+			old:  []string{"a", "b", "c", "d"},
+			new:  []string{"b", "c", "d", "a"},
+			want: []int{1, 2, 3, 0},
+		},
+		{
+			name: "rotate keyed order right",
+			old:  []string{"a", "b", "c", "d"},
+			new:  []string{"d", "a", "b", "c"},
+			want: []int{3, 0, 1, 2},
+		},
+		{
 			name: "keyed reorder and insert",
 			old:  []string{"a", "b", "c"},
 			new:  []string{"c", "b", "d", "a"},
 			want: []int{2, 1, noChildMatch, 0},
 		},
 		{
+			name: "insert around stable keyed children",
+			old:  []string{"a", "b", "c"},
+			new:  []string{"x", "a", "b", "c", "y"},
+			want: []int{noChildMatch, 0, 1, 2, noChildMatch},
+		},
+		{
 			name: "keyed removal keeps surviving identity",
 			old:  []string{"todo-1", "todo-2"},
 			new:  []string{"todo-2"},
 			want: []int{1},
+		},
+		{
+			name: "remove keyed children",
+			old:  []string{"a", "b", "c", "d"},
+			new:  []string{"a", "c"},
+			want: []int{0, 2},
 		},
 		{
 			name: "mixed children keep unkeyed order",
@@ -76,6 +112,18 @@ func TestMatchChildIndices(t *testing.T) {
 		{
 			name: "duplicate new key mounts duplicate",
 			old:  []string{"a"},
+			new:  []string{"a", "a"},
+			want: []int{0, noChildMatch},
+		},
+		{
+			name: "duplicate old key single new key",
+			old:  []string{"a", "a", "b"},
+			new:  []string{"a", "b"},
+			want: []int{0, 2},
+		},
+		{
+			name: "duplicate old key duplicate new key",
+			old:  []string{"a", "a"},
 			new:  []string{"a", "a"},
 			want: []int{0, noChildMatch},
 		},

@@ -2,6 +2,8 @@ package goframe
 
 import "testing"
 
+var benchmarkChildMatches []int
+
 func BenchmarkDirtyQueuePruning(b *testing.B) {
 	root := dirtyTestInstance("Root", nil)
 	parent := dirtyTestInstance("Parent", root)
@@ -47,6 +49,150 @@ func BenchmarkMatchChildIndicesUnkeyed(b *testing.B) {
 			b.Fatalf("last match = %d", matches[127])
 		}
 	}
+}
+
+func BenchmarkMatchChildIndicesReorders(b *testing.B) {
+	const size = 128
+
+	tests := []struct {
+		name   string
+		old    []string
+		new    []string
+		checks map[int]int
+	}{
+		{
+			name: "stable_keyed_order",
+			old:  sequentialBenchmarkKeys(size),
+			new:  sequentialBenchmarkKeys(size),
+			checks: map[int]int{
+				0:        0,
+				size - 1: size - 1,
+			},
+		},
+		{
+			name: "reverse_keyed_order",
+			old:  sequentialBenchmarkKeys(size),
+			new:  reverseBenchmarkKeys(size),
+			checks: map[int]int{
+				0:        size - 1,
+				size - 1: 0,
+			},
+		},
+		{
+			name: "rotate_left_keyed_order",
+			old:  sequentialBenchmarkKeys(size),
+			new:  rotateLeftBenchmarkKeys(size),
+			checks: map[int]int{
+				0:        1,
+				size - 1: 0,
+			},
+		},
+		{
+			name: "rotate_right_keyed_order",
+			old:  sequentialBenchmarkKeys(size),
+			new:  rotateRightBenchmarkKeys(size),
+			checks: map[int]int{
+				0:        size - 1,
+				size - 1: size - 2,
+			},
+		},
+		{
+			name: "insert_remove_keyed_order",
+			old:  sequentialBenchmarkKeys(size),
+			new:  insertRemoveBenchmarkKeys(size),
+			checks: map[int]int{
+				0:        noChildMatch,
+				1:        1,
+				size - 1: size - 1,
+			},
+		},
+		{
+			name: "mixed_keyed_unkeyed_order",
+			old:  mixedBenchmarkKeys(size),
+			new:  mixedReorderedBenchmarkKeys(size),
+			checks: map[int]int{
+				0: size - 2,
+				1: 1,
+				2: 0,
+				3: 3,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		b.Run(test.name, func(b *testing.B) {
+			matches := matchChildIndices(test.old, test.new)
+			for index, want := range test.checks {
+				if matches[index] != want {
+					b.Fatalf("sanity match[%d] = %d, want %d", index, matches[index], want)
+				}
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				benchmarkChildMatches = matchChildIndices(test.old, test.new)
+			}
+		})
+	}
+}
+
+func sequentialBenchmarkKeys(size int) []string {
+	keys := make([]string, size)
+	for index := range keys {
+		keys[index] = "item-" + ToString(index)
+	}
+	return keys
+}
+
+func reverseBenchmarkKeys(size int) []string {
+	keys := make([]string, size)
+	for index := range keys {
+		keys[index] = "item-" + ToString(size-1-index)
+	}
+	return keys
+}
+
+func rotateLeftBenchmarkKeys(size int) []string {
+	keys := make([]string, size)
+	for index := range keys {
+		keys[index] = "item-" + ToString((index+1)%size)
+	}
+	return keys
+}
+
+func rotateRightBenchmarkKeys(size int) []string {
+	keys := make([]string, size)
+	for index := range keys {
+		keys[index] = "item-" + ToString((index+size-1)%size)
+	}
+	return keys
+}
+
+func insertRemoveBenchmarkKeys(size int) []string {
+	keys := sequentialBenchmarkKeys(size)
+	keys[0] = "new-item"
+	return keys
+}
+
+func mixedBenchmarkKeys(size int) []string {
+	keys := make([]string, size)
+	for index := range keys {
+		if index%2 == 0 {
+			keys[index] = "item-" + ToString(index)
+		}
+	}
+	return keys
+}
+
+func mixedReorderedBenchmarkKeys(size int) []string {
+	keys := make([]string, size)
+	for index := range keys {
+		if index%2 == 0 {
+			keys[index] = "item-" + ToString((index+size-2)%size)
+		}
+	}
+	return keys
 }
 
 func BenchmarkSplitProps(b *testing.B) {
