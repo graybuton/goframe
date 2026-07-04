@@ -76,7 +76,7 @@ func applyPostMountProps(element js.Value, node VNode) {
 		return
 	}
 	props, _ := splitProps(node.Props)
-	if prop, ok := props["value"]; ok {
+	if prop, ok := props.get("value"); ok {
 		setDOMProp(element, "value", prop)
 	}
 }
@@ -259,16 +259,16 @@ func patchProps(element js.Value, mounted *mountedNode, oldProps, newProps Props
 	oldDOM, _ := splitProps(oldProps)
 	newDOM, newEvents := splitProps(newProps)
 
-	for name, oldProp := range oldDOM {
-		if _, exists := newDOM[name]; !exists {
-			removeDOMProp(element, name, oldProp)
+	for _, oldProp := range oldDOM {
+		if !newDOM.has(oldProp.name) {
+			removeDOMProp(element, oldProp.name, oldProp.prop)
 		}
 	}
-	for name, newProp := range newDOM {
-		if oldProp, exists := oldDOM[name]; exists && oldProp == newProp {
+	for _, newProp := range newDOM {
+		if oldProp, exists := oldDOM.get(newProp.name); exists && oldProp == newProp.prop {
 			continue
 		}
-		setDOMProp(element, name, newProp)
+		setDOMProp(element, newProp.name, newProp.prop)
 	}
 	patchEvents(element, mounted, newEvents, owner)
 }
@@ -301,9 +301,9 @@ func setDOMProp(element js.Value, name string, prop domProp) {
 	element.Call("setAttribute", name, prop.value)
 }
 
-func patchEvents(element js.Value, mounted *mountedNode, callbacks map[string]any, owner *componentInstance) {
+func patchEvents(element js.Value, mounted *mountedNode, callbacks splitEventProps, owner *componentInstance) {
 	for eventName, event := range mounted.events {
-		if _, exists := callbacks[eventName]; exists {
+		if _, exists := callbacks.get(eventName); exists {
 			continue
 		}
 		element.Call("removeEventListener", eventName, event.handler)
@@ -318,15 +318,16 @@ func patchEvents(element js.Value, mounted *mountedNode, callbacks map[string]an
 	if mounted.events == nil {
 		mounted.events = make(map[string]*mountedEvent, len(callbacks))
 	}
-	for eventName, callback := range callbacks {
+	for _, callback := range callbacks {
+		eventName := callback.name
 		if event, exists := mounted.events[eventName]; exists {
-			event.callback = callback
+			event.callback = callback.callback
 			event.component = runtimeComponentName(owner)
 			event.eventName = eventName
 			continue
 		}
 		event := &mountedEvent{
-			callback:  callback,
+			callback:  callback.callback,
 			component: runtimeComponentName(owner),
 			eventName: eventName,
 		}

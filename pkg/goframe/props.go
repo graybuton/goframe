@@ -13,6 +13,63 @@ type domProp struct {
 	boolean bool
 }
 
+type splitDOMProp struct {
+	name string
+	prop domProp
+}
+
+type splitEventProp struct {
+	name     string
+	callback any
+}
+
+type splitDOMProps []splitDOMProp
+
+type splitEventProps []splitEventProp
+
+func (props splitDOMProps) get(name string) (domProp, bool) {
+	for _, prop := range props {
+		if prop.name == name {
+			return prop.prop, true
+		}
+	}
+	return domProp{}, false
+}
+
+func (props splitDOMProps) has(name string) bool {
+	_, ok := props.get(name)
+	return ok
+}
+
+func (props *splitDOMProps) set(name string, prop domProp) {
+	for index := range *props {
+		if (*props)[index].name == name {
+			(*props)[index].prop = prop
+			return
+		}
+	}
+	*props = append(*props, splitDOMProp{name: name, prop: prop})
+}
+
+func (events splitEventProps) get(name string) (any, bool) {
+	for _, event := range events {
+		if event.name == name {
+			return event.callback, true
+		}
+	}
+	return nil, false
+}
+
+func (events *splitEventProps) set(name string, callback any) {
+	for index := range *events {
+		if (*events)[index].name == name {
+			(*events)[index].callback = callback
+			return
+		}
+	}
+	*events = append(*events, splitEventProp{name: name, callback: callback})
+}
+
 // ToString converts supported primitive values into text suitable for a Text
 // node. Unsupported values become an empty string to keep the WASM runtime
 // independent from fmt and reflection-heavy formatting.
@@ -72,13 +129,13 @@ func normalizeAttributeName(name string) string {
 	}
 }
 
-func splitProps(props Props) (map[string]domProp, map[string]any) {
+func splitProps(props Props) (splitDOMProps, splitEventProps) {
 	if len(props) == 0 {
 		return nil, nil
 	}
 
-	var dom map[string]domProp
-	var events map[string]any
+	var dom splitDOMProps
+	var events splitEventProps
 	for name, value := range props {
 		if value == nil {
 			continue
@@ -88,25 +145,25 @@ func splitProps(props Props) (map[string]domProp, map[string]any) {
 		}
 		if eventName, ok := eventNameForProp(name); ok {
 			if events == nil {
-				events = make(map[string]any)
+				events = make(splitEventProps, 0, len(props))
 			}
-			events[eventName] = value
+			events.set(eventName, value)
 			continue
 		}
 		name = normalizeAttributeName(name)
 		if boolean, ok := value.(bool); ok {
 			if boolean {
 				if dom == nil {
-					dom = make(map[string]domProp)
+					dom = make(splitDOMProps, 0, len(props))
 				}
-				dom[name] = domProp{boolean: true}
+				dom.set(name, domProp{boolean: true})
 			}
 			continue
 		}
 		if dom == nil {
-			dom = make(map[string]domProp)
+			dom = make(splitDOMProps, 0, len(props))
 		}
-		dom[name] = domProp{value: ToString(value)}
+		dom.set(name, domProp{value: ToString(value)})
 	}
 	return dom, events
 }
