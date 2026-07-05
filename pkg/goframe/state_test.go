@@ -510,6 +510,46 @@ func TestUpdateBatchResetClearsPendingRequest(t *testing.T) {
 	}
 }
 
+func TestUpdateBatchResetInvalidatesQueuedRequest(t *testing.T) {
+	var batch updateBatch
+	var queued []func()
+	enqueue := func(update func()) {
+		queued = append(queued, update)
+	}
+	updateA := 0
+	updateB := 0
+
+	batch.request(enqueue, func() { updateA++ })
+	if len(queued) != 1 {
+		t.Fatalf("queued updates = %d, want 1", len(queued))
+	}
+	if updateA != 0 {
+		t.Fatalf("updateA before queued callback = %d, want 0", updateA)
+	}
+
+	batch.reset()
+	batch.request(enqueue, func() { updateB++ })
+	if len(queued) != 2 {
+		t.Fatalf("queued updates after reset = %d, want 2", len(queued))
+	}
+
+	queued[0]()
+	if updateA != 0 {
+		t.Fatalf("stale updateA ran %d time(s), want 0", updateA)
+	}
+	if updateB != 0 {
+		t.Fatalf("updateB before current callback = %d, want 0", updateB)
+	}
+
+	queued[1]()
+	if updateB != 1 {
+		t.Fatalf("updateB = %d, want 1", updateB)
+	}
+	if len(queued) != 2 {
+		t.Fatalf("queued updates after callbacks = %d, want 2", len(queued))
+	}
+}
+
 func testComponentInstance(name string, render func() Node, schedule func(*componentInstance)) *componentInstance {
 	node := Component(name, struct{}{}, func(struct{}) Node {
 		return render()
