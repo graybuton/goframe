@@ -13,6 +13,7 @@ type stateHandle[T any] struct {
 
 type updateBatch struct {
 	pending bool
+	epoch   int
 }
 
 func (batch *updateBatch) request(enqueue func(func()), update func()) {
@@ -20,7 +21,11 @@ func (batch *updateBatch) request(enqueue func(func()), update func()) {
 		return
 	}
 	batch.pending = true
+	epoch := batch.epoch
 	enqueue(func() {
+		if epoch != batch.epoch {
+			return
+		}
 		batch.pending = false
 		update()
 	})
@@ -28,6 +33,7 @@ func (batch *updateBatch) request(enqueue func(func()), update func()) {
 
 func (batch *updateBatch) reset() {
 	batch.pending = false
+	batch.epoch++
 }
 
 // UseState returns the state value at the current component render position

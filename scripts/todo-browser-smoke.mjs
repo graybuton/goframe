@@ -84,6 +84,8 @@ try {
                 listSame: window.__list === document.querySelector("#todo-list"),
                 active: document.activeElement.id,
                 value: document.querySelector("#todo-input").value,
+                selectionStart: document.querySelector("#todo-input").selectionStart,
+                selectionEnd: document.querySelector("#todo-input").selectionEnd,
                 appRenderDelta: (window.goframeComponentRenderCounts.App || 0) - baseline.appRenders,
                 headerRenderDelta: (window.goframeComponentRenderCounts.Header || 0) - baseline.headerRenders,
                 formRenderDelta: (window.goframeComponentRenderCounts.TodoForm || 0) - baseline.formRenders,
@@ -105,6 +107,8 @@ try {
             listSame: true,
             active: "todo-input",
             value: "B",
+            selectionStart: 1,
+            selectionEnd: 1,
             appRenderDelta: 0,
             headerRenderDelta: 0,
             formRenderDelta: 1,
@@ -282,6 +286,7 @@ async function typeTodo(client, text) {
         const input = document.querySelector("#todo-input");
         input.focus();
         input.value = ${JSON.stringify(text)};
+        input.setSelectionRange(input.value.length, input.value.length);
         if (window.__GOFRAME_DEBUG__) {
             for (const key of Object.keys(window.__GOFRAME_DEBUG__.operations)) {
                 window.__GOFRAME_DEBUG__.operations[key] = 0;

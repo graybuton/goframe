@@ -449,7 +449,7 @@ func TestUseReducerDispatchSamePrimitiveValueDoesNotSchedule(t *testing.T) {
 	}
 }
 
-func TestUpdateBatchCoalescesRequests(t *testing.T) {
+func TestUpdateBatchCoalescesPendingRequests(t *testing.T) {
 	var batch updateBatch
 	var queued []func()
 	enqueue := func(update func()) {
@@ -464,14 +464,89 @@ func TestUpdateBatchCoalescesRequests(t *testing.T) {
 	if len(queued) != 1 {
 		t.Fatalf("queued updates = %d, want 1", len(queued))
 	}
+	if updates != 0 {
+		t.Fatalf("updates before queued callback = %d, want 0", updates)
+	}
 	queued[0]()
 	if updates != 1 {
 		t.Fatalf("updates = %d, want 1", updates)
 	}
+}
+
+func TestUpdateBatchAllowsRequestAfterFlush(t *testing.T) {
+	var batch updateBatch
+	var queued []func()
+	enqueue := func(update func()) {
+		queued = append(queued, update)
+	}
+	updates := 0
+
+	batch.request(enqueue, func() { updates++ })
+	queued[0]()
 
 	batch.request(enqueue, func() { updates++ })
 	if len(queued) != 2 {
 		t.Fatalf("queued updates after flush = %d, want 2", len(queued))
+	}
+	queued[1]()
+	if updates != 2 {
+		t.Fatalf("updates = %d, want 2", updates)
+	}
+}
+
+func TestUpdateBatchResetClearsPendingRequest(t *testing.T) {
+	var batch updateBatch
+	var queued []func()
+	enqueue := func(update func()) {
+		queued = append(queued, update)
+	}
+
+	batch.request(enqueue, func() {})
+	batch.reset()
+	batch.request(enqueue, func() {})
+
+	if len(queued) != 2 {
+		t.Fatalf("queued updates after reset = %d, want 2", len(queued))
+	}
+}
+
+func TestUpdateBatchResetInvalidatesQueuedRequest(t *testing.T) {
+	var batch updateBatch
+	var queued []func()
+	enqueue := func(update func()) {
+		queued = append(queued, update)
+	}
+	updateA := 0
+	updateB := 0
+
+	batch.request(enqueue, func() { updateA++ })
+	if len(queued) != 1 {
+		t.Fatalf("queued updates = %d, want 1", len(queued))
+	}
+	if updateA != 0 {
+		t.Fatalf("updateA before queued callback = %d, want 0", updateA)
+	}
+
+	batch.reset()
+	batch.request(enqueue, func() { updateB++ })
+	if len(queued) != 2 {
+		t.Fatalf("queued updates after reset = %d, want 2", len(queued))
+	}
+
+	queued[0]()
+	if updateA != 0 {
+		t.Fatalf("stale updateA ran %d time(s), want 0", updateA)
+	}
+	if updateB != 0 {
+		t.Fatalf("updateB before current callback = %d, want 0", updateB)
+	}
+
+	queued[1]()
+	if updateB != 1 {
+		t.Fatalf("updateB = %d, want 1", updateB)
+	}
+	if len(queued) != 2 {
+		t.Fatalf("queued updates after callbacks = %d, want 2", len(queued))
 	}
 }
 
