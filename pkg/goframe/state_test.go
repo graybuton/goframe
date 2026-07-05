@@ -449,7 +449,7 @@ func TestUseReducerDispatchSamePrimitiveValueDoesNotSchedule(t *testing.T) {
 	}
 }
 
-func TestUpdateBatchCoalescesRequests(t *testing.T) {
+func TestUpdateBatchCoalescesPendingRequests(t *testing.T) {
 	var batch updateBatch
 	var queued []func()
 	enqueue := func(update func()) {
@@ -464,14 +464,49 @@ func TestUpdateBatchCoalescesRequests(t *testing.T) {
 	if len(queued) != 1 {
 		t.Fatalf("queued updates = %d, want 1", len(queued))
 	}
+	if updates != 0 {
+		t.Fatalf("updates before queued callback = %d, want 0", updates)
+	}
 	queued[0]()
 	if updates != 1 {
 		t.Fatalf("updates = %d, want 1", updates)
 	}
+}
+
+func TestUpdateBatchAllowsRequestAfterFlush(t *testing.T) {
+	var batch updateBatch
+	var queued []func()
+	enqueue := func(update func()) {
+		queued = append(queued, update)
+	}
+	updates := 0
+
+	batch.request(enqueue, func() { updates++ })
+	queued[0]()
 
 	batch.request(enqueue, func() { updates++ })
 	if len(queued) != 2 {
 		t.Fatalf("queued updates after flush = %d, want 2", len(queued))
+	}
+	queued[1]()
+	if updates != 2 {
+		t.Fatalf("updates = %d, want 2", updates)
+	}
+}
+
+func TestUpdateBatchResetClearsPendingRequest(t *testing.T) {
+	var batch updateBatch
+	var queued []func()
+	enqueue := func(update func()) {
+		queued = append(queued, update)
+	}
+
+	batch.request(enqueue, func() {})
+	batch.reset()
+	batch.request(enqueue, func() {})
+
+	if len(queued) != 2 {
+		t.Fatalf("queued updates after reset = %d, want 2", len(queued))
 	}
 }
 
