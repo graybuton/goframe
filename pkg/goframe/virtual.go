@@ -69,14 +69,14 @@ type VirtualRange struct {
 }
 
 const (
-	virtualTableTopSpacerKey    = "goframe:virtual-table:spacer:top"
-	virtualTableBottomSpacerKey = "goframe:virtual-table:spacer:bottom"
-	virtualTableEmptyKey        = "goframe:virtual-table:empty"
-	virtualTableRowKeyPrefix    = "goframe:virtual-table:row:"
+	virtualTableTopSpacerKey    = "\x00vt"
+	virtualTableBottomSpacerKey = "\x00vb"
+	virtualTableEmptyKey        = "\x00ve"
+	virtualTableRowKeyPrefix    = "\x00vr:"
 )
 
 func renderVirtualList[T any](props VirtualListProps[T]) Node {
-	validateVirtualDimensions("VirtualList", props.Height, props.ItemHeight, "ItemHeight")
+	validateVirtualListDimensions(props.Height, props.ItemHeight)
 	if props.RenderItem == nil {
 		panic("goframe: VirtualList requires RenderItem")
 	}
@@ -123,7 +123,7 @@ func renderVirtualList[T any](props VirtualListProps[T]) Node {
 }
 
 func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
-	validateVirtualDimensions("VirtualTable", props.Height, props.RowHeight, "RowHeight")
+	validateVirtualTableDimensions(props.Height, props.RowHeight)
 	if props.RenderRow == nil {
 		panic("goframe: VirtualTable requires RenderRow")
 	}
@@ -239,20 +239,32 @@ func renderVirtualTableEmpty(render func() Node) (node Node) {
 	return render()
 }
 
-func validateVirtualDimensions(name string, height int, itemHeight int, itemHeightName string) {
+func validateVirtualListDimensions(height int, itemHeight int) {
 	if height <= 0 || itemHeight <= 0 {
-		panic("goframe: " + name + " requires positive Height and " + itemHeightName)
+		panic("goframe: VirtualList requires positive Height and ItemHeight")
+	}
+}
+
+func validateVirtualTableDimensions(height int, rowHeight int) {
+	if height <= 0 || rowHeight <= 0 {
+		panic("goframe: VirtualTable requires positive Height and RowHeight")
+	}
+}
+
+func validateVirtualRangeDimensions(height int, itemHeight int) {
+	if height <= 0 || itemHeight <= 0 {
+		panic("goframe: virtual range requires positive Height and ItemHeight")
 	}
 }
 
 func calculateVirtualRange(length int, height int, itemHeight int, overscan int, scrollTop int) VirtualRange {
+	validateVirtualRangeDimensions(height, itemHeight)
 	visibleStart := virtualVisibleStart(length, itemHeight, scrollTop)
 	rangeStart := virtualRangeStartForVisibleStart(length, height, itemHeight, overscan, visibleStart)
 	return calculateVirtualRangeFromStart(length, height, itemHeight, overscan, rangeStart)
 }
 
 func calculateVirtualRangeFromStart(length int, height int, itemHeight int, overscan int, rangeStart int) VirtualRange {
-	validateVirtualDimensions("virtual range", height, itemHeight, "ItemHeight")
 	if length <= 0 {
 		return VirtualRange{}
 	}
@@ -351,29 +363,28 @@ func virtualViewportStyle(height int) string {
 }
 
 func virtualTableSpacerRow(name string, height int, columnCount int) Node {
+	heightValue := ToString(height)
 	return El("tr", Props{
 		"class":       "gf-virtual-table-spacer gf-virtual-table-spacer-" + name,
 		"aria-hidden": "true",
-		"style":       "height:" + ToString(height) + "px;overflow-anchor:none;",
+		"style":       "height:" + heightValue + "px;overflow-anchor:none;",
 	}, El("td", Props{
 		"colspan": virtualTableColumnCount(columnCount),
-		"style":   "height:" + ToString(height) + "px;padding:0;border:0;line-height:0;font-size:0;overflow-anchor:none;",
+		"style":   "height:" + heightValue + "px;padding:0;border:0;line-height:0;font-size:0;overflow-anchor:none;",
 	}))
 }
 
 func virtualTableContentRow(content Node, columnCount int) Node {
-	return El("tr", Props{
-		"class": "gf-virtual-table-content",
-	}, El("td", Props{
+	return El("tr", Props{}, El("td", Props{
 		"colspan": virtualTableColumnCount(columnCount),
 	}, content))
 }
 
-func virtualTableColumnCount(value int) string {
+func virtualTableColumnCount(value int) int {
 	if value <= 0 {
-		value = 1
+		return 1
 	}
-	return ToString(value)
+	return value
 }
 
 func joinVirtualClass(base string, extra string) string {
