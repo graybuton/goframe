@@ -195,8 +195,13 @@ func patchChildren(document, parent js.Value, oldChildren []*mountedNode, newNod
 		}
 	}
 
+	stableStart := stableChildPlacementStart(matches)
 	reference := boundary
 	for index := len(children) - 1; index >= 0; index-- {
+		if index >= stableStart {
+			reference = children[index].first
+			continue
+		}
 		placeMountedBefore(parent, children[index], reference)
 		reference = children[index].first
 	}

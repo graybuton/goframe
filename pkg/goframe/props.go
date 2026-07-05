@@ -109,17 +109,22 @@ func ToString(value any) string {
 }
 
 func eventNameForProp(name string) (string, bool) {
-	if len(name) <= 2 || !strings.EqualFold(name[:2], "on") {
+	if len(name) <= 2 {
+		return "", false
+	}
+	first, second := name[0], name[1]
+	if (first != 'o' && first != 'O') || (second != 'n' && second != 'N') {
 		return "", false
 	}
 	return strings.ToLower(name[2:]), true
 }
 
 func normalizeAttributeName(name string) string {
-	switch strings.ToLower(name) {
+	lower := strings.ToLower(name)
+	switch lower {
 	case "class", "id", "value", "type", "placeholder", "name", "disabled",
 		"checked", "selected", "href", "src", "alt", "title", "role":
-		return strings.ToLower(name)
+		return lower
 	case "classname":
 		return "class"
 	case "htmlfor":
@@ -151,13 +156,11 @@ func splitProps(props Props) (splitDOMProps, splitEventProps) {
 			continue
 		}
 		name = normalizeAttributeName(name)
-		if boolean, ok := value.(bool); ok {
-			if boolean {
-				if dom == nil {
-					dom = make(splitDOMProps, 0, len(props))
-				}
-				dom.set(name, domProp{boolean: true})
+		if _, ok := value.(bool); ok {
+			if dom == nil {
+				dom = make(splitDOMProps, 0, len(props))
 			}
+			dom.set(name, domProp{boolean: true})
 			continue
 		}
 		if dom == nil {

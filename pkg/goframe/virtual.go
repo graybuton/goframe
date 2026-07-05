@@ -140,13 +140,14 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 			virtualTableTopSpacerKey,
 			virtualTableSpacerRow("top", rangeInfo.TopSpacer, props.ColumnCount),
 		))
+		rowStyle := "height:" + ToString(props.RowHeight) + "px;"
 		for index := rangeInfo.Start; index < rangeInfo.End; index++ {
 			key := virtualItemKey(props.Key, props.Items[index], index)
 			row := VirtualRow[T]{
 				Item:     props.Items[index],
 				Index:    index,
 				Key:      key,
-				RowStyle: "height:" + ToString(props.RowHeight) + "px;",
+				RowStyle: rowStyle,
 			}
 			bodyChildren = append(bodyChildren, Key(virtualTableRowKeyPrefix+key, renderVirtualTableRow(props.RenderRow, row, props.ColumnCount)))
 		}
