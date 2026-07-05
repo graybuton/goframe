@@ -3,6 +3,7 @@ package goframe
 import "testing"
 
 var benchmarkChildMatches []int
+var benchmarkStablePlacementStart int
 
 func BenchmarkDirtyQueuePruning(b *testing.B) {
 	root := dirtyTestInstance("Root", nil)
@@ -137,6 +138,55 @@ func BenchmarkMatchChildIndicesReorders(b *testing.B) {
 	}
 }
 
+func BenchmarkStableChildPlacements(b *testing.B) {
+	const size = 128
+
+	tests := []struct {
+		name    string
+		matches []int
+	}{
+		{
+			name:    "stable",
+			matches: sequentialBenchmarkMatches(size),
+		},
+		{
+			name:    "reverse",
+			matches: reverseBenchmarkMatches(size),
+		},
+		{
+			name:    "rotate_left",
+			matches: rotateLeftBenchmarkMatches(size),
+		},
+		{
+			name:    "rotate_right",
+			matches: rotateRightBenchmarkMatches(size),
+		},
+		{
+			name:    "insert_remove",
+			matches: insertRemoveBenchmarkMatches(size),
+		},
+		{
+			name:    "mixed",
+			matches: mixedBenchmarkMatchesForPlacement(size),
+		},
+	}
+
+	for _, test := range tests {
+		b.Run(test.name, func(b *testing.B) {
+			stableStart := stableChildPlacementStart(test.matches)
+			if stableStart < 0 || stableStart > len(test.matches) {
+				b.Fatalf("stable start = %d", stableStart)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				benchmarkStablePlacementStart = stableChildPlacementStart(test.matches)
+			}
+		})
+	}
+}
+
 func sequentialBenchmarkKeys(size int) []string {
 	keys := make([]string, size)
 	for index := range keys {
@@ -193,6 +243,56 @@ func mixedReorderedBenchmarkKeys(size int) []string {
 		}
 	}
 	return keys
+}
+
+func sequentialBenchmarkMatches(size int) []int {
+	matches := make([]int, size)
+	for index := range matches {
+		matches[index] = index
+	}
+	return matches
+}
+
+func reverseBenchmarkMatches(size int) []int {
+	matches := make([]int, size)
+	for index := range matches {
+		matches[index] = size - 1 - index
+	}
+	return matches
+}
+
+func rotateLeftBenchmarkMatches(size int) []int {
+	matches := make([]int, size)
+	for index := range matches {
+		matches[index] = (index + 1) % size
+	}
+	return matches
+}
+
+func rotateRightBenchmarkMatches(size int) []int {
+	matches := make([]int, size)
+	for index := range matches {
+		matches[index] = (index + size - 1) % size
+	}
+	return matches
+}
+
+func insertRemoveBenchmarkMatches(size int) []int {
+	matches := sequentialBenchmarkMatches(size)
+	matches[0] = noChildMatch
+	return matches
+}
+
+func mixedBenchmarkMatchesForPlacement(size int) []int {
+	matches := make([]int, size)
+	for index := range matches {
+		if index%2 == 0 {
+			matches[index] = (index + size - 2) % size
+			continue
+		}
+		matches[index] = index
+	}
+	return matches
 }
 
 func BenchmarkSplitProps(b *testing.B) {

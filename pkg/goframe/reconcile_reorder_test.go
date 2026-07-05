@@ -18,8 +18,9 @@ type currentPlacementStats struct {
 }
 
 func TestCurrentKeyedReorderPlacement(t *testing.T) {
-	// These counts characterize current right-to-left placement behavior. They
-	// are not asserted to be optimal; LIS work may intentionally update them.
+	// These counts characterize current stable-placement-aware right-to-left
+	// behavior. They are not asserted to be theoretically optimal; future
+	// placement work may intentionally update them.
 	tests := []struct {
 		name string
 		old  []string
@@ -49,7 +50,7 @@ func TestCurrentKeyedReorderPlacement(t *testing.T) {
 			new:  []string{"d", "a", "b", "c"},
 			want: currentPlacementStats{
 				final: []string{"d", "a", "b", "c"},
-				moves: 3,
+				moves: 1,
 			},
 		},
 		{
@@ -131,11 +132,17 @@ func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []stri
 
 	var reference string
 	hasReference := false
+	stableStart := stableChildPlacementStart(matches)
 	for index := len(children) - 1; index >= 0; index-- {
 		child := children[index]
 		if child.pending {
 			stats.mounts++
 			stats.final = insertBeforeCurrentPlacement(t, stats.final, child.id, reference, hasReference)
+			reference = child.id
+			hasReference = true
+			continue
+		}
+		if index >= stableStart {
 			reference = child.id
 			hasReference = true
 			continue
@@ -161,6 +168,76 @@ func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []stri
 	}
 
 	return stats
+}
+
+func TestStableChildPlacements(t *testing.T) {
+	tests := []struct {
+		name    string
+		matches []int
+		want    []bool
+	}{
+		{
+			name:    "empty",
+			matches: nil,
+		},
+		{
+			name:    "all mounts",
+			matches: []int{noChildMatch, noChildMatch},
+		},
+		{
+			name:    "stable",
+			matches: []int{0, 1, 2, 3},
+		},
+		{
+			name:    "insert around stable",
+			matches: []int{noChildMatch, 0, 1, 2, noChildMatch},
+		},
+		{
+			name:    "rotate left",
+			matches: []int{1, 2, 3, 0},
+		},
+		{
+			name:    "rotate right",
+			matches: []int{3, 0, 1, 2},
+			want:    []bool{false, true, true, true},
+		},
+		{
+			name:    "reverse",
+			matches: []int{3, 2, 1, 0},
+		},
+		{
+			name:    "mixed",
+			matches: []int{2, noChildMatch, 0},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := stableChildPlacementFlags(test.matches)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("stable placements = %v, want %v", got, test.want)
+			}
+			for index, stable := range got {
+				if stable && test.matches[index] == noChildMatch {
+					t.Fatalf("noChildMatch at %d marked stable", index)
+				}
+			}
+		})
+	}
+}
+
+func stableChildPlacementFlags(matches []int) []bool {
+	stableStart := stableChildPlacementStart(matches)
+	if stableStart == len(matches) {
+		return nil
+	}
+	flags := make([]bool, len(matches))
+	for index := stableStart; index < len(matches); index++ {
+		if matches[index] != noChildMatch {
+			flags[index] = true
+		}
+	}
+	return flags
 }
 
 func insertBeforeCurrentPlacement(t *testing.T, order []string, id, reference string, hasReference bool) []string {

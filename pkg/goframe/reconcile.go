@@ -93,3 +93,19 @@ func matchChildIndices(oldKeys, newKeys []string) []int {
 	}
 	return matches
 }
+
+func stableChildPlacementStart(matches []int) int {
+	stableStart := len(matches)
+	for index := len(matches) - 1; index > 0; index-- {
+		current := matches[index]
+		previous := matches[index-1]
+		if current == noChildMatch || previous == noChildMatch || previous >= current {
+			break
+		}
+		stableStart = index - 1
+	}
+	if stableStart == 0 {
+		return len(matches)
+	}
+	return stableStart
+}
