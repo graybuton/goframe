@@ -183,15 +183,15 @@ func TestVirtualTableCreatesComponentBoundary(t *testing.T) {
 func TestVirtualTableColumnCount(t *testing.T) {
 	tests := []struct {
 		value int
-		want  string
+		want  int
 	}{
-		{value: 0, want: "1"},
-		{value: -1, want: "1"},
-		{value: 7, want: "7"},
+		{value: 0, want: 1},
+		{value: -1, want: 1},
+		{value: 7, want: 7},
 	}
 	for _, test := range tests {
 		if got := virtualTableColumnCount(test.value); got != test.want {
-			t.Fatalf("column count %d = %q, want %q", test.value, got, test.want)
+			t.Fatalf("column count %d = %d, want %d", test.value, got, test.want)
 		}
 	}
 }
@@ -199,7 +199,7 @@ func TestVirtualTableColumnCount(t *testing.T) {
 func TestVirtualTableSpacerRowUsesColumnCount(t *testing.T) {
 	row := virtualTableSpacerRow("top", 48, 7).(VNode)
 	cell := row.Children[0].(VNode)
-	if got := cell.Props["colspan"]; got != "7" {
+	if got := cell.Props["colspan"]; got != 7 {
 		t.Fatalf("spacer colspan = %#v, want 7", got)
 	}
 }
@@ -207,7 +207,7 @@ func TestVirtualTableSpacerRowUsesColumnCount(t *testing.T) {
 func TestVirtualTableContentRowUsesColumnCount(t *testing.T) {
 	row := virtualTableContentRow(Text("empty"), 7).(VNode)
 	cell := row.Children[0].(VNode)
-	if got := cell.Props["colspan"]; got != "7" {
+	if got := cell.Props["colspan"]; got != 7 {
 		t.Fatalf("content colspan = %#v, want 7", got)
 	}
 }
@@ -312,7 +312,7 @@ func TestVirtualTableKeysEmptyState(t *testing.T) {
 	}
 	row := requireVNode(t, empty.Node)
 	cell := requireVNode(t, row.Children[0])
-	if got := cell.Props["colspan"]; got != "7" {
+	if got := cell.Props["colspan"]; got != 7 {
 		t.Fatalf("empty colspan = %#v, want 7", got)
 	}
 }
