@@ -91,13 +91,12 @@ Player/Engine, `.gfapp`, formatter, or LSP support.
 ## Known Limitations And Follow-Ups
 
 - `splitProps` allocation work improved hot paths, but broader allocation
-  elimination can continue.
+  elimination can continue. Follow-up area: #69.
 - A batching mutation queue or commit-buffer architecture remains future work.
   Related issue: #70.
 - Keyed placement improved a common stable-suffix case, but full LIS
   reconciliation remains future work. Tracked separately in #71.
 - Retained focused-input selection restoration still has a focused follow-up.
-  Follow-up area: #69.
 - Malformed embedded GOX expression diagnostics can be improved.
 - Workspace module directive fidelity is intentionally limited and can be
   refined later.
