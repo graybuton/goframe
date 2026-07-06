@@ -1,0 +1,10 @@
+*                         @graybuton
+
+/.github/                @graybuton
+/pkg/goframe/            @graybuton
+/pkg/gox/                @graybuton
+/cmd/goxc/               @graybuton
+/examples/               @graybuton
+/docs/                   @graybuton
+/scripts/                @graybuton
+/extensions/vscode-gox/  @graybuton @markzorg

@@ -6,9 +6,9 @@ By contributing to this repository, you agree that your contributions are
 licensed under the Apache License, Version 2.0, the same license as the
 project.
 
-GoFrame is an experimental Go-first application platform. The first preview
-validates the browser/WASM application layer; it is not a production-readiness
-claim or a 1.0 API guarantee.
+GoFrame is an experimental Go-first application framework and toolchain. The
+current preview validates the browser/WASM application layer; it is not a
+production-readiness claim or a 1.0 API guarantee.
 
 ## Workflow
 
@@ -74,7 +74,7 @@ behavior, current limitations, current evidence, and current non-goals.
 
 Avoid roadmap-style promise wording such as `planned`, `will add`, `future
 follow-up`, or `may be added later` in product docs. Prefer factual wording such
-as `outside current preview scope`, `not part of v0.1.0-preview.1`, or `current
-non-goal`.
+as `outside current preview scope`, `not part of the current browser/WASM
+preview`, or `current non-goal`.
 
 The VS Code extension lives in `extensions/vscode-gox`.
