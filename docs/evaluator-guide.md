@@ -1,6 +1,6 @@
 # Evaluator Guide
 
-This guide is for evaluating the `v0.1.0-preview.1` browser/WASM layer. It is
+This guide is for evaluating the `v0.2.0-preview.4` browser/WASM layer. It is
 not a production deployment guide.
 
 ## Prerequisites
@@ -156,4 +156,4 @@ app. It is not a cross-browser certification suite.
 
 For the guided walkthrough, read the [tutorial](tutorial.md). For release scope
 and limitations, read the
-[v0.1.0-preview.1 release notes](release-notes-v0.1.0-preview.1.md).
+[v0.2.0-preview.4 release notes](release-notes-v0.2.0-preview.4.md).

@@ -4,6 +4,20 @@
 
 ### Added
 
+- `v0.2.0-preview.4` release notes documenting runtime hot-path work, WASM
+  size headroom recovery, keyed placement behavior, scheduler reset
+  correctness, GOX diagnostics, `goxc doctor` exit behavior, community docs,
+  branding assets, audit outcomes, compatibility notes, and remaining preview
+  limits.
+- Newcomer-first README structure with Quick Start near the top, a branded hero
+  header, and links to the current preview notes.
+- Lightweight GoFrame brand assets under `assets/brand/`, including the project
+  mark, 128px PNG export, brand README, and no-affiliation disclaimer.
+- Real repository CODEOWNERS coverage, clarified NOTICE ownership, and polished
+  CONTRIBUTING, SECURITY, and code-of-conduct wording for the current
+  browser/WASM preview.
+- Runtime, GOX, and `cmd/goxc` audit passes completed with no blocker or
+  high-severity findings after focused follow-up fixes.
 - Hashed asset packaging for `goxc package`, including `assets/`,
   `asset-manifest.json`, `goframe-package.json`, preload hints, and
   `bundle.wasm` naming.
@@ -155,6 +169,18 @@
 
 ### Fixed
 
+- `splitProps` allocation behavior was characterized and reduced for common
+  runtime prop paths while preserving nil and empty zero-allocation behavior.
+- `VirtualTable` runtime code was reduced to recover dashboard WASM size
+  headroom.
+- Keyed child placement now avoids redundant moves for the stable suffix
+  pattern, reducing the characterized rotate-right existing-node move count
+  from three to one without implementing a full LIS reconciler.
+- Scheduler reset now invalidates stale queued update callbacks so pre-reset
+  work cannot run after a newer request is queued.
+- GOX now rejects Go keyword component prop names before codegen with
+  source-level diagnostics, while preserving DOM attributes such as `type`.
+- `goxc doctor` now returns nonzero when required checks fail.
 - The router-dashboard route Error Boundary fallback now distinguishes retrying
   the current crashing route from safely navigating back to the issues list, and
   browser smoke covers recovery from `?panic=render` without reloading the

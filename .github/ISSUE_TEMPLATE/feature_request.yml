@@ -56,7 +56,7 @@ body:
     attributes:
       label: Checklist
       options:
-        - label: I understand v0.1.0-preview.1 is experimental and this request is not a preview promise.
+        - label: I understand the current preview is experimental and this request is not a preview promise.
           required: true
         - label: I described the smallest useful scope rather than a broad rewrite.
           required: true
