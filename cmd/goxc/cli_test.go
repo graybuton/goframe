@@ -595,6 +595,25 @@ func TestDoctorDoesNotFail(t *testing.T) {
 	}
 }
 
+func TestDoctorReturnsErrorWhenRequiredChecksFail(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	var err error
+	output := captureStdout(t, func() {
+		err = doctorCommand(nil)
+	})
+	if err == nil {
+		t.Fatal("doctorCommand() returned nil error for required check failure")
+	}
+	for _, want := range []string{
+		"Go:           not found",
+		"Status: errors found",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestStaticHandlerServesWASMContentType(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.Mkdir(filepath.Join(directory, "assets"), 0o755); err != nil {
@@ -710,6 +729,33 @@ func captureStderr(t *testing.T, fn func()) string {
 	os.Stderr = writer
 	defer func() {
 		os.Stderr = old
+	}()
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = old
 	}()
 
 	fn()
