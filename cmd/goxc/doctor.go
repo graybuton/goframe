@@ -82,6 +82,7 @@ func doctorCommand(args []string) error {
 	switch {
 	case failures > 0:
 		fmt.Println("Status: errors found")
+		return errors.New("doctor: required checks failed")
 	case warnings > 0:
 		fmt.Println("Status: ok with warnings")
 	default:
