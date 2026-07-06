@@ -22,7 +22,8 @@ For security-sensitive reports, follow [SECURITY.md](SECURITY.md): do not post
 exploit details publicly; open only a minimal public issue asking for a private
 disclosure channel if no private maintainer contact is available.
 
-For conduct concerns, open a focused issue if the concern can be discussed
-publicly without exposing private information. Maintainers may edit, hide, or
-close disruptive comments and may restrict participation when needed to keep the
-project usable for contributors.
+For conduct concerns, contact a maintainer privately when that is available. If
+the concern can be discussed publicly without exposing private information, open
+a focused issue. Maintainers may edit, hide, or close disruptive comments and
+may restrict participation when needed to keep the project usable for
+contributors.
