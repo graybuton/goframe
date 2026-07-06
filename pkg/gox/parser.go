@@ -107,7 +107,7 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 			return element, nil
 		case tokenIdentifier:
 			if component && next.value != "Key" && !validGoIdentifier(next.value) {
-				return nil, parser.lexer.errorAt(next.offset, "component prop %q must be a Go field name", next.value)
+				return nil, parser.lexer.errorAt(next.offset, "component prop %q is not a valid Go field name", next.value)
 			}
 			if next.value == "Key" {
 				if seenKey {

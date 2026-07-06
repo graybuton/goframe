@@ -1,0 +1,2 @@
+testdata/errors/keyword_component_prop_func.gox:4:17: component prop "func" is not a valid Go field name
+  <Button func="x" />

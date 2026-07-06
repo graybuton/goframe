@@ -3,6 +3,7 @@ package gox
 import (
 	"bytes"
 	"fmt"
+	gotoken "go/token"
 	"html"
 	"path/filepath"
 	"strconv"
@@ -204,7 +205,7 @@ func (ctx *codegenContext) writeComponent(output *bytes.Buffer, component *Eleme
 	fmt.Fprintf(&body, "gf.ComponentT(%s, %s{\n", ctx.componentTypeExpression(componentInfo), componentInfo.propsType)
 	for _, attribute := range attributes {
 		if !validGoIdentifier(attribute.Name) {
-			return fmt.Errorf("gox: component prop %q must be a Go field name", attribute.Name)
+			return fmt.Errorf("gox: component prop %q is not a valid Go field name", attribute.Name)
 		}
 		writeIndent(&body, depth+1)
 		fmt.Fprintf(&body, "%s: ", attribute.Name)
@@ -485,6 +486,9 @@ func isComponent(tag string) bool {
 }
 
 func validGoIdentifier(value string) bool {
+	if gotoken.IsKeyword(value) {
+		return false
+	}
 	characters := []rune(value)
 	if len(characters) == 0 || !unicode.IsLetter(characters[0]) && characters[0] != '_' {
 		return false
