@@ -1,2 +1,2 @@
-testdata/errors/invalid_component_prop.gox:4:17: component prop "bad-prop" must be a Go field name
+testdata/errors/invalid_component_prop.gox:4:17: component prop "bad-prop" is not a valid Go field name
   <Button bad-prop="x" />

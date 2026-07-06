@@ -1,0 +1,2 @@
+testdata/errors/keyword_component_prop_type.gox:4:17: component prop "type" is not a valid Go field name
+  <Button type="x" />

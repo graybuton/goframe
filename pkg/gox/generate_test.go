@@ -76,6 +76,76 @@ func App() gf.Node {
 	}
 }
 
+func TestGenerateRejectsKeywordComponentProps(t *testing.T) {
+	keywords := []string{
+		"break", "default", "func", "interface", "select",
+		"case", "defer", "go", "map", "struct",
+		"chan", "else", "goto", "package", "switch",
+		"const", "fallthrough", "if", "range", "type",
+		"continue", "for", "import", "return", "var",
+	}
+	for _, keyword := range keywords {
+		t.Run(keyword, func(t *testing.T) {
+			source := []byte(`package main
+
+func View() any {
+	return <Button ` + keyword + `="x" />
+}
+`)
+			_, err := GenerateNamed("keyword_component_prop.gox", source)
+			if err == nil {
+				t.Fatal("GenerateNamed() returned nil error")
+			}
+			want := `component prop "` + keyword + `" is not a valid Go field name`
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %q, want %q", err.Error(), want)
+			}
+		})
+	}
+}
+
+func TestGenerateAllowsDOMTypeAttributeAndComponentPseudoProps(t *testing.T) {
+	source := []byte(`package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type ButtonProps struct {
+	Label string
+}
+
+func Button(props ButtonProps) gf.Node {
+	return <button type="button">{props.Label}</button>
+}
+
+func View() gf.Node {
+	return (
+		<form>
+			<input type="text" />
+			<Button Key="save" Label="Save" />
+		</form>
+	)
+}
+`)
+	generated, err := Generate(source)
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if _, err := parser.ParseFile(gotoken.NewFileSet(), "valid_props.gox.go", generated, parser.AllErrors); err != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", err, generated)
+	}
+	text := string(generated)
+	for _, want := range []string{
+		`"type": "text"`,
+		`"type": "button"`,
+		`Label: "Save"`,
+		`gf.Key("save"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated source does not contain %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestGenerateFileToWithOptionsWritesExplicitOutput(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := filepath.Join(root, "src", "view.gox")
