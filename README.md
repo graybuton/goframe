@@ -1,5 +1,9 @@
 # goframe
 
+<p align="center">
+  <img src="assets/brand/goframe-mark.svg" alt="GoFrame mark" width="104">
+</p>
+
 GoFrame is an experimental Go-first web application framework and toolchain for
 interactive browser/WASM apps. It combines a small Go runtime, JSX-like `.gox`
 markup, the `goxc` generate/build/package workflow, and standard Go or TinyGo
