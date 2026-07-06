@@ -1,13 +1,34 @@
-# goframe
+<div align="center">
+  <picture>
+    <img alt="GoFrame mark" src="assets/brand/goframe-mark.svg" width="112">
+  </picture>
 
-<p align="center">
-  <img src="assets/brand/goframe-mark.svg" alt="GoFrame mark" width="104">
-</p>
+  <h1>GoFrame</h1>
 
-GoFrame is an experimental Go-first web application framework and toolchain for
-interactive browser/WASM apps. It combines a small Go runtime, JSX-like `.gox`
-markup, the `goxc` generate/build/package workflow, and standard Go or TinyGo
-WebAssembly output.
+  <p>
+    <strong>Go-first web framework &amp; toolchain for browser/WASM apps.</strong>
+  </p>
+
+  <p>
+    <a href="LICENSE">
+      <img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-2563EB.svg?style=for-the-badge&amp;labelColor=111827">
+    </a>
+    <a href="docs/evaluator-guide.md">
+      <img alt="Preview scope: browser/WASM" src="https://img.shields.io/badge/preview-browser%2FWASM-00ADD8.svg?style=for-the-badge&amp;labelColor=111827">
+    </a>
+    <a href="docs/gox-language.md">
+      <img alt="GOX language" src="https://img.shields.io/badge/GOX-language-5260FF.svg?style=for-the-badge&amp;labelColor=111827">
+    </a>
+    <a href="docs/deployment.md">
+      <img alt="Toolchain: goxc" src="https://img.shields.io/badge/toolchain-goxc-248BFF.svg?style=for-the-badge&amp;labelColor=111827">
+    </a>
+  </p>
+</div>
+
+GoFrame is an experimental Go-first framework and toolchain for interactive
+browser/WASM apps. It combines a small Go runtime, JSX-like `.gox` markup, the
+`goxc` generate/build/package workflow, and standard Go or TinyGo WebAssembly
+output.
 
 The current validated surface is browser/WASM applications. GoFrame is not
 production-ready, does not claim stable 1.0 APIs, and does not ship
