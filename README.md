@@ -12,11 +12,18 @@ LSP support.
 
 ## Quick Start
 
-Install `goxc`, check your local toolchain, package the counter example, and
-serve it locally:
+Install `goxc`, add its install directory to `PATH`, check your local
+toolchain, package the counter example, and serve it locally:
 
 ```bash
 go install github.com/graybuton/goframe/cmd/goxc@latest
+
+goxc_bin="$(go env GOBIN)"
+if [ -z "$goxc_bin" ]; then
+  goxc_bin="$(go env GOPATH)/bin"
+fi
+export PATH="$goxc_bin:$PATH"
+
 goxc doctor
 goxc package ./examples/counter --compiler=tinygo
 goxc serve ./examples/counter --port=8080
