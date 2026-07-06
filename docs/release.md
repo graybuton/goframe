@@ -11,16 +11,16 @@ Current milestone tag:
 v0.1.0-mvp10
 ```
 
-Recommended first public preview tag:
+Current preview tag under preparation:
 
 ```text
-v0.1.0-preview.1
+v0.2.0-preview.4
 ```
 
 Subsequent previews should increment the pre-release number:
 
 ```text
-v0.1.0-preview.2
+v0.2.0-preview.5
 ```
 
 The current MVP tags remain historical milestone tags. They are not public API
@@ -29,8 +29,8 @@ release tags.
 Use annotated, signed tags when possible:
 
 ```bash
-git tag -s v0.1.0-preview.1 -m "GoFrame public preview 1"
-git push origin v0.1.0-preview.1
+git tag -s v0.2.0-preview.4 -m "GoFrame v0.2.0-preview.4"
+git push origin v0.2.0-preview.4
 ```
 
 ## Pre-Release Checklist
@@ -84,6 +84,7 @@ Current preview release note documents:
 - `docs/release-notes-v0.2.0-preview.1.md`
 - `docs/release-notes-v0.2.0-preview.2.md`
 - `docs/release-notes-v0.2.0-preview.3.md`
+- `docs/release-notes-v0.2.0-preview.4.md`
 
 `CHANGELOG.md` remains the factual change log; release notes should summarize
 preview scope, maturity tiers, validation evidence, compatibility notes, and
@@ -179,9 +180,9 @@ for trying the preview.
 
 ## Versioning Decision
 
-The recommended first public-preview tag is `v0.1.0-preview.1`. It is a Go
-module pre-release tag. Later previews increment the numeric suffix.
+Preview tags are Go module pre-release tags. Later previews increment the
+numeric suffix.
 
-`v0.1.0` final should wait until public-preview blockers in
+The eventual non-preview release should wait until public-preview blockers in
 `docs/public-preview-readiness.md` are closed or consciously accepted in release
 notes.
