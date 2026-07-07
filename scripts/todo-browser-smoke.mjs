@@ -69,7 +69,7 @@ try {
         "typing audit installed",
     );
 
-    await typeTodo(client, "B");
+    await typeTodoWithRetainedSelection(client, "BC", "BXC", 1, 1);
     assertDeepEqual(
         await client.evaluate(`(() => {
             const debug = window.__GOFRAME_DEBUG__;
@@ -106,7 +106,7 @@ try {
             formSame: true,
             listSame: true,
             active: "todo-input",
-            value: "B",
+            value: "BC",
             selectionStart: 1,
             selectionEnd: 1,
             appRenderDelta: 0,
@@ -123,7 +123,7 @@ try {
                 formChildList: 0,
                 list: 0,
             },
-            operations: emptyOperations(),
+            operations: { ...emptyOperations(), setProperty: 1 },
         },
         "typing preserves unrelated DOM and performs no structural operations",
     );
@@ -217,7 +217,7 @@ try {
     );
 
     const persisted = await client.evaluate(`localStorage.getItem("goframe.todo.items")`);
-    if (typeof persisted !== "string" || !persisted.includes("B")) {
+    if (typeof persisted !== "string" || !persisted.includes("BC")) {
         throw new Error(`APP FAILURE: todo persistence: got ${JSON.stringify(persisted)}, want stored todo text`);
     }
     console.log("todo persistence write: ok");
@@ -230,7 +230,7 @@ try {
             text: document.querySelector("#todo-2 .todo-text")?.textContent,
             headerRenders: window.goframeComponentRenderCounts.Header,
         })`),
-        { order: ["todo-2"], text: "B", headerRenders: 1 },
+        { order: ["todo-2"], text: "BC", headerRenders: 1 },
         "todo persistence reload",
     );
 
@@ -293,6 +293,33 @@ async function typeTodo(client, text) {
             }
         }
         input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+    })()`);
+    await wait(100);
+}
+
+async function typeTodoWithRetainedSelection(client, text, transientText, selectionStart, selectionEnd) {
+    await client.evaluate(`(() => {
+        const input = document.querySelector("#todo-input");
+        input.focus();
+        input.value = ${JSON.stringify(text)};
+        input.setSelectionRange(${selectionStart}, ${selectionEnd});
+        if (window.__GOFRAME_DEBUG__) {
+            for (const key of Object.keys(window.__GOFRAME_DEBUG__.operations)) {
+                window.__GOFRAME_DEBUG__.operations[key] = 0;
+            }
+        }
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+
+        // Force the dirty patch to restore the controlled value while retaining
+        // the active input node, so selection restoration is observable.
+        input.value = ${JSON.stringify(transientText)};
+        input.setSelectionRange(${selectionStart}, ${selectionEnd});
+        if (window.__GOFRAME_DEBUG__) {
+            for (const key of Object.keys(window.__GOFRAME_DEBUG__.operations)) {
+                window.__GOFRAME_DEBUG__.operations[key] = 0;
+            }
+        }
         return true;
     })()`);
     await wait(100);

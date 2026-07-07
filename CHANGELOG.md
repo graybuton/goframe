@@ -178,6 +178,8 @@
   from three to one without implementing a full LIS reconciler.
 - Scheduler reset now invalidates stale queued update callbacks so pre-reset
   work cannot run after a newer request is queued.
+- Retained focused inputs now restore their selection range after dirty
+  component updates.
 - GOX now rejects Go keyword component prop names before codegen with
   source-level diagnostics, while preserving DOM attributes such as `type`.
 - `goxc doctor` now returns nonzero when required checks fail.
