@@ -11,7 +11,7 @@ Current milestone tag:
 v0.1.0-mvp10
 ```
 
-Current preview tag under preparation:
+Latest published preview tag:
 
 ```text
 v0.2.0-preview.4
@@ -26,11 +26,11 @@ v0.2.0-preview.5
 The current MVP tags remain historical milestone tags. They are not public API
 release tags.
 
-Use annotated, signed tags when possible:
+Use annotated, signed tags when possible for future previews:
 
 ```bash
-git tag -s v0.2.0-preview.4 -m "GoFrame v0.2.0-preview.4"
-git push origin v0.2.0-preview.4
+git tag -s vX.Y.Z-preview.N -m "GoFrame vX.Y.Z-preview.N"
+git push origin vX.Y.Z-preview.N
 ```
 
 ## Pre-Release Checklist
@@ -90,6 +90,65 @@ Current preview release note documents:
 preview scope, maturity tiers, validation evidence, compatibility notes, and
 known limitations. `docs/evaluator-guide.md` is the evaluator-facing quick path
 for trying the preview.
+
+## GitHub Release Body Style
+
+Preview release titles should stay short and version-first:
+
+```text
+GoFrame vX.Y.Z-preview.N
+```
+
+Stable release titles should use the same shape without the preview suffix:
+
+```text
+GoFrame vX.Y.Z
+```
+
+Put scope and caveats in the body, not in a long title.
+
+Preview GitHub Release bodies should be concise publish-facing contracts, not
+marketing announcements. They should answer what was released, what surface is
+safe to evaluate, what was validated, what the release does not promise, how to
+install it, and how to verify it.
+
+Preferred preview body order:
+
+- `Status / Scope`;
+- `Highlights`;
+- `Compatibility`;
+- `Validation`;
+- `Known limitations and follow-ups`;
+- `Install`;
+- `Verification`;
+- `Links`;
+- `Non-goals`, when useful.
+
+Use calm, factual, scope-bounding language. Prefer terms such as `preview`,
+`experimental`, `pre-release`, `validated surface`, `current browser/WASM
+layer`, `not production-ready`, `no stable API guarantee`, `known limitations`,
+and `tracked separately` when they apply. Avoid stable or production wording
+unless the release is actually stable and production-ready, and keep limitations
+explicit rather than scattered.
+
+Use neutral issue references, for example `Related issue: #70`, `Tracked
+separately in #71`, or `See also #69`. Avoid the auto-closing verbs `Fixes`,
+`Closes`, and `Resolves` unless the release body intentionally wants GitHub
+auto-closing behavior.
+
+For preview releases in the GitHub UI:
+
+- mark the release as a pre-release;
+- use manual notes rather than generated notes;
+- do not upload binaries or assets unless GoFrame starts supporting an official
+  binary distribution surface;
+- do not mark preview releases as stable/latest when the UI supports avoiding
+  that.
+
+The GitHub Release body is the concise publication entrypoint.
+`docs/release-notes-*.md` is the durable detailed release record in the
+repository. `CHANGELOG.md` is factual cumulative history, not a narrative
+announcement.
 
 ## Public Preview Checklist
 

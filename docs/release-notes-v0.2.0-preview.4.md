@@ -105,7 +105,7 @@ Player/Engine, `.gfapp`, formatter, or LSP support.
 
 ## Install
 
-After the tag is published, install the exact preview with:
+Install the exact preview with:
 
 ```bash
 go install github.com/graybuton/goframe/cmd/goxc@v0.2.0-preview.4
