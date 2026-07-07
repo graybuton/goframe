@@ -11,7 +11,7 @@ Current milestone tag:
 v0.1.0-mvp10
 ```
 
-Current preview tag under preparation:
+Latest published preview tag:
 
 ```text
 v0.2.0-preview.4
@@ -26,11 +26,11 @@ v0.2.0-preview.5
 The current MVP tags remain historical milestone tags. They are not public API
 release tags.
 
-Use annotated, signed tags when possible:
+Use annotated, signed tags when possible for future previews:
 
 ```bash
-git tag -s v0.2.0-preview.4 -m "GoFrame v0.2.0-preview.4"
-git push origin v0.2.0-preview.4
+git tag -s vX.Y.Z-preview.N -m "GoFrame vX.Y.Z-preview.N"
+git push origin vX.Y.Z-preview.N
 ```
 
 ## Pre-Release Checklist

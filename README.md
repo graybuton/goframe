@@ -114,7 +114,7 @@ it does not write generated `.gox.go` files next to authored source by default.
 - [API stability](docs/api-stability.md) and
   [platform support](docs/platform-support.md) - maturity and support
   boundaries.
-- Preview notes prepared for:
+- Current published preview notes:
   [v0.2.0-preview.4](docs/release-notes-v0.2.0-preview.4.md).
 
 For the fastest tour, start with `examples/counter`, then
