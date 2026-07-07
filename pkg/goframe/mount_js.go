@@ -181,10 +181,10 @@ func restoreFocus(document js.Value, snapshot focusSnapshot) {
 		return
 	}
 	active := document.Get("activeElement")
-	if !active.IsUndefined() && !active.IsNull() && active.Equal(element) {
-		return
+	alreadyActive := !active.IsUndefined() && !active.IsNull() && active.Equal(element)
+	if !alreadyActive {
+		element.Call("focus")
 	}
-	element.Call("focus")
 	if snapshot.hasSelection && element.Get("setSelectionRange").Type() == js.TypeFunction {
 		element.Call("setSelectionRange", snapshot.selectionStart, snapshot.selectionEnd)
 	}
