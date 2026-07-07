@@ -157,6 +157,9 @@ func (parser *Parser) parseAttribute(name token) (Attribute, error) {
 			}
 			return Attribute{}, parser.lexer.errorAt(value.offset, "gox: empty expression for attribute %q", name.value)
 		}
+		if err := validateEmbeddedExpression(value.value); err != nil {
+			return Attribute{}, parser.lexer.errorAt(value.offset, "%s", err)
+		}
 		return Attribute{Name: name.value, Value: ExpressionValue{Code: value.value}}, nil
 	default:
 		return Attribute{}, parser.unexpected(value, "quoted string or Go expression")

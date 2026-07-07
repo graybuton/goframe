@@ -1,0 +1,2 @@
+testdata/errors/malformed_attr_expression.gox:4:22: gox: invalid embedded expression: 1:7: expected operand, found 'EOF'
+  <input value={name +} />

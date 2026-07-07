@@ -323,6 +323,9 @@ func (ctx *codegenContext) writeChildExpression(output *bytes.Buffer, code strin
 	if err != nil {
 		return err
 	}
+	if err := validateEmbeddedExpression(rewritten); err != nil {
+		return err
+	}
 	fmt.Fprintf(output, "gf.Child(%s)", rewritten)
 	return nil
 }
@@ -342,6 +345,9 @@ func (ctx *codegenContext) lowerRenderExpression(code string, depth int) (string
 		if !thenOK || !elseOK {
 			return "", false, fmt.Errorf("gox: ternary render branches must be GOX nodes")
 		}
+		if err := validateEmbeddedExpression(condition); err != nil {
+			return "", false, err
+		}
 		return "gf.IfElse(" + strings.TrimSpace(condition) + ", " + thenNode + ", " + elseNode + ")", true, nil
 	}
 
@@ -351,6 +357,9 @@ func (ctx *codegenContext) lowerRenderExpression(code string, depth int) (string
 			return "", false, err
 		}
 		if nodeOK {
+			if err := validateEmbeddedExpression(condition); err != nil {
+				return "", false, err
+			}
 			return "gf.If(" + strings.TrimSpace(condition) + ", " + node + ")", true, nil
 		}
 	}

@@ -1,0 +1,2 @@
+testdata/errors/malformed_child_expression.gox:4:15: gox: invalid embedded expression: 1:8: expected operand, found 'EOF'
+  <main>{count +}</main>
