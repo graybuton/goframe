@@ -1,6 +1,10 @@
 package gox
 
-import "strings"
+import (
+	"fmt"
+	"go/parser"
+	"strings"
+)
 
 func splitRenderAndExpression(code string) (string, string, bool) {
 	positions := topLevelOperatorPositions(code, "&&")
@@ -39,6 +43,13 @@ func splitTernaryExpression(code string) (string, string, string, bool, error) {
 
 func expressionError(message string) error {
 	return simpleError(message)
+}
+
+func validateEmbeddedExpression(code string) error {
+	if _, err := parser.ParseExpr(strings.TrimSpace(code)); err != nil {
+		return fmt.Errorf("gox: invalid embedded expression: %v", err)
+	}
+	return nil
 }
 
 func unwrapOuterParens(code string) (string, bool) {

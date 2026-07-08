@@ -184,7 +184,7 @@ func (ctx *codegenContext) writeNode(output *bytes.Buffer, node Node, depth int)
 		if code == "" {
 			return fmt.Errorf("gox: empty child expression")
 		}
-		return ctx.errorAtNode(node, ctx.writeChildExpression(output, code, depth))
+		return ctx.errorAtNode(node, ctx.writeChildExpression(output, code, ctx.expressionCodeOffset(node, code), depth))
 	default:
 		return fmt.Errorf("gox: unsupported AST node %T", node)
 	}
@@ -311,65 +311,74 @@ func writeAttributeValue(output *bytes.Buffer, attribute Attribute) error {
 	return nil
 }
 
-func (ctx *codegenContext) writeChildExpression(output *bytes.Buffer, code string, depth int) error {
-	if rendered, ok, err := ctx.lowerRenderExpression(code, depth); err != nil {
+func (ctx *codegenContext) writeChildExpression(output *bytes.Buffer, code string, codeOffset int, depth int) error {
+	if rendered, ok, err := ctx.lowerRenderExpression(code, codeOffset, depth); err != nil {
 		return err
 	} else if ok {
 		output.WriteString(rendered)
 		return nil
 	}
 
-	rewritten, err := ctx.rewriteMarkupInGo(code)
+	rewritten, err := ctx.rewriteMarkupInGo(code, codeOffset)
 	if err != nil {
+		return err
+	}
+	if err := validateEmbeddedExpression(rewritten); err != nil {
 		return err
 	}
 	fmt.Fprintf(output, "gf.Child(%s)", rewritten)
 	return nil
 }
 
-func (ctx *codegenContext) lowerRenderExpression(code string, depth int) (string, bool, error) {
+func (ctx *codegenContext) lowerRenderExpression(code string, codeOffset int, depth int) (string, bool, error) {
 	if condition, thenCode, elseCode, ok, err := splitTernaryExpression(code); err != nil {
 		return "", false, err
 	} else if ok {
-		thenNode, thenOK, err := ctx.codegenNodeExpression(thenCode, depth)
+		thenNode, thenOK, err := ctx.codegenNodeExpression(thenCode, subexpressionOffset(code, codeOffset, thenCode), depth)
 		if err != nil {
 			return "", false, err
 		}
-		elseNode, elseOK, err := ctx.codegenNodeExpression(elseCode, depth)
+		elseNode, elseOK, err := ctx.codegenNodeExpression(elseCode, subexpressionOffset(code, codeOffset, elseCode), depth)
 		if err != nil {
 			return "", false, err
 		}
 		if !thenOK || !elseOK {
 			return "", false, fmt.Errorf("gox: ternary render branches must be GOX nodes")
 		}
+		if err := validateEmbeddedExpression(condition); err != nil {
+			return "", false, err
+		}
 		return "gf.IfElse(" + strings.TrimSpace(condition) + ", " + thenNode + ", " + elseNode + ")", true, nil
 	}
 
 	if condition, nodeCode, ok := splitRenderAndExpression(code); ok {
-		node, nodeOK, err := ctx.codegenNodeExpression(nodeCode, depth)
+		node, nodeOK, err := ctx.codegenNodeExpression(nodeCode, subexpressionOffset(code, codeOffset, nodeCode), depth)
 		if err != nil {
 			return "", false, err
 		}
 		if nodeOK {
+			if err := validateEmbeddedExpression(condition); err != nil {
+				return "", false, err
+			}
 			return "gf.If(" + strings.TrimSpace(condition) + ", " + node + ")", true, nil
 		}
 	}
 	return "", false, nil
 }
 
-func (ctx *codegenContext) codegenNodeExpression(code string, depth int) (string, bool, error) {
+func (ctx *codegenContext) codegenNodeExpression(code string, codeOffset int, depth int) (string, bool, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return "", false, nil
 	}
 	if inner, ok := unwrapOuterParens(code); ok {
-		return ctx.codegenNodeExpression(inner, depth)
+		return ctx.codegenNodeExpression(inner, subexpressionOffset(code, codeOffset, inner), depth)
 	}
 	if code[0] != '<' {
 		return "", false, nil
 	}
 
-	node, consumed, err := ParseElement(code)
+	node, consumed, err := ctx.parseNestedElement(code, codeOffset)
 	if err != nil {
 		return "", false, err
 	}
@@ -383,7 +392,7 @@ func (ctx *codegenContext) codegenNodeExpression(code string, depth int) (string
 	return output.String(), true, nil
 }
 
-func (ctx *codegenContext) rewriteMarkupInGo(code string) (string, error) {
+func (ctx *codegenContext) rewriteMarkupInGo(code string, codeOffset int) (string, error) {
 	var output bytes.Buffer
 	cursor := 0
 	searchFrom := 0
@@ -393,7 +402,7 @@ func (ctx *codegenContext) rewriteMarkupInGo(code string) (string, error) {
 		if start < 0 {
 			break
 		}
-		node, consumed, err := ParseElement(code[start:])
+		node, consumed, err := ctx.parseNestedElement(code[start:], offsetFromBase(codeOffset, start))
 		if err != nil {
 			return "", err
 		}
@@ -413,6 +422,69 @@ func (ctx *codegenContext) rewriteMarkupInGo(code string) (string, error) {
 	}
 	output.WriteString(code[cursor:])
 	return output.String(), nil
+}
+
+func (ctx *codegenContext) parseNestedElement(input string, offset int) (Node, int, error) {
+	if ctx.diagnosticFilename == "" || ctx.diagnosticSource == "" || offset < 0 {
+		return ParseElement(input)
+	}
+	line, column := lineColumn(ctx.diagnosticSource, offset)
+	if line == 1 {
+		column += ctx.diagnosticColumn - 1
+	}
+	line += ctx.diagnosticLine - 1
+	node, consumed, positions, err := parseElementAtWithPositions(input, ctx.diagnosticFilename, line, column)
+	if err != nil {
+		return nil, 0, err
+	}
+	ctx.mergePositions(positions, offset)
+	return node, consumed, nil
+}
+
+func (ctx *codegenContext) mergePositions(positions map[Node]int, offset int) {
+	if ctx.positions == nil || offset < 0 {
+		return
+	}
+	for node, position := range positions {
+		ctx.positions[node] = offset + position
+	}
+}
+
+func (ctx *codegenContext) expressionCodeOffset(node Node, code string) int {
+	if ctx.positions == nil || ctx.diagnosticSource == "" {
+		return -1
+	}
+	offset, ok := ctx.positions[node]
+	if !ok {
+		return -1
+	}
+	start := offset + 1
+	if start > len(ctx.diagnosticSource) {
+		return -1
+	}
+	index := strings.Index(ctx.diagnosticSource[start:], code)
+	if index < 0 {
+		return -1
+	}
+	return start + index
+}
+
+func subexpressionOffset(parent string, parentOffset int, child string) int {
+	if parentOffset < 0 {
+		return -1
+	}
+	index := strings.Index(parent, child)
+	if index < 0 {
+		return -1
+	}
+	return parentOffset + index
+}
+
+func offsetFromBase(base, offset int) int {
+	if base < 0 {
+		return -1
+	}
+	return base + offset
 }
 
 func splitKeyAttribute(attributes []Attribute) (string, []Attribute, error) {

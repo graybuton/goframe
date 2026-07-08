@@ -1,0 +1,6 @@
+package main
+
+func App() any {
+	items := []string{"a"}
+	return <main>{gf.Map(items, func(item string) any { return <Item>{item +}</Item> })}</main>
+}

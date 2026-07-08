@@ -182,6 +182,8 @@
   component updates.
 - GOX now rejects Go keyword component prop names before codegen with
   source-level diagnostics, while preserving DOM attributes such as `type`.
+- GOX now reports malformed embedded expressions as source-level diagnostics
+  before generated Go parsing.
 - `goxc doctor` now returns nonzero when required checks fail.
 - The router-dashboard route Error Boundary fallback now distinguishes retrying
   the current crashing route from safely navigating back to the issues list, and

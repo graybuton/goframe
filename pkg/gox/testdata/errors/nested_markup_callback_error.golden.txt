@@ -1,2 +1,2 @@
-testdata/errors/nested_markup_callback_error.gox:6:15: expected closing tag </Item>, got </Wrong>
-  <main>{gf.Map(items, func(item string) gf.Node {
+testdata/errors/nested_markup_callback_error.gox:7:31: expected closing tag </Item>, got </Wrong>
+  <Item Label={item}></Wrong>
