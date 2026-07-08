@@ -1,0 +1,2 @@
+testdata/errors/malformed_nested_child_expression.gox:5:67: gox: invalid embedded expression: 1:7: expected operand, found 'EOF'
+  <main>{gf.Map(items, func(item string) any { return <Item>{item +}</Item> })}</main>
