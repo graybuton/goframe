@@ -111,26 +111,38 @@ func stableChildPlacementStart(matches []int) int {
 }
 
 func stableChildPlacements(matches []int, keys []string) []bool {
-	lengths := make([]int, len(matches))
+	ends := make([]int, len(matches))
+	previous := make([]int, len(matches))
 	bestIndex := noChildMatch
 	bestLength := 0
+	length := 0
 
 	for index, match := range matches {
 		if match == noChildMatch || keys[index] == "" {
 			continue
 		}
-		lengths[index] = 1
-		for previousIndex := 0; previousIndex < index; previousIndex++ {
-			if lengths[previousIndex] == 0 || matches[previousIndex] >= match {
+		low := 0
+		high := length
+		for low < high {
+			mid := (low + high) / 2
+			if matches[ends[mid]] < match {
+				low = mid + 1
 				continue
 			}
-			length := lengths[previousIndex] + 1
-			if length > lengths[index] {
-				lengths[index] = length
-			}
+			high = mid
 		}
-		if lengths[index] > bestLength {
-			bestLength = lengths[index]
+
+		previous[index] = noChildMatch
+		if low > 0 {
+			previous[index] = ends[low-1]
+		}
+		ends[low] = index
+		if low == length {
+			length++
+		}
+		currentLength := low + 1
+		if currentLength > bestLength {
+			bestLength = currentLength
 			bestIndex = index
 		}
 	}
@@ -141,16 +153,7 @@ func stableChildPlacements(matches []int, keys []string) []bool {
 	stable := make([]bool, len(matches))
 	for bestIndex != noChildMatch {
 		stable[bestIndex] = true
-		nextIndex := noChildMatch
-		nextLength := lengths[bestIndex] - 1
-		currentMatch := matches[bestIndex]
-		for index := bestIndex - 1; index >= 0; index-- {
-			if lengths[index] != 0 && lengths[index] == nextLength && matches[index] < currentMatch {
-				nextIndex = index
-				break
-			}
-		}
-		bestIndex = nextIndex
+		bestIndex = previous[bestIndex]
 	}
 	return stable
 }

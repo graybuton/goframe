@@ -345,6 +345,38 @@ func TestStableChildPlacements(t *testing.T) {
 	}
 }
 
+func TestStableChildPlacementsLongKeyedList(t *testing.T) {
+	const size = 1024
+
+	matches := sequentialBenchmarkMatches(size)
+	keys := sequentialBenchmarkKeys(size)
+	// Move one early item backward while the rest of the keyed children remain
+	// in order. The stable set should keep every other keyed child in place.
+	moved := matches[1]
+	copy(matches[1:], matches[2:32])
+	matches[31] = moved
+	movedKey := keys[1]
+	copy(keys[1:], keys[2:32])
+	keys[31] = movedKey
+
+	stable := stableChildPlacements(matches, keys)
+	if len(stable) != size {
+		t.Fatalf("stable placements length = %d, want %d", len(stable), size)
+	}
+	stableCount := 0
+	for index, value := range stable {
+		if index == 31 && value {
+			t.Fatal("moved key should not be marked stable")
+		}
+		if value {
+			stableCount++
+		}
+	}
+	if stableCount != size-1 {
+		t.Fatalf("stable placements = %d, want %d", stableCount, size-1)
+	}
+}
+
 func stableSuffixChildPlacementFlags(matches []int, keys []string) []bool {
 	stableStart := stableChildPlacementStart(matches)
 	if stableStart == len(matches) {

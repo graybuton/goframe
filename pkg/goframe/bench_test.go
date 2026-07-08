@@ -176,6 +176,11 @@ func BenchmarkStableChildPlacements(b *testing.B) {
 			keys:    mixedReorderedBenchmarkKeys(size),
 			matches: mixedBenchmarkMatchesForPlacement(size),
 		},
+		{
+			name:    "long_move_backward",
+			keys:    moveEarlyBackwardBenchmarkKeys(2048),
+			matches: moveEarlyBackwardBenchmarkMatches(2048),
+		},
 	}
 
 	for _, test := range tests {
@@ -299,6 +304,24 @@ func mixedBenchmarkMatchesForPlacement(size int) []int {
 		}
 		matches[index] = index
 	}
+	return matches
+}
+
+func moveEarlyBackwardBenchmarkKeys(size int) []string {
+	keys := sequentialBenchmarkKeys(size)
+	insert := size / 2
+	moved := keys[1]
+	copy(keys[1:insert], keys[2:insert+1])
+	keys[insert] = moved
+	return keys
+}
+
+func moveEarlyBackwardBenchmarkMatches(size int) []int {
+	matches := sequentialBenchmarkMatches(size)
+	insert := size / 2
+	moved := matches[1]
+	copy(matches[1:insert], matches[2:insert+1])
+	matches[insert] = moved
 	return matches
 }
 
