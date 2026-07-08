@@ -109,3 +109,48 @@ func stableChildPlacementStart(matches []int) int {
 	}
 	return stableStart
 }
+
+func stableChildPlacements(matches []int, keys []string) []bool {
+	lengths := make([]int, len(matches))
+	bestIndex := noChildMatch
+	bestLength := 0
+
+	for index, match := range matches {
+		if match == noChildMatch || keys[index] == "" {
+			continue
+		}
+		lengths[index] = 1
+		for previousIndex := 0; previousIndex < index; previousIndex++ {
+			if lengths[previousIndex] == 0 || matches[previousIndex] >= match {
+				continue
+			}
+			length := lengths[previousIndex] + 1
+			if length > lengths[index] {
+				lengths[index] = length
+			}
+		}
+		if lengths[index] > bestLength {
+			bestLength = lengths[index]
+			bestIndex = index
+		}
+	}
+	if bestIndex == noChildMatch {
+		return nil
+	}
+
+	stable := make([]bool, len(matches))
+	for bestIndex != noChildMatch {
+		stable[bestIndex] = true
+		nextIndex := noChildMatch
+		nextLength := lengths[bestIndex] - 1
+		currentMatch := matches[bestIndex]
+		for index := bestIndex - 1; index >= 0; index-- {
+			if lengths[index] != 0 && lengths[index] == nextLength && matches[index] < currentMatch {
+				nextIndex = index
+				break
+			}
+		}
+		bestIndex = nextIndex
+	}
+	return stable
+}

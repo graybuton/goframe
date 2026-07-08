@@ -195,10 +195,10 @@ func patchChildren(document, parent js.Value, oldChildren []*mountedNode, newNod
 		}
 	}
 
-	stableStart := stableChildPlacementStart(matches)
+	stablePlacements := stableChildPlacements(matches, newKeys)
 	reference := boundary
 	for index := len(children) - 1; index >= 0; index-- {
-		if index >= stableStart {
+		if stablePlacements != nil && stablePlacements[index] {
 			reference = children[index].first
 			continue
 		}

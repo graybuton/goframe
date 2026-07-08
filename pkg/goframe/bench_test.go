@@ -3,7 +3,7 @@ package goframe
 import "testing"
 
 var benchmarkChildMatches []int
-var benchmarkStablePlacementStart int
+var benchmarkStablePlacements []bool
 
 func BenchmarkDirtyQueuePruning(b *testing.B) {
 	root := dirtyTestInstance("Root", nil)
@@ -143,45 +143,52 @@ func BenchmarkStableChildPlacements(b *testing.B) {
 
 	tests := []struct {
 		name    string
+		keys    []string
 		matches []int
 	}{
 		{
 			name:    "stable",
+			keys:    sequentialBenchmarkKeys(size),
 			matches: sequentialBenchmarkMatches(size),
 		},
 		{
 			name:    "reverse",
+			keys:    reverseBenchmarkKeys(size),
 			matches: reverseBenchmarkMatches(size),
 		},
 		{
 			name:    "rotate_left",
+			keys:    rotateLeftBenchmarkKeys(size),
 			matches: rotateLeftBenchmarkMatches(size),
 		},
 		{
 			name:    "rotate_right",
+			keys:    rotateRightBenchmarkKeys(size),
 			matches: rotateRightBenchmarkMatches(size),
 		},
 		{
 			name:    "insert_remove",
+			keys:    insertRemoveBenchmarkKeys(size),
 			matches: insertRemoveBenchmarkMatches(size),
 		},
 		{
 			name:    "mixed",
+			keys:    mixedReorderedBenchmarkKeys(size),
 			matches: mixedBenchmarkMatchesForPlacement(size),
 		},
 	}
 
 	for _, test := range tests {
 		b.Run(test.name, func(b *testing.B) {
-			stableStart := stableChildPlacementStart(test.matches)
-			if stableStart < 0 || stableStart > len(test.matches) {
-				b.Fatalf("stable start = %d", stableStart)
+			placements := stableChildPlacements(test.matches, test.keys)
+			if len(placements) > len(test.matches) {
+				b.Fatalf("stable placements length = %d", len(placements))
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				benchmarkStablePlacementStart = stableChildPlacementStart(test.matches)
+				benchmarkStablePlacements = stableChildPlacements(test.matches, test.keys)
 			}
 		})
 	}
