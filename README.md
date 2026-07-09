@@ -114,10 +114,8 @@ it does not write generated `.gox.go` files next to authored source by default.
 - [API stability](docs/api-stability.md) and
   [platform support](docs/platform-support.md) - maturity and support
   boundaries.
-- Preview notes prepared for:
-  [v0.2.0-preview.5](docs/release-notes-v0.2.0-preview.5.md).
 - Current published preview notes:
-  [v0.2.0-preview.4](docs/release-notes-v0.2.0-preview.4.md).
+  [v0.2.0-preview.5](docs/release-notes-v0.2.0-preview.5.md).
 
 For the fastest tour, start with `examples/counter`, then
 `examples/components`, then `examples/router-dashboard`.
@@ -512,7 +510,7 @@ Start here:
 
 - [GoFrame Tutorial](docs/tutorial.md)
 - [Evaluator guide](docs/evaluator-guide.md)
-- [Preview notes prepared through v0.2.0-preview.5](docs/release-notes-v0.2.0-preview.5.md)
+- [Release notes through v0.2.0-preview.5](docs/release-notes-v0.2.0-preview.5.md)
 - [Architecture and toolchain boundaries](docs/architecture.md)
 - [Runtime model](docs/runtime-model.md)
 - [GOX language and diagnostics](docs/gox-language.md)
