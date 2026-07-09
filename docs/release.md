@@ -17,11 +17,13 @@ Latest published preview tag:
 v0.2.0-preview.4
 ```
 
-Subsequent previews should increment the pre-release number:
+Current preview tag under preparation:
 
 ```text
 v0.2.0-preview.5
 ```
+
+Subsequent previews should increment the pre-release number.
 
 The current MVP tags remain historical milestone tags. They are not public API
 release tags.
@@ -85,6 +87,7 @@ Current preview release note documents:
 - `docs/release-notes-v0.2.0-preview.2.md`
 - `docs/release-notes-v0.2.0-preview.3.md`
 - `docs/release-notes-v0.2.0-preview.4.md`
+- `docs/release-notes-v0.2.0-preview.5.md`
 
 `CHANGELOG.md` remains the factual change log; release notes should summarize
 preview scope, maturity tiers, validation evidence, compatibility notes, and

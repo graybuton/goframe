@@ -4,6 +4,10 @@
 
 ### Added
 
+- `v0.2.0-preview.5` release notes documenting retained input selection
+  restoration, GOX embedded-expression source diagnostics, nested diagnostic
+  source-location preservation, exact O(n log n) LIS-aware keyed placement, and
+  release-process documentation cleanup.
 - `v0.2.0-preview.4` release notes documenting runtime hot-path work, WASM
   size headroom recovery, keyed placement behavior, scheduler reset
   correctness, GOX diagnostics, `goxc doctor` exit behavior, community docs,
