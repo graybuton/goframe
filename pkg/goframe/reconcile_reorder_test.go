@@ -17,21 +17,24 @@ type currentPlacementStats struct {
 	moves    int
 }
 
-func TestCurrentKeyedReorderPlacement(t *testing.T) {
-	// These counts characterize current stable-placement-aware right-to-left
-	// behavior. They are not asserted to be theoretically optimal; future
-	// placement work may intentionally update them.
+func TestKeyedReorderPlacement(t *testing.T) {
+	// Before counts characterize the previous stable-suffix placement behavior.
+	// After counts assert the current LIS-aware keyed placement behavior.
 	tests := []struct {
-		name string
-		old  []string
-		new  []string
-		want currentPlacementStats
+		name   string
+		old    []string
+		new    []string
+		before currentPlacementStats
+		after  currentPlacementStats
 	}{
 		{
 			name: "stable keyed order",
 			old:  []string{"a", "b", "c", "d"},
 			new:  []string{"a", "b", "c", "d"},
-			want: currentPlacementStats{
+			before: currentPlacementStats{
+				final: []string{"a", "b", "c", "d"},
+			},
+			after: currentPlacementStats{
 				final: []string{"a", "b", "c", "d"},
 			},
 		},
@@ -39,7 +42,11 @@ func TestCurrentKeyedReorderPlacement(t *testing.T) {
 			name: "rotate left",
 			old:  []string{"a", "b", "c", "d"},
 			new:  []string{"b", "c", "d", "a"},
-			want: currentPlacementStats{
+			before: currentPlacementStats{
+				final: []string{"b", "c", "d", "a"},
+				moves: 1,
+			},
+			after: currentPlacementStats{
 				final: []string{"b", "c", "d", "a"},
 				moves: 1,
 			},
@@ -48,7 +55,11 @@ func TestCurrentKeyedReorderPlacement(t *testing.T) {
 			name: "rotate right",
 			old:  []string{"a", "b", "c", "d"},
 			new:  []string{"d", "a", "b", "c"},
-			want: currentPlacementStats{
+			before: currentPlacementStats{
+				final: []string{"d", "a", "b", "c"},
+				moves: 1,
+			},
+			after: currentPlacementStats{
 				final: []string{"d", "a", "b", "c"},
 				moves: 1,
 			},
@@ -57,17 +68,51 @@ func TestCurrentKeyedReorderPlacement(t *testing.T) {
 			name: "reverse",
 			old:  []string{"a", "b", "c", "d"},
 			new:  []string{"d", "c", "b", "a"},
-			want: currentPlacementStats{
+			before: currentPlacementStats{
 				final: []string{"d", "c", "b", "a"},
 				moves: 3,
+			},
+			after: currentPlacementStats{
+				final: []string{"d", "c", "b", "a"},
+				moves: 3,
+			},
+		},
+		{
+			name: "move middle item forward",
+			old:  []string{"a", "b", "c", "d", "e"},
+			new:  []string{"a", "d", "b", "c", "e"},
+			before: currentPlacementStats{
+				final: []string{"a", "d", "b", "c", "e"},
+				moves: 1,
+			},
+			after: currentPlacementStats{
+				final: []string{"a", "d", "b", "c", "e"},
+				moves: 1,
+			},
+		},
+		{
+			name: "move middle item backward",
+			old:  []string{"a", "b", "c", "d", "e"},
+			new:  []string{"a", "c", "d", "b", "e"},
+			before: currentPlacementStats{
+				final: []string{"a", "c", "d", "b", "e"},
+				moves: 2,
+			},
+			after: currentPlacementStats{
+				final: []string{"a", "c", "d", "b", "e"},
+				moves: 1,
 			},
 		},
 		{
 			name: "insert beginning and end",
 			old:  []string{"a", "b", "c"},
 			new:  []string{"x", "a", "b", "c", "y"},
-			want: currentPlacementStats{
-				final:  []string{"x", "a", "b", "c", "y"},
+			before: currentPlacementStats{
+				final:  []string{"new-0:x", "a", "b", "c", "new-4:y"},
+				mounts: 2,
+			},
+			after: currentPlacementStats{
+				final:  []string{"new-0:x", "a", "b", "c", "new-4:y"},
 				mounts: 2,
 			},
 		},
@@ -75,17 +120,53 @@ func TestCurrentKeyedReorderPlacement(t *testing.T) {
 			name: "remove middle",
 			old:  []string{"a", "b", "c", "d"},
 			new:  []string{"a", "c", "d"},
-			want: currentPlacementStats{
+			before: currentPlacementStats{
 				final:    []string{"a", "c", "d"},
 				removals: 1,
+			},
+			after: currentPlacementStats{
+				final:    []string{"a", "c", "d"},
+				removals: 1,
+			},
+		},
+		{
+			name: "mixed keyed and unkeyed reorder",
+			old:  []string{"a", "", "b", ""},
+			new:  []string{"b", "", "a", ""},
+			before: currentPlacementStats{
+				final: []string{"b", "old-1", "a", "old-3"},
+				moves: 2,
+			},
+			after: currentPlacementStats{
+				final: []string{"b", "old-1", "a", "old-3"},
+				moves: 2,
+			},
+		},
+		{
+			name: "duplicate new key mounts duplicate",
+			old:  []string{"a", "b"},
+			new:  []string{"a", "a", "b"},
+			before: currentPlacementStats{
+				final:  []string{"a", "new-1:a", "b"},
+				mounts: 1,
+			},
+			after: currentPlacementStats{
+				final:  []string{"a", "new-1:a", "b"},
+				mounts: 1,
 			},
 		},
 		{
 			name: "mixed insert remove reorder",
 			old:  []string{"a", "b", "c", "d"},
 			new:  []string{"c", "x", "a"},
-			want: currentPlacementStats{
-				final:    []string{"c", "x", "a"},
+			before: currentPlacementStats{
+				final:    []string{"c", "new-1:x", "a"},
+				mounts:   1,
+				removals: 2,
+				moves:    1,
+			},
+			after: currentPlacementStats{
+				final:    []string{"c", "new-1:x", "a"},
 				mounts:   1,
 				removals: 2,
 				moves:    1,
@@ -95,16 +176,25 @@ func TestCurrentKeyedReorderPlacement(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := simulateCurrentPatchChildrenPlacement(t, test.old, test.new)
-			if !reflect.DeepEqual(got, test.want) {
-				t.Fatalf("placement stats = %#v, want %#v", got, test.want)
+			before := simulateCurrentPatchChildrenPlacement(t, test.old, test.new, stableSuffixChildPlacementFlags)
+			if !reflect.DeepEqual(before, test.before) {
+				t.Fatalf("previous placement stats = %#v, want %#v", before, test.before)
+			}
+			after := simulateCurrentPatchChildrenPlacement(t, test.old, test.new, stableChildPlacements)
+			if !reflect.DeepEqual(after, test.after) {
+				t.Fatalf("placement stats = %#v, want %#v", after, test.after)
 			}
 		})
 	}
 }
 
-func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []string) currentPlacementStats {
+func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []string, stable func([]int, []string) []bool) currentPlacementStats {
 	t.Helper()
+
+	oldIDs := make([]string, len(oldKeys))
+	for index, key := range oldKeys {
+		oldIDs[index] = currentPlacementID("old", index, key)
+	}
 
 	matches := matchChildIndices(oldKeys, newKeys)
 	used := make([]bool, len(oldKeys))
@@ -112,19 +202,19 @@ func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []stri
 	for index, key := range newKeys {
 		oldIndex := matches[index]
 		if oldIndex == noChildMatch {
-			children[index] = currentPlacementChild{id: key, pending: true}
+			children[index] = currentPlacementChild{id: currentPlacementID("new", index, key), pending: true}
 			continue
 		}
 		used[oldIndex] = true
-		children[index] = currentPlacementChild{id: oldKeys[oldIndex]}
+		children[index] = currentPlacementChild{id: oldIDs[oldIndex]}
 	}
 
 	stats := currentPlacementStats{
 		final: make([]string, 0, len(newKeys)),
 	}
-	for index, key := range oldKeys {
+	for index := range oldKeys {
 		if used[index] {
-			stats.final = append(stats.final, key)
+			stats.final = append(stats.final, oldIDs[index])
 			continue
 		}
 		stats.removals++
@@ -132,7 +222,7 @@ func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []stri
 
 	var reference string
 	hasReference := false
-	stableStart := stableChildPlacementStart(matches)
+	stablePlacements := stable(matches, newKeys)
 	for index := len(children) - 1; index >= 0; index-- {
 		child := children[index]
 		if child.pending {
@@ -142,7 +232,7 @@ func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []stri
 			hasReference = true
 			continue
 		}
-		if index >= stableStart {
+		if stablePlacements != nil && stablePlacements[index] {
 			reference = child.id
 			hasReference = true
 			continue
@@ -170,9 +260,20 @@ func simulateCurrentPatchChildrenPlacement(t *testing.T, oldKeys, newKeys []stri
 	return stats
 }
 
+func currentPlacementID(prefix string, index int, key string) string {
+	if key == "" {
+		return prefix + "-" + ToString(index)
+	}
+	if prefix == "old" {
+		return key
+	}
+	return prefix + "-" + ToString(index) + ":" + key
+}
+
 func TestStableChildPlacements(t *testing.T) {
 	tests := []struct {
 		name    string
+		keys    []string
 		matches []int
 		want    []bool
 	}{
@@ -182,38 +283,56 @@ func TestStableChildPlacements(t *testing.T) {
 		},
 		{
 			name:    "all mounts",
+			keys:    []string{"a", "b"},
 			matches: []int{noChildMatch, noChildMatch},
 		},
 		{
 			name:    "stable",
+			keys:    []string{"a", "b", "c", "d"},
 			matches: []int{0, 1, 2, 3},
+			want:    []bool{true, true, true, true},
 		},
 		{
 			name:    "insert around stable",
+			keys:    []string{"x", "a", "b", "c", "y"},
 			matches: []int{noChildMatch, 0, 1, 2, noChildMatch},
+			want:    []bool{false, true, true, true, false},
 		},
 		{
 			name:    "rotate left",
+			keys:    []string{"b", "c", "d", "a"},
 			matches: []int{1, 2, 3, 0},
+			want:    []bool{true, true, true, false},
 		},
 		{
 			name:    "rotate right",
+			keys:    []string{"d", "a", "b", "c"},
 			matches: []int{3, 0, 1, 2},
 			want:    []bool{false, true, true, true},
 		},
 		{
 			name:    "reverse",
+			keys:    []string{"d", "c", "b", "a"},
 			matches: []int{3, 2, 1, 0},
+			want:    []bool{true, false, false, false},
 		},
 		{
 			name:    "mixed",
+			keys:    []string{"c", "x", "a"},
 			matches: []int{2, noChildMatch, 0},
+			want:    []bool{true, false, false},
+		},
+		{
+			name:    "unkeyed ignored",
+			keys:    []string{"b", "", "a", ""},
+			matches: []int{2, 1, 0, 3},
+			want:    []bool{true, false, false, false},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := stableChildPlacementFlags(test.matches)
+			got := stableChildPlacements(test.matches, test.keys)
 			if !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("stable placements = %v, want %v", got, test.want)
 			}
@@ -226,7 +345,39 @@ func TestStableChildPlacements(t *testing.T) {
 	}
 }
 
-func stableChildPlacementFlags(matches []int) []bool {
+func TestStableChildPlacementsLongKeyedList(t *testing.T) {
+	const size = 1024
+
+	matches := sequentialBenchmarkMatches(size)
+	keys := sequentialBenchmarkKeys(size)
+	// Move one early item backward while the rest of the keyed children remain
+	// in order. The stable set should keep every other keyed child in place.
+	moved := matches[1]
+	copy(matches[1:], matches[2:32])
+	matches[31] = moved
+	movedKey := keys[1]
+	copy(keys[1:], keys[2:32])
+	keys[31] = movedKey
+
+	stable := stableChildPlacements(matches, keys)
+	if len(stable) != size {
+		t.Fatalf("stable placements length = %d, want %d", len(stable), size)
+	}
+	stableCount := 0
+	for index, value := range stable {
+		if index == 31 && value {
+			t.Fatal("moved key should not be marked stable")
+		}
+		if value {
+			stableCount++
+		}
+	}
+	if stableCount != size-1 {
+		t.Fatalf("stable placements = %d, want %d", stableCount, size-1)
+	}
+}
+
+func stableSuffixChildPlacementFlags(matches []int, keys []string) []bool {
 	stableStart := stableChildPlacementStart(matches)
 	if stableStart == len(matches) {
 		return nil

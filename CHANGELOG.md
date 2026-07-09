@@ -173,9 +173,10 @@
   runtime prop paths while preserving nil and empty zero-allocation behavior.
 - `VirtualTable` runtime code was reduced to recover dashboard WASM size
   headroom.
-- Keyed child placement now avoids redundant moves for the stable suffix
-  pattern, reducing the characterized rotate-right existing-node move count
-  from three to one without implementing a full LIS reconciler.
+- Keyed child placement now avoids additional redundant moves by keeping the
+  longest increasing keyed subsequence stable during placement, preserving the
+  characterized rotate-right one-move behavior and reducing a middle-backward
+  keyed reorder from two existing-node moves to one.
 - Scheduler reset now invalidates stale queued update callbacks so pre-reset
   work cannot run after a newer request is queued.
 - Retained focused inputs now restore their selection range after dirty

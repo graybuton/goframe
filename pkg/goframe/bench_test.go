@@ -3,7 +3,7 @@ package goframe
 import "testing"
 
 var benchmarkChildMatches []int
-var benchmarkStablePlacementStart int
+var benchmarkStablePlacements []bool
 
 func BenchmarkDirtyQueuePruning(b *testing.B) {
 	root := dirtyTestInstance("Root", nil)
@@ -143,45 +143,57 @@ func BenchmarkStableChildPlacements(b *testing.B) {
 
 	tests := []struct {
 		name    string
+		keys    []string
 		matches []int
 	}{
 		{
 			name:    "stable",
+			keys:    sequentialBenchmarkKeys(size),
 			matches: sequentialBenchmarkMatches(size),
 		},
 		{
 			name:    "reverse",
+			keys:    reverseBenchmarkKeys(size),
 			matches: reverseBenchmarkMatches(size),
 		},
 		{
 			name:    "rotate_left",
+			keys:    rotateLeftBenchmarkKeys(size),
 			matches: rotateLeftBenchmarkMatches(size),
 		},
 		{
 			name:    "rotate_right",
+			keys:    rotateRightBenchmarkKeys(size),
 			matches: rotateRightBenchmarkMatches(size),
 		},
 		{
 			name:    "insert_remove",
+			keys:    insertRemoveBenchmarkKeys(size),
 			matches: insertRemoveBenchmarkMatches(size),
 		},
 		{
 			name:    "mixed",
+			keys:    mixedReorderedBenchmarkKeys(size),
 			matches: mixedBenchmarkMatchesForPlacement(size),
+		},
+		{
+			name:    "long_move_backward",
+			keys:    moveEarlyBackwardBenchmarkKeys(2048),
+			matches: moveEarlyBackwardBenchmarkMatches(2048),
 		},
 	}
 
 	for _, test := range tests {
 		b.Run(test.name, func(b *testing.B) {
-			stableStart := stableChildPlacementStart(test.matches)
-			if stableStart < 0 || stableStart > len(test.matches) {
-				b.Fatalf("stable start = %d", stableStart)
+			placements := stableChildPlacements(test.matches, test.keys)
+			if len(placements) > len(test.matches) {
+				b.Fatalf("stable placements length = %d", len(placements))
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				benchmarkStablePlacementStart = stableChildPlacementStart(test.matches)
+				benchmarkStablePlacements = stableChildPlacements(test.matches, test.keys)
 			}
 		})
 	}
@@ -292,6 +304,24 @@ func mixedBenchmarkMatchesForPlacement(size int) []int {
 		}
 		matches[index] = index
 	}
+	return matches
+}
+
+func moveEarlyBackwardBenchmarkKeys(size int) []string {
+	keys := sequentialBenchmarkKeys(size)
+	insert := size / 2
+	moved := keys[1]
+	copy(keys[1:insert], keys[2:insert+1])
+	keys[insert] = moved
+	return keys
+}
+
+func moveEarlyBackwardBenchmarkMatches(size int) []int {
+	matches := sequentialBenchmarkMatches(size)
+	insert := size / 2
+	moved := matches[1]
+	copy(matches[1:insert], matches[2:insert+1])
+	matches[insert] = moved
 	return matches
 }
 
