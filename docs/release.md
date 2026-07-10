@@ -14,12 +14,6 @@ v0.1.0-mvp10
 Latest published preview tag:
 
 ```text
-v0.2.0-preview.4
-```
-
-Current preview tag under preparation:
-
-```text
 v0.2.0-preview.5
 ```
 

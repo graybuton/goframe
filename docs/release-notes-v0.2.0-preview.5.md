@@ -52,7 +52,8 @@ LSP support.
 
 ### Release And Docs Process
 
-- Repository docs now mark `v0.2.0-preview.4` as the latest published preview.
+- Repository docs distinguish published-preview state from prepared-preview
+  state across the release cycle.
 - Release documentation includes GitHub Release title/body style guidance for
   future preview releases.
 - These were process/docs cleanups, not runtime behavior changes.
@@ -111,7 +112,7 @@ Release-gate validation for this preview should include:
 
 ## Install
 
-After the tag is published, install the exact preview with:
+Install the exact preview with:
 
 ```bash
 go install github.com/graybuton/goframe/cmd/goxc@v0.2.0-preview.5
