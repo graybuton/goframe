@@ -617,6 +617,15 @@ function assertNoStructuralOrListenerChurn(report, label) {
     }
 }
 
+function assertOnlyOperations(report, label, expected) {
+    for (const [operation, value] of Object.entries(report.operations)) {
+        const wanted = expected[operation] ?? 0;
+        if (value !== wanted) {
+            throw new Error(`APP FAILURE: ${label} bridge operations changed: ${JSON.stringify(report)}`);
+        }
+    }
+}
+
 function assertControlledInputCharacterization(report) {
     assertSingleScheduledUpdate(report, "controlled input");
     assertNoStructuralOrListenerChurn(report, "controlled input");
@@ -640,13 +649,11 @@ function assertBurstUpdateCharacterization(report) {
 
 function assertKeyedReorderCharacterization(report) {
     assertSingleScheduledUpdate(report, "keyed reorder");
-    if (report.operations.createElement !== 0 || report.operations.createTextNode !== 0 ||
-        report.operations.createComment !== 0 || report.operations.removeChild !== 0 ||
-        report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0 ||
-        // Moving a retained TodoItem component range places its start anchor,
-        // element, and end anchor without recreating the range.
-        report.operations.insertBefore !== 3 || report.flushComponents.TodoList !== 1 ||
-        report.flushPatches.TodoList !== 1) {
+    // A retained TodoItem component range has a start anchor, element, and end anchor.
+    // The previously focused Todo input restores its captured selection once; this is
+    // focus preservation rather than structural DOM, property, or listener churn.
+    assertOnlyOperations(report, "keyed reorder", { insertBefore: 3, setSelectionRange: 1 });
+    if (report.flushComponents.TodoList !== 1 || report.flushPatches.TodoList !== 1) {
         throw new Error(`APP FAILURE: keyed reorder should retain nodes and use bounded placement: ${JSON.stringify(report)}`);
     }
 }
