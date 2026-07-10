@@ -128,11 +128,16 @@ try {
     const focusReport = await finishScenario(client, "focus-search");
     assertFocusOnlyReport(focusReport);
 
+    await captureDashboardRowWindow(client, "__dashboardSearchBillingBefore");
+    await prepareControlValue(client, "#dashboard-search", "billing");
     await startScenario(client, "search-billing");
     const searchStart = Date.now();
-    await setInputValue(client, "#dashboard-search", "billing");
+    await dispatchControlEvent(client, "#dashboard-search", "input");
     timings.push({ step: "search-update", ms: Date.now() - searchStart });
     const searchReport = await finishScenario(client, "search-billing");
+    const searchAttribution = await readDashboardRowAttribution(client, "__dashboardSearchBillingBefore");
+    assertDashboardRowAttribution(searchReport, searchAttribution, "search-billing");
+    console.log(`dashboard DOM bridge search-billing attribution: ${JSON.stringify(buildDashboardBridgeAttribution(searchReport, searchAttribution))}`);
     const searchState = await client.evaluate(`(() => {
         const rows = document.querySelectorAll(".issue-row").length;
         const summary = document.querySelector("[data-testid='visible-summary']")?.textContent.trim();
@@ -350,12 +355,15 @@ try {
             window.__dashboardBeforeSortNodes[node.id] = node;
         }
     })()`);
+    await captureDashboardRowWindow(client, "__dashboardSortAttributionBefore");
 
+    await prepareControlValue(client, "#sort-mode", "priority");
     await startScenario(client, "sort-priority");
     const sortStart = Date.now();
-    await setSelectValue(client, "#sort-mode", "priority");
+    await dispatchControlEvent(client, "#sort-mode", "change");
     timings.push({ step: "sort-update", ms: Date.now() - sortStart });
     const sortReport = await finishScenario(client, "sort-priority");
+    const sortAttribution = await readDashboardRowAttribution(client, "__dashboardSortAttributionBefore");
     const sorted = await client.evaluate(`(() => {
         const after = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
         const overlap = after.find((id) => window.__dashboardBeforeSort.includes(id));
@@ -372,6 +380,13 @@ try {
         { changed: true, headerSame: true, overlapPreserved: true },
         "dashboard sort updates virtual row window without replacing visible survivors",
     );
+    if (searchAttribution.retainedCount === 0) {
+        assertDashboardRowAttribution(sortReport, sortAttribution, "sort-priority fallback");
+        if (sortAttribution.retainedCount === 0) {
+            throw new Error(`APP FAILURE: dashboard search and sort scenarios have no retained visible rows: ${JSON.stringify({ searchAttribution, sortAttribution })}`);
+        }
+        console.log(`dashboard DOM bridge sort-priority fallback attribution: ${JSON.stringify(buildDashboardBridgeAttribution(sortReport, sortAttribution))}`);
+    }
     await assertVirtualTableSpacerStability(client, "sort");
 
     await startScenario(client, "status-blocked");
@@ -522,14 +537,14 @@ async function clearClientStorage(client) {
     }
 }
 
-async function setInputValue(client, selector, value) {
-    await client.callFunction(`function(selector, value) {
+async function setInputValue(client, selector, value, focus = true) {
+    await client.callFunction(`function(selector, value, focus) {
         const input = document.querySelector(selector);
-        input.focus();
+        if (focus) input.focus();
         input.value = value;
         input.dispatchEvent(new Event("input", { bubbles: true }));
         return true;
-    }`, selector, value);
+    }`, selector, value, focus);
     await wait(140);
 }
 
@@ -541,6 +556,23 @@ async function setSelectValue(client, selector, value) {
         return true;
     }`, selector, value);
     await wait(140);
+}
+
+async function prepareControlValue(client, selector, value) {
+    await client.callFunction(`function(selector, value) {
+        const control = document.querySelector(selector);
+        control.value = value;
+        return true;
+    }`, selector, value);
+}
+
+async function dispatchControlEvent(client, selector, eventType, waitDuration = 140) {
+    await client.callFunction(`function(selector, eventType) {
+        const control = document.querySelector(selector);
+        control.dispatchEvent(new Event(eventType, { bubbles: true }));
+        return true;
+    }`, selector, eventType);
+    await wait(waitDuration);
 }
 
 async function clickButtonByText(client, text) {
@@ -588,9 +620,9 @@ async function finishScenario(client, label) {
 function assertFocusOnlyReport(report) {
     const nonZeroRenders = Object.entries(report.renderDeltas).filter(([, value]) => value !== 0);
     const nonZeroPatches = Object.entries(report.patchDeltas).filter(([, value]) => value !== 0);
-    const nonZeroOperations = Object.entries(report.operations).filter(([, value]) => value !== 0);
+    const nonZeroOperations = Object.entries(report.operations).filter(([name, value]) => name !== "focus" && value !== 0);
     const nonZeroMutations = Object.entries(report.mutations).filter(([, value]) => value !== 0);
-    if (nonZeroRenders.length || nonZeroPatches.length || nonZeroOperations.length || nonZeroMutations.length) {
+    if (nonZeroRenders.length || nonZeroPatches.length || nonZeroOperations.length || nonZeroMutations.length || report.operations.focus !== 1) {
         throw new Error(`APP FAILURE: focus-only should not trigger runtime work: ${JSON.stringify(report)}`);
     }
     console.log("dashboard focus-only does not trigger runtime work: ok");
@@ -609,6 +641,376 @@ function assertMountedRowsBounded(rows, logicalRows, label) {
     if (rows < 0 || rows > expectedLimit || (logicalRows > 0 && rows === 0)) {
         throw new Error(`APP FAILURE: ${label}: mounted rows ${rows}, logical rows ${logicalRows}, limit ${expectedLimit}`);
     }
+}
+
+async function captureDashboardRowWindow(client, key) {
+    return await client.callFunction(`function(key) {
+        const rows = [...document.querySelectorAll(".issue-row")];
+        const nodes = {};
+        for (const row of rows) nodes[row.id] = row;
+        const snapshot = {
+            ids: rows.map((row) => row.id),
+            nodes,
+            header: document.querySelector("[data-testid='dashboard-header']"),
+            search: document.querySelector("#dashboard-search"),
+            table: document.querySelector("[data-testid='issue-table']"),
+            detail: document.querySelector("[data-testid='detail-panel']"),
+            summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+        };
+        window[key] = snapshot;
+        return { ids: snapshot.ids, count: snapshot.ids.length, summary: snapshot.summary };
+    }`, key);
+}
+
+async function readDashboardRowAttribution(client, key) {
+    return await client.callFunction(`function(key) {
+        const before = window[key];
+        if (!before) return null;
+        const rows = [...document.querySelectorAll(".issue-row")];
+        const afterIDs = rows.map((row) => row.id);
+        const afterNodes = {};
+        for (const row of rows) afterNodes[row.id] = row;
+
+        const beforeIDs = before.ids || [];
+        const beforeSet = new Set(beforeIDs);
+        const afterSet = new Set(afterIDs);
+        const retainedIDs = afterIDs.filter((id) => beforeSet.has(id));
+        const newIDs = afterIDs.filter((id) => !beforeSet.has(id));
+        const removedIDs = beforeIDs.filter((id) => !afterSet.has(id));
+        const retainedSameNodeIDs = retainedIDs.filter((id) => before.nodes[id] === afterNodes[id]);
+        const retainedRecreatedIDs = retainedIDs.filter((id) => before.nodes[id] !== afterNodes[id]);
+        const rowOperations = window.__dashboardAudit?.lastRowOperations || {};
+        const unique = (ids) => [...new Set((ids || []).filter(Boolean))];
+        const countStrings = (values) => {
+            const counts = {};
+            for (const value of values || []) {
+                if (!value) continue;
+                counts[value] = (counts[value] || 0) + 1;
+            }
+            return Object.fromEntries(
+                Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)),
+            );
+        };
+
+        return {
+            beforeIDs,
+            afterIDs,
+            beforeCount: beforeIDs.length,
+            afterCount: afterIDs.length,
+            retainedIDs,
+            newIDs,
+            removedIDs,
+            retainedCount: retainedIDs.length,
+            newCount: newIDs.length,
+            removedCount: removedIDs.length,
+            retainedSameNodeIDs,
+            retainedSameNodeCount: retainedSameNodeIDs.length,
+            retainedRecreatedIDs,
+            orderChanged: JSON.stringify(beforeIDs) !== JSON.stringify(afterIDs),
+            headerSame: before.header === document.querySelector("[data-testid='dashboard-header']"),
+            searchSame: before.search === document.querySelector("#dashboard-search"),
+            tableSame: before.table === document.querySelector("[data-testid='issue-table']"),
+            detailSame: before.detail === document.querySelector("[data-testid='detail-panel']"),
+            beforeSummary: before.summary,
+            afterSummary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+            activeElementID: document.activeElement?.id || "",
+            rowOperationIDs: {
+                placementIDs: unique(rowOperations.placements),
+                removalIDs: unique(rowOperations.removals),
+                listenerAddIDs: unique(rowOperations.listenerAdds),
+                listenerRemoveIDs: unique(rowOperations.listenerRemoves),
+            },
+            rowOperationCounts: {
+                placements: (rowOperations.placements || []).length,
+                removals: (rowOperations.removals || []).length,
+                listenerAdds: (rowOperations.listenerAdds || []).length,
+                listenerRemoves: (rowOperations.listenerRemoves || []).length,
+            },
+            placementCountsByRow: countStrings(rowOperations.placements),
+            removalCountsByRow: countStrings(rowOperations.removals),
+            listenerAddCountsByRow: countStrings(rowOperations.listenerAdds),
+            listenerRemoveCountsByRow: countStrings(rowOperations.listenerRemoves),
+        };
+    }`, key);
+}
+
+function sameStringSet(left, right) {
+    const normalize = (values) => [...new Set(values || [])].sort();
+    return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+function sumCounts(counts) {
+    return Object.values(counts || {}).reduce((total, value) => total + value, 0);
+}
+
+function everyIDHasCount(ids, counts, expected) {
+    return (ids || []).every((id) => counts?.[id] === expected);
+}
+
+function assertSingleRAFScheduledUpdate(report, label) {
+    const scheduling = report.scheduling;
+    if (report.flushes !== 1 || scheduling.requestAnimationFrame !== 1 ||
+        scheduling.requestAnimationFrameCallbacks !== 1 || scheduling.queueMicrotask !== 0 ||
+        scheduling.queueMicrotaskCallbacks !== 0) {
+        throw new Error(`APP FAILURE: ${label} should use one rAF dirty flush with no microtask fallback: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertDashboardRowAttribution(report, attribution, label) {
+    if (!attribution) {
+        throw new Error(`APP FAILURE: missing dashboard row attribution for ${label}`);
+    }
+    const visible = parseSummary(attribution.afterSummary).visible;
+    assertMountedRowsBounded(attribution.afterCount, visible, `dashboard ${label} mounted rows`);
+    if (attribution.retainedCount + attribution.newCount !== attribution.afterCount ||
+        attribution.retainedCount + attribution.removedCount !== attribution.beforeCount) {
+        throw new Error(`APP FAILURE: inconsistent dashboard row attribution for ${label}: ${JSON.stringify(attribution)}`);
+    }
+    if (attribution.retainedSameNodeCount !== attribution.retainedCount || attribution.retainedRecreatedIDs.length !== 0) {
+        throw new Error(`APP FAILURE: retained dashboard rows were recreated during ${label}: ${JSON.stringify(attribution)}`);
+    }
+    if (!attribution.headerSame || !attribution.searchSame || !attribution.tableSame || !attribution.detailSame) {
+        throw new Error(`APP FAILURE: dashboard shell node was replaced during ${label}: ${JSON.stringify(attribution)}`);
+    }
+    const placementIDs = attribution.rowOperationIDs.placementIDs;
+    const newRowPlacementIDs = placementIDs.filter((id) => attribution.newIDs.includes(id));
+    const missingNewRowPlacementIDs = attribution.newIDs.filter((id) => !placementIDs.includes(id));
+    const retainedRowPlacementIDs = placementIDs.filter((id) => attribution.retainedIDs.includes(id));
+    if ((attribution.newCount > 0 && missingNewRowPlacementIDs.length !== 0) || retainedRowPlacementIDs.length !== 0) {
+        throw new Error(`APP FAILURE: row placement attribution does not match ${label} row replacement: ${JSON.stringify({
+            newIDs: attribution.newIDs,
+            retainedIDs: attribution.retainedIDs,
+            placementIDs,
+            newRowPlacementIDs,
+            missingNewRowPlacementIDs,
+            retainedRowPlacementIDs,
+            placementCountsByRow: attribution.placementCountsByRow,
+            rawPlacements: report.rowOperations.placements,
+            appendChild: report.operations.appendChild,
+            insertBefore: report.operations.insertBefore,
+            replaceChild: report.operations.replaceChild,
+        })}`);
+    }
+    const removalIDs = attribution.rowOperationIDs.removalIDs;
+    const missingRemovedRowIDs = attribution.removedIDs.filter((id) => !removalIDs.includes(id));
+    const unexpectedRemovalRowIDs = removalIDs.filter((id) => !attribution.removedIDs.includes(id));
+    const retainedRowRemovalIDs = removalIDs.filter((id) => attribution.retainedIDs.includes(id));
+    const removalHistogramKeysMatchRemovedRows = sameStringSet(
+        Object.keys(attribution.removalCountsByRow),
+        attribution.removedIDs,
+    );
+    const removalHistogramTotal = sumCounts(attribution.removalCountsByRow);
+    if (!sameStringSet(removalIDs, attribution.removedIDs) || missingRemovedRowIDs.length !== 0 ||
+        unexpectedRemovalRowIDs.length !== 0 || retainedRowRemovalIDs.length !== 0 ||
+        !removalHistogramKeysMatchRemovedRows ||
+        removalHistogramTotal !== attribution.rowOperationCounts.removals) {
+        throw new Error(`APP FAILURE: row removal attribution does not match ${label} row replacement: ${JSON.stringify({
+            removedIDs: attribution.removedIDs,
+            retainedIDs: attribution.retainedIDs,
+            removalIDs,
+            missingRemovedRowIDs,
+            unexpectedRemovalRowIDs,
+            retainedRowRemovalIDs,
+            removalCountsByRow: attribution.removalCountsByRow,
+            removalHistogramTotal,
+            attributedRemovals: attribution.rowOperationCounts.removals,
+            rawRemovals: report.rowOperations.removals,
+            removeChild: report.operations.removeChild,
+            replaceChild: report.operations.replaceChild,
+        })}`);
+    }
+    const listenerAddTargetsMatchNewRows = sameStringSet(attribution.rowOperationIDs.listenerAddIDs, attribution.newIDs);
+    const listenerRemoveTargetsMatchRemovedRows = sameStringSet(attribution.rowOperationIDs.listenerRemoveIDs, attribution.removedIDs);
+    const listenerAddHistogramKeysMatchNewRows = sameStringSet(Object.keys(attribution.listenerAddCountsByRow), attribution.newIDs);
+    const listenerRemoveHistogramKeysMatchRemovedRows = sameStringSet(Object.keys(attribution.listenerRemoveCountsByRow), attribution.removedIDs);
+    const everyNewRowHasTwoAdds = everyIDHasCount(attribution.newIDs, attribution.listenerAddCountsByRow, 2);
+    const everyRemovedRowHasTwoRemoves = everyIDHasCount(attribution.removedIDs, attribution.listenerRemoveCountsByRow, 2);
+    const listenerAddHistogramTotal = sumCounts(attribution.listenerAddCountsByRow);
+    const listenerRemoveHistogramTotal = sumCounts(attribution.listenerRemoveCountsByRow);
+    // Each mounted IssueRow currently registers its row link and toggle listeners.
+    if (!listenerAddTargetsMatchNewRows || !listenerRemoveTargetsMatchRemovedRows ||
+        !listenerAddHistogramKeysMatchNewRows || !listenerRemoveHistogramKeysMatchRemovedRows ||
+        !everyNewRowHasTwoAdds || !everyRemovedRowHasTwoRemoves ||
+        listenerAddHistogramTotal !== attribution.rowOperationCounts.listenerAdds ||
+        listenerRemoveHistogramTotal !== attribution.rowOperationCounts.listenerRemoves ||
+        attribution.rowOperationCounts.listenerAdds !== report.operations.addEventListener ||
+        attribution.rowOperationCounts.listenerRemoves !== report.operations.removeEventListener ||
+        report.operations.addEventListener !== attribution.newCount * 2 ||
+        report.operations.removeEventListener !== attribution.removedCount * 2) {
+        throw new Error(`APP FAILURE: listener churn does not match ${label} row replacement: ${JSON.stringify({
+            newIDs: attribution.newIDs,
+            removedIDs: attribution.removedIDs,
+            listenerAddIDs: attribution.rowOperationIDs.listenerAddIDs,
+            listenerRemoveIDs: attribution.rowOperationIDs.listenerRemoveIDs,
+            listenerAddCountsByRow: attribution.listenerAddCountsByRow,
+            listenerRemoveCountsByRow: attribution.listenerRemoveCountsByRow,
+            listenerAdds: report.operations.addEventListener,
+            listenerRemoves: report.operations.removeEventListener,
+            rowOperationCounts: attribution.rowOperationCounts,
+        })}`);
+    }
+    for (const [name, value] of Object.entries(report.operations)) {
+        if (!Number.isFinite(value) || value < 0) {
+            throw new Error(`APP FAILURE: invalid ${name} operation count during ${label}: ${JSON.stringify(report)}`);
+        }
+    }
+    for (const [name, value] of Object.entries(report.scheduling)) {
+        if (!Number.isFinite(value) || value < 0) {
+            throw new Error(`APP FAILURE: invalid ${name} scheduling count during ${label}: ${JSON.stringify(report)}`);
+        }
+    }
+    assertSingleRAFScheduledUpdate(report, label);
+}
+
+function buildDashboardBridgeAttribution(report, rows) {
+    const operations = report.operations;
+    const structuralOperationTotal = operations.createElement + operations.createTextNode + operations.createComment +
+        operations.createDocumentFragment + operations.appendChild + operations.insertBefore + operations.removeChild +
+        operations.replaceChild;
+    const creationOperationTotal = operations.createElement + operations.createTextNode + operations.createComment +
+        operations.createDocumentFragment;
+    const placementOperationTotal = operations.appendChild + operations.insertBefore + operations.replaceChild;
+    const removalOperationTotal = operations.removeChild + operations.replaceChild;
+    const textPropertyAttributeTotal = operations.setTextNodeValue + operations.setAttribute +
+        operations.removeAttribute + operations.setProperty;
+    const listenerAddsPerNewVisibleRow = rows.newCount > 0 ? operations.addEventListener / rows.newCount : null;
+    const listenerRemovesPerRemovedVisibleRow = rows.removedCount > 0 ? operations.removeEventListener / rows.removedCount : null;
+    const placementIDs = rows.rowOperationIDs.placementIDs;
+    const newRowPlacementIDs = placementIDs.filter((id) => rows.newIDs.includes(id));
+    const missingNewRowPlacementIDs = rows.newIDs.filter((id) => !placementIDs.includes(id));
+    const retainedPlacementIDs = placementIDs.filter((id) => rows.retainedIDs.includes(id));
+    const removalIDs = rows.rowOperationIDs.removalIDs;
+    const observedRemovedRowIDs = removalIDs.filter((id) => rows.removedIDs.includes(id));
+    const missingRemovedRowIDs = rows.removedIDs.filter((id) => !removalIDs.includes(id));
+    const unexpectedRemovalRowIDs = removalIDs.filter((id) => !rows.removedIDs.includes(id));
+    const retainedRowRemovalIDs = removalIDs.filter((id) => rows.retainedIDs.includes(id));
+    const removalHistogramKeysMatchRemovedRows = sameStringSet(
+        Object.keys(rows.removalCountsByRow),
+        rows.removedIDs,
+    );
+    const removalHistogramTotal = sumCounts(rows.removalCountsByRow);
+    const removalChurnTracksRowReplacement = sameStringSet(removalIDs, rows.removedIDs) &&
+        removalHistogramKeysMatchRemovedRows && missingRemovedRowIDs.length === 0 &&
+        unexpectedRemovalRowIDs.length === 0 && retainedRowRemovalIDs.length === 0 &&
+        removalHistogramTotal === rows.rowOperationCounts.removals
+        ? true
+        : "unknown";
+    const listenerAddTargetsMatchNewRows = sameStringSet(rows.rowOperationIDs.listenerAddIDs, rows.newIDs);
+    const listenerRemoveTargetsMatchRemovedRows = sameStringSet(rows.rowOperationIDs.listenerRemoveIDs, rows.removedIDs);
+    const listenerAddHistogramKeysMatchNewRows = sameStringSet(Object.keys(rows.listenerAddCountsByRow), rows.newIDs);
+    const listenerRemoveHistogramKeysMatchRemovedRows = sameStringSet(Object.keys(rows.listenerRemoveCountsByRow), rows.removedIDs);
+    const everyNewRowHasTwoAdds = everyIDHasCount(rows.newIDs, rows.listenerAddCountsByRow, 2);
+    const everyRemovedRowHasTwoRemoves = everyIDHasCount(rows.removedIDs, rows.listenerRemoveCountsByRow, 2);
+    const listenerAddHistogramTotal = sumCounts(rows.listenerAddCountsByRow);
+    const listenerRemoveHistogramTotal = sumCounts(rows.listenerRemoveCountsByRow);
+    const listenerChurnTracksRowReplacement = listenerAddTargetsMatchNewRows && listenerRemoveTargetsMatchRemovedRows &&
+        listenerAddHistogramKeysMatchNewRows && listenerRemoveHistogramKeysMatchRemovedRows &&
+        everyNewRowHasTwoAdds && everyRemovedRowHasTwoRemoves &&
+        listenerAddHistogramTotal === rows.rowOperationCounts.listenerAdds &&
+        listenerRemoveHistogramTotal === rows.rowOperationCounts.listenerRemoves &&
+        operations.addEventListener === rows.rowOperationCounts.listenerAdds &&
+        operations.removeEventListener === rows.rowOperationCounts.listenerRemoves &&
+        operations.addEventListener === rows.newCount * 2 &&
+        operations.removeEventListener === rows.removedCount * 2
+        ? true
+        : "unknown";
+    const retainedRowsReinsertedSuspected = retainedPlacementIDs.length > 0;
+    const immediateBroadCommitBufferJustified = listenerChurnTracksRowReplacement === true &&
+        removalChurnTracksRowReplacement === true &&
+        !retainedRowsReinsertedSuspected && rows.retainedRecreatedIDs.length === 0
+        ? false
+        : "unknown";
+
+    return {
+        scenario: report.label,
+        flushes: report.flushes,
+        scheduling: report.scheduling,
+        operations,
+        rows: {
+            beforeCount: rows.beforeCount,
+            afterCount: rows.afterCount,
+            beforeIDs: rows.beforeIDs,
+            afterIDs: rows.afterIDs,
+            retainedIDs: rows.retainedIDs,
+            newIDs: rows.newIDs,
+            removedIDs: rows.removedIDs,
+            retainedSameNodeCount: rows.retainedSameNodeCount,
+            retainedRecreatedIDs: rows.retainedRecreatedIDs,
+            orderChanged: rows.orderChanged,
+        },
+        retention: {
+            headerSame: rows.headerSame,
+            searchSame: rows.searchSame,
+            tableSame: rows.tableSame,
+            detailSame: rows.detailSame,
+            activeElementID: rows.activeElementID,
+        },
+        components: {
+            renderDeltas: report.renderDeltas,
+            patchDeltas: report.patchDeltas,
+        },
+        listeners: {
+            addedRowIDs: rows.rowOperationIDs.listenerAddIDs,
+            removedRowIDs: rows.rowOperationIDs.listenerRemoveIDs,
+            addCountsByRow: rows.listenerAddCountsByRow,
+            removeCountsByRow: rows.listenerRemoveCountsByRow,
+            addCalls: rows.rowOperationCounts.listenerAdds,
+            removeCalls: rows.rowOperationCounts.listenerRemoves,
+            uniqueAddedRowsMatchNewRows: listenerAddTargetsMatchNewRows,
+            uniqueRemovedRowsMatchRemovedRows: listenerRemoveTargetsMatchRemovedRows,
+            addHistogramKeysMatchNewRows: listenerAddHistogramKeysMatchNewRows,
+            removeHistogramKeysMatchRemovedRows: listenerRemoveHistogramKeysMatchRemovedRows,
+            everyNewRowHasTwoAdds,
+            everyRemovedRowHasTwoRemoves,
+            addsPerNewVisibleRow: listenerAddsPerNewVisibleRow,
+            removesPerRemovedVisibleRow: listenerRemovesPerRemovedVisibleRow,
+        },
+        placements: {
+            rowIDs: placementIDs,
+            countsByRow: rows.placementCountsByRow,
+            attributedCalls: rows.rowOperationCounts.placements,
+            newRowIDsObserved: newRowPlacementIDs,
+            missingNewRowIDs: missingNewRowPlacementIDs,
+            retainedRowIDsObserved: retainedPlacementIDs,
+        },
+        removals: {
+            rowIDs: removalIDs,
+            countsByRow: rows.removalCountsByRow,
+            attributedCalls: rows.rowOperationCounts.removals,
+            removedRowIDsObserved: observedRemovedRowIDs,
+            missingRemovedRowIDs,
+            unexpectedRowIDs: unexpectedRemovalRowIDs,
+            retainedRowIDsObserved: retainedRowRemovalIDs,
+            histogramKeysMatchRemovedRows: removalHistogramKeysMatchRemovedRows,
+            histogramTotal: removalHistogramTotal,
+        },
+        derived: {
+            structuralOperationTotal,
+            creationOperationTotal,
+            placementOperationTotal,
+            removalOperationTotal,
+            textPropertyAttributeTotal,
+            listenerAdds: operations.addEventListener,
+            listenerRemoves: operations.removeEventListener,
+            listenerNet: operations.addEventListener - operations.removeEventListener,
+            retainedVisibleRows: rows.retainedCount,
+            newVisibleRows: rows.newCount,
+            removedVisibleRows: rows.removedCount,
+            retainedRowsRecreated: false,
+            retainedRowPlacementIDs: retainedPlacementIDs,
+            listenerAddsPerNewVisibleRow,
+            listenerRemovesPerRemovedVisibleRow,
+            listenerChurnTracksRowReplacement,
+            removalChurnTracksRowReplacement,
+            retainedRowsReinsertedSuspected,
+            immediateBroadCommitBufferJustified,
+            bufferedAlternativeMeasured: false,
+            broadCommitBufferBenefit: "unknown",
+            narrowPrototypeCandidate: retainedRowsReinsertedSuspected
+                ? "measure retained row-range placement separately"
+                : null,
+        },
+    };
 }
 
 async function assertDashboardTableLayout(client, label) {
@@ -697,7 +1099,9 @@ function assertWithinRowScrollReport(report, beforeState, state) {
     if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
         throw new Error(`APP FAILURE: within-row scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
     }
-    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+    if (report.operations.createElement !== 0 || report.operations.createComment !== 0 ||
+        report.operations.createDocumentFragment !== 0 ||
+        report.operations.removeChild !== 0 ||
         report.operations.insertBefore !== 0 || report.operations.appendChild !== 0) {
         throw new Error(`APP FAILURE: within-row scroll should not churn DOM: ${JSON.stringify(report.operations)}`);
     }
@@ -758,7 +1162,9 @@ function assertInsideBufferScrollReport(report, beforeState, state) {
     if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
         throw new Error(`APP FAILURE: inside-buffer scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
     }
-    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+    if (report.operations.createElement !== 0 || report.operations.createComment !== 0 ||
+        report.operations.createDocumentFragment !== 0 ||
+        report.operations.removeChild !== 0 ||
         report.operations.insertBefore !== 0 || report.operations.appendChild !== 0 ||
         report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
         throw new Error(`APP FAILURE: inside-buffer scroll should not churn DOM/listeners: ${JSON.stringify(report.operations)}`);
@@ -782,8 +1188,9 @@ function assertBeyondBufferScrollReport(report, beforeState, state) {
     }
     const rowCount = Math.max(beforeState.rowCount, state.rowCount, 1);
     const changedRows = Math.max(1, countRowWindowChanges(beforeState.rowIDs, state.rowIDs));
-    const created = report.operations.createElement + report.operations.createTextNode;
-    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment +
+        report.operations.createDocumentFragment;
+    const inserted = report.operations.insertBefore + report.operations.appendChild + report.operations.replaceChild;
     const createdLimit = rowCount * 16;
     const insertedLimit = rowCount * 16;
     const removedLimit = rowCount * 4;
@@ -823,8 +1230,9 @@ function assertContinuousScrollReport(report, scrollSteps, beforeState, state) {
     if (report.renderDeltas.IssueRow > maxMountedRows * maxTableRenders) {
         throw new Error(`APP FAILURE: continuous scroll rendered IssueRow too often: ${JSON.stringify(report.renderDeltas)}`);
     }
-    const created = report.operations.createElement + report.operations.createTextNode;
-    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment +
+        report.operations.createDocumentFragment;
+    const inserted = report.operations.insertBefore + report.operations.appendChild + report.operations.replaceChild;
     if (created > maxMountedRows * maxTableRenders || inserted > maxMountedRows * maxTableRenders ||
         report.operations.removeChild > maxMountedRows * maxTableRenders) {
         throw new Error(`APP FAILURE: continuous scroll DOM churn is unbounded: ${JSON.stringify(report.operations)}`);
@@ -1056,6 +1464,8 @@ function emptyOperations() {
     return {
         createElement: 0,
         createTextNode: 0,
+        createComment: 0,
+        createDocumentFragment: 0,
         appendChild: 0,
         removeChild: 0,
         replaceChild: 0,
@@ -1066,6 +1476,26 @@ function emptyOperations() {
         setProperty: 0,
         addEventListener: 0,
         removeEventListener: 0,
+        focus: 0,
+        setSelectionRange: 0,
+    };
+}
+
+function emptyScheduling() {
+    return {
+        requestAnimationFrame: 0,
+        requestAnimationFrameCallbacks: 0,
+        queueMicrotask: 0,
+        queueMicrotaskCallbacks: 0,
+    };
+}
+
+function emptyRowOperations() {
+    return {
+        placements: [],
+        removals: [],
+        listenerAdds: [],
+        listenerRemoves: [],
     };
 }
 
@@ -1086,11 +1516,21 @@ function installDashboardAuditExpression(names) {
 
         const operations = ${JSON.stringify(emptyOperations())};
         const mutations = ${JSON.stringify(emptyMutations())};
+        const scheduling = ${JSON.stringify(emptyScheduling())};
+        const rowOperations = ${JSON.stringify(emptyRowOperations())};
         const componentNames = ${JSON.stringify(names)};
+        const renderReports = [];
+        window.goframeRenderProbe = (phase, duration) => {
+            renderReports.push({ phase, duration });
+        };
         const audit = {
             operations,
             mutations,
+            scheduling,
+            rowOperations,
+            lastRowOperations: null,
             baseline: null,
+            renderBaseline: 0,
             startedAt: 0,
             label: "",
             start(label) {
@@ -1098,7 +1538,11 @@ function installDashboardAuditExpression(names) {
                 this.startedAt = performance.now();
                 for (const key of Object.keys(this.operations)) this.operations[key] = 0;
                 for (const key of Object.keys(this.mutations)) this.mutations[key] = 0;
+                for (const key of Object.keys(this.scheduling)) this.scheduling[key] = 0;
+                clearRowOperations(this.rowOperations);
+                this.lastRowOperations = null;
                 this.baseline = snapshotCounts(componentNames);
+                this.renderBaseline = renderReports.length;
             },
             finish(label) {
             const next = snapshotCounts(componentNames);
@@ -1112,37 +1556,98 @@ function installDashboardAuditExpression(names) {
             for (const name of componentNames) {
                 memoDeltas[name] = next.memoSkips[name] - this.baseline.memoSkips[name];
             }
+            const updates = renderReports.slice(this.renderBaseline).filter((report) => report.phase === "update");
+            const rowOperationSnapshot = snapshotRowOperations(this.rowOperations);
+            this.lastRowOperations = rowOperationSnapshot;
             return {
                 label,
                 durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
+                flushes: updates.length,
+                scheduling: { ...this.scheduling },
                 renderDeltas,
                 patchDeltas,
                 memoDeltas,
                 operations: { ...this.operations },
                 mutations: { ...this.mutations },
+                rowOperations: rowOperationSnapshot,
                 rows: document.querySelectorAll(".issue-row").length,
                 summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
             };
             },
         };
 
-        const wrap = (owner, name, counter) => {
+        const rowIDsForNode = (node) => {
+            const ids = [];
+            const seen = new Set();
+            const addRow = (row) => {
+                const id = row?.id || "";
+                if (!id || seen.has(id)) return;
+                seen.add(id);
+                ids.push(id);
+            };
+            const visit = (candidate) => {
+                if (!candidate) return;
+                if (candidate.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                    for (const child of candidate.childNodes) visit(child);
+                    return;
+                }
+                if (candidate.nodeType === Node.ELEMENT_NODE) {
+                    const enclosing = candidate.matches(".issue-row")
+                        ? candidate
+                        : candidate.closest(".issue-row");
+                    if (enclosing) {
+                        addRow(enclosing);
+                        return;
+                    }
+                    for (const row of candidate.querySelectorAll(".issue-row")) addRow(row);
+                    return;
+                }
+                if (candidate.parentElement) addRow(candidate.parentElement.closest(".issue-row"));
+            };
+            visit(node);
+            return ids;
+        };
+        const rowIDForTarget = (node) => rowIDsForNode(node)[0] || "";
+        const recordRowOperation = (bucket, node) => {
+            for (const id of rowIDsForNode(node)) rowOperations[bucket].push(id);
+        };
+        const recordRowTarget = (bucket, node) => {
+            rowOperations[bucket].push(node);
+        };
+        const wrap = (owner, name, counter, onCall) => {
             const original = owner[name];
             owner[name] = function(...args) {
                 operations[counter]++;
+                if (onCall) onCall.call(this, args);
                 return original.apply(this, args);
             };
         };
         wrap(Document.prototype, "createElement", "createElement");
         wrap(Document.prototype, "createTextNode", "createTextNode");
-        wrap(Node.prototype, "appendChild", "appendChild");
-        wrap(Node.prototype, "removeChild", "removeChild");
-        wrap(Node.prototype, "replaceChild", "replaceChild");
-        wrap(Node.prototype, "insertBefore", "insertBefore");
+        wrap(Document.prototype, "createComment", "createComment");
+        wrap(Document.prototype, "createDocumentFragment", "createDocumentFragment");
+        wrap(Node.prototype, "appendChild", "appendChild", function(args) {
+            recordRowOperation("placements", args[0]);
+        });
+        wrap(Node.prototype, "removeChild", "removeChild", function(args) {
+            recordRowOperation("removals", args[0]);
+        });
+        wrap(Node.prototype, "replaceChild", "replaceChild", function(args) {
+            recordRowOperation("placements", args[0]);
+            recordRowOperation("removals", args[1]);
+        });
+        wrap(Node.prototype, "insertBefore", "insertBefore", function(args) {
+            recordRowOperation("placements", args[0]);
+        });
         wrap(Element.prototype, "setAttribute", "setAttribute");
         wrap(Element.prototype, "removeAttribute", "removeAttribute");
-        wrap(EventTarget.prototype, "addEventListener", "addEventListener");
-        wrap(EventTarget.prototype, "removeEventListener", "removeEventListener");
+        wrap(EventTarget.prototype, "addEventListener", "addEventListener", function() {
+            recordRowTarget("listenerAdds", this);
+        });
+        wrap(EventTarget.prototype, "removeEventListener", "removeEventListener", function() {
+            recordRowTarget("listenerRemoves", this);
+        });
+        wrap(HTMLElement.prototype, "focus", "focus");
 
         const nodeValue = Object.getOwnPropertyDescriptor(Node.prototype, "nodeValue");
         Object.defineProperty(Node.prototype, "nodeValue", {
@@ -1174,6 +1679,34 @@ function installDashboardAuditExpression(names) {
                 return selectValue.set.call(this, value);
             },
         });
+        if (typeof HTMLInputElement.prototype.setSelectionRange === "function") {
+            const setSelectionRange = HTMLInputElement.prototype.setSelectionRange;
+            HTMLInputElement.prototype.setSelectionRange = function(...args) {
+                operations.setSelectionRange++;
+                return setSelectionRange.apply(this, args);
+            };
+        }
+
+        const requestAnimationFrame = window.requestAnimationFrame;
+        if (typeof requestAnimationFrame === "function") {
+            window.requestAnimationFrame = function(callback) {
+                scheduling.requestAnimationFrame++;
+                return requestAnimationFrame.call(window, (...args) => {
+                    scheduling.requestAnimationFrameCallbacks++;
+                    return callback(...args);
+                });
+            };
+        }
+        const queueMicrotask = window.queueMicrotask;
+        if (typeof queueMicrotask === "function") {
+            window.queueMicrotask = function(callback) {
+                scheduling.queueMicrotask++;
+                return queueMicrotask.call(window, () => {
+                    scheduling.queueMicrotaskCallbacks++;
+                    return callback();
+                });
+            };
+        }
 
         const observe = (selector, key, options) => {
             const node = document.querySelector(selector);
@@ -1210,6 +1743,20 @@ function installDashboardAuditExpression(names) {
             }
             return { renders, patches, memoSkips: skips };
         }
+
+        function clearRowOperations(next) {
+            for (const key of Object.keys(next)) next[key].length = 0;
+        }
+
+        function snapshotRowOperations(next) {
+            const rowIDs = (values) => values.map((value) => typeof value === "string" ? value : rowIDForTarget(value)).filter(Boolean);
+            return {
+                placements: [...next.placements],
+                removals: [...next.removals],
+                listenerAdds: rowIDs(next.listenerAdds),
+                listenerRemoves: rowIDs(next.listenerRemoves),
+            };
+        }
     })()`;
 }
 
@@ -1242,6 +1789,7 @@ function assertRowDataChangeReport(report, label) {
         throw new Error(`APP FAILURE: IssueRow memo skips not observed for ${label}: ${JSON.stringify(report.memoDeltas)}`);
     }
     if (report.operations.createElement !== 0 || report.operations.createTextNode !== 0 ||
+        report.operations.createComment !== 0 || report.operations.createDocumentFragment !== 0 ||
         report.operations.appendChild !== 0 || report.operations.removeChild !== 0 ||
         report.operations.replaceChild !== 0 || report.operations.insertBefore !== 0) {
         throw new Error(`APP FAILURE: structural DOM operations during ${label}: ${JSON.stringify(report.operations)}`);
