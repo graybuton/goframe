@@ -128,11 +128,15 @@ try {
     const focusReport = await finishScenario(client, "focus-search");
     assertFocusOnlyReport(focusReport);
 
+    await captureDashboardRowWindow(client, "__dashboardSearchBillingBefore");
     await startScenario(client, "search-billing");
     const searchStart = Date.now();
-    await setInputValue(client, "#dashboard-search", "billing");
+    await setInputValue(client, "#dashboard-search", "billing", false);
     timings.push({ step: "search-update", ms: Date.now() - searchStart });
     const searchReport = await finishScenario(client, "search-billing");
+    const searchAttribution = await readDashboardRowAttribution(client, "__dashboardSearchBillingBefore");
+    assertDashboardRowAttribution(searchReport, searchAttribution, "search-billing");
+    console.log(`dashboard DOM bridge search-billing attribution: ${JSON.stringify(buildDashboardBridgeAttribution(searchReport, searchAttribution))}`);
     const searchState = await client.evaluate(`(() => {
         const rows = document.querySelectorAll(".issue-row").length;
         const summary = document.querySelector("[data-testid='visible-summary']")?.textContent.trim();
@@ -350,12 +354,14 @@ try {
             window.__dashboardBeforeSortNodes[node.id] = node;
         }
     })()`);
+    await captureDashboardRowWindow(client, "__dashboardSortAttributionBefore");
 
     await startScenario(client, "sort-priority");
     const sortStart = Date.now();
     await setSelectValue(client, "#sort-mode", "priority");
     timings.push({ step: "sort-update", ms: Date.now() - sortStart });
     const sortReport = await finishScenario(client, "sort-priority");
+    const sortAttribution = await readDashboardRowAttribution(client, "__dashboardSortAttributionBefore");
     const sorted = await client.evaluate(`(() => {
         const after = [...document.querySelectorAll(".issue-row")].slice(0, 8).map((node) => node.id);
         const overlap = after.find((id) => window.__dashboardBeforeSort.includes(id));
@@ -372,6 +378,13 @@ try {
         { changed: true, headerSame: true, overlapPreserved: true },
         "dashboard sort updates virtual row window without replacing visible survivors",
     );
+    if (searchAttribution.retainedCount === 0) {
+        assertDashboardRowAttribution(sortReport, sortAttribution, "sort-priority fallback");
+        if (sortAttribution.retainedCount === 0) {
+            throw new Error(`APP FAILURE: dashboard search and sort scenarios have no retained visible rows: ${JSON.stringify({ searchAttribution, sortAttribution })}`);
+        }
+        console.log(`dashboard DOM bridge sort-priority fallback attribution: ${JSON.stringify(buildDashboardBridgeAttribution(sortReport, sortAttribution))}`);
+    }
     await assertVirtualTableSpacerStability(client, "sort");
 
     await startScenario(client, "status-blocked");
@@ -522,14 +535,14 @@ async function clearClientStorage(client) {
     }
 }
 
-async function setInputValue(client, selector, value) {
-    await client.callFunction(`function(selector, value) {
+async function setInputValue(client, selector, value, focus = true) {
+    await client.callFunction(`function(selector, value, focus) {
         const input = document.querySelector(selector);
-        input.focus();
+        if (focus) input.focus();
         input.value = value;
         input.dispatchEvent(new Event("input", { bubbles: true }));
         return true;
-    }`, selector, value);
+    }`, selector, value, focus);
     await wait(140);
 }
 
@@ -588,9 +601,9 @@ async function finishScenario(client, label) {
 function assertFocusOnlyReport(report) {
     const nonZeroRenders = Object.entries(report.renderDeltas).filter(([, value]) => value !== 0);
     const nonZeroPatches = Object.entries(report.patchDeltas).filter(([, value]) => value !== 0);
-    const nonZeroOperations = Object.entries(report.operations).filter(([, value]) => value !== 0);
+    const nonZeroOperations = Object.entries(report.operations).filter(([name, value]) => name !== "focus" && value !== 0);
     const nonZeroMutations = Object.entries(report.mutations).filter(([, value]) => value !== 0);
-    if (nonZeroRenders.length || nonZeroPatches.length || nonZeroOperations.length || nonZeroMutations.length) {
+    if (nonZeroRenders.length || nonZeroPatches.length || nonZeroOperations.length || nonZeroMutations.length || report.operations.focus !== 1) {
         throw new Error(`APP FAILURE: focus-only should not trigger runtime work: ${JSON.stringify(report)}`);
     }
     console.log("dashboard focus-only does not trigger runtime work: ok");
@@ -609,6 +622,193 @@ function assertMountedRowsBounded(rows, logicalRows, label) {
     if (rows < 0 || rows > expectedLimit || (logicalRows > 0 && rows === 0)) {
         throw new Error(`APP FAILURE: ${label}: mounted rows ${rows}, logical rows ${logicalRows}, limit ${expectedLimit}`);
     }
+}
+
+async function captureDashboardRowWindow(client, key) {
+    return await client.callFunction(`function(key) {
+        const rows = [...document.querySelectorAll(".issue-row")];
+        const nodes = {};
+        for (const row of rows) nodes[row.id] = row;
+        const snapshot = {
+            ids: rows.map((row) => row.id),
+            nodes,
+            header: document.querySelector("[data-testid='dashboard-header']"),
+            search: document.querySelector("#dashboard-search"),
+            table: document.querySelector("[data-testid='issue-table']"),
+            detail: document.querySelector("[data-testid='detail-panel']"),
+            summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+        };
+        window[key] = snapshot;
+        return { ids: snapshot.ids, count: snapshot.ids.length, summary: snapshot.summary };
+    }`, key);
+}
+
+async function readDashboardRowAttribution(client, key) {
+    return await client.callFunction(`function(key) {
+        const before = window[key];
+        if (!before) return null;
+        const rows = [...document.querySelectorAll(".issue-row")];
+        const afterIDs = rows.map((row) => row.id);
+        const afterNodes = {};
+        for (const row of rows) afterNodes[row.id] = row;
+
+        const beforeIDs = before.ids || [];
+        const beforeSet = new Set(beforeIDs);
+        const afterSet = new Set(afterIDs);
+        const retainedIDs = afterIDs.filter((id) => beforeSet.has(id));
+        const newIDs = afterIDs.filter((id) => !beforeSet.has(id));
+        const removedIDs = beforeIDs.filter((id) => !afterSet.has(id));
+        const retainedSameNodeIDs = retainedIDs.filter((id) => before.nodes[id] === afterNodes[id]);
+        const retainedRecreatedIDs = retainedIDs.filter((id) => before.nodes[id] !== afterNodes[id]);
+        const rowOperations = window.__dashboardAudit?.lastRowOperations || {};
+        const unique = (ids) => [...new Set((ids || []).filter(Boolean))];
+
+        return {
+            beforeIDs,
+            afterIDs,
+            beforeCount: beforeIDs.length,
+            afterCount: afterIDs.length,
+            retainedIDs,
+            newIDs,
+            removedIDs,
+            retainedCount: retainedIDs.length,
+            newCount: newIDs.length,
+            removedCount: removedIDs.length,
+            retainedSameNodeIDs,
+            retainedSameNodeCount: retainedSameNodeIDs.length,
+            retainedRecreatedIDs,
+            orderChanged: JSON.stringify(beforeIDs) !== JSON.stringify(afterIDs),
+            headerSame: before.header === document.querySelector("[data-testid='dashboard-header']"),
+            searchSame: before.search === document.querySelector("#dashboard-search"),
+            tableSame: before.table === document.querySelector("[data-testid='issue-table']"),
+            detailSame: before.detail === document.querySelector("[data-testid='detail-panel']"),
+            beforeSummary: before.summary,
+            afterSummary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
+            activeElementID: document.activeElement?.id || "",
+            rowOperationIDs: {
+                placementIDs: unique(rowOperations.placements),
+                removalIDs: unique(rowOperations.removals),
+                listenerAddIDs: unique(rowOperations.listenerAdds),
+                listenerRemoveIDs: unique(rowOperations.listenerRemoves),
+            },
+            rowOperationCounts: {
+                placements: (rowOperations.placements || []).length,
+                removals: (rowOperations.removals || []).length,
+                listenerAdds: (rowOperations.listenerAdds || []).length,
+                listenerRemoves: (rowOperations.listenerRemoves || []).length,
+            },
+        };
+    }`, key);
+}
+
+function assertDashboardRowAttribution(report, attribution, label) {
+    if (!attribution) {
+        throw new Error(`APP FAILURE: missing dashboard row attribution for ${label}`);
+    }
+    const visible = parseSummary(attribution.afterSummary).visible;
+    assertMountedRowsBounded(attribution.afterCount, visible, `dashboard ${label} mounted rows`);
+    if (attribution.retainedCount + attribution.newCount !== attribution.afterCount ||
+        attribution.retainedCount + attribution.removedCount !== attribution.beforeCount) {
+        throw new Error(`APP FAILURE: inconsistent dashboard row attribution for ${label}: ${JSON.stringify(attribution)}`);
+    }
+    if (attribution.retainedSameNodeCount !== attribution.retainedCount || attribution.retainedRecreatedIDs.length !== 0) {
+        throw new Error(`APP FAILURE: retained dashboard rows were recreated during ${label}: ${JSON.stringify(attribution)}`);
+    }
+    if (!attribution.headerSame || !attribution.searchSame || !attribution.tableSame || !attribution.detailSame) {
+        throw new Error(`APP FAILURE: dashboard shell node was replaced during ${label}: ${JSON.stringify(attribution)}`);
+    }
+    for (const [name, value] of Object.entries(report.operations)) {
+        if (!Number.isFinite(value) || value < 0) {
+            throw new Error(`APP FAILURE: invalid ${name} operation count during ${label}: ${JSON.stringify(report)}`);
+        }
+    }
+    for (const [name, value] of Object.entries(report.scheduling)) {
+        if (!Number.isFinite(value) || value < 0) {
+            throw new Error(`APP FAILURE: invalid ${name} scheduling count during ${label}: ${JSON.stringify(report)}`);
+        }
+    }
+    if (report.flushes !== 1 || report.scheduling.requestAnimationFrame < 1 ||
+        report.scheduling.requestAnimationFrameCallbacks < 1) {
+        throw new Error(`APP FAILURE: ${label} should use one bounded rAF dirty flush: ${JSON.stringify(report)}`);
+    }
+}
+
+function buildDashboardBridgeAttribution(report, rows) {
+    const operations = report.operations;
+    const structuralOperationTotal = operations.createElement + operations.createTextNode + operations.createComment +
+        operations.appendChild + operations.insertBefore + operations.removeChild + operations.replaceChild;
+    const creationOperationTotal = operations.createElement + operations.createTextNode + operations.createComment;
+    const placementOperationTotal = operations.appendChild + operations.insertBefore;
+    const removalOperationTotal = operations.removeChild + operations.replaceChild;
+    const textPropertyAttributeTotal = operations.setTextNodeValue + operations.setAttribute +
+        operations.removeAttribute + operations.setProperty;
+    const listenerAddsPerNewVisibleRow = rows.newCount > 0 ? operations.addEventListener / rows.newCount : null;
+    const listenerRemovesPerRemovedVisibleRow = rows.removedCount > 0 ? operations.removeEventListener / rows.removedCount : null;
+    const retainedPlacementIDs = rows.rowOperationIDs.placementIDs.filter((id) => rows.retainedIDs.includes(id));
+    const listenerChurnTracksRowReplacement = rows.newCount > 0 && rows.removedCount > 0 &&
+        operations.addEventListener === rows.rowOperationCounts.listenerAdds &&
+        operations.removeEventListener === rows.rowOperationCounts.listenerRemoves &&
+        operations.addEventListener === operations.removeEventListener
+        ? true
+        : "unknown";
+    const retainedRowsReinsertedSuspected = retainedPlacementIDs.length > 0;
+    const broadCommitBufferJustified = listenerChurnTracksRowReplacement === true &&
+        !retainedRowsReinsertedSuspected && rows.retainedRecreatedIDs.length === 0
+        ? false
+        : "unknown";
+
+    return {
+        scenario: report.label,
+        flushes: report.flushes,
+        scheduling: report.scheduling,
+        operations,
+        rows: {
+            beforeCount: rows.beforeCount,
+            afterCount: rows.afterCount,
+            beforeIDs: rows.beforeIDs,
+            afterIDs: rows.afterIDs,
+            retainedIDs: rows.retainedIDs,
+            newIDs: rows.newIDs,
+            removedIDs: rows.removedIDs,
+            retainedSameNodeCount: rows.retainedSameNodeCount,
+            retainedRecreatedIDs: rows.retainedRecreatedIDs,
+            orderChanged: rows.orderChanged,
+        },
+        retention: {
+            headerSame: rows.headerSame,
+            searchSame: rows.searchSame,
+            tableSame: rows.tableSame,
+            detailSame: rows.detailSame,
+            activeElementID: rows.activeElementID,
+        },
+        components: {
+            renderDeltas: report.renderDeltas,
+            patchDeltas: report.patchDeltas,
+        },
+        derived: {
+            structuralOperationTotal,
+            creationOperationTotal,
+            placementOperationTotal,
+            removalOperationTotal,
+            textPropertyAttributeTotal,
+            listenerAdds: operations.addEventListener,
+            listenerRemoves: operations.removeEventListener,
+            listenerNet: operations.addEventListener - operations.removeEventListener,
+            retainedVisibleRows: rows.retainedCount,
+            newVisibleRows: rows.newCount,
+            removedVisibleRows: rows.removedCount,
+            retainedRowsRecreated: false,
+            retainedRowPlacementIDs: retainedPlacementIDs,
+            listenerAddsPerNewVisibleRow,
+            listenerRemovesPerRemovedVisibleRow,
+            listenerChurnTracksRowReplacement,
+            retainedRowsReinsertedSuspected,
+            broadCommitBufferJustified,
+            narrowPrototypeCandidate: retainedRowsReinsertedSuspected
+                ? "measure retained row-range placement separately"
+                : null,
+        },
+    };
 }
 
 async function assertDashboardTableLayout(client, label) {
@@ -1056,6 +1256,7 @@ function emptyOperations() {
     return {
         createElement: 0,
         createTextNode: 0,
+        createComment: 0,
         appendChild: 0,
         removeChild: 0,
         replaceChild: 0,
@@ -1066,6 +1267,26 @@ function emptyOperations() {
         setProperty: 0,
         addEventListener: 0,
         removeEventListener: 0,
+        focus: 0,
+        setSelectionRange: 0,
+    };
+}
+
+function emptyScheduling() {
+    return {
+        requestAnimationFrame: 0,
+        requestAnimationFrameCallbacks: 0,
+        queueMicrotask: 0,
+        queueMicrotaskCallbacks: 0,
+    };
+}
+
+function emptyRowOperations() {
+    return {
+        placements: [],
+        removals: [],
+        listenerAdds: [],
+        listenerRemoves: [],
     };
 }
 
@@ -1086,11 +1307,21 @@ function installDashboardAuditExpression(names) {
 
         const operations = ${JSON.stringify(emptyOperations())};
         const mutations = ${JSON.stringify(emptyMutations())};
+        const scheduling = ${JSON.stringify(emptyScheduling())};
+        const rowOperations = ${JSON.stringify(emptyRowOperations())};
         const componentNames = ${JSON.stringify(names)};
+        const renderReports = [];
+        window.goframeRenderProbe = (phase, duration) => {
+            renderReports.push({ phase, duration });
+        };
         const audit = {
             operations,
             mutations,
+            scheduling,
+            rowOperations,
+            lastRowOperations: null,
             baseline: null,
+            renderBaseline: 0,
             startedAt: 0,
             label: "",
             start(label) {
@@ -1098,7 +1329,11 @@ function installDashboardAuditExpression(names) {
                 this.startedAt = performance.now();
                 for (const key of Object.keys(this.operations)) this.operations[key] = 0;
                 for (const key of Object.keys(this.mutations)) this.mutations[key] = 0;
+                for (const key of Object.keys(this.scheduling)) this.scheduling[key] = 0;
+                clearRowOperations(this.rowOperations);
+                this.lastRowOperations = null;
                 this.baseline = snapshotCounts(componentNames);
+                this.renderBaseline = renderReports.length;
             },
             finish(label) {
             const next = snapshotCounts(componentNames);
@@ -1112,37 +1347,73 @@ function installDashboardAuditExpression(names) {
             for (const name of componentNames) {
                 memoDeltas[name] = next.memoSkips[name] - this.baseline.memoSkips[name];
             }
+            const updates = renderReports.slice(this.renderBaseline).filter((report) => report.phase === "update");
+            const rowOperationSnapshot = snapshotRowOperations(this.rowOperations);
+            this.lastRowOperations = rowOperationSnapshot;
             return {
                 label,
                 durationMs: Math.round((performance.now() - this.startedAt) * 100) / 100,
+                flushes: updates.length,
+                scheduling: { ...this.scheduling },
                 renderDeltas,
                 patchDeltas,
                 memoDeltas,
                 operations: { ...this.operations },
                 mutations: { ...this.mutations },
+                rowOperations: rowOperationSnapshot,
                 rows: document.querySelectorAll(".issue-row").length,
                 summary: document.querySelector("[data-testid='visible-summary']")?.textContent.trim() || "",
             };
             },
         };
 
-        const wrap = (owner, name, counter) => {
+        const rowIDForNode = (node) => {
+            let element = node;
+            if (element && element.nodeType !== Node.ELEMENT_NODE) element = element.parentElement;
+            if (!element || typeof element.closest !== "function") return "";
+            const row = element.matches(".issue-row") ? element : element.closest(".issue-row");
+            return row?.id || "";
+        };
+        const recordRowOperation = (bucket, node) => {
+            const id = rowIDForNode(node);
+            if (id) rowOperations[bucket].push(id);
+        };
+        const recordRowTarget = (bucket, node) => {
+            rowOperations[bucket].push(node);
+        };
+        const wrap = (owner, name, counter, onCall) => {
             const original = owner[name];
             owner[name] = function(...args) {
                 operations[counter]++;
+                if (onCall) onCall.call(this, args);
                 return original.apply(this, args);
             };
         };
         wrap(Document.prototype, "createElement", "createElement");
         wrap(Document.prototype, "createTextNode", "createTextNode");
-        wrap(Node.prototype, "appendChild", "appendChild");
-        wrap(Node.prototype, "removeChild", "removeChild");
-        wrap(Node.prototype, "replaceChild", "replaceChild");
-        wrap(Node.prototype, "insertBefore", "insertBefore");
+        wrap(Document.prototype, "createComment", "createComment");
+        wrap(Node.prototype, "appendChild", "appendChild", function(args) {
+            recordRowOperation("placements", args[0]);
+        });
+        wrap(Node.prototype, "removeChild", "removeChild", function(args) {
+            recordRowOperation("removals", args[0]);
+        });
+        wrap(Node.prototype, "replaceChild", "replaceChild", function(args) {
+            recordRowOperation("placements", args[0]);
+            recordRowOperation("removals", args[1]);
+        });
+        wrap(Node.prototype, "insertBefore", "insertBefore", function(args) {
+            recordRowOperation("placements", args[0]);
+        });
         wrap(Element.prototype, "setAttribute", "setAttribute");
         wrap(Element.prototype, "removeAttribute", "removeAttribute");
-        wrap(EventTarget.prototype, "addEventListener", "addEventListener");
-        wrap(EventTarget.prototype, "removeEventListener", "removeEventListener");
+        wrap(EventTarget.prototype, "addEventListener", "addEventListener", function() {
+            recordRowTarget("listenerAdds", this);
+        });
+        wrap(EventTarget.prototype, "removeEventListener", "removeEventListener", function() {
+            recordRowTarget("listenerRemoves", this);
+        });
+        wrap(HTMLElement.prototype, "focus", "focus");
 
         const nodeValue = Object.getOwnPropertyDescriptor(Node.prototype, "nodeValue");
         Object.defineProperty(Node.prototype, "nodeValue", {
@@ -1174,6 +1445,34 @@ function installDashboardAuditExpression(names) {
                 return selectValue.set.call(this, value);
             },
         });
+        if (typeof HTMLInputElement.prototype.setSelectionRange === "function") {
+            const setSelectionRange = HTMLInputElement.prototype.setSelectionRange;
+            HTMLInputElement.prototype.setSelectionRange = function(...args) {
+                operations.setSelectionRange++;
+                return setSelectionRange.apply(this, args);
+            };
+        }
+
+        const requestAnimationFrame = window.requestAnimationFrame;
+        if (typeof requestAnimationFrame === "function") {
+            window.requestAnimationFrame = function(callback) {
+                scheduling.requestAnimationFrame++;
+                return requestAnimationFrame.call(window, (...args) => {
+                    scheduling.requestAnimationFrameCallbacks++;
+                    return callback(...args);
+                });
+            };
+        }
+        const queueMicrotask = window.queueMicrotask;
+        if (typeof queueMicrotask === "function") {
+            window.queueMicrotask = function(callback) {
+                scheduling.queueMicrotask++;
+                return queueMicrotask.call(window, () => {
+                    scheduling.queueMicrotaskCallbacks++;
+                    return callback();
+                });
+            };
+        }
 
         const observe = (selector, key, options) => {
             const node = document.querySelector(selector);
@@ -1209,6 +1508,20 @@ function installDashboardAuditExpression(names) {
                 skips[name] = memoSkips[name] || 0;
             }
             return { renders, patches, memoSkips: skips };
+        }
+
+        function clearRowOperations(next) {
+            for (const key of Object.keys(next)) next[key].length = 0;
+        }
+
+        function snapshotRowOperations(next) {
+            const rowIDs = (values) => values.map((value) => typeof value === "string" ? value : rowIDForNode(value)).filter(Boolean);
+            return {
+                placements: [...next.placements],
+                removals: [...next.removals],
+                listenerAdds: rowIDs(next.listenerAdds),
+                listenerRemoves: rowIDs(next.listenerRemoves),
+            };
         }
     })()`;
 }
