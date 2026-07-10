@@ -681,6 +681,16 @@ async function readDashboardRowAttribution(client, key) {
         const retainedRecreatedIDs = retainedIDs.filter((id) => before.nodes[id] !== afterNodes[id]);
         const rowOperations = window.__dashboardAudit?.lastRowOperations || {};
         const unique = (ids) => [...new Set((ids || []).filter(Boolean))];
+        const countStrings = (values) => {
+            const counts = {};
+            for (const value of values || []) {
+                if (!value) continue;
+                counts[value] = (counts[value] || 0) + 1;
+            }
+            return Object.fromEntries(
+                Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)),
+            );
+        };
 
         return {
             beforeIDs,
@@ -716,6 +726,8 @@ async function readDashboardRowAttribution(client, key) {
                 listenerAdds: (rowOperations.listenerAdds || []).length,
                 listenerRemoves: (rowOperations.listenerRemoves || []).length,
             },
+            listenerAddCountsByRow: countStrings(rowOperations.listenerAdds),
+            listenerRemoveCountsByRow: countStrings(rowOperations.listenerRemoves),
         };
     }`, key);
 }
@@ -723,6 +735,14 @@ async function readDashboardRowAttribution(client, key) {
 function sameStringSet(left, right) {
     const normalize = (values) => [...new Set(values || [])].sort();
     return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+function sumCounts(counts) {
+    return Object.values(counts || {}).reduce((total, value) => total + value, 0);
+}
+
+function everyIDHasCount(ids, counts, expected) {
+    return (ids || []).every((id) => counts?.[id] === expected);
 }
 
 function assertDashboardRowAttribution(report, attribution, label) {
@@ -743,8 +763,18 @@ function assertDashboardRowAttribution(report, attribution, label) {
     }
     const listenerAddTargetsMatchNewRows = sameStringSet(attribution.rowOperationIDs.listenerAddIDs, attribution.newIDs);
     const listenerRemoveTargetsMatchRemovedRows = sameStringSet(attribution.rowOperationIDs.listenerRemoveIDs, attribution.removedIDs);
+    const listenerAddHistogramKeysMatchNewRows = sameStringSet(Object.keys(attribution.listenerAddCountsByRow), attribution.newIDs);
+    const listenerRemoveHistogramKeysMatchRemovedRows = sameStringSet(Object.keys(attribution.listenerRemoveCountsByRow), attribution.removedIDs);
+    const everyNewRowHasTwoAdds = everyIDHasCount(attribution.newIDs, attribution.listenerAddCountsByRow, 2);
+    const everyRemovedRowHasTwoRemoves = everyIDHasCount(attribution.removedIDs, attribution.listenerRemoveCountsByRow, 2);
+    const listenerAddHistogramTotal = sumCounts(attribution.listenerAddCountsByRow);
+    const listenerRemoveHistogramTotal = sumCounts(attribution.listenerRemoveCountsByRow);
     // Each mounted IssueRow currently registers its row link and toggle listeners.
     if (!listenerAddTargetsMatchNewRows || !listenerRemoveTargetsMatchRemovedRows ||
+        !listenerAddHistogramKeysMatchNewRows || !listenerRemoveHistogramKeysMatchRemovedRows ||
+        !everyNewRowHasTwoAdds || !everyRemovedRowHasTwoRemoves ||
+        listenerAddHistogramTotal !== attribution.rowOperationCounts.listenerAdds ||
+        listenerRemoveHistogramTotal !== attribution.rowOperationCounts.listenerRemoves ||
         attribution.rowOperationCounts.listenerAdds !== report.operations.addEventListener ||
         attribution.rowOperationCounts.listenerRemoves !== report.operations.removeEventListener ||
         report.operations.addEventListener !== attribution.newCount * 2 ||
@@ -754,6 +784,8 @@ function assertDashboardRowAttribution(report, attribution, label) {
             removedIDs: attribution.removedIDs,
             listenerAddIDs: attribution.rowOperationIDs.listenerAddIDs,
             listenerRemoveIDs: attribution.rowOperationIDs.listenerRemoveIDs,
+            listenerAddCountsByRow: attribution.listenerAddCountsByRow,
+            listenerRemoveCountsByRow: attribution.listenerRemoveCountsByRow,
             listenerAdds: report.operations.addEventListener,
             listenerRemoves: report.operations.removeEventListener,
             rowOperationCounts: attribution.rowOperationCounts,
@@ -789,7 +821,17 @@ function buildDashboardBridgeAttribution(report, rows) {
     const retainedPlacementIDs = rows.rowOperationIDs.placementIDs.filter((id) => rows.retainedIDs.includes(id));
     const listenerAddTargetsMatchNewRows = sameStringSet(rows.rowOperationIDs.listenerAddIDs, rows.newIDs);
     const listenerRemoveTargetsMatchRemovedRows = sameStringSet(rows.rowOperationIDs.listenerRemoveIDs, rows.removedIDs);
+    const listenerAddHistogramKeysMatchNewRows = sameStringSet(Object.keys(rows.listenerAddCountsByRow), rows.newIDs);
+    const listenerRemoveHistogramKeysMatchRemovedRows = sameStringSet(Object.keys(rows.listenerRemoveCountsByRow), rows.removedIDs);
+    const everyNewRowHasTwoAdds = everyIDHasCount(rows.newIDs, rows.listenerAddCountsByRow, 2);
+    const everyRemovedRowHasTwoRemoves = everyIDHasCount(rows.removedIDs, rows.listenerRemoveCountsByRow, 2);
+    const listenerAddHistogramTotal = sumCounts(rows.listenerAddCountsByRow);
+    const listenerRemoveHistogramTotal = sumCounts(rows.listenerRemoveCountsByRow);
     const listenerChurnTracksRowReplacement = listenerAddTargetsMatchNewRows && listenerRemoveTargetsMatchRemovedRows &&
+        listenerAddHistogramKeysMatchNewRows && listenerRemoveHistogramKeysMatchRemovedRows &&
+        everyNewRowHasTwoAdds && everyRemovedRowHasTwoRemoves &&
+        listenerAddHistogramTotal === rows.rowOperationCounts.listenerAdds &&
+        listenerRemoveHistogramTotal === rows.rowOperationCounts.listenerRemoves &&
         operations.addEventListener === rows.rowOperationCounts.listenerAdds &&
         operations.removeEventListener === rows.rowOperationCounts.listenerRemoves &&
         operations.addEventListener === rows.newCount * 2 &&
@@ -833,10 +875,16 @@ function buildDashboardBridgeAttribution(report, rows) {
         listeners: {
             addedRowIDs: rows.rowOperationIDs.listenerAddIDs,
             removedRowIDs: rows.rowOperationIDs.listenerRemoveIDs,
+            addCountsByRow: rows.listenerAddCountsByRow,
+            removeCountsByRow: rows.listenerRemoveCountsByRow,
             addCalls: rows.rowOperationCounts.listenerAdds,
             removeCalls: rows.rowOperationCounts.listenerRemoves,
             uniqueAddedRowsMatchNewRows: listenerAddTargetsMatchNewRows,
             uniqueRemovedRowsMatchRemovedRows: listenerRemoveTargetsMatchRemovedRows,
+            addHistogramKeysMatchNewRows: listenerAddHistogramKeysMatchNewRows,
+            removeHistogramKeysMatchRemovedRows: listenerRemoveHistogramKeysMatchRemovedRows,
+            everyNewRowHasTwoAdds,
+            everyRemovedRowHasTwoRemoves,
             addsPerNewVisibleRow: listenerAddsPerNewVisibleRow,
             removesPerRemovedVisibleRow: listenerRemovesPerRemovedVisibleRow,
         },
