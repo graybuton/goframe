@@ -726,6 +726,7 @@ async function readDashboardRowAttribution(client, key) {
                 listenerAdds: (rowOperations.listenerAdds || []).length,
                 listenerRemoves: (rowOperations.listenerRemoves || []).length,
             },
+            placementCountsByRow: countStrings(rowOperations.placements),
             listenerAddCountsByRow: countStrings(rowOperations.listenerAdds),
             listenerRemoveCountsByRow: countStrings(rowOperations.listenerRemoves),
         };
@@ -745,6 +746,15 @@ function everyIDHasCount(ids, counts, expected) {
     return (ids || []).every((id) => counts?.[id] === expected);
 }
 
+function assertSingleRAFScheduledUpdate(report, label) {
+    const scheduling = report.scheduling;
+    if (report.flushes !== 1 || scheduling.requestAnimationFrame !== 1 ||
+        scheduling.requestAnimationFrameCallbacks !== 1 || scheduling.queueMicrotask !== 0 ||
+        scheduling.queueMicrotaskCallbacks !== 0) {
+        throw new Error(`APP FAILURE: ${label} should use one rAF dirty flush with no microtask fallback: ${JSON.stringify(report)}`);
+    }
+}
+
 function assertDashboardRowAttribution(report, attribution, label) {
     if (!attribution) {
         throw new Error(`APP FAILURE: missing dashboard row attribution for ${label}`);
@@ -760,6 +770,25 @@ function assertDashboardRowAttribution(report, attribution, label) {
     }
     if (!attribution.headerSame || !attribution.searchSame || !attribution.tableSame || !attribution.detailSame) {
         throw new Error(`APP FAILURE: dashboard shell node was replaced during ${label}: ${JSON.stringify(attribution)}`);
+    }
+    const placementIDs = attribution.rowOperationIDs.placementIDs;
+    const newRowPlacementIDs = placementIDs.filter((id) => attribution.newIDs.includes(id));
+    const missingNewRowPlacementIDs = attribution.newIDs.filter((id) => !placementIDs.includes(id));
+    const retainedRowPlacementIDs = placementIDs.filter((id) => attribution.retainedIDs.includes(id));
+    if ((attribution.newCount > 0 && missingNewRowPlacementIDs.length !== 0) || retainedRowPlacementIDs.length !== 0) {
+        throw new Error(`APP FAILURE: row placement attribution does not match ${label} row replacement: ${JSON.stringify({
+            newIDs: attribution.newIDs,
+            retainedIDs: attribution.retainedIDs,
+            placementIDs,
+            newRowPlacementIDs,
+            missingNewRowPlacementIDs,
+            retainedRowPlacementIDs,
+            placementCountsByRow: attribution.placementCountsByRow,
+            rawPlacements: report.rowOperations.placements,
+            appendChild: report.operations.appendChild,
+            insertBefore: report.operations.insertBefore,
+            replaceChild: report.operations.replaceChild,
+        })}`);
     }
     const listenerAddTargetsMatchNewRows = sameStringSet(attribution.rowOperationIDs.listenerAddIDs, attribution.newIDs);
     const listenerRemoveTargetsMatchRemovedRows = sameStringSet(attribution.rowOperationIDs.listenerRemoveIDs, attribution.removedIDs);
@@ -801,10 +830,7 @@ function assertDashboardRowAttribution(report, attribution, label) {
             throw new Error(`APP FAILURE: invalid ${name} scheduling count during ${label}: ${JSON.stringify(report)}`);
         }
     }
-    if (report.flushes !== 1 || report.scheduling.requestAnimationFrame < 1 ||
-        report.scheduling.requestAnimationFrameCallbacks < 1) {
-        throw new Error(`APP FAILURE: ${label} should use one bounded rAF dirty flush: ${JSON.stringify(report)}`);
-    }
+    assertSingleRAFScheduledUpdate(report, label);
 }
 
 function buildDashboardBridgeAttribution(report, rows) {
@@ -818,7 +844,10 @@ function buildDashboardBridgeAttribution(report, rows) {
         operations.removeAttribute + operations.setProperty;
     const listenerAddsPerNewVisibleRow = rows.newCount > 0 ? operations.addEventListener / rows.newCount : null;
     const listenerRemovesPerRemovedVisibleRow = rows.removedCount > 0 ? operations.removeEventListener / rows.removedCount : null;
-    const retainedPlacementIDs = rows.rowOperationIDs.placementIDs.filter((id) => rows.retainedIDs.includes(id));
+    const placementIDs = rows.rowOperationIDs.placementIDs;
+    const newRowPlacementIDs = placementIDs.filter((id) => rows.newIDs.includes(id));
+    const missingNewRowPlacementIDs = rows.newIDs.filter((id) => !placementIDs.includes(id));
+    const retainedPlacementIDs = placementIDs.filter((id) => rows.retainedIDs.includes(id));
     const listenerAddTargetsMatchNewRows = sameStringSet(rows.rowOperationIDs.listenerAddIDs, rows.newIDs);
     const listenerRemoveTargetsMatchRemovedRows = sameStringSet(rows.rowOperationIDs.listenerRemoveIDs, rows.removedIDs);
     const listenerAddHistogramKeysMatchNewRows = sameStringSet(Object.keys(rows.listenerAddCountsByRow), rows.newIDs);
@@ -887,6 +916,14 @@ function buildDashboardBridgeAttribution(report, rows) {
             everyRemovedRowHasTwoRemoves,
             addsPerNewVisibleRow: listenerAddsPerNewVisibleRow,
             removesPerRemovedVisibleRow: listenerRemovesPerRemovedVisibleRow,
+        },
+        placements: {
+            rowIDs: placementIDs,
+            countsByRow: rows.placementCountsByRow,
+            attributedCalls: rows.rowOperationCounts.placements,
+            newRowIDsObserved: newRowPlacementIDs,
+            missingNewRowIDs: missingNewRowPlacementIDs,
+            retainedRowIDsObserved: retainedPlacementIDs,
         },
         derived: {
             structuralOperationTotal,
@@ -1002,7 +1039,8 @@ function assertWithinRowScrollReport(report, beforeState, state) {
     if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
         throw new Error(`APP FAILURE: within-row scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
     }
-    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+    if (report.operations.createElement !== 0 || report.operations.createComment !== 0 ||
+        report.operations.removeChild !== 0 ||
         report.operations.insertBefore !== 0 || report.operations.appendChild !== 0) {
         throw new Error(`APP FAILURE: within-row scroll should not churn DOM: ${JSON.stringify(report.operations)}`);
     }
@@ -1063,7 +1101,8 @@ function assertInsideBufferScrollReport(report, beforeState, state) {
     if (report.renderDeltas.VirtualTable !== 0 || report.renderDeltas.IssueRow !== 0) {
         throw new Error(`APP FAILURE: inside-buffer scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
     }
-    if (report.operations.createElement !== 0 || report.operations.removeChild !== 0 ||
+    if (report.operations.createElement !== 0 || report.operations.createComment !== 0 ||
+        report.operations.removeChild !== 0 ||
         report.operations.insertBefore !== 0 || report.operations.appendChild !== 0 ||
         report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
         throw new Error(`APP FAILURE: inside-buffer scroll should not churn DOM/listeners: ${JSON.stringify(report.operations)}`);
@@ -1087,7 +1126,7 @@ function assertBeyondBufferScrollReport(report, beforeState, state) {
     }
     const rowCount = Math.max(beforeState.rowCount, state.rowCount, 1);
     const changedRows = Math.max(1, countRowWindowChanges(beforeState.rowIDs, state.rowIDs));
-    const created = report.operations.createElement + report.operations.createTextNode;
+    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment;
     const inserted = report.operations.insertBefore + report.operations.appendChild;
     const createdLimit = rowCount * 16;
     const insertedLimit = rowCount * 16;
@@ -1128,7 +1167,7 @@ function assertContinuousScrollReport(report, scrollSteps, beforeState, state) {
     if (report.renderDeltas.IssueRow > maxMountedRows * maxTableRenders) {
         throw new Error(`APP FAILURE: continuous scroll rendered IssueRow too often: ${JSON.stringify(report.renderDeltas)}`);
     }
-    const created = report.operations.createElement + report.operations.createTextNode;
+    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment;
     const inserted = report.operations.insertBefore + report.operations.appendChild;
     if (created > maxMountedRows * maxTableRenders || inserted > maxMountedRows * maxTableRenders ||
         report.operations.removeChild > maxMountedRows * maxTableRenders) {
@@ -1472,16 +1511,40 @@ function installDashboardAuditExpression(names) {
             },
         };
 
-        const rowIDForNode = (node) => {
-            let element = node;
-            if (element && element.nodeType !== Node.ELEMENT_NODE) element = element.parentElement;
-            if (!element || typeof element.closest !== "function") return "";
-            const row = element.matches(".issue-row") ? element : element.closest(".issue-row");
-            return row?.id || "";
+        const rowIDsForNode = (node) => {
+            const ids = [];
+            const seen = new Set();
+            const addRow = (row) => {
+                const id = row?.id || "";
+                if (!id || seen.has(id)) return;
+                seen.add(id);
+                ids.push(id);
+            };
+            const visit = (candidate) => {
+                if (!candidate) return;
+                if (candidate.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                    for (const child of candidate.childNodes) visit(child);
+                    return;
+                }
+                if (candidate.nodeType === Node.ELEMENT_NODE) {
+                    const enclosing = candidate.matches(".issue-row")
+                        ? candidate
+                        : candidate.closest(".issue-row");
+                    if (enclosing) {
+                        addRow(enclosing);
+                        return;
+                    }
+                    for (const row of candidate.querySelectorAll(".issue-row")) addRow(row);
+                    return;
+                }
+                if (candidate.parentElement) addRow(candidate.parentElement.closest(".issue-row"));
+            };
+            visit(node);
+            return ids;
         };
+        const rowIDForTarget = (node) => rowIDsForNode(node)[0] || "";
         const recordRowOperation = (bucket, node) => {
-            const id = rowIDForNode(node);
-            if (id) rowOperations[bucket].push(id);
+            for (const id of rowIDsForNode(node)) rowOperations[bucket].push(id);
         };
         const recordRowTarget = (bucket, node) => {
             rowOperations[bucket].push(node);
@@ -1620,7 +1683,7 @@ function installDashboardAuditExpression(names) {
         }
 
         function snapshotRowOperations(next) {
-            const rowIDs = (values) => values.map((value) => typeof value === "string" ? value : rowIDForNode(value)).filter(Boolean);
+            const rowIDs = (values) => values.map((value) => typeof value === "string" ? value : rowIDForTarget(value)).filter(Boolean);
             return {
                 placements: [...next.placements],
                 removals: [...next.removals],
@@ -1660,6 +1723,7 @@ function assertRowDataChangeReport(report, label) {
         throw new Error(`APP FAILURE: IssueRow memo skips not observed for ${label}: ${JSON.stringify(report.memoDeltas)}`);
     }
     if (report.operations.createElement !== 0 || report.operations.createTextNode !== 0 ||
+        report.operations.createComment !== 0 ||
         report.operations.appendChild !== 0 || report.operations.removeChild !== 0 ||
         report.operations.replaceChild !== 0 || report.operations.insertBefore !== 0) {
         throw new Error(`APP FAILURE: structural DOM operations during ${label}: ${JSON.stringify(report.operations)}`);
