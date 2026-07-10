@@ -727,6 +727,7 @@ async function readDashboardRowAttribution(client, key) {
                 listenerRemoves: (rowOperations.listenerRemoves || []).length,
             },
             placementCountsByRow: countStrings(rowOperations.placements),
+            removalCountsByRow: countStrings(rowOperations.removals),
             listenerAddCountsByRow: countStrings(rowOperations.listenerAdds),
             listenerRemoveCountsByRow: countStrings(rowOperations.listenerRemoves),
         };
@@ -790,6 +791,34 @@ function assertDashboardRowAttribution(report, attribution, label) {
             replaceChild: report.operations.replaceChild,
         })}`);
     }
+    const removalIDs = attribution.rowOperationIDs.removalIDs;
+    const missingRemovedRowIDs = attribution.removedIDs.filter((id) => !removalIDs.includes(id));
+    const unexpectedRemovalRowIDs = removalIDs.filter((id) => !attribution.removedIDs.includes(id));
+    const retainedRowRemovalIDs = removalIDs.filter((id) => attribution.retainedIDs.includes(id));
+    const removalHistogramKeysMatchRemovedRows = sameStringSet(
+        Object.keys(attribution.removalCountsByRow),
+        attribution.removedIDs,
+    );
+    const removalHistogramTotal = sumCounts(attribution.removalCountsByRow);
+    if (!sameStringSet(removalIDs, attribution.removedIDs) || missingRemovedRowIDs.length !== 0 ||
+        unexpectedRemovalRowIDs.length !== 0 || retainedRowRemovalIDs.length !== 0 ||
+        !removalHistogramKeysMatchRemovedRows ||
+        removalHistogramTotal !== attribution.rowOperationCounts.removals) {
+        throw new Error(`APP FAILURE: row removal attribution does not match ${label} row replacement: ${JSON.stringify({
+            removedIDs: attribution.removedIDs,
+            retainedIDs: attribution.retainedIDs,
+            removalIDs,
+            missingRemovedRowIDs,
+            unexpectedRemovalRowIDs,
+            retainedRowRemovalIDs,
+            removalCountsByRow: attribution.removalCountsByRow,
+            removalHistogramTotal,
+            attributedRemovals: attribution.rowOperationCounts.removals,
+            rawRemovals: report.rowOperations.removals,
+            removeChild: report.operations.removeChild,
+            replaceChild: report.operations.replaceChild,
+        })}`);
+    }
     const listenerAddTargetsMatchNewRows = sameStringSet(attribution.rowOperationIDs.listenerAddIDs, attribution.newIDs);
     const listenerRemoveTargetsMatchRemovedRows = sameStringSet(attribution.rowOperationIDs.listenerRemoveIDs, attribution.removedIDs);
     const listenerAddHistogramKeysMatchNewRows = sameStringSet(Object.keys(attribution.listenerAddCountsByRow), attribution.newIDs);
@@ -836,9 +865,11 @@ function assertDashboardRowAttribution(report, attribution, label) {
 function buildDashboardBridgeAttribution(report, rows) {
     const operations = report.operations;
     const structuralOperationTotal = operations.createElement + operations.createTextNode + operations.createComment +
-        operations.appendChild + operations.insertBefore + operations.removeChild + operations.replaceChild;
-    const creationOperationTotal = operations.createElement + operations.createTextNode + operations.createComment;
-    const placementOperationTotal = operations.appendChild + operations.insertBefore;
+        operations.createDocumentFragment + operations.appendChild + operations.insertBefore + operations.removeChild +
+        operations.replaceChild;
+    const creationOperationTotal = operations.createElement + operations.createTextNode + operations.createComment +
+        operations.createDocumentFragment;
+    const placementOperationTotal = operations.appendChild + operations.insertBefore + operations.replaceChild;
     const removalOperationTotal = operations.removeChild + operations.replaceChild;
     const textPropertyAttributeTotal = operations.setTextNodeValue + operations.setAttribute +
         operations.removeAttribute + operations.setProperty;
@@ -848,6 +879,22 @@ function buildDashboardBridgeAttribution(report, rows) {
     const newRowPlacementIDs = placementIDs.filter((id) => rows.newIDs.includes(id));
     const missingNewRowPlacementIDs = rows.newIDs.filter((id) => !placementIDs.includes(id));
     const retainedPlacementIDs = placementIDs.filter((id) => rows.retainedIDs.includes(id));
+    const removalIDs = rows.rowOperationIDs.removalIDs;
+    const observedRemovedRowIDs = removalIDs.filter((id) => rows.removedIDs.includes(id));
+    const missingRemovedRowIDs = rows.removedIDs.filter((id) => !removalIDs.includes(id));
+    const unexpectedRemovalRowIDs = removalIDs.filter((id) => !rows.removedIDs.includes(id));
+    const retainedRowRemovalIDs = removalIDs.filter((id) => rows.retainedIDs.includes(id));
+    const removalHistogramKeysMatchRemovedRows = sameStringSet(
+        Object.keys(rows.removalCountsByRow),
+        rows.removedIDs,
+    );
+    const removalHistogramTotal = sumCounts(rows.removalCountsByRow);
+    const removalChurnTracksRowReplacement = sameStringSet(removalIDs, rows.removedIDs) &&
+        removalHistogramKeysMatchRemovedRows && missingRemovedRowIDs.length === 0 &&
+        unexpectedRemovalRowIDs.length === 0 && retainedRowRemovalIDs.length === 0 &&
+        removalHistogramTotal === rows.rowOperationCounts.removals
+        ? true
+        : "unknown";
     const listenerAddTargetsMatchNewRows = sameStringSet(rows.rowOperationIDs.listenerAddIDs, rows.newIDs);
     const listenerRemoveTargetsMatchRemovedRows = sameStringSet(rows.rowOperationIDs.listenerRemoveIDs, rows.removedIDs);
     const listenerAddHistogramKeysMatchNewRows = sameStringSet(Object.keys(rows.listenerAddCountsByRow), rows.newIDs);
@@ -869,6 +916,7 @@ function buildDashboardBridgeAttribution(report, rows) {
         : "unknown";
     const retainedRowsReinsertedSuspected = retainedPlacementIDs.length > 0;
     const immediateBroadCommitBufferJustified = listenerChurnTracksRowReplacement === true &&
+        removalChurnTracksRowReplacement === true &&
         !retainedRowsReinsertedSuspected && rows.retainedRecreatedIDs.length === 0
         ? false
         : "unknown";
@@ -925,6 +973,17 @@ function buildDashboardBridgeAttribution(report, rows) {
             missingNewRowIDs: missingNewRowPlacementIDs,
             retainedRowIDsObserved: retainedPlacementIDs,
         },
+        removals: {
+            rowIDs: removalIDs,
+            countsByRow: rows.removalCountsByRow,
+            attributedCalls: rows.rowOperationCounts.removals,
+            removedRowIDsObserved: observedRemovedRowIDs,
+            missingRemovedRowIDs,
+            unexpectedRowIDs: unexpectedRemovalRowIDs,
+            retainedRowIDsObserved: retainedRowRemovalIDs,
+            histogramKeysMatchRemovedRows: removalHistogramKeysMatchRemovedRows,
+            histogramTotal: removalHistogramTotal,
+        },
         derived: {
             structuralOperationTotal,
             creationOperationTotal,
@@ -942,6 +1001,7 @@ function buildDashboardBridgeAttribution(report, rows) {
             listenerAddsPerNewVisibleRow,
             listenerRemovesPerRemovedVisibleRow,
             listenerChurnTracksRowReplacement,
+            removalChurnTracksRowReplacement,
             retainedRowsReinsertedSuspected,
             immediateBroadCommitBufferJustified,
             bufferedAlternativeMeasured: false,
@@ -1040,6 +1100,7 @@ function assertWithinRowScrollReport(report, beforeState, state) {
         throw new Error(`APP FAILURE: within-row scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
     }
     if (report.operations.createElement !== 0 || report.operations.createComment !== 0 ||
+        report.operations.createDocumentFragment !== 0 ||
         report.operations.removeChild !== 0 ||
         report.operations.insertBefore !== 0 || report.operations.appendChild !== 0) {
         throw new Error(`APP FAILURE: within-row scroll should not churn DOM: ${JSON.stringify(report.operations)}`);
@@ -1102,6 +1163,7 @@ function assertInsideBufferScrollReport(report, beforeState, state) {
         throw new Error(`APP FAILURE: inside-buffer scroll should not render VirtualTable/IssueRow: ${JSON.stringify(report.renderDeltas)}`);
     }
     if (report.operations.createElement !== 0 || report.operations.createComment !== 0 ||
+        report.operations.createDocumentFragment !== 0 ||
         report.operations.removeChild !== 0 ||
         report.operations.insertBefore !== 0 || report.operations.appendChild !== 0 ||
         report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0) {
@@ -1126,8 +1188,9 @@ function assertBeyondBufferScrollReport(report, beforeState, state) {
     }
     const rowCount = Math.max(beforeState.rowCount, state.rowCount, 1);
     const changedRows = Math.max(1, countRowWindowChanges(beforeState.rowIDs, state.rowIDs));
-    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment;
-    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment +
+        report.operations.createDocumentFragment;
+    const inserted = report.operations.insertBefore + report.operations.appendChild + report.operations.replaceChild;
     const createdLimit = rowCount * 16;
     const insertedLimit = rowCount * 16;
     const removedLimit = rowCount * 4;
@@ -1167,8 +1230,9 @@ function assertContinuousScrollReport(report, scrollSteps, beforeState, state) {
     if (report.renderDeltas.IssueRow > maxMountedRows * maxTableRenders) {
         throw new Error(`APP FAILURE: continuous scroll rendered IssueRow too often: ${JSON.stringify(report.renderDeltas)}`);
     }
-    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment;
-    const inserted = report.operations.insertBefore + report.operations.appendChild;
+    const created = report.operations.createElement + report.operations.createTextNode + report.operations.createComment +
+        report.operations.createDocumentFragment;
+    const inserted = report.operations.insertBefore + report.operations.appendChild + report.operations.replaceChild;
     if (created > maxMountedRows * maxTableRenders || inserted > maxMountedRows * maxTableRenders ||
         report.operations.removeChild > maxMountedRows * maxTableRenders) {
         throw new Error(`APP FAILURE: continuous scroll DOM churn is unbounded: ${JSON.stringify(report.operations)}`);
@@ -1401,6 +1465,7 @@ function emptyOperations() {
         createElement: 0,
         createTextNode: 0,
         createComment: 0,
+        createDocumentFragment: 0,
         appendChild: 0,
         removeChild: 0,
         replaceChild: 0,
@@ -1560,6 +1625,7 @@ function installDashboardAuditExpression(names) {
         wrap(Document.prototype, "createElement", "createElement");
         wrap(Document.prototype, "createTextNode", "createTextNode");
         wrap(Document.prototype, "createComment", "createComment");
+        wrap(Document.prototype, "createDocumentFragment", "createDocumentFragment");
         wrap(Node.prototype, "appendChild", "appendChild", function(args) {
             recordRowOperation("placements", args[0]);
         });
@@ -1723,7 +1789,7 @@ function assertRowDataChangeReport(report, label) {
         throw new Error(`APP FAILURE: IssueRow memo skips not observed for ${label}: ${JSON.stringify(report.memoDeltas)}`);
     }
     if (report.operations.createElement !== 0 || report.operations.createTextNode !== 0 ||
-        report.operations.createComment !== 0 ||
+        report.operations.createComment !== 0 || report.operations.createDocumentFragment !== 0 ||
         report.operations.appendChild !== 0 || report.operations.removeChild !== 0 ||
         report.operations.replaceChild !== 0 || report.operations.insertBefore !== 0) {
         throw new Error(`APP FAILURE: structural DOM operations during ${label}: ${JSON.stringify(report.operations)}`);
