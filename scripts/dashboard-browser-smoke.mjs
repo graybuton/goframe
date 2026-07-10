@@ -129,9 +129,10 @@ try {
     assertFocusOnlyReport(focusReport);
 
     await captureDashboardRowWindow(client, "__dashboardSearchBillingBefore");
+    await prepareControlValue(client, "#dashboard-search", "billing");
     await startScenario(client, "search-billing");
     const searchStart = Date.now();
-    await setInputValue(client, "#dashboard-search", "billing", false);
+    await dispatchControlEvent(client, "#dashboard-search", "input");
     timings.push({ step: "search-update", ms: Date.now() - searchStart });
     const searchReport = await finishScenario(client, "search-billing");
     const searchAttribution = await readDashboardRowAttribution(client, "__dashboardSearchBillingBefore");
@@ -356,9 +357,10 @@ try {
     })()`);
     await captureDashboardRowWindow(client, "__dashboardSortAttributionBefore");
 
+    await prepareControlValue(client, "#sort-mode", "priority");
     await startScenario(client, "sort-priority");
     const sortStart = Date.now();
-    await setSelectValue(client, "#sort-mode", "priority");
+    await dispatchControlEvent(client, "#sort-mode", "change");
     timings.push({ step: "sort-update", ms: Date.now() - sortStart });
     const sortReport = await finishScenario(client, "sort-priority");
     const sortAttribution = await readDashboardRowAttribution(client, "__dashboardSortAttributionBefore");
@@ -556,6 +558,23 @@ async function setSelectValue(client, selector, value) {
     await wait(140);
 }
 
+async function prepareControlValue(client, selector, value) {
+    await client.callFunction(`function(selector, value) {
+        const control = document.querySelector(selector);
+        control.value = value;
+        return true;
+    }`, selector, value);
+}
+
+async function dispatchControlEvent(client, selector, eventType, waitDuration = 140) {
+    await client.callFunction(`function(selector, eventType) {
+        const control = document.querySelector(selector);
+        control.dispatchEvent(new Event(eventType, { bubbles: true }));
+        return true;
+    }`, selector, eventType);
+    await wait(waitDuration);
+}
+
 async function clickButtonByText(client, text) {
     await client.callFunction(`function(text) {
         const button = [...document.querySelectorAll("button")].find((node) => node.textContent.trim() === text);
@@ -701,6 +720,11 @@ async function readDashboardRowAttribution(client, key) {
     }`, key);
 }
 
+function sameStringSet(left, right) {
+    const normalize = (values) => [...new Set(values || [])].sort();
+    return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
 function assertDashboardRowAttribution(report, attribution, label) {
     if (!attribution) {
         throw new Error(`APP FAILURE: missing dashboard row attribution for ${label}`);
@@ -716,6 +740,24 @@ function assertDashboardRowAttribution(report, attribution, label) {
     }
     if (!attribution.headerSame || !attribution.searchSame || !attribution.tableSame || !attribution.detailSame) {
         throw new Error(`APP FAILURE: dashboard shell node was replaced during ${label}: ${JSON.stringify(attribution)}`);
+    }
+    const listenerAddTargetsMatchNewRows = sameStringSet(attribution.rowOperationIDs.listenerAddIDs, attribution.newIDs);
+    const listenerRemoveTargetsMatchRemovedRows = sameStringSet(attribution.rowOperationIDs.listenerRemoveIDs, attribution.removedIDs);
+    // Each mounted IssueRow currently registers its row link and toggle listeners.
+    if (!listenerAddTargetsMatchNewRows || !listenerRemoveTargetsMatchRemovedRows ||
+        attribution.rowOperationCounts.listenerAdds !== report.operations.addEventListener ||
+        attribution.rowOperationCounts.listenerRemoves !== report.operations.removeEventListener ||
+        report.operations.addEventListener !== attribution.newCount * 2 ||
+        report.operations.removeEventListener !== attribution.removedCount * 2) {
+        throw new Error(`APP FAILURE: listener churn does not match ${label} row replacement: ${JSON.stringify({
+            newIDs: attribution.newIDs,
+            removedIDs: attribution.removedIDs,
+            listenerAddIDs: attribution.rowOperationIDs.listenerAddIDs,
+            listenerRemoveIDs: attribution.rowOperationIDs.listenerRemoveIDs,
+            listenerAdds: report.operations.addEventListener,
+            listenerRemoves: report.operations.removeEventListener,
+            rowOperationCounts: attribution.rowOperationCounts,
+        })}`);
     }
     for (const [name, value] of Object.entries(report.operations)) {
         if (!Number.isFinite(value) || value < 0) {
@@ -745,14 +787,17 @@ function buildDashboardBridgeAttribution(report, rows) {
     const listenerAddsPerNewVisibleRow = rows.newCount > 0 ? operations.addEventListener / rows.newCount : null;
     const listenerRemovesPerRemovedVisibleRow = rows.removedCount > 0 ? operations.removeEventListener / rows.removedCount : null;
     const retainedPlacementIDs = rows.rowOperationIDs.placementIDs.filter((id) => rows.retainedIDs.includes(id));
-    const listenerChurnTracksRowReplacement = rows.newCount > 0 && rows.removedCount > 0 &&
+    const listenerAddTargetsMatchNewRows = sameStringSet(rows.rowOperationIDs.listenerAddIDs, rows.newIDs);
+    const listenerRemoveTargetsMatchRemovedRows = sameStringSet(rows.rowOperationIDs.listenerRemoveIDs, rows.removedIDs);
+    const listenerChurnTracksRowReplacement = listenerAddTargetsMatchNewRows && listenerRemoveTargetsMatchRemovedRows &&
         operations.addEventListener === rows.rowOperationCounts.listenerAdds &&
         operations.removeEventListener === rows.rowOperationCounts.listenerRemoves &&
-        operations.addEventListener === operations.removeEventListener
+        operations.addEventListener === rows.newCount * 2 &&
+        operations.removeEventListener === rows.removedCount * 2
         ? true
         : "unknown";
     const retainedRowsReinsertedSuspected = retainedPlacementIDs.length > 0;
-    const broadCommitBufferJustified = listenerChurnTracksRowReplacement === true &&
+    const immediateBroadCommitBufferJustified = listenerChurnTracksRowReplacement === true &&
         !retainedRowsReinsertedSuspected && rows.retainedRecreatedIDs.length === 0
         ? false
         : "unknown";
@@ -785,6 +830,16 @@ function buildDashboardBridgeAttribution(report, rows) {
             renderDeltas: report.renderDeltas,
             patchDeltas: report.patchDeltas,
         },
+        listeners: {
+            addedRowIDs: rows.rowOperationIDs.listenerAddIDs,
+            removedRowIDs: rows.rowOperationIDs.listenerRemoveIDs,
+            addCalls: rows.rowOperationCounts.listenerAdds,
+            removeCalls: rows.rowOperationCounts.listenerRemoves,
+            uniqueAddedRowsMatchNewRows: listenerAddTargetsMatchNewRows,
+            uniqueRemovedRowsMatchRemovedRows: listenerRemoveTargetsMatchRemovedRows,
+            addsPerNewVisibleRow: listenerAddsPerNewVisibleRow,
+            removesPerRemovedVisibleRow: listenerRemovesPerRemovedVisibleRow,
+        },
         derived: {
             structuralOperationTotal,
             creationOperationTotal,
@@ -803,7 +858,9 @@ function buildDashboardBridgeAttribution(report, rows) {
             listenerRemovesPerRemovedVisibleRow,
             listenerChurnTracksRowReplacement,
             retainedRowsReinsertedSuspected,
-            broadCommitBufferJustified,
+            immediateBroadCommitBufferJustified,
+            bufferedAlternativeMeasured: false,
+            broadCommitBufferBenefit: "unknown",
             narrowPrototypeCandidate: retainedRowsReinsertedSuspected
                 ? "measure retained row-range placement separately"
                 : null,
