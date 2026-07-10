@@ -69,6 +69,7 @@ try {
         "typing audit installed",
     );
 
+    await startTodoScenario(client, "controlled-input");
     await typeTodoWithRetainedSelection(client, "BC", "BXC", 1, 1);
     assertDeepEqual(
         await client.evaluate(`(() => {
@@ -123,10 +124,11 @@ try {
                 formChildList: 0,
                 list: 0,
             },
-            operations: { ...emptyOperations(), setProperty: 1 },
+            operations: { ...emptyOperations(), setProperty: 1, setSelectionRange: 1 },
         },
         "typing preserves unrelated DOM and performs no structural operations",
     );
+    assertControlledInputCharacterization(await finishTodoScenario(client, "controlled-input"));
 
     await submitTodo(client);
     assertDeepEqual(
@@ -177,6 +179,7 @@ try {
         "second single click removes changed prop",
     );
 
+    await startTodoScenario(client, "keyed-reorder");
     await client.evaluate(
         `[...document.querySelectorAll("button")].find((node) => node.textContent.trim() === "Reverse tasks").click()`,
     );
@@ -191,6 +194,7 @@ try {
         { order: ["todo-2", "todo-1"], todo1Same: true, todo2Same: true, headerRenders: 1 },
         "keyed reorder moves existing DOM nodes",
     );
+    assertKeyedReorderCharacterization(await finishTodoScenario(client, "keyed-reorder"));
 
     await client.evaluate(`document.querySelector("#todo-1 .button").click()`);
     await wait(120);
@@ -215,6 +219,30 @@ try {
         },
         "keyed removal and text patch preserve survivors",
     );
+
+    await startTodoScenario(client, "burst-state-updates");
+    await queueTodoInputBurst(client, ["burst-one", "burst-two", "burst-three"], "transient", 1, 4);
+    assertDeepEqual(
+        await client.evaluate(`(() => {
+            const input = document.querySelector("#todo-input");
+            return {
+                inputSame: window.__input === input,
+                active: document.activeElement.id,
+                value: input.value,
+                selectionStart: input.selectionStart,
+                selectionEnd: input.selectionEnd,
+            };
+        })()`),
+        {
+            inputSame: true,
+            active: "todo-input",
+            value: "burst-three",
+            selectionStart: 1,
+            selectionEnd: 4,
+        },
+        "bursty controlled updates retain input focus and selection",
+    );
+    assertBurstUpdateCharacterization(await finishTodoScenario(client, "burst-state-updates"));
 
     const persisted = await client.evaluate(`localStorage.getItem("goframe.todo.items")`);
     if (typeof persisted !== "string" || !persisted.includes("BC")) {
@@ -304,22 +332,33 @@ async function typeTodoWithRetainedSelection(client, text, transientText, select
         input.focus();
         input.value = ${JSON.stringify(text)};
         input.setSelectionRange(${selectionStart}, ${selectionEnd});
-        if (window.__GOFRAME_DEBUG__) {
-            for (const key of Object.keys(window.__GOFRAME_DEBUG__.operations)) {
-                window.__GOFRAME_DEBUG__.operations[key] = 0;
-            }
-        }
+        window.__domBridgeAudit.discardDOMWork();
         input.dispatchEvent(new Event("input", { bubbles: true }));
 
         // Force the dirty patch to restore the controlled value while retaining
         // the active input node, so selection restoration is observable.
         input.value = ${JSON.stringify(transientText)};
         input.setSelectionRange(${selectionStart}, ${selectionEnd});
-        if (window.__GOFRAME_DEBUG__) {
-            for (const key of Object.keys(window.__GOFRAME_DEBUG__.operations)) {
-                window.__GOFRAME_DEBUG__.operations[key] = 0;
-            }
+        window.__domBridgeAudit.discardDOMWork();
+        return true;
+    })()`);
+    await wait(100);
+}
+
+async function queueTodoInputBurst(client, values, transientText, selectionStart, selectionEnd) {
+    await client.evaluate(`(() => {
+        const input = document.querySelector("#todo-input");
+        input.focus();
+        for (const value of ${JSON.stringify(values)}) {
+            input.value = value;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
         }
+
+        // Keep the last state update queued while making the controlled patch
+        // restore both the value and a non-collapsed selection range.
+        input.value = ${JSON.stringify(transientText)};
+        input.setSelectionRange(${selectionStart}, ${selectionEnd});
+        window.__domBridgeAudit.discardDOMWork();
         return true;
     })()`);
     await wait(100);
@@ -517,6 +556,7 @@ function emptyOperations() {
     return {
         createElement: 0,
         createTextNode: 0,
+        createComment: 0,
         appendChild: 0,
         removeChild: 0,
         replaceChild: 0,
@@ -527,7 +567,88 @@ function emptyOperations() {
         setProperty: 0,
         addEventListener: 0,
         removeEventListener: 0,
+        focus: 0,
+        setSelectionRange: 0,
     };
+}
+
+async function startTodoScenario(client, label) {
+    const started = await client.evaluate(`window.__domBridgeAudit?.start(${JSON.stringify(label)}) ?? false`);
+    if (!started) {
+        throw new Error(`APP FAILURE: DOM bridge audit did not start ${label}`);
+    }
+}
+
+async function finishTodoScenario(client, label) {
+    const report = await client.evaluate(`window.__domBridgeAudit?.finish(${JSON.stringify(label)}) ?? null`);
+    if (!report) {
+        throw new Error(`APP FAILURE: DOM bridge audit did not finish ${label}`);
+    }
+    console.log(`todo DOM bridge ${label}: ${JSON.stringify(report)}`);
+    return report;
+}
+
+function assertSingleScheduledUpdate(report, label) {
+    if (report.flushes !== 1 || report.scheduling.requestAnimationFrame !== 1 ||
+        report.scheduling.requestAnimationFrameCallbacks !== 1 ||
+        report.scheduling.queueMicrotask !== 0 || report.scheduling.queueMicrotaskCallbacks !== 0) {
+        throw new Error(`APP FAILURE: ${label} should use one rAF-batched dirty flush: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertNoStructuralOrListenerChurn(report, label) {
+    const operations = report.operations;
+    const structural = [
+        "createElement",
+        "createTextNode",
+        "createComment",
+        "appendChild",
+        "removeChild",
+        "replaceChild",
+        "insertBefore",
+    ];
+    for (const operation of structural) {
+        if (operations[operation] !== 0) {
+            throw new Error(`APP FAILURE: ${label} unexpectedly used ${operation}: ${JSON.stringify(report)}`);
+        }
+    }
+    if (operations.addEventListener !== 0 || operations.removeEventListener !== 0) {
+        throw new Error(`APP FAILURE: ${label} churned listeners: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertControlledInputCharacterization(report) {
+    assertSingleScheduledUpdate(report, "controlled input");
+    assertNoStructuralOrListenerChurn(report, "controlled input");
+    if (report.operations.setProperty !== 1 || report.operations.focus !== 0 ||
+        report.operations.setSelectionRange !== 1 || report.flushComponents.TodoForm !== 1 ||
+        report.flushPatches.TodoForm !== 1 || report.mutations.rootChildList !== 0 ||
+        report.mutations.header !== 0 || report.mutations.formChildList !== 0 || report.mutations.list !== 0) {
+        throw new Error(`APP FAILURE: controlled-input bridge characterization changed: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertBurstUpdateCharacterization(report) {
+    assertSingleScheduledUpdate(report, "burst state updates");
+    assertNoStructuralOrListenerChurn(report, "burst state updates");
+    if (report.operations.setProperty !== 1 || report.operations.focus !== 0 ||
+        report.operations.setSelectionRange !== 1 || report.flushComponents.TodoForm !== 1 ||
+        report.flushPatches.TodoForm !== 1) {
+        throw new Error(`APP FAILURE: burst updates did not coalesce into one retained-input patch: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertKeyedReorderCharacterization(report) {
+    assertSingleScheduledUpdate(report, "keyed reorder");
+    if (report.operations.createElement !== 0 || report.operations.createTextNode !== 0 ||
+        report.operations.createComment !== 0 || report.operations.removeChild !== 0 ||
+        report.operations.addEventListener !== 0 || report.operations.removeEventListener !== 0 ||
+        // Moving a retained TodoItem component range places its start anchor,
+        // element, and end anchor without recreating the range.
+        report.operations.insertBefore !== 3 || report.flushComponents.TodoList !== 1 ||
+        report.flushPatches.TodoList !== 1) {
+        throw new Error(`APP FAILURE: keyed reorder should retain nodes and use bounded placement: ${JSON.stringify(report)}`);
+    }
 }
 
 function installTypingAuditExpression() {
@@ -546,6 +667,63 @@ function installTypingAuditExpression() {
         formChildList: 0,
         list: 0,
     };
+    const scheduling = {
+        requestAnimationFrame: 0,
+        requestAnimationFrameCallbacks: 0,
+        queueMicrotask: 0,
+        queueMicrotaskCallbacks: 0,
+    };
+    const componentNames = ["App", "Header", "TodoForm", "TodoList"];
+    const renderReports = [];
+    window.goframeRenderProbe = (phase, duration) => {
+        renderReports.push({ phase, duration });
+    };
+    const audit = {
+        baseline: null,
+        renderBaseline: 0,
+        start() {
+            for (const key of Object.keys(operations)) operations[key] = 0;
+            for (const key of Object.keys(mutations)) mutations[key] = 0;
+            for (const key of Object.keys(scheduling)) scheduling[key] = 0;
+            this.baseline = snapshotComponentCounts(componentNames);
+            this.renderBaseline = renderReports.length;
+            window.__typingBaseline = {
+                appRenders: this.baseline.renders.App,
+                headerRenders: this.baseline.renders.Header,
+                formRenders: this.baseline.renders.TodoForm,
+                listRenders: this.baseline.renders.TodoList,
+                appPatches: this.baseline.patches.App,
+                headerPatches: this.baseline.patches.Header,
+                formPatches: this.baseline.patches.TodoForm,
+                listPatches: this.baseline.patches.TodoList,
+            };
+            return true;
+        },
+        discardDOMWork() {
+            for (const key of Object.keys(operations)) operations[key] = 0;
+            for (const key of Object.keys(mutations)) mutations[key] = 0;
+        },
+        finish(label) {
+            const next = snapshotComponentCounts(componentNames);
+            const flushComponents = {};
+            const flushPatches = {};
+            for (const name of componentNames) {
+                flushComponents[name] = next.renders[name] - this.baseline.renders[name];
+                flushPatches[name] = next.patches[name] - this.baseline.patches[name];
+            }
+            const updates = renderReports.slice(this.renderBaseline).filter((report) => report.phase === "update");
+            return {
+                label,
+                flushes: updates.length,
+                flushComponents,
+                flushPatches,
+                scheduling: { ...scheduling },
+                operations: { ...operations },
+                mutations: { ...mutations },
+            };
+        },
+    };
+    window.__domBridgeAudit = audit;
     window.__GOFRAME_DEBUG__ = { operations, mutations };
 
     const wrap = (owner, name, counter) => {
@@ -557,6 +735,7 @@ function installTypingAuditExpression() {
     };
     wrap(Document.prototype, "createElement", "createElement");
     wrap(Document.prototype, "createTextNode", "createTextNode");
+    wrap(Document.prototype, "createComment", "createComment");
     wrap(Node.prototype, "appendChild", "appendChild");
     wrap(Node.prototype, "removeChild", "removeChild");
     wrap(Node.prototype, "replaceChild", "replaceChild");
@@ -565,6 +744,7 @@ function installTypingAuditExpression() {
     wrap(Element.prototype, "removeAttribute", "removeAttribute");
     wrap(EventTarget.prototype, "addEventListener", "addEventListener");
     wrap(EventTarget.prototype, "removeEventListener", "removeEventListener");
+    wrap(HTMLElement.prototype, "focus", "focus");
 
     const nodeValue = Object.getOwnPropertyDescriptor(Node.prototype, "nodeValue");
     Object.defineProperty(Node.prototype, "nodeValue", {
@@ -586,6 +766,30 @@ function installTypingAuditExpression() {
             return inputValue.set.call(this, value);
         },
     });
+    const setSelectionRange = HTMLInputElement.prototype.setSelectionRange;
+    HTMLInputElement.prototype.setSelectionRange = function(...args) {
+        operations.setSelectionRange++;
+        return setSelectionRange.apply(this, args);
+    };
+
+    const requestAnimationFrame = window.requestAnimationFrame;
+    window.requestAnimationFrame = function(callback) {
+        scheduling.requestAnimationFrame++;
+        return requestAnimationFrame.call(window, (...args) => {
+            scheduling.requestAnimationFrameCallbacks++;
+            return callback(...args);
+        });
+    };
+    const queueMicrotask = window.queueMicrotask;
+    if (typeof queueMicrotask === "function") {
+        window.queueMicrotask = function(callback) {
+            scheduling.queueMicrotask++;
+            return queueMicrotask.call(window, () => {
+                scheduling.queueMicrotaskCallbacks++;
+                return callback();
+            });
+        };
+    }
 
     new MutationObserver((records) => {
         mutations.rootChildList += records.filter((record) => record.type === "childList").length;
@@ -600,19 +804,28 @@ function installTypingAuditExpression() {
         mutations.list += records.length;
     }).observe(window.__list, { childList: true, subtree: true, attributes: true, characterData: true });
 
-    const renderCounts = window.goframeComponentRenderCounts;
-    const patchCounts = window.goframeComponentPatchCounts;
     window.__typingBaseline = {
-        appRenders: renderCounts.App || 0,
-        headerRenders: renderCounts.Header || 0,
-        formRenders: renderCounts.TodoForm || 0,
-        listRenders: renderCounts.TodoList || 0,
-        appPatches: patchCounts.App || 0,
-        headerPatches: patchCounts.Header || 0,
-        formPatches: patchCounts.TodoForm || 0,
-        listPatches: patchCounts.TodoList || 0,
+        appRenders: 0,
+        headerRenders: 0,
+        formRenders: 0,
+        listRenders: 0,
+        appPatches: 0,
+        headerPatches: 0,
+        formPatches: 0,
+        listPatches: 0,
     };
-    for (const key of Object.keys(operations)) operations[key] = 0;
     return { ready: true, listItems: document.querySelectorAll(".todo-item").length };
+
+    function snapshotComponentCounts(names) {
+        const renderCounts = window.goframeComponentRenderCounts || {};
+        const patchCounts = window.goframeComponentPatchCounts || {};
+        const renders = {};
+        const patches = {};
+        for (const name of names) {
+            renders[name] = renderCounts[name] || 0;
+            patches[name] = patchCounts[name] || 0;
+        }
+        return { renders, patches };
+    }
 })()`;
 }
