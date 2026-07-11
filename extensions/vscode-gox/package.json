@@ -97,6 +97,7 @@
       "properties": {
         "gox.goxcPath": {
           "type": "string",
+          "scope": "resource",
           "default": "goxc",
           "description": "Executable path or command name used to run goxc; this is not a shell command and must not include arguments."
         }
