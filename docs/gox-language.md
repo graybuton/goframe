@@ -475,7 +475,10 @@ The schema has these contracts:
 - `diagnostics` is always an array and is ordered by file, line, column, then
   message;
 - `file` is a cleaned absolute native filesystem path;
-- `line` and `column` are one-based when available and `0` when unavailable;
+- `line` is one-based when available and `0` when unavailable;
+- `column` is a one-based UTF-8 byte column when available and `0` when
+  unavailable; editor consumers must translate it into their editor's position
+  encoding;
 - `severity` is currently always `"error"`;
 - `source` is the relevant authored source line when available and an empty
   string otherwise.

@@ -161,7 +161,13 @@ class CheckController implements vscode.Disposable {
             interpretation.error,
           );
         } else {
-          this.applyReport(workspace, state, interpretation.report);
+          void this.applyReport(
+            workspace,
+            state,
+            interpretation.report,
+            generation,
+          ).then(resolve);
+          return;
         }
         resolve();
       };
@@ -220,38 +226,65 @@ class CheckController implements vscode.Disposable {
     }
   }
 
-  private applyReport(
+  private async applyReport(
     workspace: vscode.WorkspaceFolder,
     state: WorkspaceRunState,
     report: CheckReport,
-  ): void {
+    generation: number,
+  ): Promise<void> {
     const workspaceKey = workspace.uri.toString();
-    const grouped = new Map<string, { uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }>();
+    const sourceGroups = new Map<string, { uri: vscode.Uri; items: CheckReport["diagnostics"] }>();
     for (const [file, fileDiagnostics] of groupDiagnosticsByFile(report.diagnostics)) {
       const uri = vscode.Uri.file(file);
       const owner = vscode.workspace.getWorkspaceFolder(uri);
       if (!owner || owner.uri.toString() !== workspaceKey) {
         continue;
       }
-      grouped.set(uri.toString(), {
-        uri,
-        diagnostics: fileDiagnostics.map((item) => {
-          const location = diagnosticRange(item.line, item.column);
-          const diagnostic = new vscode.Diagnostic(
-            new vscode.Range(
-              location.startLine,
-              location.startCharacter,
-              location.endLine,
-              location.endCharacter,
-            ),
-            item.message,
-            vscode.DiagnosticSeverity.Error,
-          );
-          diagnostic.source = "goxc";
-          return diagnostic;
-        }),
-      });
+      const uriKey = uri.toString();
+      const current = sourceGroups.get(uriKey);
+      if (current) {
+        current.items.push(...fileDiagnostics);
+      } else {
+        sourceGroups.set(uriKey, { uri, items: [...fileDiagnostics] });
+      }
     }
+
+    const mappedGroups = await Promise.all(
+      [...sourceGroups.entries()].map(async ([uriKey, current]) => {
+        let source: Uint8Array | undefined;
+        try {
+          source = await vscode.workspace.fs.readFile(current.uri);
+        } catch {
+          source = undefined;
+        }
+        return [
+          uriKey,
+          {
+            uri: current.uri,
+            diagnostics: current.items.map((item) => {
+              const location = diagnosticRange(source, item.line, item.column);
+              const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(
+                  location.startLine,
+                  location.startCharacter,
+                  location.endLine,
+                  location.endCharacter,
+                ),
+                item.message,
+                vscode.DiagnosticSeverity.Error,
+              );
+              diagnostic.source = "goxc";
+              return diagnostic;
+            }),
+          },
+        ] as const;
+      }),
+    );
+    if (!this.generations.isCurrent(workspaceKey, generation)) {
+      return;
+    }
+
+    const grouped = new Map(mappedGroups);
 
     const ownership = new Map<string, ReadonlySet<string>>();
     for (const [key, current] of this.states) {

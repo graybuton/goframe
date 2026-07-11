@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import * as path from "node:path";
+import { TextDecoder } from "node:util";
 
 export const checkSchemaVersion = 1;
 
@@ -155,23 +156,37 @@ export function groupDiagnosticsByFile(
   return grouped;
 }
 
-export function diagnosticRange(line: number, column: number): DiagnosticRange {
-  if (line <= 0 || column <= 0) {
-    return {
-      startLine: 0,
-      startCharacter: 0,
-      endLine: 0,
-      endCharacter: 0,
-    };
+export function diagnosticRange(
+  source: Uint8Array | undefined,
+  line: number,
+  column: number,
+): DiagnosticRange {
+  if (!source || line <= 0 || column <= 0) {
+    return fileLevelDiagnosticRange();
   }
-  const startLine = line - 1;
-  const startCharacter = column - 1;
-  return {
-    startLine,
-    startCharacter,
-    endLine: startLine,
-    endCharacter: startCharacter + 1,
-  };
+
+  const rawLine = sourceLineBytes(source, line);
+  if (!rawLine) {
+    return fileLevelDiagnosticRange();
+  }
+
+  const byteOffset = Math.min(column - 1, rawLine.length);
+  try {
+    const lineText = utf8Decoder.decode(rawLine);
+    const startCharacter = utf8Decoder.decode(rawLine.subarray(0, byteOffset)).length;
+    const codePoint = lineText.codePointAt(startCharacter);
+    const width = byteOffset < rawLine.length && codePoint !== undefined
+      ? codePoint > 0xffff ? 2 : 1
+      : 0;
+    return {
+      startLine: line - 1,
+      startCharacter,
+      endLine: line - 1,
+      endCharacter: startCharacter + width,
+    };
+  } catch {
+    return fileLevelDiagnosticRange();
+  }
 }
 
 export function buildCheckInvocation(executable: string, workspacePath: string): CheckInvocation {
@@ -261,6 +276,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonNegativeInteger(value: unknown): value is number {
   return Number.isInteger(value) && typeof value === "number" && value >= 0;
+}
+
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+function sourceLineBytes(source: Uint8Array, line: number): Uint8Array | undefined {
+  let currentLine = 1;
+  let lineStart = 0;
+  for (let index = 0; index < source.length; index++) {
+    if (source[index] !== 0x0a) {
+      continue;
+    }
+    if (currentLine === line) {
+      const lineEnd = index > lineStart && source[index - 1] === 0x0d ? index - 1 : index;
+      return source.subarray(lineStart, lineEnd);
+    }
+    currentLine++;
+    lineStart = index + 1;
+  }
+  return currentLine === line ? source.subarray(lineStart) : undefined;
+}
+
+function fileLevelDiagnosticRange(): DiagnosticRange {
+  return {
+    startLine: 0,
+    startCharacter: 0,
+    endLine: 0,
+    endCharacter: 0,
+  };
 }
 
 function errorMessage(error: unknown): string {

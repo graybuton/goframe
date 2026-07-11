@@ -17,6 +17,10 @@ const workspacePath = path.resolve("workspace with spaces");
 const firstFile = path.join(workspacePath, "first.gox");
 const secondFile = path.join(workspacePath, "nested", "second.gox");
 
+function sourceBytes(source: string): Uint8Array {
+  return Buffer.from(source, "utf8");
+}
+
 function diagnostic(file = firstFile): CheckDiagnostic {
   return {
     file,
@@ -209,12 +213,85 @@ test("groups diagnostics by absolute file path", () => {
   assert.equal(grouped.get(secondFile)?.length, 1);
 });
 
-test("maps one-based locations to zero-based one-character ranges", () => {
-  assert.deepEqual(diagnosticRange(4, 15), {
-    startLine: 3,
+test("maps an ASCII byte column to a UTF-16 editor range", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("first\nabcdefghijklmnop"), 2, 15), {
+    startLine: 1,
     startCharacter: 14,
-    endLine: 3,
+    endLine: 1,
     endCharacter: 15,
+  });
+});
+
+test("maps a byte column after a two-byte UTF-8 character", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("<p>é{}</p>"), 1, 6), {
+    startLine: 0,
+    startCharacter: 4,
+    endLine: 0,
+    endCharacter: 5,
+  });
+});
+
+test("maps a byte column after a four-byte UTF-8 character", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("<p>🙂{}</p>"), 1, 8), {
+    startLine: 0,
+    startCharacter: 5,
+    endLine: 0,
+    endCharacter: 6,
+  });
+});
+
+test("maps indentation and mixed non-ASCII prefixes", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("header\n    é🙂{}"), 2, 11), {
+    startLine: 1,
+    startCharacter: 7,
+    endLine: 1,
+    endCharacter: 8,
+  });
+});
+
+test("maps CRLF source without treating carriage return as editor text", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("first\r\n<p>é{}</p>\r\n"), 2, 6), {
+    startLine: 1,
+    startCharacter: 4,
+    endLine: 1,
+    endCharacter: 5,
+  });
+});
+
+test("uses a zero-width range at the end of a source line", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("é"), 1, 3), {
+    startLine: 0,
+    startCharacter: 1,
+    endLine: 0,
+    endCharacter: 1,
+  });
+});
+
+test("clamps a byte column beyond the source line to its end", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("éx"), 1, 99), {
+    startLine: 0,
+    startCharacter: 2,
+    endLine: 0,
+    endCharacter: 2,
+  });
+});
+
+test("maps a byte column inside a UTF-8 sequence to a file-level range", () => {
+  const fileRange = {
+    startLine: 0,
+    startCharacter: 0,
+    endLine: 0,
+    endCharacter: 0,
+  };
+  assert.deepEqual(diagnosticRange(sourceBytes("éx"), 1, 2), fileRange);
+});
+
+test("maps a missing source line to a file-level range", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("one line"), 2, 1), {
+    startLine: 0,
+    startCharacter: 0,
+    endLine: 0,
+    endCharacter: 0,
   });
 });
 
@@ -225,8 +302,35 @@ test("maps unknown or partial locations to a file-level range", () => {
     endLine: 0,
     endCharacter: 0,
   };
-  assert.deepEqual(diagnosticRange(0, 0), fileRange);
-  assert.deepEqual(diagnosticRange(4, 0), fileRange);
+  const source = sourceBytes("<main />");
+  assert.deepEqual(diagnosticRange(source, 0, 0), fileRange);
+  assert.deepEqual(diagnosticRange(source, 4, 0), fileRange);
+  assert.deepEqual(diagnosticRange(undefined, 1, 1), fileRange);
+});
+
+test("covers one complete supplementary code point at the diagnostic start", () => {
+  assert.deepEqual(diagnosticRange(sourceBytes("🙂x"), 1, 1), {
+    startLine: 0,
+    startCharacter: 0,
+    endLine: 0,
+    endCharacter: 2,
+  });
+});
+
+test("maps multiple diagnostics from the same saved source bytes", () => {
+  const source = sourceBytes("éx\n🙂y");
+  assert.deepEqual(diagnosticRange(source, 1, 3), {
+    startLine: 0,
+    startCharacter: 1,
+    endLine: 0,
+    endCharacter: 2,
+  });
+  assert.deepEqual(diagnosticRange(source, 2, 5), {
+    startLine: 1,
+    startCharacter: 2,
+    endLine: 1,
+    endCharacter: 3,
+  });
 });
 
 test("later runs invalidate earlier generations", () => {
