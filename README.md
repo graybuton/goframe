@@ -38,7 +38,7 @@ LSP support.
 ## Quick Start
 
 Install `goxc`, add its install directory to `PATH`, check your local
-toolchain and GOX source, package the counter example, and serve it locally:
+toolchain, package the counter example, and serve it locally:
 
 ```bash
 go install github.com/graybuton/goframe/cmd/goxc@latest
@@ -50,7 +50,6 @@ fi
 export PATH="$goxc_bin:$PATH"
 
 goxc doctor
-goxc check ./examples/counter
 goxc package ./examples/counter --compiler=tinygo
 goxc serve ./examples/counter --port=8080
 ```
@@ -116,8 +115,10 @@ it does not write generated `.gox.go` files next to authored source by default.
 - [API stability](docs/api-stability.md) and
   [platform support](docs/platform-support.md) - maturity and support
   boundaries.
-- Current published preview notes:
-  [v0.2.0-preview.5](docs/release-notes-v0.2.0-preview.5.md).
+- [Releases](https://github.com/graybuton/goframe/releases) - published
+  previews and release notes.
+- [Release process](docs/release.md) - versioning, validation, and publishing
+  policy.
 
 For the fastest tour, start with `examples/counter`, then
 `examples/components`, then `examples/router-dashboard`.
@@ -513,7 +514,8 @@ Start here:
 
 - [GoFrame Tutorial](docs/tutorial.md)
 - [Evaluator guide](docs/evaluator-guide.md)
-- [Release notes through v0.2.0-preview.5](docs/release-notes-v0.2.0-preview.5.md)
+- [Published releases and release notes](https://github.com/graybuton/goframe/releases)
+- [Release process](docs/release.md)
 - [Architecture and toolchain boundaries](docs/architecture.md)
 - [Runtime model](docs/runtime-model.md)
 - [GOX language and diagnostics](docs/gox-language.md)
