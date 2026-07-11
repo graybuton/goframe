@@ -38,7 +38,7 @@ LSP support.
 ## Quick Start
 
 Install `goxc`, add its install directory to `PATH`, check your local
-toolchain, package the counter example, and serve it locally:
+toolchain and GOX source, package the counter example, and serve it locally:
 
 ```bash
 go install github.com/graybuton/goframe/cmd/goxc@latest
@@ -50,6 +50,7 @@ fi
 export PATH="$goxc_bin:$PATH"
 
 goxc doctor
+goxc check ./examples/counter
 goxc package ./examples/counter --compiler=tinygo
 goxc serve ./examples/counter --port=8080
 ```
@@ -86,6 +87,7 @@ func App(props AppProps) gf.Node {
 }
 ```
 
+`goxc check` validates authored `.gox` files without writing generated output.
 `goxc generate` turns `.gox` files into Go compiler output under `.goframe`;
 it does not write generated `.gox.go` files next to authored source by default.
 
@@ -95,8 +97,8 @@ it does not write generated `.gox.go` files next to authored source by default.
   context, events, reconciliation, resources, routing, and fixed-height
   virtualization.
 - `pkg/gox`: GOX lexer/parser/codegen with source-oriented diagnostics.
-- `cmd/goxc`: generate, build, package, export, serve, size, clean, doctor,
-  and version commands.
+- `cmd/goxc`: check, generate, build, package, export, serve, size, clean,
+  doctor, and version commands.
 - Examples and scripts that exercise the runtime, compiler, package workflow,
   browser smoke paths, and WASM size budgets.
 - A lightweight VS Code GOX extension in `extensions/vscode-gox`.
@@ -396,6 +398,7 @@ Common commands:
 
 | Command | Responsibility |
 |---|---|
+| `goxc check <file-or-directory>` | Validate authored `.gox` source without writing generated files. |
 | `goxc generate <app>` | Generate `.gox.go` compiler output under `.goframe/gen`. |
 | `goxc build <app>` | Compile raw WASM under `.goframe/build/<compiler>/dev`. |
 | `goxc package <app>` | Build a runnable `.goframe/package/standalone` bundle. |

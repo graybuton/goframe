@@ -103,6 +103,7 @@ Runtime:
 
 Tooling:
 
+- `goxc check`
 - `goxc generate`
 - `goxc build`
 - `goxc package`
@@ -115,6 +116,12 @@ Tooling:
 
 These are public-candidate because examples and docs rely on them, but their
 exact shapes can still change before public preview.
+
+The `goxc check --format=json` schema version 1 transport is a versioned
+tooling process contract. Consumers should reject unsupported schema versions,
+and incompatible field or semantic changes require a schema version increment.
+Exact diagnostic wording remains experimental. This transport contract is not
+an LSP stability promise and does not imply inline editor diagnostics.
 
 ### Exported Compiler-Facing / Low-Level
 
