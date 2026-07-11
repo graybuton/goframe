@@ -1,5 +1,10 @@
 # Post-preview v0.2 Technical Focus
 
+Status: completed historical planning snapshot. The selected reusable
+component/package identity focus was executed in later work. The current
+planning document is the [GoFrame roadmap](roadmap.md); the historical body
+below is preserved as originally scoped.
+
 ## Purpose
 
 This document records the selected technical focus after the first public

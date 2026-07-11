@@ -119,6 +119,9 @@ it does not write generated `.gox.go` files next to authored source by default.
   previews and release notes.
 - [Release process](docs/release.md) - versioning, validation, and publishing
   policy.
+- [Roadmap](docs/roadmap.md) - status-qualified direction for the application
+  model, modular delivery, SSR/hydration research, tooling, and fullstack
+  contracts beyond the current shipped surface.
 
 For the fastest tour, start with `examples/counter`, then
 `examples/components`, then `examples/router-dashboard`.
