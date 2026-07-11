@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,12 @@ func main() {
 			return
 		}
 		err = generateCommand(os.Args[2:])
+	case "check":
+		if commandHelpRequested(os.Args[2:]) {
+			commandUsage(os.Stdout, "check")
+			return
+		}
+		err = checkCommand(os.Args[2:])
 	case "build":
 		if commandHelpRequested(os.Args[2:]) {
 			commandUsage(os.Stdout, "build")
@@ -77,6 +84,9 @@ func main() {
 	}
 
 	if err != nil {
+		if errors.Is(err, errCheckDiagnostics) {
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, "goxc:", err)
 		os.Exit(1)
 	}
@@ -88,6 +98,7 @@ func usage(output io.Writer) {
 	fmt.Fprintln(output, "usage: goxc <command> [arguments]")
 	fmt.Fprintln(output, "")
 	fmt.Fprintln(output, "commands:")
+	fmt.Fprintln(output, "  check <path>          validate .gox source without writing generated files")
 	fmt.Fprintln(output, "  generate <path>       generate .go files from .gox files into .goframe/gen/")
 	fmt.Fprintln(output, "  build <app>           compile raw WASM into .goframe/build/")
 	fmt.Fprintln(output, "  package <app>         create a runnable bundle in .goframe/package/")
@@ -114,6 +125,9 @@ func commandHelpRequested(args []string) bool {
 
 func commandUsage(output io.Writer, command string) {
 	switch command {
+	case "check":
+		fmt.Fprintln(output, "usage: goxc check <file-or-directory> [--format=text|json]")
+		fmt.Fprintln(output, "validate GOX source without writing generated files or running Go type checking")
 	case "generate":
 		fmt.Fprintln(output, "usage: goxc generate <file-or-directory> [--out=directory] [--workspace=directory] [--in-place]")
 		fmt.Fprintln(output, "generate .go compiler output from .gox files; default output is .goframe/gen/")

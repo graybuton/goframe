@@ -433,6 +433,60 @@ examples/app.gox:12:18: expected closing tag </div>, got </main>
   <div>Broken</main>
 ```
 
+Run a read-only source check for one authored file or a directory tree:
+
+```bash
+goxc check ./examples/counter
+goxc check ./examples/counter --format=json
+```
+
+Directory checks recursively validate authored `.gox` files in nested packages
+using the same discovery and package-identity rules as generation. Files are
+processed in deterministic lexical order. Symlinked source paths are rejected,
+and the existing top-level skipped directories such as `.goframe`, `build`,
+`dist`, `node_modules`, and `.git` are not scanned.
+
+`goxc check` calls the GOX generator in memory and discards successful output.
+It does not create `.goframe`, generated `.gox.go` files, build/package files,
+or a generated workspace. A completed check exits `0` when no diagnostics are
+found and `1` when source diagnostics exist. Argument, path, discovery, safety,
+and source-read failures also exit `1` through the normal `goxc` operational
+error path.
+
+Text is the default format. Source diagnostics and the failed summary go to
+stderr; a successful summary goes to stdout. JSON mode writes one compact JSON
+document and a trailing newline to stdout. Completed JSON diagnostic reports do
+not add human-readable output to stderr. GOX markup remains readable because
+the encoder does not apply JSON HTML escaping.
+
+The current machine-readable transport uses schema version 1:
+
+```json
+{"schemaVersion":1,"ok":false,"filesChecked":1,"diagnostics":[{"file":"/absolute/path/app.gox","line":4,"column":15,"severity":"error","message":"gox: empty child expression","source":"<main>{}</main>"}]}
+```
+
+The schema has these contracts:
+
+- `schemaVersion` is the integer `1`; consumers should reject unsupported
+  versions, and incompatible field or semantic changes require an increment;
+- `ok` is true only when `diagnostics` is empty;
+- `filesChecked` includes every processed `.gox` file, including files with a
+  diagnostic;
+- `diagnostics` is always an array and is ordered by file, line, column, then
+  message;
+- `file` is a cleaned absolute native filesystem path;
+- `line` and `column` are one-based when available and `0` when unavailable;
+- `severity` is currently always `"error"`;
+- `source` is the relevant authored source line when available and an empty
+  string otherwise.
+
+The versioned schema is a process contract for tooling and future editor
+consumers, not an LSP or inline VS Code diagnostics implementation. Exact
+diagnostic wording remains experimental. The existing generator currently
+returns at most one compiler diagnostic per file, but a directory check
+continues through all later files instead of stopping at the first failing
+file. Operational failures do not produce a completed or partial JSON report.
+
 GOX also reports focused diagnostics for unclosed tags, invalid component
 names, invalid component prop names, empty child/attribute expressions,
 duplicate or valueless `Key` pseudo-props, spread props, XML-style namespace
@@ -463,7 +517,10 @@ examples/app.gox:8:15: spread props are not supported; pass explicit props inste
   <Button {...props} />
 ```
 
-Go type errors, such as a missing props struct or invalid field type, are
+`goxc check` validates GOX parsing and code generation only. It does not run Go
+or TinyGo type checking, scan remote modules, or process external dependency
+`.gox` files outside the requested authored tree. Go type errors, such as an
+unknown component prop, a missing props struct, or an invalid field type, are
 reported by the selected Go or TinyGo compiler after generation. Those errors
 may still mention the hidden `.goframe/work/<profile>` workspace because they
 come from the Go toolchain, but `goxc` generation failures prefer the original

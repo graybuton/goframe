@@ -70,6 +70,21 @@ The recommended install path for the CLI is:
 go install github.com/graybuton/goframe/cmd/goxc@latest
 ```
 
+### README release references
+
+README is a version-agnostic project entry point. It links to GitHub Releases
+and this release process instead of hard-coding the latest preview tag or a
+current release-note filename. Version-specific scope and history belong in
+GitHub Releases, `docs/release-notes-*.md`, `CHANGELOG.md`, and intentionally
+versioned release or evaluator documents. Release-prep and post-publish work
+should not modify README solely to advance a current-preview pointer.
+
+Because the Quick Start installs `goxc` with `@latest`, every command in that
+sequence must exist in the latest published module tag. Commands merged on
+`main` may appear in current-main reference sections before their next release,
+but should enter the `@latest` Quick Start only after a release containing them
+is published.
+
 ## After Tagging
 
 Use the dedicated release notes document for the preview tag being released.

@@ -4,6 +4,9 @@
 
 ### Added
 
+- Read-only `goxc check` validation for authored GOX files and directory trees,
+  with text output, a versioned JSON diagnostics contract, nonzero diagnostic
+  exit status, and no generated output or workspace materialization.
 - `v0.2.0-preview.5` release notes documenting retained input selection
   restoration, GOX embedded-expression source diagnostics, nested diagnostic
   source-location preservation, exact O(n log n) LIS-aware keyed placement, and
