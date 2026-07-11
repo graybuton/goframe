@@ -4,6 +4,9 @@
 
 ### Added
 
+- VS Code inline GOX source diagnostics backed by the schema-v1 `goxc check`
+  transport, with manual and saved-file workspace checks, stale-run protection,
+  and multi-root isolation.
 - Read-only `goxc check` validation for authored GOX files and directory trees,
   with text output, a versioned JSON diagnostics contract, nonzero diagnostic
   exit status, and no generated output or workspace materialization.

@@ -480,8 +480,10 @@ The schema has these contracts:
 - `source` is the relevant authored source line when available and an empty
   string otherwise.
 
-The versioned schema is a process contract for tooling and future editor
-consumers, not an LSP or inline VS Code diagnostics implementation. Exact
+The official lightweight VS Code extension consumes schema version 1 for
+CLI-backed inline source diagnostics. This remains process-based editor
+tooling, not an LSP. It checks saved authored source and does not diagnose
+unsaved buffer content or run Go/TinyGo semantic type checking. Exact
 diagnostic wording remains experimental. The existing generator currently
 returns at most one compiler diagnostic per file, but a directory check
 continues through all later files instead of stopping at the first failing

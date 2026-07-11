@@ -115,11 +115,12 @@ surface remains experimental.
 
 `.github/workflows/ci-vscode.yml` runs on pull requests and pushes to `main`.
 
-It validates extension JSON files, installs dependencies with `npm ci`, and
-runs:
+It validates extension JSON files, installs dependencies with `npm ci`,
+compiles the TypeScript extension, and runs pure Node tests for the diagnostics
+transport helpers through:
 
 ```bash
-npm run compile
+npm test
 ```
 
 ## Dependabot
@@ -221,8 +222,11 @@ VS Code extension:
 ```bash
 cd extensions/vscode-gox
 npm ci
-npm run compile
+npm test
 ```
+
+Use `npm run compile` separately during extension development when the pure
+test run is not needed.
 
 ## Required Tools
 

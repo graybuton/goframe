@@ -120,8 +120,9 @@ exact shapes can still change before public preview.
 The `goxc check --format=json` schema version 1 transport is a versioned
 tooling process contract. Consumers should reject unsupported schema versions,
 and incompatible field or semantic changes require a schema version increment.
-Exact diagnostic wording remains experimental. This transport contract is not
-an LSP stability promise and does not imply inline editor diagnostics.
+The official lightweight VS Code extension consumes this contract for
+CLI-backed source diagnostics. Exact diagnostic wording remains experimental,
+and this editor integration does not create an LSP compatibility promise.
 
 ### Exported Compiler-Facing / Low-Level
 
@@ -188,8 +189,10 @@ Tooling contracts:
 
 VS Code extension:
 
-- syntax highlighting, snippets, and command wrappers over `goxc` are
-  experimental tooling contracts, not language-server stability promises.
+- syntax highlighting, snippets, command wrappers over `goxc`, and CLI-backed
+  schema-v1 source diagnostics are experimental editor tooling contracts, not
+  language-server stability promises. LSP and formatter behavior remain
+  outside the current contract.
 
 ### Experimental Frontier
 
@@ -238,7 +241,7 @@ VS Code extension:
   intentionally does not add a runtime form framework.
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
-- VS Code extension commands and snippets.
+- VS Code extension commands, snippets, and CLI-backed diagnostics behavior.
 - `pkg/gox` AST/lexer/parser structures.
 
 These surfaces should be hardened, tested, and documented before wider
