@@ -29,6 +29,7 @@
   "main": "./out/extension.js",
   "scripts": {
     "compile": "tsc -p ./",
+    "test": "npm run compile && node --test out/check.test.js",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile"
   },
