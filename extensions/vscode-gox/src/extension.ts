@@ -74,6 +74,15 @@ class CheckController implements vscode.Disposable {
   ) {}
 
   run(workspace: vscode.WorkspaceFolder, source: CheckSource): Promise<void> {
+    if (!vscode.workspace.isTrusted) {
+      if (source === "manual") {
+        void vscode.window.showWarningMessage(
+          "GOX checks require a trusted workspace because they execute the configured goxc executable.",
+        );
+      }
+      return Promise.resolve();
+    }
+
     const workspaceKey = workspace.uri.toString();
     const state = this.workspaceState(workspaceKey);
     const generation = this.generations.begin(workspaceKey);

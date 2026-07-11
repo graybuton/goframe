@@ -8,6 +8,12 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "GOX diagnostics and toolchain commands execute the configured goxc executable."
+    }
+  },
   "categories": [
     "Programming Languages",
     "Snippets",

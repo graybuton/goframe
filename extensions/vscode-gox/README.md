@@ -37,6 +37,10 @@ shell and consumes the versioned schema-v1 report. This requires a current
 executable path or command name available through `PATH`; the setting is not a
 shell command and must not include arguments.
 
+The extension executes the configured `goxc` executable and is disabled in VS
+Code Restricted Mode and untrusted workspaces. Automatic saved-file diagnostics
+require a trusted workspace.
+
 Saving an authored `.gox` file checks its owning workspace folder. The manual
 `GOX: Check Current Project` command checks the workspace containing the active
 editor, falling back to the first workspace folder. Multi-root workspaces keep
