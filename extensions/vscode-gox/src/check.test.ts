@@ -10,7 +10,9 @@ import {
   groupDiagnosticsByFile,
   interpretCheckProcessResult,
   parseCheckReport,
+  planWorkspaceDiagnosticRemoval,
   planWorkspaceDiagnosticUpdate,
+  resourcePathRelation,
 } from "./check";
 
 const workspacePath = path.resolve("workspace with spaces");
@@ -366,6 +368,153 @@ test("workspace update leaves another workspace ownership untouched", () => {
   const plan = planWorkspaceDiagnosticUpdate(ownership, "workspace-a", []);
   assert.deepEqual([...plan.ownership.get("workspace-b") ?? []], ["file-b"]);
   assert.deepEqual([...ownership.get("workspace-a") ?? []], ["file-a"]);
+});
+
+test("plans exact owned URI removal", () => {
+  const ownership = new Map<string, ReadonlySet<string>>([
+    ["workspace-a", new Set(["file-a", "file-b"])],
+  ]);
+  const plan = planWorkspaceDiagnosticRemoval(ownership, "workspace-a", ["file-a"]);
+  assert.deepEqual(plan.removedKeys, ["file-a"]);
+  assert.deepEqual(plan.nextKeys, ["file-b"]);
+});
+
+test("unknown URI removal is a no-op", () => {
+  const ownership = new Map<string, ReadonlySet<string>>([
+    ["workspace-a", new Set(["file-a"])],
+  ]);
+  const plan = planWorkspaceDiagnosticRemoval(ownership, "workspace-a", ["unknown"]);
+  assert.deepEqual(plan.removedKeys, []);
+  assert.deepEqual(plan.nextKeys, ["file-a"]);
+  assert.deepEqual([...plan.ownership.get("workspace-a") ?? []], ["file-a"]);
+});
+
+test("plans multiple owned URI removals", () => {
+  const ownership = new Map<string, ReadonlySet<string>>([
+    ["workspace-a", new Set(["file-a", "file-b", "file-c"])],
+  ]);
+  const plan = planWorkspaceDiagnosticRemoval(
+    ownership,
+    "workspace-a",
+    ["file-c", "file-a"],
+  );
+  assert.deepEqual(plan.removedKeys, ["file-a", "file-c"]);
+  assert.deepEqual(plan.nextKeys, ["file-b"]);
+});
+
+test("removing the last owned URI leaves an empty set", () => {
+  const ownership = new Map<string, ReadonlySet<string>>([
+    ["workspace-a", new Set(["file-a"])],
+  ]);
+  const plan = planWorkspaceDiagnosticRemoval(ownership, "workspace-a", ["file-a"]);
+  assert.deepEqual(plan.nextKeys, []);
+  assert.deepEqual([...plan.ownership.get("workspace-a") ?? []], []);
+});
+
+test("workspace removal planning leaves another workspace untouched", () => {
+  const ownership = new Map<string, ReadonlySet<string>>([
+    ["workspace-a", new Set(["file-a"])],
+    ["workspace-b", new Set(["file-b"])],
+  ]);
+  const plan = planWorkspaceDiagnosticRemoval(ownership, "workspace-a", ["file-a"]);
+  assert.deepEqual([...plan.ownership.get("workspace-b") ?? []], ["file-b"]);
+});
+
+test("resource path relation recognizes directory descendants", () => {
+  assert.equal(
+    resourcePathRelation(
+      { scheme: "file", fsPath: path.join(workspacePath, "removed") },
+      { scheme: "file", fsPath: path.join(workspacePath, "removed", "nested", "app.gox") },
+    ),
+    "descendant",
+  );
+});
+
+test("resource path relation rejects a prefix sibling", () => {
+  assert.equal(
+    resourcePathRelation(
+      { scheme: "file", fsPath: path.join(workspacePath, "app") },
+      { scheme: "file", fsPath: path.join(workspacePath, "application", "app.gox") },
+    ),
+    "outside",
+  );
+});
+
+test("resource path relation recognizes exact file paths", () => {
+  assert.equal(
+    resourcePathRelation(
+      { scheme: "file", fsPath: firstFile },
+      { scheme: "file", fsPath: firstFile },
+    ),
+    "exact",
+  );
+});
+
+test("resource path relation rejects outside paths and mismatched schemes", () => {
+  const parent = { scheme: "file", fsPath: path.join(workspacePath, "app") };
+  assert.equal(
+    resourcePathRelation(parent, {
+      scheme: "file",
+      fsPath: path.join(workspacePath, "other", "app.gox"),
+    }),
+    "outside",
+  );
+  assert.equal(
+    resourcePathRelation(parent, {
+      scheme: "untitled",
+      fsPath: path.join(workspacePath, "app", "app.gox"),
+    }),
+    "outside",
+  );
+});
+
+test("workspace removal planning does not mutate its ownership input", () => {
+  const workspaceA = new Set(["file-a", "file-b"]);
+  const workspaceB = new Set(["file-c"]);
+  const ownership = new Map<string, ReadonlySet<string>>([
+    ["workspace-a", workspaceA],
+    ["workspace-b", workspaceB],
+  ]);
+  const plan = planWorkspaceDiagnosticRemoval(ownership, "workspace-a", ["file-a"]);
+  assert.deepEqual([...workspaceA], ["file-a", "file-b"]);
+  assert.deepEqual([...workspaceB], ["file-c"]);
+  assert.notEqual(plan.ownership.get("workspace-a"), workspaceA);
+  assert.notEqual(plan.ownership.get("workspace-b"), workspaceB);
+});
+
+test("a renamed directory identifies multiple descendant diagnostic keys", () => {
+  const removedDirectory = {
+    scheme: "file",
+    fsPath: path.join(workspacePath, "old"),
+  };
+  const resources = new Map([
+    ["first", { scheme: "file", fsPath: path.join(workspacePath, "old", "first.gox") }],
+    [
+      "second",
+      { scheme: "file", fsPath: path.join(workspacePath, "old", "nested", "second.gox") },
+    ],
+    ["other", { scheme: "file", fsPath: path.join(workspacePath, "other.gox") }],
+  ]);
+  const removedKeys = [...resources]
+    .filter(([, candidate]) => resourcePathRelation(removedDirectory, candidate) === "descendant")
+    .map(([key]) => key);
+  const ownership = new Map<string, ReadonlySet<string>>([
+    ["workspace-a", new Set(resources.keys())],
+  ]);
+  const plan = planWorkspaceDiagnosticRemoval(ownership, "workspace-a", removedKeys);
+  assert.deepEqual(plan.removedKeys, ["first", "second"]);
+  assert.deepEqual(plan.nextKeys, ["other"]);
+});
+
+test("resource path relation supports normalized Windows paths", () => {
+  assert.equal(
+    resourcePathRelation(
+      { scheme: "file", fsPath: "C:/Work/App/." },
+      { scheme: "file", fsPath: "c:/work/app/nested/../file.gox" },
+      path.win32,
+    ),
+    "descendant",
+  );
 });
 
 test("builds a non-shell invocation with the workspace path as one argument", () => {

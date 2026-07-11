@@ -52,6 +52,24 @@ export interface WorkspaceDiagnosticUpdatePlan {
   ownership: Map<string, Set<string>>;
 }
 
+export interface WorkspaceDiagnosticRemovalPlan {
+  removedKeys: string[];
+  nextKeys: string[];
+  ownership: Map<string, Set<string>>;
+}
+
+export interface ResourcePath {
+  scheme: string;
+  fsPath: string;
+}
+
+export type ResourcePathRelation = "exact" | "descendant" | "outside";
+
+type PathOperations = Pick<
+  typeof path,
+  "isAbsolute" | "relative" | "resolve" | "sep"
+>;
+
 export function parseCheckReport(stdout: string): CheckReport {
   let parsed: unknown;
   try {
@@ -226,16 +244,57 @@ export function planWorkspaceDiagnosticUpdate(
   const nextKeys = new Set(nextKeyValues);
   const previousKeys = currentOwnership.get(workspaceKey) ?? new Set<string>();
   const staleKeys = [...previousKeys].filter((key) => !nextKeys.has(key)).sort();
-  const ownership = new Map<string, Set<string>>();
-  for (const [key, values] of currentOwnership) {
-    ownership.set(key, new Set(values));
-  }
+  const ownership = cloneOwnership(currentOwnership);
   ownership.set(workspaceKey, nextKeys);
   return {
     staleKeys,
     nextKeys: [...nextKeys].sort(),
     ownership,
   };
+}
+
+export function resourcePathRelation(
+  parent: ResourcePath,
+  candidate: ResourcePath,
+  pathOperations: PathOperations = path,
+): ResourcePathRelation {
+  if (parent.scheme !== candidate.scheme) {
+    return "outside";
+  }
+
+  const relative = pathOperations.relative(
+    pathOperations.resolve(parent.fsPath),
+    pathOperations.resolve(candidate.fsPath),
+  );
+  if (relative === "") {
+    return "exact";
+  }
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${pathOperations.sep}`) ||
+    pathOperations.isAbsolute(relative)
+  ) {
+    return "outside";
+  }
+  return "descendant";
+}
+
+export function planWorkspaceDiagnosticRemoval(
+  currentOwnership: ReadonlyMap<string, ReadonlySet<string>>,
+  workspaceKey: string,
+  removedKeyValues: Iterable<string>,
+): WorkspaceDiagnosticRemovalPlan {
+  const removedKeySet = new Set(removedKeyValues);
+  const previousKeys = currentOwnership.get(workspaceKey);
+  const ownership = cloneOwnership(currentOwnership);
+  if (!previousKeys) {
+    return { removedKeys: [], nextKeys: [], ownership };
+  }
+
+  const removedKeys = [...previousKeys].filter((key) => removedKeySet.has(key)).sort();
+  const nextKeys = [...previousKeys].filter((key) => !removedKeySet.has(key)).sort();
+  ownership.set(workspaceKey, new Set(nextKeys));
+  return { removedKeys, nextKeys, ownership };
 }
 
 function parseDiagnostic(value: unknown, index: number): CheckDiagnostic {
@@ -304,6 +363,16 @@ function fileLevelDiagnosticRange(): DiagnosticRange {
     endLine: 0,
     endCharacter: 0,
   };
+}
+
+function cloneOwnership(
+  ownership: ReadonlyMap<string, ReadonlySet<string>>,
+): Map<string, Set<string>> {
+  const cloned = new Map<string, Set<string>>();
+  for (const [key, values] of ownership) {
+    cloned.set(key, new Set(values));
+  }
+  return cloned;
 }
 
 function errorMessage(error: unknown): string {

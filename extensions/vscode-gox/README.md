@@ -48,6 +48,12 @@ diagnostics and active checks isolated by folder. A newer check supersedes an
 older in-flight check for the same folder, while checks in different folders
 can run independently.
 
+Deleting an authored `.gox` file through VS Code removes diagnostics for its
+old URI. Renaming or moving a `.gox` file through VS Code removes old-path
+diagnostics and rechecks the destination workspace, while keeping file
+operations isolated by workspace folder. These hooks cover VS Code file
+operations; they are not general filesystem watch mode.
+
 Diagnostics use saved source only. The extension does not check every edit or
 inspect unsaved buffer content, and `goxc check` does not perform Go or TinyGo
 semantic type checking. Operational launch, process, and schema failures leave

@@ -11,15 +11,21 @@ import {
   diagnosticRange,
   groupDiagnosticsByFile,
   interpretCheckProcessResult,
+  planWorkspaceDiagnosticRemoval,
   planWorkspaceDiagnosticUpdate,
+  resourcePathRelation,
 } from "./check";
 
 type ProjectCommand = "generate" | "package" | "serve";
-type CheckSource = "manual" | "save";
+type CheckSource = "manual" | "save" | "rename";
 
 interface WorkspaceRunState {
   child?: ChildProcess;
   ownedUris: Set<string>;
+}
+
+interface PathRemovalResult {
+  matchedDescendant: boolean;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -53,6 +59,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (workspace) {
         void checks.run(workspace, "save");
       }
+    }),
+    vscode.workspace.onDidDeleteFiles((event) => {
+      checks.handleDeletedFiles(event.files);
+    }),
+    vscode.workspace.onDidRenameFiles((event) => {
+      checks.handleRenamedFiles(event.files);
     }),
     vscode.workspace.onDidChangeWorkspaceFolders((event) => {
       for (const workspace of event.removed) {
@@ -210,6 +222,27 @@ class CheckController implements vscode.Disposable {
     this.states.delete(workspaceKey);
   }
 
+  handleDeletedFiles(files: readonly vscode.Uri[]): void {
+    this.removePaths(files);
+  }
+
+  handleRenamedFiles(files: vscode.FileRenameEvent["files"]): void {
+    const removals = this.removePaths(files.map((file) => file.oldUri));
+    const destinationWorkspaces = new Map<string, vscode.WorkspaceFolder>();
+    files.forEach((file, index) => {
+      const destination = vscode.workspace.getWorkspaceFolder(file.newUri);
+      if (!destination) {
+        return;
+      }
+      if (isAuthoredGOXUri(file.newUri) || removals[index].matchedDescendant) {
+        destinationWorkspaces.set(destination.uri.toString(), destination);
+      }
+    });
+    for (const workspace of destinationWorkspaces.values()) {
+      void this.run(workspace, "rename");
+    }
+  }
+
   dispose(): void {
     for (const [workspaceKey, state] of this.states) {
       this.generations.invalidate(workspaceKey);
@@ -233,6 +266,63 @@ class CheckController implements vscode.Disposable {
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill();
     }
+  }
+
+  private removePaths(paths: readonly vscode.Uri[]): PathRemovalResult[] {
+    const results = paths.map(() => ({ matchedDescendant: false }));
+    const workspaceGroups = new Map<string, Array<{ index: number; uri: vscode.Uri }>>();
+    paths.forEach((uri, index) => {
+      const workspace = vscode.workspace.getWorkspaceFolder(uri);
+      if (!workspace) {
+        return;
+      }
+      const workspaceKey = workspace.uri.toString();
+      const current = workspaceGroups.get(workspaceKey);
+      if (current) {
+        current.push({ index, uri });
+      } else {
+        workspaceGroups.set(workspaceKey, [{ index, uri }]);
+      }
+    });
+
+    for (const [workspaceKey, removedPaths] of workspaceGroups) {
+      this.generations.invalidate(workspaceKey);
+      const state = this.states.get(workspaceKey);
+      if (!state) {
+        continue;
+      }
+      this.cancelChild(state);
+
+      const removedKeys = new Set<string>();
+      for (const uriKey of state.ownedUris) {
+        const candidate = vscode.Uri.parse(uriKey);
+        for (const removedPath of removedPaths) {
+          const relation = resourcePathRelation(
+            { scheme: removedPath.uri.scheme, fsPath: removedPath.uri.fsPath },
+            { scheme: candidate.scheme, fsPath: candidate.fsPath },
+          );
+          if (relation === "outside") {
+            continue;
+          }
+          removedKeys.add(uriKey);
+          if (relation === "descendant") {
+            results[removedPath.index].matchedDescendant = true;
+          }
+        }
+      }
+
+      const ownership = new Map<string, ReadonlySet<string>>();
+      for (const [key, current] of this.states) {
+        ownership.set(key, current.ownedUris);
+      }
+      const plan = planWorkspaceDiagnosticRemoval(ownership, workspaceKey, removedKeys);
+      for (const uriKey of plan.removedKeys) {
+        this.diagnostics.delete(vscode.Uri.parse(uriKey));
+      }
+      state.ownedUris = new Set(plan.nextKeys);
+    }
+
+    return results;
   }
 
   private async applyReport(
@@ -378,7 +468,11 @@ function currentWorkspace(): vscode.WorkspaceFolder | undefined {
 }
 
 function isAuthoredGOXDocument(document: vscode.TextDocument): boolean {
-  return document.uri.scheme === "file" && document.uri.fsPath.toLowerCase().endsWith(".gox");
+  return isAuthoredGOXUri(document.uri);
+}
+
+function isAuthoredGOXUri(uri: vscode.Uri): boolean {
+  return uri.scheme === "file" && uri.fsPath.toLowerCase().endsWith(".gox");
 }
 
 function configuredGoxcExecutable(workspace?: vscode.WorkspaceFolder): string {
