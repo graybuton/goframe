@@ -1,7 +1,7 @@
 {
   "name": "gox",
   "displayName": "GOX Language Support",
-  "description": "Syntax highlighting, snippets, icons, and goxc commands for GoFrame GOX files.",
+  "description": "Syntax highlighting, snippets, diagnostics, icons, and goxc commands for GoFrame GOX files.",
   "version": "0.1.0",
   "publisher": "goframe",
   "license": "Apache-2.0",
@@ -21,6 +21,8 @@
     "jsx"
   ],
   "activationEvents": [
+    "onLanguage:gox",
+    "onCommand:gox.check",
     "onCommand:gox.generate",
     "onCommand:gox.package",
     "onCommand:gox.serve",
@@ -70,6 +72,10 @@
     ],
     "commands": [
       {
+        "command": "gox.check",
+        "title": "GOX: Check Current Project"
+      },
+      {
         "command": "gox.generate",
         "title": "GOX: Generate Current Project"
       },
@@ -92,7 +98,7 @@
         "gox.goxcPath": {
           "type": "string",
           "default": "goxc",
-          "description": "Path or command name used to run the goxc toolchain."
+          "description": "Executable path or command name used to run goxc; this is not a shell command and must not include arguments."
         }
       }
     }
