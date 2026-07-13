@@ -19,7 +19,8 @@ goxc toolchain
    source generation, compilation, packaging, inspection, and local serving
 
 VS Code GOX extension
-   syntax highlighting, snippets, language configuration, and goxc commands
+   syntax highlighting, snippets, language configuration, CLI-backed
+   saved-source diagnostics, and goxc commands
 ```
 
 `goframe` is the library imported by applications. `goxc` is the installed
@@ -30,10 +31,15 @@ Player/Engine, `.gfapp`, portable host/runtime packaging, and desktop/mobile
 shells are inactive directions, not active architecture layers or preview
 promises.
 
+The status-qualified direction beyond the current architecture is documented
+in the [GoFrame roadmap](roadmap.md).
+
 The VS Code extension is deliberately a thin developer-experience layer over
 GOX and `goxc`. TextMate scopes provide heuristic highlighting, while terminal
-commands invoke the same installed CLI used outside the editor. Semantic
-analysis, formatting, and diagnostics remain future LSP responsibilities.
+commands invoke the same installed CLI used outside the editor. CLI-backed
+saved-source diagnostics run `goxc check` and present source diagnostics without
+creating a language server. Formatting, semantic analysis, completion,
+references, rename, and a full LSP remain future language-service work.
 
 ## Toolchain responsibilities
 
