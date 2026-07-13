@@ -40,10 +40,11 @@ not published to the Marketplace.
 - Completed JSON output is one compact document followed by a newline.
   Completed JSON diagnostic output does not add human-readable text to
   stderr.
-- Schema-v1 diagnostics contain an absolute authored file path, one-based line,
-  one-based UTF-8 byte column, current `"error"` severity, message, and the
-  authored source line when available. Consumers must reject unsupported
-  schema versions.
+- Schema-v1 diagnostics contain an absolute authored file path. `line` and
+  `column` are one-based when available and `0` when unavailable, with `column`
+  measured in UTF-8 bytes. Diagnostics also contain the current `"error"`
+  severity, a message, and the authored source line when available.
+  Consumers must reject unsupported schema versions.
 - Exact diagnostic wording remains experimental.
 
 ### VS Code Editor Diagnostics
