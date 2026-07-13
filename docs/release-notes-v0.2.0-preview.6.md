@@ -68,9 +68,10 @@ not published to the Marketplace.
   delete and rename events clear diagnostics for old paths; a rename or move
   may recheck the destination workspace. These hooks are not general
   filesystem watch mode.
-- Tool execution requires a trusted workspace. Automatic save and rename
-  failures do not produce popup spam, while operational details are recorded
-  in the dedicated `GOX Diagnostics` Output Channel.
+- VS Code Workspace Trust is required before the extension may execute the
+  configured `goxc` executable. Automatic save and rename failures do not
+  produce popup spam, while operational details are recorded in the dedicated
+  `GOX Diagnostics` Output Channel.
 - Focused pure Node tests and the VS Code Extension CI workflow cover the
   diagnostics transport, source-position mapping, stale-run coordination,
   multi-root ownership, and file-lifecycle helpers.
