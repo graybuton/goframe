@@ -4,6 +4,11 @@
 
 ### Added
 
+- `v0.2.0-preview.6` release notes documenting structured `goxc check`
+  diagnostics, the schema-v1 tooling transport, saved-source VS Code
+  diagnostics, Unicode position mapping, multi-root and stale-run handling,
+  Workspace Trust, file lifecycle cleanup, and the diagnostics-focused preview
+  boundary.
 - VS Code inline GOX source diagnostics backed by the schema-v1 `goxc check`
   transport, with manual and saved-file workspace checks, stale-run protection,
   and multi-root isolation.
