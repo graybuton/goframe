@@ -17,6 +17,12 @@ Latest published preview tag:
 v0.2.0-preview.5
 ```
 
+Current preview tag under preparation:
+
+```text
+v0.2.0-preview.6
+```
+
 Subsequent previews should increment the pre-release number.
 
 The current MVP tags remain historical milestone tags. They are not public API
@@ -44,7 +50,8 @@ Before creating a tag:
 - `scripts/check.sh` passes locally or in CI;
 - `scripts/size-budget.sh` passes;
 - `scripts/browser-smoke.sh` passes on a machine with Chrome and localhost bind;
-- VS Code extension JSON validation and compile pass;
+- VS Code extension JSON validation, TypeScript compile, and pure Node tests
+  pass (`npm test --prefix extensions/vscode-gox` covers compile and tests);
 - `scripts/artifact-check.sh` passes;
 - `scripts/module-path-check.sh` passes;
 - release package layout is checked with `goxc package --asset-hash --preload`
@@ -97,6 +104,7 @@ Current preview release note documents:
 - `docs/release-notes-v0.2.0-preview.3.md`
 - `docs/release-notes-v0.2.0-preview.4.md`
 - `docs/release-notes-v0.2.0-preview.5.md`
+- `docs/release-notes-v0.2.0-preview.6.md`
 
 `CHANGELOG.md` remains the factual change log; release notes should summarize
 preview scope, maturity tiers, validation evidence, compatibility notes, and

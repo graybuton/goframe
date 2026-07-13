@@ -144,8 +144,9 @@ baseline already exists on current `main`:
 
 - `goxc check <file-or-directory>` performs read-only GOX validation;
 - text output and schema-v1 JSON transport report authored source diagnostics;
-- completed checks exit `0` without diagnostics and `1` when diagnostics or
-  operational failures occur;
+- completed checks exit `0` without diagnostics and `1` when source
+  diagnostics exist; operational failures also exit `1` through the normal CLI
+  error path and do not produce a completed schema-v1 report;
 - the VS Code extension applies saved-source diagnostics without treating
   unsaved editor text as compiler input;
 - one-based UTF-8 byte columns are converted to VS Code UTF-16 positions using
@@ -159,8 +160,10 @@ baseline already exists on current `main`:
 - focused pure Node tests and the VS Code extension CI lane cover the process
   contract and mapping helpers.
 
-This roadmap branch does not prepare `v0.2.0-preview.6`. Release notes, tag,
-GitHub Release body, and publish validation belong to a separate release stage.
+Release notes for `v0.2.0-preview.6` are prepared in the
+[dedicated release document](release-notes-v0.2.0-preview.6.md). The tag,
+GitHub Release body, publication, and exact-install verification remain
+separate steps. The release remains a **Next checkpoint** until publication.
 
 `v0.2.0-preview.7` should exist only for a real maintenance, compatibility, or
 security need. Normal feature progression should move to
@@ -533,8 +536,8 @@ product direction. Historical references remain available in
 
 ## Immediate Sequence
 
-1. Merge the roadmap consolidation.
-2. Prepare and publish `v0.2.0-preview.6` as a separate release stage.
+1. Complete and merge preview.6 release preparation.
+2. Run release gates and publish `v0.2.0-preview.6`.
 3. Begin `v0.3` with an executable Application Model II capability.
 
 The first post-release engineering PR should not be another broad audit or a
