@@ -7,38 +7,74 @@ import (
 	gf "github.com/graybuton/goframe/pkg/goframe"
 )
 
+type ServerBackedShellProps struct {
+	Children []gf.Node
+}
+
+type HomeRouteProps struct {
+	Target string
+}
+
+type GreetingRouteProps struct {
+	Name   string
+	Target string
+}
+
+type NotFoundRouteProps struct {
+	Target string
+}
+
+var router = gf.NewHashRouter([]gf.Route{
+	gf.RoutePath("/", homeRoute),
+	gf.RoutePath("/greeting", greetingRoute),
+	gf.NotFoundRoute(notFoundRoute),
+})
+
 func App() gf.Node {
+	return (
+		<main class="server-backed-app" data-testid="server-backed-app">
+			<ServerBackedShell>
+				{gf.RouterView(router)}
+			</ServerBackedShell>
+		</main>
+	)
+}
+
+func ServerBackedShell(props ServerBackedShellProps) gf.Node {
 	name, setName := gf.UseState("GoFrame")
-	submittedName, setSubmittedName := gf.UseState("GoFrame")
-	resource, reload := gf.UseResource(greetingPath(submittedName), gf.FetchText)
 
 	submitGreeting := func(event gf.Event) {
 		event.PreventDefault()
-		next := strings.TrimSpace(name)
-		if next == "" {
-			next = "GoFrame"
+		next := normalizedGreetingName(name)
+		if next != name {
 			setName(next)
 		}
-		if next == submittedName {
-			reload()
-			return
-		}
-		setSubmittedName(next)
+		gf.Navigate(gf.WithQuery("/greeting", gf.QueryValues{
+			"name": {next},
+		}))
 	}
 
 	return (
-		<main class="server-backed-app" data-testid="server-backed-app">
+		<section class="server-backed-shell" data-testid="server-backed-shell">
 			<section class="hero">
 				<p class="eyebrow">Server-backed reference</p>
-				<h1>GoFrame app served by a Go backend</h1>
+				<h1>Route-driven data from a Go backend</h1>
 				<p class="muted">
-					This browser/WASM app is packaged by goxc, served by a plain
-					Go net/http backend, and reads from a same-origin API endpoint.
+					This browser/WASM app keeps its form shell mounted while hash routes
+					own same-origin greeting resources.
 				</p>
 			</section>
 
-			<section class="panel">
-				<h2>Same-origin greeting</h2>
+			<section class="panel" data-testid="greeting-form-panel">
+				<div class="panel-heading">
+					<div>
+						<h2>Same-origin greeting</h2>
+						<p class="muted">Submitting changes the route; route content owns the request.</p>
+					</div>
+					<gf.RouterLink To="/" Class="home-link" TestID="server-backed-home-link">
+						Home
+					</gf.RouterLink>
+				</div>
 				<form class="greeting-form" data-testid="greeting-form" OnSubmit={submitGreeting}>
 					<label class="field">
 						<span>Name</span>
@@ -53,22 +89,88 @@ func App() gf.Node {
 					</label>
 					<button data-testid="greeting-submit" Type="submit">Ask backend</button>
 				</form>
-
-				<p class="muted" data-testid="greeting-resource-key">{greetingPath(submittedName)}</p>
-				<p class="muted" data-testid="greeting-status">{greetingStatus(resource)}</p>
-
-				{resource.Loading() && (
-					<p class="status loading" data-testid="greeting-loading">Loading backend greeting...</p>
-				)}
-				{resource.Failed() && (
-					<div class="status failed" data-testid="greeting-error">{greetingErrorText(resource)}</div>
-				)}
-				{resource.Ready() && (
-					<p class="status message" data-testid="greeting-message">{resource.Value}</p>
-				)}
 			</section>
-		</main>
+
+			<section class="panel route-panel" data-testid="server-backed-route-content">
+				{props.Children}
+			</section>
+		</section>
 	)
+}
+
+func homeRoute(ctx gf.RouteContext) gf.Node {
+	return <HomeRoute Target={routeTarget(ctx)} />
+}
+
+func greetingRoute(ctx gf.RouteContext) gf.Node {
+	return <GreetingRoute
+		Name={normalizedGreetingName(ctx.Query().Get("name"))}
+		Target={routeTarget(ctx)}
+	/>
+}
+
+func notFoundRoute(ctx gf.RouteContext) gf.Node {
+	return <NotFoundRoute Target={routeTarget(ctx)} />
+}
+
+func HomeRoute(props HomeRouteProps) gf.Node {
+	return (
+		<div data-testid="server-backed-home">
+			<p class="eyebrow" data-testid="server-backed-route-name">Home route</p>
+			<h2>Choose a greeting</h2>
+			<p class="muted">The initial route starts no greeting resource.</p>
+			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+		</div>
+	)
+}
+
+func GreetingRoute(props GreetingRouteProps) gf.Node {
+	resource, _ := gf.UseResource(greetingPath(props.Name), gf.FetchText)
+
+	return (
+		<div data-testid="server-backed-greeting-route">
+			<p class="eyebrow" data-testid="server-backed-route-name">Greeting route</p>
+			<h2>Backend response</h2>
+			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+			<p class="muted" data-testid="greeting-resource-key">{greetingPath(props.Name)}</p>
+			<p class="muted" data-testid="greeting-status">{greetingStatus(resource)}</p>
+
+			{resource.Loading() && (
+				<p class="status loading" data-testid="greeting-loading">Loading backend greeting...</p>
+			)}
+			{resource.Failed() && (
+				<div class="status failed" data-testid="greeting-error">{greetingErrorText(resource)}</div>
+			)}
+			{resource.Ready() && (
+				<p class="status message" data-testid="greeting-message">{resource.Value}</p>
+			)}
+		</div>
+	)
+}
+
+func NotFoundRoute(props NotFoundRouteProps) gf.Node {
+	return (
+		<div data-testid="server-backed-not-found">
+			<p class="eyebrow" data-testid="server-backed-route-name">Not found</p>
+			<h2>Unknown route</h2>
+			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+		</div>
+	)
+}
+
+func normalizedGreetingName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "GoFrame"
+	}
+	return name
+}
+
+func routeTarget(ctx gf.RouteContext) string {
+	if ctx.RawQuery == "" {
+		return ctx.Path
+	}
+	return ctx.Path + "?" + ctx.RawQuery
 }
 
 func greetingPath(name string) string {
