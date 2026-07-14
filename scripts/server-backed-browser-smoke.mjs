@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,12 +12,14 @@ if (typeof WebSocket === "undefined") {
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const appDir = join(rootDir, "examples", "server-backed");
 const packageDir = join(appDir, ".goframe", "package", "standalone");
+const workspaceAppDir = join(appDir, ".goframe", "work", "dev", "examples", "server-backed", "cmd", "app");
 const chrome = process.env.CHROME ?? "google-chrome";
 const debugPort = Number(process.env.GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT ?? await pickFreePort());
 const backendPort = Number(process.env.GOFRAME_SERVER_BACKED_SMOKE_PORT ?? await pickFreePort());
 const profile = await mkdtempCompat("goframe-server-backed-smoke-");
 const appURL = `http://127.0.0.1:${backendPort}/?smoke=${Date.now()}`;
 const expectedApp = new URL(appURL);
+const initialName = "GoFrame";
 const initialMessage = "Hello, GoFrame, from Go backend!";
 const updatedName = "Ada";
 const updatedMessage = "Hello, Ada, from Go backend!";
@@ -28,6 +30,15 @@ const staleSettleMS = slowDelayMS + 300;
 const failureName = "fail";
 const failureStatus = "failed";
 const failureMessage = "goframe: fetch returned HTTP 500";
+const componentNames = [
+    "App",
+    "ServerBackedShell",
+    "RouterView",
+    "RouterRoute",
+    "HomeRoute",
+    "GreetingRoute",
+    "NotFoundRoute",
+];
 
 let backend = null;
 let browser = null;
@@ -37,6 +48,7 @@ let browserExit = null;
 
 try {
     await runCommand("go", ["run", "./cmd/goxc", "package", "./examples/server-backed", "--compiler=go"], { cwd: rootDir });
+    await rebuildDebugBundle();
 
     const packageInfo = await stat(packageDir);
     if (!packageInfo.isDirectory()) {
@@ -84,107 +96,238 @@ try {
     const client = await connect(page.webSocketDebuggerUrl);
     await client.call("Runtime.enable");
     await client.call("Page.enable");
+    await client.call("Page.addScriptToEvaluateOnNewDocument", {
+        source: installServerBackedEvidenceExpression(),
+    });
     await navigateToApp(client, appURL);
     await waitForAppPage(client, expectedApp);
-    await waitForGreeting(client, initialMessage, "initial backend greeting");
-    assertState(await appState(client, initialMessage), {
-        app: true,
-        ready: true,
-        failed: false,
-        status: "ready",
-        message: initialMessage,
-        messageMatches: true,
-        origin: expectedApp.origin,
-        input: "GoFrame",
-    }, "server-backed initial render");
+    await initializeBrowserEvidence(client);
 
-    await setGreetingName(client, updatedName);
-    await waitForCondition(async () => {
-        return (await appState(client, initialMessage)).input === updatedName;
-    }, "controlled input update");
-    await wait(100);
-    await submitGreeting(client);
-    await waitForGreeting(client, updatedMessage, "updated backend greeting");
-    assertState(await appState(client, updatedMessage), {
+    assertState(await appState(client), {
         app: true,
+        shell: true,
+        form: true,
+        routeContent: true,
+        route: "home",
+        hash: "",
+        routeTarget: "/",
+        loading: false,
+        ready: false,
+        failed: false,
+        status: "",
+        message: "",
+        origin: expectedApp.origin,
+        input: initialName,
+        shellSame: true,
+        formSame: true,
+        inputSame: true,
+        routeContentSame: true,
+    }, "server-backed initial route");
+    assertEvidence(await evidenceState(client), {
+        fetchesStarted: 0,
+        aborts: 0,
+        staleResultAppearances: 0,
+        shellIdentityChanges: 0,
+        inputIdentityChanges: 0,
+    }, "initial route evidence");
+
+    await prepareGreetingName(client, updatedName);
+    await startScenario(client, "successful-navigation");
+    await dispatchGreetingSubmit(client);
+    await waitForLoading(client, updatedName, "successful navigation loading");
+    assertState(await appState(client), {
+        route: "greeting",
+        hash: greetingHash(updatedName),
+        routeTarget: greetingTarget(updatedName),
+        status: "loading",
+        loading: true,
+        ready: false,
+        failed: false,
+        message: "",
+    }, "server-backed successful navigation loading");
+    await waitForGreeting(client, updatedMessage, "updated backend greeting");
+    const successReport = await finishScenario(client, "successful-navigation");
+    assertRouteLoadReport(successReport, "successful navigation");
+    assertState(await appState(client), {
+        app: true,
+        route: "greeting",
+        hash: greetingHash(updatedName),
+        routeTarget: greetingTarget(updatedName),
         ready: true,
         failed: false,
         status: "ready",
         message: updatedMessage,
-        messageMatches: true,
         origin: expectedApp.origin,
         input: updatedName,
+        shellSame: true,
+        formSame: true,
+        inputSame: true,
+        routeContentSame: true,
     }, "server-backed form submit render");
 
-    await setGreetingName(client, slowName);
-    await waitForCondition(async () => {
-        return (await appState(client, updatedMessage, slowMessage, "name=slow")).input === slowName;
-    }, "slow input update");
-    await submitGreeting(client);
-    await waitForSlowActive(client);
+    await prepareGreetingName(client, slowName);
+    await startScenario(client, "same-pattern-slow-start");
+    await dispatchGreetingSubmit(client);
+    const supersededSlowRequest = await waitForSlowActive(client, "same-pattern slow request active");
+    const slowStartReport = await finishScenario(client, "same-pattern-slow-start");
+    assertPendingRouteReport(slowStartReport, "same-pattern slow start");
 
-    await setGreetingName(client, updatedName);
-    await waitForCondition(async () => {
-        return (await appState(client, updatedMessage, slowMessage, "name=slow")).input === updatedName;
-    }, "newer Ada input update during slow request");
-    await wait(100);
-    await submitGreeting(client);
-    await waitForCondition(async () => {
-        const state = await appState(client, updatedMessage, slowMessage, "name=Ada");
-        return state.input === updatedName && state.keyContainsExpected;
-    }, "newer Ada resource key after slow request");
+    await prepareGreetingName(client, updatedName);
+    await startScenario(client, "same-pattern-supersede");
+    await dispatchGreetingSubmit(client);
+    await waitForLoading(client, updatedName, "newer Ada route loading after slow request");
+    await waitForRequestAbort(client, supersededSlowRequest.id, "same-pattern slow request abort");
     await waitForGreeting(client, updatedMessage, "newer Ada backend greeting after slow request");
     await wait(staleSettleMS);
-    assertState(await appState(client, updatedMessage, slowMessage, "name=Ada"), {
+    const supersedeReport = await finishScenario(client, "same-pattern-supersede");
+    assertRouteLoadReport(supersedeReport, "same-pattern supersede");
+    assertState(await appState(client), {
         app: true,
+        route: "greeting",
+        hash: greetingHash(updatedName),
+        routeTarget: greetingTarget(updatedName),
         ready: true,
         failed: false,
         status: "ready",
         message: updatedMessage,
-        messageMatches: true,
-        messageNotStale: true,
         input: updatedName,
-        keyContainsExpected: true,
         error: "",
         errorNonEmpty: false,
+        shellSame: true,
+        inputSame: true,
     }, "server-backed stale slow result ignored");
+    assertRequest(await requestEvidence(client, supersededSlowRequest.id), {
+        name: slowName,
+        outcome: "aborted",
+        aborted: true,
+    }, "same-pattern superseded request");
 
-    await setGreetingName(client, failureName);
-    await waitForCondition(async () => {
-        return (await appState(client, updatedMessage)).input === failureName;
-    }, "controlled failure input update");
-    await wait(100);
-    await submitGreeting(client);
+    await prepareGreetingName(client, slowName);
+    await startScenario(client, "unmount-slow-start");
+    await dispatchGreetingSubmit(client);
+    const unmountedSlowRequest = await waitForSlowActive(client, "unmount slow request active");
+    const unmountSlowStartReport = await finishScenario(client, "unmount-slow-start");
+    assertPendingRouteReport(unmountSlowStartReport, "unmount slow start");
+
+    await startScenario(client, "route-unmount-cancellation");
+    await navigateHome(client);
+    await waitForRoute(client, "home", "/");
+    await waitForRequestAbort(client, unmountedSlowRequest.id, "route unmount slow request abort");
+    await wait(staleSettleMS);
+    const unmountReport = await finishScenario(client, "route-unmount-cancellation");
+    assertHomeNavigationReport(unmountReport, "route unmount cancellation");
+    assertState(await appState(client), {
+        route: "home",
+        hash: "#/",
+        routeTarget: "/",
+        message: "",
+        loading: false,
+        ready: false,
+        failed: false,
+        shellSame: true,
+        formSame: true,
+        inputSame: true,
+        routeContentSame: true,
+    }, "server-backed route unmount cancellation");
+    assertRequest(await requestEvidence(client, unmountedSlowRequest.id), {
+        name: slowName,
+        outcome: "aborted",
+        aborted: true,
+    }, "route-unmounted request");
+
+    await prepareGreetingName(client, failureName);
+    await startScenario(client, "controlled-failure");
+    await dispatchGreetingSubmit(client);
+    await waitForLoading(client, failureName, "controlled backend failure loading");
     await waitForFailure(client, failureMessage, "controlled backend failure");
-    assertState(await appState(client, updatedMessage), {
+    const failureReport = await finishScenario(client, "controlled-failure");
+    assertRouteLoadReport(failureReport, "controlled failure");
+    assertState(await appState(client), {
         app: true,
+        route: "greeting",
+        hash: greetingHash(failureName),
+        routeTarget: greetingTarget(failureName),
         ready: false,
         failed: true,
         status: failureStatus,
         input: failureName,
         error: failureMessage,
         errorNonEmpty: true,
+        shellSame: true,
+        inputSame: true,
     }, "server-backed controlled failure render");
 
-    await setGreetingName(client, updatedName);
-    await waitForCondition(async () => {
-        return (await appState(client, updatedMessage)).input === updatedName;
-    }, "recovery input update");
-    await wait(100);
-    await submitGreeting(client);
+    await prepareGreetingName(client, updatedName);
+    await startScenario(client, "failure-recovery");
+    await dispatchGreetingSubmit(client);
+    await waitForLoading(client, updatedName, "failure recovery loading");
     await waitForGreeting(client, updatedMessage, "recovered backend greeting");
-    assertState(await appState(client, updatedMessage), {
+    const recoveryReport = await finishScenario(client, "failure-recovery");
+    assertRouteLoadReport(recoveryReport, "failure recovery");
+    assertState(await appState(client), {
         app: true,
+        route: "greeting",
+        hash: greetingHash(updatedName),
+        routeTarget: greetingTarget(updatedName),
         ready: true,
         failed: false,
         status: "ready",
         message: updatedMessage,
-        messageMatches: true,
         origin: expectedApp.origin,
         input: updatedName,
         error: "",
         errorNonEmpty: false,
+        shellSame: true,
+        inputSame: true,
     }, "server-backed recovery render");
+
+    await startScenario(client, "browser-back");
+    await client.evaluate("history.back()");
+    await waitForLoading(client, failureName, "browser back failure loading");
+    await waitForFailure(client, failureMessage, "browser back failed route");
+    const backReport = await finishScenario(client, "browser-back");
+    assertRouteLoadReport(backReport, "browser back");
+    assertState(await appState(client), {
+        route: "greeting",
+        hash: greetingHash(failureName),
+        routeTarget: greetingTarget(failureName),
+        status: "failed",
+        error: failureMessage,
+        shellSame: true,
+        inputSame: true,
+    }, "server-backed browser back");
+
+    await startScenario(client, "browser-forward");
+    await client.evaluate("history.forward()");
+    await waitForLoading(client, updatedName, "browser forward Ada loading");
+    await waitForGreeting(client, updatedMessage, "browser forward Ada ready");
+    const forwardReport = await finishScenario(client, "browser-forward");
+    assertRouteLoadReport(forwardReport, "browser forward");
+    assertState(await appState(client), {
+        route: "greeting",
+        hash: greetingHash(updatedName),
+        routeTarget: greetingTarget(updatedName),
+        status: "ready",
+        message: updatedMessage,
+        shellSame: true,
+        formSame: true,
+        inputSame: true,
+        routeContentSame: true,
+    }, "server-backed browser forward");
+
+    const finalEvidence = await evidenceState(client);
+    assertEvidence(finalEvidence, {
+        fetchesStarted: 8,
+        aborts: 2,
+        successfulCompletions: 4,
+        failedCompletions: 2,
+        staleResultAppearances: 0,
+        shellIdentityChanges: 0,
+        formIdentityChanges: 0,
+        inputIdentityChanges: 0,
+        routeContentIdentityChanges: 0,
+    }, "final route/resource evidence");
+    console.log(`server-backed async navigation evidence: ${JSON.stringify(finalEvidence)}`);
 
     client.close();
     console.log("Server-backed browser smoke: ok");
@@ -220,8 +363,38 @@ async function assertBackendAPIFailure(name, status) {
     }
 }
 
-async function setGreetingName(client, name) {
-    return await client.callFunction(`function(name) {
+async function rebuildDebugBundle() {
+    const manifest = JSON.parse(await readFile(join(packageDir, "asset-manifest.json"), "utf8"));
+    const wasm = manifest.entrypoints?.wasm;
+    if (typeof wasm !== "string" || wasm === "") {
+        throw new Error("HARNESS FAILURE: server-backed asset manifest has no WASM entrypoint");
+    }
+    await runCommand("go", ["build", "-tags=goframe_debug", "-o", join(packageDir, wasm), "."], {
+        cwd: workspaceAppDir,
+        env: {
+            GOOS: "js",
+            GOARCH: "wasm",
+        },
+    });
+}
+
+function greetingTarget(name) {
+    return `/greeting?name=${encodeURIComponent(name)}`;
+}
+
+function greetingHash(name) {
+    return `#${greetingTarget(name)}`;
+}
+
+async function initializeBrowserEvidence(client) {
+    const initialized = await client.evaluate("window.__serverBackedEvidence?.initialize() ?? null");
+    if (!initialized?.ready) {
+        throw new Error(`APP FAILURE: server-backed evidence did not initialize: ${JSON.stringify(initialized)}`);
+    }
+}
+
+async function prepareGreetingName(client, name) {
+    const prepared = await client.callFunction(`function(name) {
         const input = document.querySelector("[data-testid='greeting-name']");
         if (!input) {
             return { ok: false, reason: "missing input" };
@@ -230,9 +403,15 @@ async function setGreetingName(client, name) {
         input.dispatchEvent(new Event("input", { bubbles: true }));
         return { ok: true, value: input.value };
     }`, name);
+    if (!prepared?.ok) {
+        throw new Error(`APP FAILURE: could not prepare greeting input: ${JSON.stringify(prepared)}`);
+    }
+    await waitForCondition(async () => {
+        return (await appState(client)).input === name;
+    }, `controlled input ${name}`);
 }
 
-async function submitGreeting(client) {
+async function dispatchGreetingSubmit(client) {
     return await client.callFunction(`function() {
         const form = document.querySelector("[data-testid='greeting-form']");
         if (!form) {
@@ -249,52 +428,494 @@ async function submitGreeting(client) {
 
 async function waitForGreeting(client, expected, label) {
     await waitForCondition(async () => {
-        const state = await appState(client, expected);
-        return state.ready && state.messageMatches && state.origin === expectedApp.origin;
+        const state = await appState(client);
+        return state.ready && state.message === expected && state.origin === expectedApp.origin;
     }, label);
 }
 
-async function waitForSlowActive(client) {
+async function waitForLoading(client, name, label) {
     await waitForCondition(async () => {
-        const state = await appState(client, updatedMessage, slowMessage, "name=slow");
-        return state.input === slowName &&
-            state.keyContainsExpected &&
+        const state = await appState(client);
+        return state.route === "greeting" &&
+            state.hash === greetingHash(name) &&
+            state.routeTarget === greetingTarget(name) &&
+            state.key === `/api/greeting?name=${encodeURIComponent(name)}` &&
             state.status === "loading" &&
             state.loading &&
             !state.ready &&
             !state.failed;
-    }, "slow backend request active");
+    }, label);
+}
+
+async function waitForSlowActive(client, label) {
+    let request = null;
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        const evidence = await evidenceState(client);
+        request = [...evidence.requests].reverse().find((entry) => entry.name === slowName && entry.outcome === "pending") ?? null;
+        return state.hash === greetingHash(slowName) &&
+            state.status === "loading" &&
+            state.loading &&
+            request !== null;
+    }, label);
+    return request;
+}
+
+async function waitForRequestAbort(client, requestID, label) {
+    await waitForCondition(async () => {
+        const request = await requestEvidence(client, requestID);
+        return request?.aborted === true && request.outcome === "aborted";
+    }, label);
 }
 
 async function waitForFailure(client, expectedError, label) {
     await waitForCondition(async () => {
-        const state = await appState(client, updatedMessage);
+        const state = await appState(client);
         return state.failed && state.status === failureStatus && state.error === expectedError;
     }, label);
 }
 
-async function appState(client, expected, stale = "", keyPart = "") {
-    return await client.callFunction(`function(expected, stale, keyPart) {
+async function waitForRoute(client, route, target) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.route === route && state.routeTarget === target;
+    }, `route ${route} at ${target}`);
+}
+
+async function navigateHome(client) {
+    await client.evaluate(`document.querySelector("[data-testid='server-backed-home-link']")?.click()`);
+}
+
+async function appState(client) {
+    return await client.callFunction(`function() {
         const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() ?? "";
         const error = document.querySelector("[data-testid='greeting-error']")?.textContent.trim() ?? "";
         const key = document.querySelector("[data-testid='greeting-resource-key']")?.textContent.trim() ?? "";
+        const home = document.querySelector("[data-testid='server-backed-home']");
+        const greeting = document.querySelector("[data-testid='server-backed-greeting-route']");
+        const notFound = document.querySelector("[data-testid='server-backed-not-found']");
+        const identity = window.__serverBackedEvidence?.checkIdentity() ?? {};
         return {
             app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
+            shell: Boolean(document.querySelector("[data-testid='server-backed-shell']")),
+            form: Boolean(document.querySelector("[data-testid='greeting-form']")),
+            routeContent: Boolean(document.querySelector("[data-testid='server-backed-route-content']")),
+            route: home ? "home" : greeting ? "greeting" : notFound ? "notFound" : "missing",
+            hash: window.location.hash,
+            routeTarget: document.querySelector("[data-testid='server-backed-route-target']")?.textContent.trim() ?? "",
             loading: Boolean(document.querySelector("[data-testid='greeting-loading']")),
             ready: Boolean(document.querySelector("[data-testid='greeting-message']")),
             failed: Boolean(document.querySelector("[data-testid='greeting-error']")),
             status: document.querySelector("[data-testid='greeting-status']")?.textContent.trim() ?? "",
             input: document.querySelector("[data-testid='greeting-name']")?.value ?? "",
             key,
-            keyContainsExpected: keyPart === "" || key.includes(keyPart),
             message,
-            messageMatches: message === expected,
-            messageNotStale: stale === "" || message !== stale,
             error,
             errorNonEmpty: error.length > 0,
             origin: window.location.origin,
+            shellSame: identity.shellSame ?? false,
+            formSame: identity.formSame ?? false,
+            inputSame: identity.inputSame ?? false,
+            routeContentSame: identity.routeContentSame ?? false,
         };
-    }`, expected, stale, keyPart);
+    }`);
+}
+
+async function evidenceState(client) {
+    return await client.evaluate("window.__serverBackedEvidence?.snapshot() ?? null");
+}
+
+async function requestEvidence(client, requestID) {
+    return await client.callFunction(`function(requestID) {
+        return window.__serverBackedEvidence?.request(requestID) ?? null;
+    }`, requestID);
+}
+
+async function startScenario(client, label) {
+    const started = await client.callFunction(`function(label) {
+        return window.__serverBackedAudit?.start(label) ?? false;
+    }`, label);
+    if (!started) {
+        throw new Error(`APP FAILURE: server-backed audit did not start ${label}`);
+    }
+}
+
+async function finishScenario(client, label) {
+    const report = await client.callFunction(`function(label) {
+        return window.__serverBackedAudit?.finish(label) ?? null;
+    }`, label);
+    if (!report) {
+        throw new Error(`APP FAILURE: server-backed audit did not finish ${label}`);
+    }
+    assertFiniteReport(report, label);
+    console.log(`server-backed DOM bridge ${label}: ${JSON.stringify(report)}`);
+    return report;
+}
+
+function assertRouteLoadReport(report, label) {
+    if (report.flushes !== 2 || report.scheduling.requestAnimationFrame !== 2 ||
+        report.scheduling.requestAnimationFrameCallbacks !== 2 ||
+        report.scheduling.queueMicrotask !== 0 || report.scheduling.queueMicrotaskCallbacks !== 0 ||
+        report.componentRenders.GreetingRoute < 2 || report.routeContentMutations < 1) {
+        throw new Error(`APP FAILURE: ${label} route/load scheduling changed: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertPendingRouteReport(report, label) {
+    if (report.flushes !== 1 || report.scheduling.requestAnimationFrame !== 1 ||
+        report.scheduling.requestAnimationFrameCallbacks !== 1 ||
+        report.scheduling.queueMicrotask !== 0 || report.scheduling.queueMicrotaskCallbacks !== 0 ||
+        report.componentRenders.GreetingRoute < 1) {
+        throw new Error(`APP FAILURE: ${label} pending scheduling changed: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertHomeNavigationReport(report, label) {
+    if (report.flushes !== 1 || report.scheduling.requestAnimationFrame !== 1 ||
+        report.scheduling.requestAnimationFrameCallbacks !== 1 ||
+        report.scheduling.queueMicrotask !== 0 || report.scheduling.queueMicrotaskCallbacks !== 0 ||
+        report.componentRenders.HomeRoute < 1 || report.routeContentMutations < 1) {
+        throw new Error(`APP FAILURE: ${label} home scheduling changed: ${JSON.stringify(report)}`);
+    }
+}
+
+function assertFiniteReport(report, label) {
+    for (const [groupName, group] of Object.entries({ operations: report.operations, scheduling: report.scheduling })) {
+        for (const [name, value] of Object.entries(group)) {
+            if (!Number.isFinite(value) || value < 0) {
+                throw new Error(`APP FAILURE: ${label} ${groupName}.${name} is invalid: ${JSON.stringify(report)}`);
+            }
+        }
+    }
+}
+
+function assertRequest(actual, expected, label) {
+    if (!actual) {
+        throw new Error(`APP FAILURE: ${label}: missing request evidence`);
+    }
+    assertState(actual, expected, label);
+}
+
+function assertEvidence(actual, expected, label) {
+    if (!actual) {
+        throw new Error(`APP FAILURE: ${label}: missing evidence`);
+    }
+    assertState(actual, expected, label);
+}
+
+function emptyOperations() {
+    return {
+        createElement: 0,
+        createTextNode: 0,
+        createComment: 0,
+        createDocumentFragment: 0,
+        appendChild: 0,
+        removeChild: 0,
+        replaceChild: 0,
+        insertBefore: 0,
+        setTextNodeValue: 0,
+        setAttribute: 0,
+        removeAttribute: 0,
+        setProperty: 0,
+        addEventListener: 0,
+        removeEventListener: 0,
+        focus: 0,
+        setSelectionRange: 0,
+    };
+}
+
+function installServerBackedEvidenceExpression() {
+    return `(() => {
+    const componentNames = ${JSON.stringify(componentNames)};
+    const slowMessage = ${JSON.stringify(slowMessage)};
+    const requests = [];
+    const routeTargetsVisited = [];
+    const operations = ${JSON.stringify(emptyOperations())};
+    const scheduling = {
+        requestAnimationFrame: 0,
+        requestAnimationFrameCallbacks: 0,
+        queueMicrotask: 0,
+        queueMicrotaskCallbacks: 0,
+    };
+    const renderReports = [];
+    let nextRequestID = 1;
+    let aborts = 0;
+    let successfulCompletions = 0;
+    let failedCompletions = 0;
+    let staleResultAppearances = 0;
+    let routeContentMutations = 0;
+    let lastMessage = "";
+
+    window.goframeComponentRenderCounts = {};
+    window.goframeComponentPatchCounts = {};
+    window.goframeComponentRenderProbe = (name) => {
+        window.goframeComponentRenderCounts[name] =
+            (window.goframeComponentRenderCounts[name] || 0) + 1;
+    };
+    window.goframeComponentPatchProbe = (name) => {
+        window.goframeComponentPatchCounts[name] =
+            (window.goframeComponentPatchCounts[name] || 0) + 1;
+    };
+    window.goframeRenderProbe = (phase, duration) => {
+        renderReports.push({ phase, duration });
+    };
+
+    const evidence = {
+        stable: null,
+        identityChanged: {
+            shell: false,
+            form: false,
+            input: false,
+            routeContent: false,
+        },
+        initialize() {
+            this.stable = {
+                shell: document.querySelector("[data-testid='server-backed-shell']"),
+                form: document.querySelector("[data-testid='greeting-form']"),
+                input: document.querySelector("[data-testid='greeting-name']"),
+                routeContent: document.querySelector("[data-testid='server-backed-route-content']"),
+            };
+            if (!this.stable.shell || !this.stable.form || !this.stable.input || !this.stable.routeContent) {
+                return { ready: false };
+            }
+            routeTargetsVisited.push(window.location.hash);
+            new MutationObserver((records) => {
+                routeContentMutations += records.length;
+                const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() || "";
+                if (message === slowMessage && lastMessage !== slowMessage) {
+                    staleResultAppearances++;
+                }
+                lastMessage = message;
+            }).observe(this.stable.routeContent, {
+                childList: true,
+                subtree: true,
+                characterData: true,
+            });
+            return { ready: true };
+        },
+        checkIdentity() {
+            if (!this.stable) return {};
+            const current = {
+                shell: document.querySelector("[data-testid='server-backed-shell']"),
+                form: document.querySelector("[data-testid='greeting-form']"),
+                input: document.querySelector("[data-testid='greeting-name']"),
+                routeContent: document.querySelector("[data-testid='server-backed-route-content']"),
+            };
+            for (const name of Object.keys(current)) {
+                if (current[name] !== this.stable[name]) this.identityChanged[name] = true;
+            }
+            return {
+                shellSame: !this.identityChanged.shell,
+                formSame: !this.identityChanged.form,
+                inputSame: !this.identityChanged.input,
+                routeContentSame: !this.identityChanged.routeContent,
+            };
+        },
+        request(id) {
+            const request = requests.find((entry) => entry.id === id);
+            return request ? { ...request } : null;
+        },
+        snapshot() {
+            return {
+                routeTargetsVisited: [...routeTargetsVisited],
+                fetchesStarted: requests.length,
+                aborts,
+                successfulCompletions,
+                failedCompletions,
+                staleResultAppearances,
+                shellIdentityChanges: this.identityChanged.shell ? 1 : 0,
+                formIdentityChanges: this.identityChanged.form ? 1 : 0,
+                inputIdentityChanges: this.identityChanged.input ? 1 : 0,
+                routeContentIdentityChanges: this.identityChanged.routeContent ? 1 : 0,
+                routeContentMutations,
+                requests: requests.map((request) => ({ ...request })),
+            };
+        },
+    };
+    window.__serverBackedEvidence = evidence;
+
+    window.addEventListener("hashchange", () => {
+        routeTargetsVisited.push(window.location.hash);
+    });
+
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+        const requestURL = new URL(typeof input === "string" ? input : input.url, window.location.href);
+        if (requestURL.pathname !== "/api/greeting") {
+            return originalFetch(input, init);
+        }
+        const signal = init?.signal;
+        const request = {
+            id: nextRequestID++,
+            name: requestURL.searchParams.get("name") || "",
+            target: requestURL.pathname + requestURL.search,
+            outcome: "pending",
+            aborted: false,
+        };
+        requests.push(request);
+        if (signal) {
+            signal.addEventListener("abort", () => {
+                if (request.aborted) return;
+                request.aborted = true;
+                request.outcome = "aborted";
+                aborts++;
+            }, { once: true });
+        }
+        return originalFetch(input, init).then((response) => {
+            // Keep loading observable without changing the backend or runtime.
+            return new Promise((resolve) => {
+                window.setTimeout(() => {
+                    if (!request.aborted) {
+                        request.outcome = response.ok ? "success" : "failed";
+                        if (response.ok) successfulCompletions++;
+                        else failedCompletions++;
+                    }
+                    resolve(response);
+                }, request.name === ${JSON.stringify(slowName)} ? 0 : 140);
+            });
+        }, (error) => {
+            if (signal?.aborted) {
+                request.aborted = true;
+                request.outcome = "aborted";
+            } else {
+                request.outcome = "failed";
+                failedCompletions++;
+            }
+            throw error;
+        });
+    };
+
+    const audit = {
+        componentBaseline: null,
+        renderBaseline: 0,
+        requestBaseline: null,
+        routeTargetBaseline: 0,
+        routeMutationBaseline: 0,
+        start(label) {
+            for (const name of Object.keys(operations)) operations[name] = 0;
+            for (const name of Object.keys(scheduling)) scheduling[name] = 0;
+            this.componentBaseline = snapshotComponentCounts();
+            this.renderBaseline = renderReports.length;
+            this.requestBaseline = {
+                fetchesStarted: requests.length,
+                aborts,
+                successfulCompletions,
+                failedCompletions,
+            };
+            this.routeTargetBaseline = routeTargetsVisited.length;
+            this.routeMutationBaseline = routeContentMutations;
+            this.label = label;
+            return true;
+        },
+        finish(label) {
+            if (!this.componentBaseline || this.label !== label) return null;
+            const current = snapshotComponentCounts();
+            const componentRenders = {};
+            const componentPatches = {};
+            for (const name of componentNames) {
+                componentRenders[name] = current.renders[name] - this.componentBaseline.renders[name];
+                componentPatches[name] = current.patches[name] - this.componentBaseline.patches[name];
+            }
+            const updates = renderReports.slice(this.renderBaseline).filter((entry) => entry.phase === "update");
+            return {
+                scenario: label,
+                flushes: updates.length,
+                updateDurations: updates.map((entry) => entry.duration),
+                scheduling: { ...scheduling },
+                operations: { ...operations },
+                componentRenders,
+                componentPatches,
+                routeContentMutations: routeContentMutations - this.routeMutationBaseline,
+                routeTargets: routeTargetsVisited.slice(this.routeTargetBaseline),
+                requests: {
+                    started: requests.length - this.requestBaseline.fetchesStarted,
+                    aborted: aborts - this.requestBaseline.aborts,
+                    succeeded: successfulCompletions - this.requestBaseline.successfulCompletions,
+                    failed: failedCompletions - this.requestBaseline.failedCompletions,
+                },
+            };
+        },
+    };
+    window.__serverBackedAudit = audit;
+
+    const wrap = (owner, name, counter) => {
+        const original = owner[name];
+        owner[name] = function(...args) {
+            operations[counter]++;
+            return original.apply(this, args);
+        };
+    };
+    wrap(Document.prototype, "createElement", "createElement");
+    wrap(Document.prototype, "createTextNode", "createTextNode");
+    wrap(Document.prototype, "createComment", "createComment");
+    wrap(Document.prototype, "createDocumentFragment", "createDocumentFragment");
+    wrap(Node.prototype, "appendChild", "appendChild");
+    wrap(Node.prototype, "removeChild", "removeChild");
+    wrap(Node.prototype, "replaceChild", "replaceChild");
+    wrap(Node.prototype, "insertBefore", "insertBefore");
+    wrap(Element.prototype, "setAttribute", "setAttribute");
+    wrap(Element.prototype, "removeAttribute", "removeAttribute");
+    wrap(EventTarget.prototype, "addEventListener", "addEventListener");
+    wrap(EventTarget.prototype, "removeEventListener", "removeEventListener");
+    wrap(HTMLElement.prototype, "focus", "focus");
+
+    const nodeValue = Object.getOwnPropertyDescriptor(Node.prototype, "nodeValue");
+    Object.defineProperty(Node.prototype, "nodeValue", {
+        configurable: nodeValue.configurable,
+        enumerable: nodeValue.enumerable,
+        get: nodeValue.get,
+        set(value) {
+            operations.setTextNodeValue++;
+            return nodeValue.set.call(this, value);
+        },
+    });
+    const inputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    Object.defineProperty(HTMLInputElement.prototype, "value", {
+        configurable: inputValue.configurable,
+        enumerable: inputValue.enumerable,
+        get: inputValue.get,
+        set(value) {
+            operations.setProperty++;
+            return inputValue.set.call(this, value);
+        },
+    });
+    const setSelectionRange = HTMLInputElement.prototype.setSelectionRange;
+    HTMLInputElement.prototype.setSelectionRange = function(...args) {
+        operations.setSelectionRange++;
+        return setSelectionRange.apply(this, args);
+    };
+
+    const requestAnimationFrame = window.requestAnimationFrame;
+    window.requestAnimationFrame = function(callback) {
+        scheduling.requestAnimationFrame++;
+        return requestAnimationFrame.call(window, (...args) => {
+            scheduling.requestAnimationFrameCallbacks++;
+            return callback(...args);
+        });
+    };
+    const queueMicrotask = window.queueMicrotask;
+    if (typeof queueMicrotask === "function") {
+        window.queueMicrotask = function(callback) {
+            scheduling.queueMicrotask++;
+            return queueMicrotask.call(window, () => {
+                scheduling.queueMicrotaskCallbacks++;
+                return callback();
+            });
+        };
+    }
+
+    return true;
+
+    function snapshotComponentCounts() {
+        const renders = {};
+        const patches = {};
+        for (const name of componentNames) {
+            renders[name] = window.goframeComponentRenderCounts[name] || 0;
+            patches[name] = window.goframeComponentPatchCounts[name] || 0;
+        }
+        return { renders, patches };
+    }
+})()`;
 }
 
 function assertState(actual, expected, label) {
@@ -533,6 +1154,7 @@ function runCommand(command, args, options = {}) {
             stdio: "inherit",
             env: {
                 ...process.env,
+                ...options.env,
                 GOWORK: "off",
             },
         });
