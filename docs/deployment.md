@@ -214,7 +214,7 @@ metadata compatibility policy.
 ```
 
 Local checkout builds write `devel`; tagged module installs write the module
-version recorded in Go build information, such as `v0.2.0-preview.5`.
+version recorded in Go build information, such as `v0.2.0-preview.6`.
 
 `goframe-package.json` is the authoritative current package completion marker.
 `goxc` publishes it last and removes it first during destructive package
@@ -322,7 +322,7 @@ configure a production fallback policy.
 
 The current package contract does not include bundle splitting, asset imports
 from Go/GOX, glob asset patterns, route loaders, SSR/hydration, production
-server fallback automation, or Player/Engine packaging semantics. The package
-surface is limited to explicit app manifests, generated or custom
-`index.html`, static assets under package `assets/`, versioned generated
-metadata, and exportable static browser/WASM artifacts.
+server fallback automation. The package surface is limited to explicit app
+manifests, generated or custom `index.html`, static assets under package
+`assets/`, versioned generated metadata, and exportable static browser/WASM
+artifacts.

@@ -123,7 +123,7 @@ Future features do not become delivery promises by appearing in this document.
 
 | Version line | Theme | Intended capability class | Status |
 |---|---|---|---|
-| `v0.2.0-preview.6` | Diagnostics & Editor DX checkpoint | Publish the current CLI/editor diagnostic boundary as a bounded preview checkpoint. | **Next checkpoint** |
+| `v0.2.0-preview.6` | Diagnostics & Editor DX checkpoint | Published the current CLI/editor diagnostic boundary as a bounded preview checkpoint. | **Current / shipped** |
 | `v0.3.0-preview.*` | Application Model II | Route-driven data, transitions, loaders, mutations, and document state. | **Planned direction** |
 | `v0.4.0-preview.*` | Modular Delivery & Bundle Splitting | Explicit asset, multi-entry WASM, and route-lazy delivery boundaries. | **Candidate** |
 | `v0.5.0-preview.*` | Server Rendering & Prerender | A DOM-independent HTML-rendering subset, static prerender, and evaluated SSR adapters. | **Research** |
@@ -137,10 +137,9 @@ The ordering expresses dependencies and preferred focus. It is not a calendar.
 
 ## `v0.2.0-preview.6` - Diagnostics & Editor DX Checkpoint
 
-Status: **Next checkpoint**.
+Status: **Current / shipped**.
 
-This is the nearest tooling and diagnostics checkpoint. Its implementation
-baseline already exists on current `main`:
+This published tooling and diagnostics checkpoint includes:
 
 - `goxc check <file-or-directory>` performs read-only GOX validation;
 - text output and schema-v1 JSON transport report authored source diagnostics;
@@ -160,10 +159,9 @@ baseline already exists on current `main`:
 - focused pure Node tests and the VS Code extension CI lane cover the process
   contract and mapping helpers.
 
-Release notes for `v0.2.0-preview.6` are prepared in the
-[dedicated release document](release-notes-v0.2.0-preview.6.md). The tag,
-GitHub Release body, publication, and exact-install verification remain
-separate steps. The release remains a **Next checkpoint** until publication.
+`v0.2.0-preview.6` was published as a pre-release. Its durable scope and
+validation evidence are recorded in the
+[dedicated release document](release-notes-v0.2.0-preview.6.md).
 
 `v0.2.0-preview.7` should exist only for a real maintenance, compatibility, or
 security need. Normal feature progression should move to
@@ -516,29 +514,12 @@ entries are deliberately not sequenced or assigned to releases.
 Reservoir entries become version-train work only through an explicit selection
 that defines behavior boundaries, evidence, cost, and non-goals.
 
-## Inactive Directions
-
-Status: **Inactive**.
-
-The following are historical strategic options, not current roadmap items:
-
-- Player/Engine;
-- `.gfapp`;
-- a portable custom host/runtime;
-- desktop or mobile shells;
-- a custom application engine.
-
-Reopening any of these directions requires an explicit maintainer decision.
-Architecture lessons about authored source, runtime APIs, toolchain packaging,
-and deployment contracts may still be reused without reactivating the original
-product direction. Historical references remain available in
-[the Player/Engine inactive direction note](player-vision.md).
-
 ## Immediate Sequence
 
-1. Complete and merge preview.6 release preparation.
-2. Run release gates and publish `v0.2.0-preview.6`.
-3. Begin `v0.3` with an executable Application Model II capability.
+1. Begin `v0.3` with an executable Application Model II capability.
+2. Establish route transition state and cancellation through focused evidence.
+3. Continue toward later `v0.3` capabilities only after the first slice is
+   validated.
 
 The first post-release engineering PR should not be another broad audit or a
 wording-only cleanup. It should provide a bounded, observable capability with

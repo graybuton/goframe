@@ -1,6 +1,6 @@
 # Evaluator Guide
 
-This guide is for evaluating the `v0.2.0-preview.5` browser/WASM layer. It is
+This guide is for evaluating the `v0.2.0-preview.6` browser/WASM layer. It is
 not a production deployment guide.
 
 ## Prerequisites
@@ -31,6 +31,20 @@ Inside a checkout:
 ```bash
 go install ./cmd/goxc
 goxc doctor
+```
+
+From a repository checkout, verify the structured diagnostics path:
+
+```bash
+goxc check ./examples/counter --format=json
+```
+
+A clean counter check returns one schema-v1 JSON document with:
+
+```text
+schemaVersion: 1
+ok: true
+diagnostics: []
 ```
 
 ## Recommended Evaluation Path
@@ -156,4 +170,4 @@ app. It is not a cross-browser certification suite.
 
 For the guided walkthrough, read the [tutorial](tutorial.md). For release scope
 and limitations, read the
-[v0.2.0-preview.5 release notes](release-notes-v0.2.0-preview.5.md).
+[v0.2.0-preview.6 release notes](release-notes-v0.2.0-preview.6.md).
