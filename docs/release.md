@@ -14,12 +14,6 @@ v0.1.0-mvp10
 Latest published preview tag:
 
 ```text
-v0.2.0-preview.5
-```
-
-Current preview tag under preparation:
-
-```text
 v0.2.0-preview.6
 ```
 
@@ -250,7 +244,6 @@ announcement.
   browser platforms as explicit deferred scope when unverified;
 - reusable/multi-module component identity scope stated explicitly;
 - experimental surfaces named rather than hidden;
-- Player/Engine bounded as inactive and not a preview promise;
 - compatibility/deprecation notes included;
 - supply-chain/tooling evidence stated as lightweight CI/Dependabot/lockfile
   coverage, with no SBOM or scanner claim in the current preview contract;
