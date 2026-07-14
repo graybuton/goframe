@@ -2,7 +2,7 @@
 
 ## Status / Scope
 
-`v0.2.0-preview.6` is an experimental preview for GoFrame's current
+`v0.2.0-preview.6` is a published experimental preview for GoFrame's current
 browser/WASM surface. This release is focused on structured GOX diagnostics and
 saved-source editor feedback.
 
@@ -13,8 +13,8 @@ contract and the repository's lightweight VS Code extension.
 
 GoFrame is not production-ready and does not provide a stable 1.0 API
 guarantee. This preview does not claim fullstack/server APIs, SSR/hydration,
-Player/Engine, `.gfapp`, formatter, or LSP support. The VS Code extension is
-not published to the Marketplace.
+formatter, or LSP support. The VS Code extension is not published to the
+Marketplace.
 
 ## Highlights
 
@@ -119,7 +119,7 @@ not published to the Marketplace.
 
 ## Validation
 
-Release-gate validation for this preview should include:
+The release candidate passed:
 
 - `git diff --check`;
 - `node scripts/docs-check.mjs`;
@@ -136,15 +136,12 @@ Release-gate validation for this preview should include:
 - `npm ci --prefix extensions/vscode-gox`;
 - `npm test --prefix extensions/vscode-gox`.
 
-The corresponding GitHub Actions workflows are:
+The corresponding GitHub Actions workflows passed on the tagged commit:
 
 - Core;
 - Browser Smoke;
 - WASM Size;
 - VS Code Extension.
-
-These are release-gate requirements, not claims that this docs-only
-preparation task ran the full release suite.
 
 ## Known Limitations And Follow-Ups
 
@@ -164,7 +161,7 @@ preparation task ran the full release suite.
 
 ## Install
 
-After the tag is published, install the exact preview with:
+Install the exact preview with:
 
 ```bash
 go install github.com/graybuton/goframe/cmd/goxc@v0.2.0-preview.6
@@ -180,7 +177,7 @@ goxc doctor
 goxc check ./examples/counter --format=json
 ```
 
-Expected first line after the exact tag is published:
+Expected first line from the exact tagged install:
 
 ```text
 goxc version v0.2.0-preview.6
@@ -218,4 +215,4 @@ This preview does not add GOX grammar, runtime, package, manifest, or public API
 behavior. It does not add unsaved-buffer analysis, Go/TinyGo semantic checking,
 an LSP, formatter, completion, code actions, general filesystem watch mode, or
 Marketplace distribution. It also does not add a commit buffer, mutation queue,
-production server, fullstack API, SSR, hydration, Player/Engine, or `.gfapp`.
+production server, fullstack API, SSR, or hydration.
