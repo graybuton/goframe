@@ -65,6 +65,8 @@ Published CLI/module version:
 Published CLI/module tag target:
 Documentation/examples revision:
 Documentation delivery method:
+Participant material allowlist:
+Participant material isolation audit:
 ```
 
 Use exact Git SHA or tag values. The study-kit revision is the selected commit
@@ -75,8 +77,8 @@ commit and `docs/task-based-evaluation.md` path actually delivered. The
 published CLI/module version identifies the release installed through Go and
 used by participant applications, while its tag target identifies that
 release's exact source commit. The documentation/examples revision identifies
-the separate immutable documentation and examples snapshot available during
-the task.
+the source commit from which the separate, closed participant product-material
+bundle is filtered.
 
 For the first published-preview series, use this material contract:
 
@@ -97,9 +99,9 @@ whose evaluator and deployment guidance is aligned to preview.6. The latter is
 a descendant of the tag target; the intervening changes are documentation-only,
 and product source and examples are unchanged.
 
-Record one documentation delivery method: pinned GitHub permalinks, a detached
-local checkout, a read-only archive, or another explicitly described immutable
-snapshot. Do not give participants moving default-branch links.
+Record the filtered documentation delivery method, participant material
+allowlist, and isolation-audit result described below. Do not give participants
+moving default-branch links.
 
 When the documentation/examples revision differs from the published tag target,
 record why the revisions differ, how the documentation was verified against
@@ -115,18 +117,69 @@ between them, examples are unchanged, and `docs/evaluator-guide.md` and
 series record.
 
 Every participant in one study series must use the same study-kit,
-participant-brief, and documentation/examples revisions. Do not silently
-update documentation or examples during a series. If any study-material
-revision changes, start or clearly label a new series or cohort. Preserve that
-revision difference during aggregation, and do not compare sessions as
-equivalent unless the difference is explicitly recorded and judged irrelevant
+participant-brief, documentation/examples revision, participant material
+allowlist, and filtered delivery bundle. Do not silently update documentation,
+examples, or delivered paths during a series. If any study-material revision,
+allowlist, or delivery bundle changes, start or clearly label a new series or
+cohort. Preserve that difference during aggregation, and do not compare
+sessions as equivalent unless it is explicitly recorded and judged irrelevant
 to the repeated observation. A deterministic product defect may be reproduced
-immediately, but its originating material revision remains part of the
+immediately, but its originating material contract remains part of the
 evidence.
 
 The published tag target and documentation/examples revision are intentionally
 different in the first-series material contract. That defined split does not
 create separate cohorts; changing either recorded revision does.
+
+## Participant Material Bundle
+
+Deliver the participant brief separately from the product-material bundle. For
+the first published-preview series, filter the bundle at
+`3997797c40f764601df9bf6bbec6a070eaaa0ffb` to exactly this allowlist:
+
+```text
+docs/gox-language.md
+docs/router.md
+docs/resources.md
+docs/deployment.md
+
+examples/counter/**
+examples/multipackage/**
+examples/router/**
+examples/server-backed/**
+```
+
+These are the only repository product materials supplied to participants.
+Exclude `README.md`, the organizer-facing `docs/evaluator-guide.md`, the
+organizer-only `docs/task-based-evaluation-facilitator.md`, `docs/release.md`,
+`docs/release-notes-*.md`, `docs/roadmap.md`,
+`docs/post-preview6-deep-audit.md`, and every other non-allowlisted repository
+path. Do not deliver a full repository checkout or an unfiltered repository
+archive. The facilitator may retain a full private checkout for setup,
+comparison, and evidence verification.
+
+Use one participant-safe delivery method:
+
+- pinned permalinks to exact allowlisted files and directories;
+- a filtered read-only archive containing only allowlisted paths;
+- a filtered local material directory containing only allowlisted paths; or
+- another explicitly described immutable and filtered bundle.
+
+Before a series starts, verify and record that the participant bundle:
+
+- contains only the recorded allowlist;
+- contains no `@latest` installation instruction;
+- contains no facilitator-protocol link or path;
+- contains no evaluator-guide link or path;
+- uses no moving default-branch link as required task material;
+- matches the recorded documentation/examples revision;
+- contains every file under each allowlisted example directory; and
+- lets participants complete the core task without accessing excluded paths.
+
+Record the exact paths under `Participant material allowlist:` and the audit
+method and result under `Participant material isolation audit:`. Changing the
+allowlist or delivered bundle is a material study change and requires a new or
+clearly labeled cohort.
 
 ## Session Setup
 
@@ -139,18 +192,26 @@ Before starting, record:
 - published CLI/module tag target;
 - documentation/examples revision;
 - documentation delivery method;
+- participant material allowlist;
+- participant material isolation audit;
 - an anonymized participant ID;
 - broad Go experience band;
 - prior WASM or TinyGo experience as `yes` or `no`;
 - operating system;
 - editor;
 - Go, TinyGo, Node.js, browser, and `goxc` versions;
-- the clean session-directory path or an anonymized label for it;
+- an anonymized session-directory label;
 - exact session start timestamp.
 
 Record the exact end timestamp when the session stops. Do not collect names,
 email addresses, employer names, repository credentials, access tokens, or
 other personal identifying information.
+
+Do not store the participant's raw absolute home-directory path. Redact
+usernames, organization names, customer names, and other identifying path
+segments from stored commands or error logs while preserving relative paths
+and technical error meaning. Use `[session-root]` as a stable replacement when
+redaction is needed.
 
 Confirm that the participant starts outside the GoFrame repository and that
 `goxc version` reports `v0.2.0-preview.6`. If a machine prerequisite is
@@ -276,6 +337,8 @@ filled participant result to the GoFrame repository by default.
 - Published CLI/module tag target:
 - Documentation/examples revision:
 - Documentation delivery method:
+- Participant material allowlist:
+- Participant material isolation audit:
 - Participant ID:
 - Go experience band:
 - Prior WASM/TinyGo experience: yes/no
@@ -286,7 +349,8 @@ filled participant result to the GoFrame repository by default.
 - Node.js version:
 - Browser and version:
 - goxc version:
-- Session directory label:
+- Anonymized session-directory label:
+- Path redactions applied: yes/no
 - Core start timestamp:
 - Core end timestamp:
 - Optional editor add-on used: yes/no
@@ -443,16 +507,17 @@ roadmap work.
 - Task-wording ambiguity observed:
 - Environment-only blockers:
 - Product/documentation blockers:
-- Evidence files retained and storage location:
+- Anonymized evidence artifact label or private storage identifier:
 - Personal or credential data removed: yes/no
 ```
 
 ## Aggregation Rules
 
-Aggregate recurring evidence only when the study-kit, participant-brief, and
-documentation/examples revisions are identical, or when each revision
-difference is explicitly labeled and judged irrelevant to the repeated
-observation. Do not hide a documentation or example correction made between
+Aggregate recurring evidence only when the study-kit, participant-brief,
+documentation/examples revision, participant material allowlist, and filtered
+delivery bundle are identical, or when each material difference is explicitly
+labeled and judged irrelevant to the repeated observation. Do not hide a
+documentation, example, allowlist, or delivery correction made between
 sessions inside one unqualified aggregate.
 
 Select an engineering follow-up only after at least one of these conditions is

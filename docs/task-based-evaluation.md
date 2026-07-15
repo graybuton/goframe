@@ -30,30 +30,38 @@ For the core session:
 - work in a clean directory outside the GoFrame repository;
 - use the exact published `v0.2.0-preview.6` CLI and module dependency;
 - do not use AI or code-generation assistance;
-- use public GoFrame documentation and examples, plus normal Go
-  documentation;
-- do not inspect GoFrame implementation under `pkg/**` or `cmd/**` unless you
-  are blocked;
-- if you inspect implementation source, record the reason and path;
+- use only the supplied participant brief and product-material bundle, plus
+  ordinary external Go documentation;
+- do not browse or request other GoFrame repository paths during the timed
+  task;
+- record any omitted document or implementation source that appears necessary
+  as friction rather than expanding the supplied materials;
 - do not copy an existing example wholesale.
 
 ### Study Materials
 
-Use only this participant brief and the documentation and examples snapshot
-supplied by the facilitator. The facilitator records the exact revisions and
+Use only this participant brief and the closed product-material bundle supplied
+by the facilitator. The facilitator records its exact revision, allowlist, and
 delivery method before the session; you do not need to determine those values
 yourself.
 
 Do not switch to another branch, tag, commit, archive, or repository snapshot during the session.
 
-The supplied snapshot includes these public study materials:
+These are the only GoFrame product materials supplied for the core session:
 
-- `README.md`;
 - `docs/gox-language.md`;
 - `docs/router.md`;
 - `docs/resources.md`;
 - `docs/deployment.md`;
-- public examples from the supplied snapshot.
+- `examples/counter/**`;
+- `examples/multipackage/**`;
+- `examples/router/**`;
+- `examples/server-backed/**`.
+
+Do not browse or request other repository paths during the timed task. If an
+omitted document appears necessary, record that need as friction rather than
+silently expanding the material set. Ordinary external Go documentation
+remains allowed.
 
 Choose what to consult and record what you use.
 
@@ -67,6 +75,15 @@ go install \
 
 goxc version
 goxc doctor
+```
+
+Use the exact CLI and module version stated in this participant brief.
+Generic unpinned installation guidance is outside this study.
+
+The participant application must use this module dependency:
+
+```text
+github.com/graybuton/goframe v0.2.0-preview.6
 ```
 
 The version command must print:
@@ -184,13 +201,16 @@ These states describe the task outcome, not participant ability.
 
 At the end, provide the facilitator with:
 
-- the working directory or an archive, excluding credentials and other
-  secrets;
+- with your consent, a working artifact or archive, excluding credentials and
+  other secrets;
+- an anonymized artifact or session label for the written study record; your
+  raw local absolute path is not recorded;
 - commands you remember failing and their output when available;
 - the last completed stage;
 - the first unresolved blocker;
 - documents and examples you consulted;
-- any GoFrame implementation source you inspected, with the reason;
+- any non-allowlisted document or implementation source you believed was
+  necessary, with the reason;
 - one action you expected GoFrame to provide but could not find.
 
 Do not include names, email addresses, employer information, repository
