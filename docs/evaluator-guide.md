@@ -94,6 +94,19 @@ Then visit:
 TinyGo's size-oriented trap behavior is not the containment proof path for this
 demo.
 
+## Task-Based Evaluation
+
+This guide is a guided walkthrough of an existing repository checkout. To
+evaluate independent application construction with the published preview, give
+participants the [GoFrame Task-Based Evaluation](task-based-evaluation.md)
+brief instead. Facilitators should retain the separate
+[facilitator protocol](task-based-evaluation-facilitator.md) and avoid exposing
+its observation prompts as implementation hints during the task.
+
+No external task-based results are recorded yet. A maintainer mechanical pilot
+may verify the instructions, but it is not independent participant evidence or
+an adoption claim.
+
 ## Package A Small App
 
 The recommended preview manifest shape is:
