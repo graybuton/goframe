@@ -32,6 +32,13 @@ const staleSettleMS = slowDelayMS + 300;
 const failureName = "fail";
 const failureStatus = "failed";
 const failureMessage = "goframe: fetch returned HTTP 500";
+const savedGreetingTarget = "/saved-greeting";
+const savedGreetingHash = `#${savedGreetingTarget}`;
+const savedInitialName = "GoFrame";
+const savedSlowName = "slow";
+const savedFailureName = "fail";
+const savedRecoveryName = "Grace";
+const savedFailureMessage = "controlled saved greeting failure";
 const componentNames = [
     "App",
     "ServerBackedShell",
@@ -39,6 +46,7 @@ const componentNames = [
     "RouterRoute",
     "HomeRoute",
     "GreetingRoute",
+    "SavedGreetingRoute",
     "NotFoundRoute",
 ];
 
@@ -77,6 +85,7 @@ try {
     await assertBackendAPI(updatedName, updatedMessage);
     await assertBackendAPI(slowName, slowMessage);
     await assertBackendAPIFailure(failureName, 500);
+    await assertSavedGreetingAPI(savedInitialName);
 
     browser = spawn(chrome, [
         "--headless",
@@ -421,8 +430,8 @@ try {
         routeContentSame: true,
     }, "server-backed browser forward");
 
-    const finalEvidence = await evidenceState(client);
-    assertEvidence(finalEvidence, {
+    const routeEvidence = await evidenceState(client);
+    assertEvidence(routeEvidence, {
         fetchesStarted: 11,
         aborts: 2,
         successfulCompletions: 6,
@@ -432,7 +441,7 @@ try {
         shellIdentityChanges: 0,
         routeContentIdentityChanges: 0,
     }, "final route/resource evidence");
-    assertStringArray(finalEvidence.routeTargetsVisited, [
+    assertStringArray(routeEvidence.routeTargetsVisited, [
         "",
         greetingHash(directName),
         greetingHash(updatedName),
@@ -445,7 +454,178 @@ try {
         greetingHash(failureName),
         greetingHash(updatedName),
     ], "route targets visited");
-    console.log(`server-backed async navigation evidence: ${JSON.stringify(finalEvidence)}`);
+    console.log(`server-backed async navigation evidence: ${JSON.stringify(routeEvidence)}`);
+
+    await startScenario(client, "saved-initial-state");
+    await navigateSavedGreeting(client);
+    await waitForSavedReadLoading(client, "saved greeting initial read loading");
+    await waitForSavedCommitted(client, savedInitialName, "saved greeting initial committed state");
+    const savedInitialReport = await finishScenario(client, "saved-initial-state");
+    assertSavedGreetingReport(savedInitialReport, "saved greeting initial state", {
+        routeChanges: 1,
+        samePattern: false,
+        getsStarted: 1,
+        getsCompleted: 1,
+        postsStarted: 0,
+    });
+    assertState(await appState(client), {
+        route: "savedGreeting",
+        hash: savedGreetingHash,
+        routeTarget: savedGreetingTarget,
+        savedReadStatus: "ready",
+        savedCommitted: savedInitialName,
+        mutationStatus: "idle",
+        mutationError: "",
+        mutationErrorNonEmpty: false,
+        mutationPending: false,
+        mutationSubmitDisabled: false,
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+    }, "server-backed saved greeting initial state");
+
+    await prepareSavedGreetingName(client, "   ");
+    await startScenario(client, "saved-client-validation");
+    await dispatchSavedGreetingSubmit(client);
+    await waitForSavedValidationFailure(client, savedInitialName, "saved greeting client validation");
+    const validationReport = await finishScenario(client, "saved-client-validation");
+    assertSavedGreetingReport(validationReport, "saved greeting client validation", {
+        routeChanges: 0,
+        samePattern: true,
+        getsStarted: 0,
+        postsStarted: 0,
+    });
+    assertState(await appState(client), {
+        savedCommitted: savedInitialName,
+        mutationStatus: "validation failed",
+        mutationError: "Name is required.",
+        mutationErrorNonEmpty: true,
+        mutationPending: false,
+    }, "server-backed saved greeting validation state");
+
+    await prepareSavedGreetingName(client, savedSlowName);
+    const slowMutationBaseline = await evidenceState(client);
+    await startScenario(client, "saved-slow-duplicate");
+    await dispatchSavedGreetingSubmit(client);
+    await waitForSavedMutationPending(client, savedInitialName, "saved greeting slow mutation pending");
+    await waitForMutationPostCount(client, slowMutationBaseline.mutationPostsStarted + 1, "saved greeting slow POST start");
+    await dispatchSavedGreetingSubmit(client);
+    await waitForDuplicateSubmitCount(client, slowMutationBaseline.duplicateSubmitAttempts + 1, "saved greeting duplicate submit attempt");
+    await wait(100);
+    assertEvidence(await evidenceState(client), {
+        mutationPostsStarted: slowMutationBaseline.mutationPostsStarted + 1,
+        activeMutationRequests: 1,
+    }, "saved greeting duplicate POST suppression");
+    await waitForSavedCommitted(client, savedSlowName, "saved greeting slow committed state");
+    const slowMutationReport = await finishScenario(client, "saved-slow-duplicate");
+    assertSavedGreetingReport(slowMutationReport, "saved greeting slow mutation", {
+        routeChanges: 0,
+        samePattern: true,
+        getsStarted: 1,
+        getsCompleted: 1,
+        postsStarted: 1,
+        postsCompleted: 1,
+        duplicateSubmitAttempts: 1,
+        committedValues: [savedSlowName],
+    });
+    assertState(await appState(client), {
+        savedReadStatus: "ready",
+        savedCommitted: savedSlowName,
+        mutationStatus: "success",
+        mutationError: "",
+        mutationErrorNonEmpty: false,
+        mutationPending: false,
+        mutationSubmitDisabled: false,
+    }, "server-backed saved greeting slow success");
+
+    await prepareSavedGreetingName(client, savedFailureName);
+    await startScenario(client, "saved-controlled-failure");
+    await dispatchSavedGreetingSubmit(client);
+    await waitForSavedMutationPending(client, savedSlowName, "saved greeting controlled failure pending");
+    await waitForSavedMutationFailure(client, savedSlowName, "saved greeting controlled server failure");
+    const savedFailureReport = await finishScenario(client, "saved-controlled-failure");
+    assertSavedGreetingReport(savedFailureReport, "saved greeting controlled failure", {
+        routeChanges: 0,
+        samePattern: true,
+        getsStarted: 0,
+        postsStarted: 1,
+        postsFailed: 1,
+    });
+    assertState(await appState(client), {
+        savedCommitted: savedSlowName,
+        mutationStatus: "server failed",
+        mutationError: savedFailureMessage,
+        mutationErrorNonEmpty: true,
+        mutationPending: false,
+    }, "server-backed saved greeting server failure state");
+    await assertSavedGreetingAPI(savedSlowName);
+
+    await prepareSavedGreetingName(client, savedRecoveryName);
+    await startScenario(client, "saved-recovery");
+    await dispatchSavedGreetingSubmit(client);
+    await waitForSavedMutationPending(client, savedSlowName, "saved greeting recovery pending");
+    await waitForSavedCommitted(client, savedRecoveryName, "saved greeting recovery committed state");
+    const savedRecoveryReport = await finishScenario(client, "saved-recovery");
+    assertSavedGreetingReport(savedRecoveryReport, "saved greeting recovery", {
+        routeChanges: 0,
+        samePattern: true,
+        getsStarted: 1,
+        getsCompleted: 1,
+        postsStarted: 1,
+        postsCompleted: 1,
+        committedValues: [savedRecoveryName],
+    });
+    assertState(await appState(client), {
+        savedReadStatus: "ready",
+        savedCommitted: savedRecoveryName,
+        mutationStatus: "success",
+        mutationError: "",
+        mutationErrorNonEmpty: false,
+        mutationPending: false,
+        mutationSubmitDisabled: false,
+    }, "server-backed saved greeting recovery state");
+    await assertSavedGreetingAPI(savedRecoveryName);
+
+    const finalEvidence = await evidenceState(client);
+    assertEvidence(finalEvidence, {
+        fetchesStarted: 11,
+        aborts: 2,
+        successfulCompletions: 6,
+        failedCompletions: 3,
+        savedGetsStarted: 3,
+        savedGetsCompleted: 3,
+        savedGetsFailed: 0,
+        mutationPostsStarted: 3,
+        mutationPostsCompleted: 2,
+        mutationPostsFailed: 1,
+        activeMutationRequests: 0,
+        duplicateSubmitAttempts: 1,
+        readReloadsAfterSuccess: 2,
+        staleCommittedValueAppearances: 0,
+        appIdentityChanges: 0,
+        shellIdentityChanges: 0,
+        routeContentIdentityChanges: 0,
+    }, "final mutation evidence");
+    assertStringArray(finalEvidence.committedValuesObserved, [
+        savedInitialName,
+        savedSlowName,
+        savedRecoveryName,
+    ], "saved greeting committed values observed");
+    assertStringArray(finalEvidence.routeTargetsVisited, [
+        "",
+        greetingHash(directName),
+        greetingHash(updatedName),
+        greetingHash(slowName),
+        greetingHash(updatedName),
+        greetingHash(slowName),
+        "#/",
+        greetingHash(failureName),
+        greetingHash(updatedName),
+        greetingHash(failureName),
+        greetingHash(updatedName),
+        savedGreetingHash,
+    ], "final route targets visited");
+    console.log(`server-backed mutation evidence: ${JSON.stringify(finalEvidence)}`);
 
     client.close();
     console.log("Server-backed browser smoke: ok");
@@ -478,6 +658,20 @@ async function assertBackendAPIFailure(name, status) {
     const text = await response.text();
     if (!text.trim()) {
         throw new Error("HARNESS FAILURE: backend API failure response body was empty");
+    }
+}
+
+async function assertSavedGreetingAPI(expected) {
+    const response = await fetch(`http://127.0.0.1:${backendPort}/api/saved-greeting`);
+    if (!response.ok) {
+        throw new Error(`HARNESS FAILURE: saved greeting API returned HTTP ${response.status}`);
+    }
+    const text = await response.text();
+    if (text !== expected) {
+        throw new Error(`HARNESS FAILURE: saved greeting API returned ${JSON.stringify(text)}, want ${JSON.stringify(expected)}`);
+    }
+    if (response.headers.get("cache-control") !== "no-store") {
+        throw new Error("HARNESS FAILURE: saved greeting API did not return Cache-Control: no-store");
     }
 }
 
@@ -555,6 +749,55 @@ async function prepareGreetingName(client, name) {
     return report;
 }
 
+async function prepareSavedGreetingName(client, name) {
+    const baseline = await client.callFunction(`function(name) {
+        const input = document.querySelector("[data-testid='saved-greeting-input']");
+        if (!input) {
+            return { ok: false, reason: "missing saved greeting input" };
+        }
+        const owner = "SavedGreetingRoute";
+        const renders = window.goframeComponentRenderCounts?.[owner] || 0;
+        const patches = window.goframeComponentPatchCounts?.[owner] || 0;
+        input.value = name;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return { ok: true, owner, renders, patches, value: input.value };
+    }`, name);
+    if (!baseline?.ok) {
+        throw new Error(`APP FAILURE: could not prepare saved greeting input: ${JSON.stringify(baseline)}`);
+    }
+
+    let updated = null;
+    await waitForCondition(async () => {
+        updated = await savedInputPreparationState(client);
+        return updated.value === name &&
+            updated.renders > baseline.renders &&
+            updated.patches > baseline.patches;
+    }, `controlled saved greeting input ${name} framework update`);
+
+    await waitForBrowserFrames(client, 2);
+    const settled = await savedInputPreparationState(client);
+    if (settled.value !== name ||
+        settled.renders !== updated.renders ||
+        settled.patches !== updated.patches) {
+        throw new Error(`APP FAILURE: controlled saved greeting input ${name} did not settle: ${JSON.stringify({ baseline, updated, settled })}`);
+    }
+    const report = { name, owner: baseline.owner, baseline, updated, settled };
+    console.log(`server-backed saved input preparation: ${JSON.stringify(report)}`);
+    return report;
+}
+
+async function savedInputPreparationState(client) {
+    return await client.callFunction(`function() {
+        const owner = "SavedGreetingRoute";
+        return {
+            owner,
+            renders: window.goframeComponentRenderCounts?.[owner] || 0,
+            patches: window.goframeComponentPatchCounts?.[owner] || 0,
+            value: document.querySelector("[data-testid='saved-greeting-input']")?.value ?? "",
+        };
+    }`);
+}
+
 async function inputPreparationState(client, owner) {
     return await client.callFunction(`function(owner) {
         return {
@@ -588,6 +831,20 @@ async function dispatchGreetingSubmit(client) {
         }
         return { ok: true };
     }`);
+}
+
+async function dispatchSavedGreetingSubmit(client) {
+    const result = await client.evaluate(`(() => {
+        const form = document.querySelector("[data-testid='saved-greeting-form']");
+        if (!form) {
+            return { ok: false, reason: "missing saved greeting form" };
+        }
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        return { ok: true };
+    })()`);
+    if (!result?.ok) {
+        throw new Error(`APP FAILURE: could not submit saved greeting form: ${JSON.stringify(result)}`);
+    }
 }
 
 async function waitForGreeting(client, expected, label) {
@@ -653,8 +910,86 @@ async function waitForRoute(client, route, target) {
     }, `route ${route} at ${target}`);
 }
 
+async function waitForSavedReadLoading(client, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.route === "savedGreeting" &&
+            state.hash === savedGreetingHash &&
+            state.routeTarget === savedGreetingTarget &&
+            state.savedResourceKey === "/api/saved-greeting" &&
+            state.savedReadStatus === "loading" &&
+            state.savedReadLoading &&
+            !state.savedReadReady &&
+            !state.savedReadFailed;
+    }, label);
+}
+
+async function waitForSavedCommitted(client, expected, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.route === "savedGreeting" &&
+            state.savedReadStatus === "ready" &&
+            state.savedReadReady &&
+            !state.savedReadLoading &&
+            !state.savedReadFailed &&
+            state.savedCommitted === expected &&
+            state.mutationStatus !== "pending";
+    }, label);
+}
+
+async function waitForSavedValidationFailure(client, committed, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.savedCommitted === committed &&
+            state.savedReadStatus === "ready" &&
+            state.mutationStatus === "validation failed" &&
+            state.mutationError === "Name is required." &&
+            !state.mutationPending;
+    }, label);
+}
+
+async function waitForSavedMutationPending(client, committed, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.savedCommitted === committed &&
+            state.savedReadStatus === "ready" &&
+            state.mutationStatus === "pending" &&
+            state.mutationPending &&
+            state.mutationSubmitDisabled &&
+            !state.mutationErrorNonEmpty;
+    }, label);
+}
+
+async function waitForSavedMutationFailure(client, committed, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.savedCommitted === committed &&
+            state.savedReadStatus === "ready" &&
+            state.mutationStatus === "server failed" &&
+            state.mutationError === savedFailureMessage &&
+            state.mutationErrorNonEmpty &&
+            !state.mutationPending;
+    }, label);
+}
+
+async function waitForMutationPostCount(client, expected, label) {
+    await waitForCondition(async () => {
+        return (await evidenceState(client)).mutationPostsStarted === expected;
+    }, label);
+}
+
+async function waitForDuplicateSubmitCount(client, expected, label) {
+    await waitForCondition(async () => {
+        return (await evidenceState(client)).duplicateSubmitAttempts === expected;
+    }, label);
+}
+
 async function navigateHome(client) {
     await client.evaluate(`document.querySelector("[data-testid='server-backed-home-link']")?.click()`);
+}
+
+async function navigateSavedGreeting(client) {
+    await client.evaluate(`document.querySelector("[data-testid='server-backed-saved-link']")?.click()`);
 }
 
 async function navigateGreetingHash(client, name) {
@@ -671,14 +1006,17 @@ async function appState(client) {
         const key = document.querySelector("[data-testid='greeting-resource-key']")?.textContent.trim() ?? "";
         const home = document.querySelector("[data-testid='server-backed-home']");
         const greeting = document.querySelector("[data-testid='server-backed-greeting-route']");
+        const savedGreeting = document.querySelector("[data-testid='server-backed-saved-route']");
         const notFound = document.querySelector("[data-testid='server-backed-not-found']");
+        const mutationError = document.querySelector("[data-testid='saved-greeting-mutation-error']")?.textContent.trim() ?? "";
+        const mutationStatus = document.querySelector("[data-testid='saved-greeting-mutation-status']")?.textContent.trim() ?? "";
         const identity = window.__serverBackedEvidence?.checkIdentity() ?? {};
         return {
             app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
             shell: Boolean(document.querySelector("[data-testid='server-backed-shell']")),
             form: Boolean(document.querySelector("[data-testid='greeting-form']")),
             routeContent: Boolean(document.querySelector("[data-testid='server-backed-route-content']")),
-            route: home ? "home" : greeting ? "greeting" : notFound ? "notFound" : "missing",
+            route: home ? "home" : greeting ? "greeting" : savedGreeting ? "savedGreeting" : notFound ? "notFound" : "missing",
             hash: window.location.hash,
             routeTarget: document.querySelector("[data-testid='server-backed-route-target']")?.textContent.trim() ?? "",
             loading: Boolean(document.querySelector("[data-testid='greeting-loading']")),
@@ -690,6 +1028,19 @@ async function appState(client) {
             message,
             error,
             errorNonEmpty: error.length > 0,
+            savedForm: Boolean(document.querySelector("[data-testid='saved-greeting-form']")),
+            savedInput: document.querySelector("[data-testid='saved-greeting-input']")?.value ?? "",
+            savedResourceKey: document.querySelector("[data-testid='saved-greeting-resource-key']")?.textContent.trim() ?? "",
+            savedReadStatus: document.querySelector("[data-testid='saved-greeting-read-status']")?.textContent.trim() ?? "",
+            savedReadLoading: Boolean(document.querySelector("[data-testid='saved-greeting-read-loading']")),
+            savedReadReady: Boolean(document.querySelector("[data-testid='saved-greeting-committed']")),
+            savedReadFailed: Boolean(document.querySelector("[data-testid='saved-greeting-read-error']")),
+            savedCommitted: document.querySelector("[data-testid='saved-greeting-committed']")?.textContent.trim() ?? "",
+            mutationStatus,
+            mutationPending: mutationStatus === "pending",
+            mutationError,
+            mutationErrorNonEmpty: mutationError.length > 0,
+            mutationSubmitDisabled: document.querySelector("[data-testid='saved-greeting-submit']")?.disabled ?? false,
             origin: window.location.origin,
             appSame: identity.appSame ?? false,
             shellSame: identity.shellSame ?? false,
@@ -756,6 +1107,39 @@ function assertHomeNavigationReport(report, label) {
         throw new Error(`APP FAILURE: ${label} home evidence changed: ${JSON.stringify(report)}`);
     }
     assertReportIdentity(report, label, false);
+}
+
+function assertSavedGreetingReport(report, label, options) {
+    assertSchedulingReport(report, label, "SavedGreetingRoute");
+    assertState(report.requests, {
+        started: 0,
+        aborted: 0,
+        succeeded: 0,
+        failed: 0,
+    }, `${label} greeting request delta`);
+    assertState(report.savedRequests, {
+        getsStarted: options.getsStarted ?? 0,
+        getsCompleted: options.getsCompleted ?? 0,
+        getsFailed: options.getsFailed ?? 0,
+        postsStarted: options.postsStarted ?? 0,
+        postsCompleted: options.postsCompleted ?? 0,
+        postsFailed: options.postsFailed ?? 0,
+        duplicateSubmitAttempts: options.duplicateSubmitAttempts ?? 0,
+        activeMutationRequests: 0,
+    }, `${label} saved request delta`);
+    if (report.routeTargets.length !== options.routeChanges || report.routeContentMutations < 1) {
+        throw new Error(`APP FAILURE: ${label} route evidence changed: ${JSON.stringify(report)}`);
+    }
+    assertState(report.identity, {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        savedFormSame: options.samePattern,
+        savedInputSame: options.samePattern,
+    }, `${label} identity`);
+    if (options.committedValues) {
+        assertStringArray(report.committedValues, options.committedValues, `${label} committed values`);
+    }
 }
 
 function assertSchedulingReport(report, label, component) {
@@ -842,6 +1226,8 @@ function installServerBackedEvidenceExpression() {
     const componentNames = ${JSON.stringify(componentNames)};
     const slowMessage = ${JSON.stringify(slowMessage)};
     const requests = [];
+    const savedRequests = [];
+    const committedValuesObserved = [];
     const routeTargetsVisited = [];
     const operations = ${JSON.stringify(emptyOperations())};
     const scheduling = {
@@ -852,12 +1238,24 @@ function installServerBackedEvidenceExpression() {
     };
     const renderReports = [];
     let nextRequestID = 1;
+    let nextSavedRequestID = 1;
     let aborts = 0;
     let successfulCompletions = 0;
     let failedCompletions = 0;
     let staleResultAppearances = 0;
     let routeContentMutations = 0;
     let lastMessage = "";
+    let lastCommittedValue = "";
+    let savedGetsStarted = 0;
+    let savedGetsCompleted = 0;
+    let savedGetsFailed = 0;
+    let mutationPostsStarted = 0;
+    let mutationPostsCompleted = 0;
+    let mutationPostsFailed = 0;
+    let activeMutationRequests = 0;
+    let duplicateSubmitAttempts = 0;
+    let readReloadsAfterSuccess = 0;
+    let staleCommittedValueAppearances = 0;
 
     window.goframeComponentRenderCounts = {};
     window.goframeComponentPatchCounts = {};
@@ -897,6 +1295,15 @@ function installServerBackedEvidenceExpression() {
                     staleResultAppearances++;
                 }
                 lastMessage = message;
+                const committed = document.querySelector("[data-testid='saved-greeting-committed']")?.textContent.trim() || "";
+                if (committed && committed !== lastCommittedValue) {
+                    if (committedValuesObserved.includes(committed) &&
+                        committedValuesObserved.at(-1) !== committed) {
+                        staleCommittedValueAppearances++;
+                    }
+                    committedValuesObserved.push(committed);
+                    lastCommittedValue = committed;
+                }
             }).observe(this.stable.routeContent, {
                 childList: true,
                 subtree: true,
@@ -932,11 +1339,23 @@ function installServerBackedEvidenceExpression() {
                 successfulCompletions,
                 failedCompletions,
                 staleResultAppearances,
+                savedGetsStarted,
+                savedGetsCompleted,
+                savedGetsFailed,
+                mutationPostsStarted,
+                mutationPostsCompleted,
+                mutationPostsFailed,
+                activeMutationRequests,
+                duplicateSubmitAttempts,
+                readReloadsAfterSuccess,
+                staleCommittedValueAppearances,
+                committedValuesObserved: [...committedValuesObserved],
                 appIdentityChanges: this.identityChanged.app ? 1 : 0,
                 shellIdentityChanges: this.identityChanged.shell ? 1 : 0,
                 routeContentIdentityChanges: this.identityChanged.routeContent ? 1 : 0,
                 routeContentMutations,
                 requests: requests.map((request) => ({ ...request })),
+                savedRequests: savedRequests.map((request) => ({ ...request })),
             };
         },
     };
@@ -946,48 +1365,117 @@ function installServerBackedEvidenceExpression() {
         routeTargetsVisited.push(window.location.hash);
     });
 
+    document.addEventListener("submit", (event) => {
+        if (event.target?.matches?.("[data-testid='saved-greeting-form']") &&
+            activeMutationRequests > 0) {
+            duplicateSubmitAttempts++;
+        }
+    }, true);
+
     const originalFetch = window.fetch.bind(window);
     window.fetch = function(input, init) {
         const requestURL = new URL(typeof input === "string" ? input : input.url, window.location.href);
-        if (requestURL.pathname !== "/api/greeting") {
+        if (requestURL.pathname === "/api/greeting") {
+            const signal = init?.signal;
+            const request = {
+                id: nextRequestID++,
+                name: requestURL.searchParams.get("name") || "",
+                target: requestURL.pathname + requestURL.search,
+                outcome: "pending",
+                aborted: false,
+            };
+            requests.push(request);
+            if (signal) {
+                signal.addEventListener("abort", () => {
+                    if (request.aborted) return;
+                    request.aborted = true;
+                    request.outcome = "aborted";
+                    aborts++;
+                }, { once: true });
+            }
+            return originalFetch(input, init).then((response) => {
+                // Keep loading observable without changing the backend or runtime.
+                return new Promise((resolve) => {
+                    window.setTimeout(() => {
+                        if (!request.aborted) {
+                            request.outcome = response.ok ? "success" : "failed";
+                            if (response.ok) successfulCompletions++;
+                            else failedCompletions++;
+                        }
+                        resolve(response);
+                    }, request.name === ${JSON.stringify(slowName)} ? 0 : 140);
+                });
+            }, (error) => {
+                if (signal?.aborted) {
+                    request.aborted = true;
+                    request.outcome = "aborted";
+                } else {
+                    request.outcome = "failed";
+                    failedCompletions++;
+                }
+                throw error;
+            });
+        }
+        if (requestURL.pathname !== "/api/saved-greeting") {
             return originalFetch(input, init);
         }
+
+        const method = String(init?.method || "GET").toUpperCase();
         const signal = init?.signal;
+        const name = method === "POST"
+            ? new URLSearchParams(typeof init?.body === "string" ? init.body : "").get("name") || ""
+            : "";
         const request = {
-            id: nextRequestID++,
-            name: requestURL.searchParams.get("name") || "",
+            id: nextSavedRequestID++,
+            method,
+            name,
             target: requestURL.pathname + requestURL.search,
             outcome: "pending",
             aborted: false,
         };
-        requests.push(request);
+        savedRequests.push(request);
+        if (method === "GET") {
+            if (savedGetsStarted > 0) readReloadsAfterSuccess++;
+            savedGetsStarted++;
+        } else if (method === "POST") {
+            mutationPostsStarted++;
+            activeMutationRequests++;
+        }
+        const finish = (outcome) => {
+            if (request.outcome !== "pending") return;
+            request.outcome = outcome;
+            if (method === "GET") {
+                if (outcome === "success") savedGetsCompleted++;
+                else savedGetsFailed++;
+            } else if (method === "POST") {
+                activeMutationRequests--;
+                if (outcome === "success") mutationPostsCompleted++;
+                else mutationPostsFailed++;
+            }
+        };
         if (signal) {
             signal.addEventListener("abort", () => {
                 if (request.aborted) return;
                 request.aborted = true;
+                if (request.outcome === "pending" && method === "POST") {
+                    activeMutationRequests--;
+                }
                 request.outcome = "aborted";
-                aborts++;
             }, { once: true });
         }
         return originalFetch(input, init).then((response) => {
-            // Keep loading observable without changing the backend or runtime.
             return new Promise((resolve) => {
                 window.setTimeout(() => {
-                    if (!request.aborted) {
-                        request.outcome = response.ok ? "success" : "failed";
-                        if (response.ok) successfulCompletions++;
-                        else failedCompletions++;
-                    }
+                    if (!request.aborted) finish(response.ok ? "success" : "failed");
                     resolve(response);
-                }, request.name === ${JSON.stringify(slowName)} ? 0 : 140);
+                }, method === "POST" && name === ${JSON.stringify(savedSlowName)} ? 0 : 140);
             });
         }, (error) => {
             if (signal?.aborted) {
                 request.aborted = true;
                 request.outcome = "aborted";
             } else {
-                request.outcome = "failed";
-                failedCompletions++;
+                finish("failed");
             }
             throw error;
         });
@@ -1001,6 +1489,9 @@ function installServerBackedEvidenceExpression() {
         routeMutationBaseline: 0,
         formBaseline: null,
         inputBaseline: null,
+        savedFormBaseline: null,
+        savedInputBaseline: null,
+        committedValueBaseline: 0,
         start(label) {
             for (const name of Object.keys(operations)) operations[name] = 0;
             for (const name of Object.keys(scheduling)) scheduling[name] = 0;
@@ -1011,11 +1502,22 @@ function installServerBackedEvidenceExpression() {
                 aborts,
                 successfulCompletions,
                 failedCompletions,
+                savedGetsStarted,
+                savedGetsCompleted,
+                savedGetsFailed,
+                mutationPostsStarted,
+                mutationPostsCompleted,
+                mutationPostsFailed,
+                activeMutationRequests,
+                duplicateSubmitAttempts,
             };
             this.routeTargetBaseline = routeTargetsVisited.length;
             this.routeMutationBaseline = routeContentMutations;
             this.formBaseline = document.querySelector("[data-testid='greeting-form']");
             this.inputBaseline = document.querySelector("[data-testid='greeting-name']");
+            this.savedFormBaseline = document.querySelector("[data-testid='saved-greeting-form']");
+            this.savedInputBaseline = document.querySelector("[data-testid='saved-greeting-input']");
+            this.committedValueBaseline = committedValuesObserved.length;
             this.label = label;
             return true;
         },
@@ -1043,6 +1545,8 @@ function installServerBackedEvidenceExpression() {
                     ...evidence.checkIdentity(),
                     formSame: document.querySelector("[data-testid='greeting-form']") === this.formBaseline,
                     inputSame: document.querySelector("[data-testid='greeting-name']") === this.inputBaseline,
+                    savedFormSame: document.querySelector("[data-testid='saved-greeting-form']") === this.savedFormBaseline,
+                    savedInputSame: document.querySelector("[data-testid='saved-greeting-input']") === this.savedInputBaseline,
                 },
                 requests: {
                     started: requests.length - this.requestBaseline.fetchesStarted,
@@ -1050,6 +1554,17 @@ function installServerBackedEvidenceExpression() {
                     succeeded: successfulCompletions - this.requestBaseline.successfulCompletions,
                     failed: failedCompletions - this.requestBaseline.failedCompletions,
                 },
+                savedRequests: {
+                    getsStarted: savedGetsStarted - this.requestBaseline.savedGetsStarted,
+                    getsCompleted: savedGetsCompleted - this.requestBaseline.savedGetsCompleted,
+                    getsFailed: savedGetsFailed - this.requestBaseline.savedGetsFailed,
+                    postsStarted: mutationPostsStarted - this.requestBaseline.mutationPostsStarted,
+                    postsCompleted: mutationPostsCompleted - this.requestBaseline.mutationPostsCompleted,
+                    postsFailed: mutationPostsFailed - this.requestBaseline.mutationPostsFailed,
+                    duplicateSubmitAttempts: duplicateSubmitAttempts - this.requestBaseline.duplicateSubmitAttempts,
+                    activeMutationRequests,
+                },
+                committedValues: committedValuesObserved.slice(this.committedValueBaseline),
             };
         },
     };
