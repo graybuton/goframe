@@ -61,9 +61,10 @@ Before recruiting or running a study series, record:
 Study series ID:
 Study-kit revision:
 Participant-brief revision:
+Published CLI/module version:
+Published CLI/module tag target:
 Documentation/examples revision:
 Documentation delivery method:
-Published CLI/module version: v0.2.0-preview.6
 ```
 
 Use exact Git SHA or tag values. The study-kit revision is the selected commit
@@ -71,19 +72,47 @@ that contains `docs/task-based-evaluation.md`,
 `docs/task-based-evaluation-facilitator.md`, and `docs/evaluator-guide.md`; do
 not assume a future merge SHA. The participant-brief revision records the exact
 commit and `docs/task-based-evaluation.md` path actually delivered. The
-documentation/examples revision identifies the immutable product snapshot
-available during the task.
+published CLI/module version identifies the release installed through Go and
+used by participant applications, while its tag target identifies that
+release's exact source commit. The documentation/examples revision identifies
+the separate immutable documentation and examples snapshot available during
+the task.
 
-For the first published-preview series, use this recommended product snapshot:
+For the first published-preview series, use this material contract:
 
 ```text
-tag: v0.2.0-preview.6
-tagged commit: 9548345776e6398cd70e8fc58435dd5dab687c7d
+Published CLI/module version:
+v0.2.0-preview.6
+
+Published CLI/module tag target:
+9548345776e6398cd70e8fc58435dd5dab687c7d
+
+Documentation/examples revision:
+3997797c40f764601df9bf6bbec6a070eaaa0ffb
 ```
+
+The CLI/module tag target is the published source revision installed by Go.
+The documentation/examples revision is the later post-publication snapshot
+whose evaluator and deployment guidance is aligned to preview.6. The latter is
+a descendant of the tag target; the intervening changes are documentation-only,
+and product source and examples are unchanged.
 
 Record one documentation delivery method: pinned GitHub permalinks, a detached
 local checkout, a read-only archive, or another explicitly described immutable
 snapshot. Do not give participants moving default-branch links.
+
+When the documentation/examples revision differs from the published tag target,
+record why the revisions differ, how the documentation was verified against
+the tested release, whether relevant examples and product behavior are
+unchanged or otherwise explicitly compatible, and the exact comparison
+evidence used. Participants do not perform this verification.
+
+For the first series, the recorded comparison establishes that
+`3997797c40f764601df9bf6bbec6a070eaaa0ffb` descends from
+`9548345776e6398cd70e8fc58435dd5dab687c7d`; only documentation paths changed
+between them, examples are unchanged, and `docs/evaluator-guide.md` and
+`docs/deployment.md` identify preview.6. Preserve this evidence with the study
+series record.
 
 Every participant in one study series must use the same study-kit,
 participant-brief, and documentation/examples revisions. Do not silently
@@ -95,6 +124,10 @@ to the repeated observation. A deterministic product defect may be reproduced
 immediately, but its originating material revision remains part of the
 evidence.
 
+The published tag target and documentation/examples revision are intentionally
+different in the first-series material contract. That defined split does not
+create separate cohorts; changing either recorded revision does.
+
 ## Session Setup
 
 Before starting, record:
@@ -102,6 +135,8 @@ Before starting, record:
 - study series ID;
 - study-kit revision;
 - participant-brief revision;
+- published CLI/module version;
+- published CLI/module tag target;
 - documentation/examples revision;
 - documentation delivery method;
 - an anonymized participant ID;
@@ -237,6 +272,8 @@ filled participant result to the GoFrame repository by default.
 - Study series ID:
 - Study-kit revision:
 - Participant-brief revision:
+- Published CLI/module version:
+- Published CLI/module tag target:
 - Documentation/examples revision:
 - Documentation delivery method:
 - Participant ID:
