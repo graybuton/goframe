@@ -41,54 +41,18 @@ func App() gf.Node {
 }
 
 func ServerBackedShell(props ServerBackedShellProps) gf.Node {
-	name, setName := gf.UseState("GoFrame")
-
-	submitGreeting := func(event gf.Event) {
-		event.PreventDefault()
-		next := normalizedGreetingName(name)
-		if next != name {
-			setName(next)
-		}
-		gf.Navigate(gf.WithQuery("/greeting", gf.QueryValues{
-			"name": {next},
-		}))
-	}
-
 	return (
 		<section class="server-backed-shell" data-testid="server-backed-shell">
 			<section class="hero">
 				<p class="eyebrow">Server-backed reference</p>
 				<h1>Route-driven data from a Go backend</h1>
 				<p class="muted">
-					This browser/WASM app keeps its form shell mounted while hash routes
-					own same-origin greeting resources.
+					This browser/WASM app keeps its outer shell mounted while hash routes
+					own greeting form state and same-origin resources.
 				</p>
-			</section>
-
-			<section class="panel" data-testid="greeting-form-panel">
-				<div class="panel-heading">
-					<div>
-						<h2>Same-origin greeting</h2>
-						<p class="muted">Submitting changes the route; route content owns the request.</p>
-					</div>
-					<gf.RouterLink To="/" Class="home-link" TestID="server-backed-home-link">
-						Home
-					</gf.RouterLink>
-				</div>
-				<form class="greeting-form" data-testid="greeting-form" OnSubmit={submitGreeting}>
-					<label class="field">
-						<span>Name</span>
-						<input
-							data-testid="greeting-name"
-							Type="text"
-							Value={name}
-							OnInput={func(event gf.InputEvent) {
-								setName(event.Value())
-							}}
-						/>
-					</label>
-					<button data-testid="greeting-submit" Type="submit">Ask backend</button>
-				</form>
+				<gf.RouterLink To="/" Class="home-link" TestID="server-backed-home-link">
+					Home
+				</gf.RouterLink>
 			</section>
 
 			<section class="panel route-panel" data-testid="server-backed-route-content">
@@ -114,18 +78,49 @@ func notFoundRoute(ctx gf.RouteContext) gf.Node {
 }
 
 func HomeRoute(props HomeRouteProps) gf.Node {
+	draft, setDraft := gf.UseState("GoFrame")
+	submitGreeting := func(event gf.Event) {
+		event.PreventDefault()
+		next := normalizedGreetingName(draft)
+		if next != draft {
+			setDraft(next)
+		}
+		gf.Navigate(greetingTarget(next))
+	}
+
 	return (
 		<div data-testid="server-backed-home">
 			<p class="eyebrow" data-testid="server-backed-route-name">Home route</p>
 			<h2>Choose a greeting</h2>
 			<p class="muted">The initial route starts no greeting resource.</p>
 			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+			{greetingForm(draft, setDraft, submitGreeting)}
 		</div>
 	)
 }
 
 func GreetingRoute(props GreetingRouteProps) gf.Node {
-	resource, _ := gf.UseResource(greetingPath(props.Name), gf.FetchText)
+	draft, setDraft := gf.UseState(props.Name)
+	gf.UseEffect(func() gf.Cleanup {
+		if draft != props.Name {
+			setDraft(props.Name)
+		}
+		return nil
+	}, gf.Deps(props.Name))
+
+	resource, reload := gf.UseResource(greetingPath(props.Name), gf.FetchText)
+	submitGreeting := func(event gf.Event) {
+		event.PreventDefault()
+		next := normalizedGreetingName(draft)
+		if next != draft {
+			setDraft(next)
+		}
+		if next == props.Name {
+			reload()
+			return
+		}
+		gf.Navigate(greetingTarget(next))
+	}
 
 	return (
 		<div data-testid="server-backed-greeting-route">
@@ -134,6 +129,7 @@ func GreetingRoute(props GreetingRouteProps) gf.Node {
 			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
 			<p class="muted" data-testid="greeting-resource-key">{greetingPath(props.Name)}</p>
 			<p class="muted" data-testid="greeting-status">{greetingStatus(resource)}</p>
+			{greetingForm(draft, setDraft, submitGreeting)}
 
 			{resource.Loading() && (
 				<p class="status loading" data-testid="greeting-loading">Loading backend greeting...</p>
@@ -145,6 +141,25 @@ func GreetingRoute(props GreetingRouteProps) gf.Node {
 				<p class="status message" data-testid="greeting-message">{resource.Value}</p>
 			)}
 		</div>
+	)
+}
+
+func greetingForm(name string, setName func(string), submitGreeting func(gf.Event)) gf.Node {
+	return (
+		<form class="greeting-form" data-testid="greeting-form" OnSubmit={submitGreeting}>
+			<label class="field">
+				<span>Name</span>
+				<input
+					data-testid="greeting-name"
+					Type="text"
+					Value={name}
+					OnInput={func(event gf.InputEvent) {
+						setName(event.Value())
+					}}
+				/>
+			</label>
+			<button data-testid="greeting-submit" Type="submit">Ask backend</button>
+		</form>
 	)
 }
 
@@ -171,6 +186,12 @@ func routeTarget(ctx gf.RouteContext) string {
 		return ctx.Path
 	}
 	return ctx.Path + "?" + ctx.RawQuery
+}
+
+func greetingTarget(name string) string {
+	return gf.WithQuery("/greeting", gf.QueryValues{
+		"name": {name},
+	})
 }
 
 func greetingPath(name string) string {

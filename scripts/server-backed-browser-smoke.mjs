@@ -21,6 +21,8 @@ const appURL = `http://127.0.0.1:${backendPort}/?smoke=${Date.now()}`;
 const expectedApp = new URL(appURL);
 const initialName = "GoFrame";
 const initialMessage = "Hello, GoFrame, from Go backend!";
+const directName = "Lin";
+const directMessage = "Hello, Lin, from Go backend!";
 const updatedName = "Ada";
 const updatedMessage = "Hello, Ada, from Go backend!";
 const slowName = "slow";
@@ -71,6 +73,7 @@ try {
 
     await waitForHTTP(`http://127.0.0.1:${backendPort}/`, () => backend.exitCode !== null, "server-backed backend");
     await assertBackendAPI("GoFrame", initialMessage);
+    await assertBackendAPI(directName, directMessage);
     await assertBackendAPI(updatedName, updatedMessage);
     await assertBackendAPI(slowName, slowMessage);
     await assertBackendAPIFailure(failureName, 500);
@@ -118,18 +121,41 @@ try {
         message: "",
         origin: expectedApp.origin,
         input: initialName,
+        appSame: true,
         shellSame: true,
-        formSame: true,
-        inputSame: true,
         routeContentSame: true,
     }, "server-backed initial route");
     assertEvidence(await evidenceState(client), {
         fetchesStarted: 0,
         aborts: 0,
         staleResultAppearances: 0,
+        appIdentityChanges: 0,
         shellIdentityChanges: 0,
-        inputIdentityChanges: 0,
+        routeContentIdentityChanges: 0,
     }, "initial route evidence");
+
+    await startScenario(client, "direct-hash-navigation");
+    await navigateGreetingHash(client, directName);
+    await waitForLoading(client, directName, "direct Lin route loading");
+    await waitForGreeting(client, directMessage, "direct Lin backend greeting");
+    const directReport = await finishScenario(client, "direct-hash-navigation");
+    assertGreetingRouteReport(directReport, "direct hash navigation", {
+        outcome: "success",
+        routeChanges: 1,
+        samePattern: false,
+    });
+    assertState(await appState(client), {
+        route: "greeting",
+        hash: greetingHash(directName),
+        routeTarget: greetingTarget(directName),
+        key: `/api/greeting?name=${encodeURIComponent(directName)}`,
+        status: "ready",
+        message: directMessage,
+        input: directName,
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+    }, "server-backed direct hash navigation");
 
     await prepareGreetingName(client, updatedName);
     await startScenario(client, "successful-navigation");
@@ -147,7 +173,11 @@ try {
     }, "server-backed successful navigation loading");
     await waitForGreeting(client, updatedMessage, "updated backend greeting");
     const successReport = await finishScenario(client, "successful-navigation");
-    assertRouteLoadReport(successReport, "successful navigation");
+    assertGreetingRouteReport(successReport, "successful navigation", {
+        outcome: "success",
+        routeChanges: 1,
+        samePattern: true,
+    });
     assertState(await appState(client), {
         app: true,
         route: "greeting",
@@ -159,18 +189,42 @@ try {
         message: updatedMessage,
         origin: expectedApp.origin,
         input: updatedName,
+        appSame: true,
         shellSame: true,
-        formSame: true,
-        inputSame: true,
         routeContentSame: true,
     }, "server-backed form submit render");
+
+    const successfulReloadBaseline = await evidenceState(client);
+    const successfulReloadHash = (await appState(client)).hash;
+    await startScenario(client, "successful-same-target-reload");
+    await dispatchGreetingSubmit(client);
+    await waitForFetchCount(client, successfulReloadBaseline.fetchesStarted + 1, "successful same-target reload fetch");
+    await waitForLoading(client, updatedName, "successful same-target reload loading");
+    await waitForGreeting(client, updatedMessage, "successful same-target reload ready");
+    const successfulReloadReport = await finishScenario(client, "successful-same-target-reload");
+    assertGreetingRouteReport(successfulReloadReport, "successful same-target reload", {
+        outcome: "success",
+        routeChanges: 0,
+        samePattern: true,
+    });
+    assertState(await appState(client), {
+        hash: successfulReloadHash,
+        routeTarget: greetingTarget(updatedName),
+        status: "ready",
+        message: updatedMessage,
+        input: updatedName,
+    }, "server-backed successful same-target reload");
 
     await prepareGreetingName(client, slowName);
     await startScenario(client, "same-pattern-slow-start");
     await dispatchGreetingSubmit(client);
     const supersededSlowRequest = await waitForSlowActive(client, "same-pattern slow request active");
     const slowStartReport = await finishScenario(client, "same-pattern-slow-start");
-    assertPendingRouteReport(slowStartReport, "same-pattern slow start");
+    assertGreetingRouteReport(slowStartReport, "same-pattern slow start", {
+        outcome: "pending",
+        routeChanges: 1,
+        samePattern: true,
+    });
 
     await prepareGreetingName(client, updatedName);
     await startScenario(client, "same-pattern-supersede");
@@ -180,7 +234,12 @@ try {
     await waitForGreeting(client, updatedMessage, "newer Ada backend greeting after slow request");
     await wait(staleSettleMS);
     const supersedeReport = await finishScenario(client, "same-pattern-supersede");
-    assertRouteLoadReport(supersedeReport, "same-pattern supersede");
+    assertGreetingRouteReport(supersedeReport, "same-pattern supersede", {
+        aborted: 1,
+        outcome: "success",
+        routeChanges: 1,
+        samePattern: true,
+    });
     assertState(await appState(client), {
         app: true,
         route: "greeting",
@@ -193,8 +252,9 @@ try {
         input: updatedName,
         error: "",
         errorNonEmpty: false,
+        appSame: true,
         shellSame: true,
-        inputSame: true,
+        routeContentSame: true,
     }, "server-backed stale slow result ignored");
     assertRequest(await requestEvidence(client, supersededSlowRequest.id), {
         name: slowName,
@@ -207,7 +267,11 @@ try {
     await dispatchGreetingSubmit(client);
     const unmountedSlowRequest = await waitForSlowActive(client, "unmount slow request active");
     const unmountSlowStartReport = await finishScenario(client, "unmount-slow-start");
-    assertPendingRouteReport(unmountSlowStartReport, "unmount slow start");
+    assertGreetingRouteReport(unmountSlowStartReport, "unmount slow start", {
+        outcome: "pending",
+        routeChanges: 1,
+        samePattern: true,
+    });
 
     await startScenario(client, "route-unmount-cancellation");
     await navigateHome(client);
@@ -224,9 +288,9 @@ try {
         loading: false,
         ready: false,
         failed: false,
+        input: initialName,
+        appSame: true,
         shellSame: true,
-        formSame: true,
-        inputSame: true,
         routeContentSame: true,
     }, "server-backed route unmount cancellation");
     assertRequest(await requestEvidence(client, unmountedSlowRequest.id), {
@@ -241,7 +305,11 @@ try {
     await waitForLoading(client, failureName, "controlled backend failure loading");
     await waitForFailure(client, failureMessage, "controlled backend failure");
     const failureReport = await finishScenario(client, "controlled-failure");
-    assertRouteLoadReport(failureReport, "controlled failure");
+    assertGreetingRouteReport(failureReport, "controlled failure", {
+        outcome: "failed",
+        routeChanges: 1,
+        samePattern: false,
+    });
     assertState(await appState(client), {
         app: true,
         route: "greeting",
@@ -253,9 +321,32 @@ try {
         input: failureName,
         error: failureMessage,
         errorNonEmpty: true,
+        appSame: true,
         shellSame: true,
-        inputSame: true,
+        routeContentSame: true,
     }, "server-backed controlled failure render");
+
+    const failedRetryBaseline = await evidenceState(client);
+    const failedRetryHash = (await appState(client)).hash;
+    await startScenario(client, "failed-same-target-retry");
+    await dispatchGreetingSubmit(client);
+    await waitForFetchCount(client, failedRetryBaseline.fetchesStarted + 1, "failed same-target retry fetch");
+    await waitForLoading(client, failureName, "failed same-target retry loading");
+    await waitForFailure(client, failureMessage, "failed same-target retry result");
+    const failedRetryReport = await finishScenario(client, "failed-same-target-retry");
+    assertGreetingRouteReport(failedRetryReport, "failed same-target retry", {
+        outcome: "failed",
+        routeChanges: 0,
+        samePattern: true,
+    });
+    assertState(await appState(client), {
+        hash: failedRetryHash,
+        routeTarget: greetingTarget(failureName),
+        status: failureStatus,
+        input: failureName,
+        error: failureMessage,
+        errorNonEmpty: true,
+    }, "server-backed failed same-target retry");
 
     await prepareGreetingName(client, updatedName);
     await startScenario(client, "failure-recovery");
@@ -263,7 +354,11 @@ try {
     await waitForLoading(client, updatedName, "failure recovery loading");
     await waitForGreeting(client, updatedMessage, "recovered backend greeting");
     const recoveryReport = await finishScenario(client, "failure-recovery");
-    assertRouteLoadReport(recoveryReport, "failure recovery");
+    assertGreetingRouteReport(recoveryReport, "failure recovery", {
+        outcome: "success",
+        routeChanges: 1,
+        samePattern: true,
+    });
     assertState(await appState(client), {
         app: true,
         route: "greeting",
@@ -277,8 +372,9 @@ try {
         input: updatedName,
         error: "",
         errorNonEmpty: false,
+        appSame: true,
         shellSame: true,
-        inputSame: true,
+        routeContentSame: true,
     }, "server-backed recovery render");
 
     await startScenario(client, "browser-back");
@@ -286,15 +382,21 @@ try {
     await waitForLoading(client, failureName, "browser back failure loading");
     await waitForFailure(client, failureMessage, "browser back failed route");
     const backReport = await finishScenario(client, "browser-back");
-    assertRouteLoadReport(backReport, "browser back");
+    assertGreetingRouteReport(backReport, "browser back", {
+        outcome: "failed",
+        routeChanges: 1,
+        samePattern: true,
+    });
     assertState(await appState(client), {
         route: "greeting",
         hash: greetingHash(failureName),
         routeTarget: greetingTarget(failureName),
         status: "failed",
         error: failureMessage,
+        input: failureName,
+        appSame: true,
         shellSame: true,
-        inputSame: true,
+        routeContentSame: true,
     }, "server-backed browser back");
 
     await startScenario(client, "browser-forward");
@@ -302,31 +404,47 @@ try {
     await waitForLoading(client, updatedName, "browser forward Ada loading");
     await waitForGreeting(client, updatedMessage, "browser forward Ada ready");
     const forwardReport = await finishScenario(client, "browser-forward");
-    assertRouteLoadReport(forwardReport, "browser forward");
+    assertGreetingRouteReport(forwardReport, "browser forward", {
+        outcome: "success",
+        routeChanges: 1,
+        samePattern: true,
+    });
     assertState(await appState(client), {
         route: "greeting",
         hash: greetingHash(updatedName),
         routeTarget: greetingTarget(updatedName),
         status: "ready",
         message: updatedMessage,
+        input: updatedName,
+        appSame: true,
         shellSame: true,
-        formSame: true,
-        inputSame: true,
         routeContentSame: true,
     }, "server-backed browser forward");
 
     const finalEvidence = await evidenceState(client);
     assertEvidence(finalEvidence, {
-        fetchesStarted: 8,
+        fetchesStarted: 11,
         aborts: 2,
-        successfulCompletions: 4,
-        failedCompletions: 2,
+        successfulCompletions: 6,
+        failedCompletions: 3,
         staleResultAppearances: 0,
+        appIdentityChanges: 0,
         shellIdentityChanges: 0,
-        formIdentityChanges: 0,
-        inputIdentityChanges: 0,
         routeContentIdentityChanges: 0,
     }, "final route/resource evidence");
+    assertStringArray(finalEvidence.routeTargetsVisited, [
+        "",
+        greetingHash(directName),
+        greetingHash(updatedName),
+        greetingHash(slowName),
+        greetingHash(updatedName),
+        greetingHash(slowName),
+        "#/",
+        greetingHash(failureName),
+        greetingHash(updatedName),
+        greetingHash(failureName),
+        greetingHash(updatedName),
+    ], "route targets visited");
     console.log(`server-backed async navigation evidence: ${JSON.stringify(finalEvidence)}`);
 
     client.close();
@@ -394,21 +512,67 @@ async function initializeBrowserEvidence(client) {
 }
 
 async function prepareGreetingName(client, name) {
-    const prepared = await client.callFunction(`function(name) {
+    const baseline = await client.callFunction(`function(name) {
         const input = document.querySelector("[data-testid='greeting-name']");
         if (!input) {
             return { ok: false, reason: "missing input" };
         }
+        const owner = document.querySelector("[data-testid='server-backed-home']")
+            ? "HomeRoute"
+            : document.querySelector("[data-testid='server-backed-greeting-route']")
+                ? "GreetingRoute"
+                : "";
+        if (!owner) {
+            return { ok: false, reason: "missing state-owning route" };
+        }
+        const renders = window.goframeComponentRenderCounts?.[owner] || 0;
+        const patches = window.goframeComponentPatchCounts?.[owner] || 0;
         input.value = name;
         input.dispatchEvent(new Event("input", { bubbles: true }));
-        return { ok: true, value: input.value };
+        return { ok: true, owner, renders, patches, value: input.value };
     }`, name);
-    if (!prepared?.ok) {
-        throw new Error(`APP FAILURE: could not prepare greeting input: ${JSON.stringify(prepared)}`);
+    if (!baseline?.ok) {
+        throw new Error(`APP FAILURE: could not prepare greeting input: ${JSON.stringify(baseline)}`);
     }
+
+    let updated = null;
     await waitForCondition(async () => {
-        return (await appState(client)).input === name;
-    }, `controlled input ${name}`);
+        updated = await inputPreparationState(client, baseline.owner);
+        return updated.value === name &&
+            updated.renders > baseline.renders &&
+            updated.patches > baseline.patches;
+    }, `controlled input ${name} framework update`);
+
+    await waitForBrowserFrames(client, 2);
+    const settled = await inputPreparationState(client, baseline.owner);
+    if (settled.value !== name ||
+        settled.renders !== updated.renders ||
+        settled.patches !== updated.patches) {
+        throw new Error(`APP FAILURE: controlled input ${name} did not settle: ${JSON.stringify({ baseline, updated, settled })}`);
+    }
+    const report = { name, owner: baseline.owner, baseline, updated, settled };
+    console.log(`server-backed input preparation: ${JSON.stringify(report)}`);
+    return report;
+}
+
+async function inputPreparationState(client, owner) {
+    return await client.callFunction(`function(owner) {
+        return {
+            owner,
+            renders: window.goframeComponentRenderCounts?.[owner] || 0,
+            patches: window.goframeComponentPatchCounts?.[owner] || 0,
+            value: document.querySelector("[data-testid='greeting-name']")?.value ?? "",
+        };
+    }`, owner);
+}
+
+async function waitForBrowserFrames(client, count) {
+    await client.callFunction(`async function(count) {
+        for (let index = 0; index < count; index++) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+        return true;
+    }`, count);
 }
 
 async function dispatchGreetingSubmit(client) {
@@ -433,6 +597,12 @@ async function waitForGreeting(client, expected, label) {
     }, label);
 }
 
+async function waitForFetchCount(client, expected, label) {
+    await waitForCondition(async () => {
+        return (await evidenceState(client)).fetchesStarted === expected;
+    }, label);
+}
+
 async function waitForLoading(client, name, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
@@ -441,6 +611,7 @@ async function waitForLoading(client, name, label) {
             state.routeTarget === greetingTarget(name) &&
             state.key === `/api/greeting?name=${encodeURIComponent(name)}` &&
             state.status === "loading" &&
+            state.input === name &&
             state.loading &&
             !state.ready &&
             !state.failed;
@@ -486,6 +657,13 @@ async function navigateHome(client) {
     await client.evaluate(`document.querySelector("[data-testid='server-backed-home-link']")?.click()`);
 }
 
+async function navigateGreetingHash(client, name) {
+    await client.callFunction(`function(target) {
+        window.location.hash = target;
+        return window.location.hash;
+    }`, greetingTarget(name));
+}
+
 async function appState(client) {
     return await client.callFunction(`function() {
         const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() ?? "";
@@ -513,9 +691,8 @@ async function appState(client) {
             error,
             errorNonEmpty: error.length > 0,
             origin: window.location.origin,
+            appSame: identity.appSame ?? false,
             shellSame: identity.shellSame ?? false,
-            formSame: identity.formSame ?? false,
-            inputSame: identity.inputSame ?? false,
             routeContentSame: identity.routeContentSame ?? false,
         };
     }`);
@@ -552,35 +729,64 @@ async function finishScenario(client, label) {
     return report;
 }
 
-function assertRouteLoadReport(report, label) {
-    if (report.flushes !== 2 || report.scheduling.requestAnimationFrame !== 2 ||
-        report.scheduling.requestAnimationFrameCallbacks !== 2 ||
-        report.scheduling.queueMicrotask !== 0 || report.scheduling.queueMicrotaskCallbacks !== 0 ||
-        report.componentRenders.GreetingRoute < 2 || report.routeContentMutations < 1) {
-        throw new Error(`APP FAILURE: ${label} route/load scheduling changed: ${JSON.stringify(report)}`);
+function assertGreetingRouteReport(report, label, options) {
+    assertSchedulingReport(report, label, "GreetingRoute");
+    const expectedRequests = {
+        started: 1,
+        aborted: options.aborted ?? 0,
+        succeeded: options.outcome === "success" ? 1 : 0,
+        failed: options.outcome === "failed" ? 1 : 0,
+    };
+    assertState(report.requests, expectedRequests, `${label} request delta`);
+    if (report.routeTargets.length !== options.routeChanges || report.routeContentMutations < 1) {
+        throw new Error(`APP FAILURE: ${label} route evidence changed: ${JSON.stringify(report)}`);
     }
-}
-
-function assertPendingRouteReport(report, label) {
-    if (report.flushes !== 1 || report.scheduling.requestAnimationFrame !== 1 ||
-        report.scheduling.requestAnimationFrameCallbacks !== 1 ||
-        report.scheduling.queueMicrotask !== 0 || report.scheduling.queueMicrotaskCallbacks !== 0 ||
-        report.componentRenders.GreetingRoute < 1) {
-        throw new Error(`APP FAILURE: ${label} pending scheduling changed: ${JSON.stringify(report)}`);
-    }
+    assertReportIdentity(report, label, options.samePattern);
 }
 
 function assertHomeNavigationReport(report, label) {
-    if (report.flushes !== 1 || report.scheduling.requestAnimationFrame !== 1 ||
-        report.scheduling.requestAnimationFrameCallbacks !== 1 ||
-        report.scheduling.queueMicrotask !== 0 || report.scheduling.queueMicrotaskCallbacks !== 0 ||
-        report.componentRenders.HomeRoute < 1 || report.routeContentMutations < 1) {
-        throw new Error(`APP FAILURE: ${label} home scheduling changed: ${JSON.stringify(report)}`);
+    assertSchedulingReport(report, label, "HomeRoute");
+    assertState(report.requests, {
+        started: 0,
+        aborted: 1,
+        succeeded: 0,
+        failed: 0,
+    }, `${label} request delta`);
+    if (report.routeTargets.length !== 1 || report.routeContentMutations < 1) {
+        throw new Error(`APP FAILURE: ${label} home evidence changed: ${JSON.stringify(report)}`);
+    }
+    assertReportIdentity(report, label, false);
+}
+
+function assertSchedulingReport(report, label, component) {
+    if (report.flushes < 1 ||
+        report.scheduling.requestAnimationFrame !== report.scheduling.requestAnimationFrameCallbacks ||
+        report.scheduling.requestAnimationFrameCallbacks !== report.flushes ||
+        report.scheduling.queueMicrotask !== 0 ||
+        report.scheduling.queueMicrotaskCallbacks !== 0 ||
+        report.componentRenders[component] < 1) {
+        throw new Error(`APP FAILURE: ${label} scheduling invariants changed: ${JSON.stringify(report)}`);
     }
 }
 
+function assertReportIdentity(report, label, samePattern) {
+    const expected = {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        formSame: samePattern,
+        inputSame: samePattern,
+    };
+    assertState(report.identity, expected, `${label} identity`);
+}
+
 function assertFiniteReport(report, label) {
-    for (const [groupName, group] of Object.entries({ operations: report.operations, scheduling: report.scheduling })) {
+    for (const [groupName, group] of Object.entries({
+        operations: report.operations,
+        scheduling: report.scheduling,
+        componentRenders: report.componentRenders,
+        componentPatches: report.componentPatches,
+    })) {
         for (const [name, value] of Object.entries(group)) {
             if (!Number.isFinite(value) || value < 0) {
                 throw new Error(`APP FAILURE: ${label} ${groupName}.${name} is invalid: ${JSON.stringify(report)}`);
@@ -601,6 +807,13 @@ function assertEvidence(actual, expected, label) {
         throw new Error(`APP FAILURE: ${label}: missing evidence`);
     }
     assertState(actual, expected, label);
+}
+
+function assertStringArray(actual, expected, label) {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(`APP FAILURE: ${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+    }
+    console.log(`${label}: ok`);
 }
 
 function emptyOperations() {
@@ -663,19 +876,17 @@ function installServerBackedEvidenceExpression() {
     const evidence = {
         stable: null,
         identityChanged: {
+            app: false,
             shell: false,
-            form: false,
-            input: false,
             routeContent: false,
         },
         initialize() {
             this.stable = {
+                app: document.querySelector("[data-testid='server-backed-app']"),
                 shell: document.querySelector("[data-testid='server-backed-shell']"),
-                form: document.querySelector("[data-testid='greeting-form']"),
-                input: document.querySelector("[data-testid='greeting-name']"),
                 routeContent: document.querySelector("[data-testid='server-backed-route-content']"),
             };
-            if (!this.stable.shell || !this.stable.form || !this.stable.input || !this.stable.routeContent) {
+            if (!this.stable.app || !this.stable.shell || !this.stable.routeContent) {
                 return { ready: false };
             }
             routeTargetsVisited.push(window.location.hash);
@@ -696,18 +907,16 @@ function installServerBackedEvidenceExpression() {
         checkIdentity() {
             if (!this.stable) return {};
             const current = {
+                app: document.querySelector("[data-testid='server-backed-app']"),
                 shell: document.querySelector("[data-testid='server-backed-shell']"),
-                form: document.querySelector("[data-testid='greeting-form']"),
-                input: document.querySelector("[data-testid='greeting-name']"),
                 routeContent: document.querySelector("[data-testid='server-backed-route-content']"),
             };
             for (const name of Object.keys(current)) {
                 if (current[name] !== this.stable[name]) this.identityChanged[name] = true;
             }
             return {
+                appSame: !this.identityChanged.app,
                 shellSame: !this.identityChanged.shell,
-                formSame: !this.identityChanged.form,
-                inputSame: !this.identityChanged.input,
                 routeContentSame: !this.identityChanged.routeContent,
             };
         },
@@ -723,9 +932,8 @@ function installServerBackedEvidenceExpression() {
                 successfulCompletions,
                 failedCompletions,
                 staleResultAppearances,
+                appIdentityChanges: this.identityChanged.app ? 1 : 0,
                 shellIdentityChanges: this.identityChanged.shell ? 1 : 0,
-                formIdentityChanges: this.identityChanged.form ? 1 : 0,
-                inputIdentityChanges: this.identityChanged.input ? 1 : 0,
                 routeContentIdentityChanges: this.identityChanged.routeContent ? 1 : 0,
                 routeContentMutations,
                 requests: requests.map((request) => ({ ...request })),
@@ -791,6 +999,8 @@ function installServerBackedEvidenceExpression() {
         requestBaseline: null,
         routeTargetBaseline: 0,
         routeMutationBaseline: 0,
+        formBaseline: null,
+        inputBaseline: null,
         start(label) {
             for (const name of Object.keys(operations)) operations[name] = 0;
             for (const name of Object.keys(scheduling)) scheduling[name] = 0;
@@ -804,6 +1014,8 @@ function installServerBackedEvidenceExpression() {
             };
             this.routeTargetBaseline = routeTargetsVisited.length;
             this.routeMutationBaseline = routeContentMutations;
+            this.formBaseline = document.querySelector("[data-testid='greeting-form']");
+            this.inputBaseline = document.querySelector("[data-testid='greeting-name']");
             this.label = label;
             return true;
         },
@@ -827,6 +1039,11 @@ function installServerBackedEvidenceExpression() {
                 componentPatches,
                 routeContentMutations: routeContentMutations - this.routeMutationBaseline,
                 routeTargets: routeTargetsVisited.slice(this.routeTargetBaseline),
+                identity: {
+                    ...evidence.checkIdentity(),
+                    formSame: document.querySelector("[data-testid='greeting-form']") === this.formBaseline,
+                    inputSame: document.querySelector("[data-testid='greeting-name']") === this.inputBaseline,
+                },
                 requests: {
                     started: requests.length - this.requestBaseline.fetchesStarted,
                     aborted: aborts - this.requestBaseline.aborts,
