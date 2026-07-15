@@ -31,6 +31,10 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/greeting", greetingHandler)
+	mux.Handle("/api/saved-greeting", savedGreetingHandler(
+		newSavedGreetingStore("GoFrame"),
+		slowGreetingDelay,
+	))
 	mux.Handle("/", staticPackageHandler(*packageDir))
 
 	server := &http.Server{Addr: *addr, Handler: mux}

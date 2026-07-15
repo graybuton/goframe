@@ -23,6 +23,11 @@ button {
   padding: 0.6rem 1rem;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 input {
   border: 1px solid #c8d3e6;
   border-radius: 14px;
@@ -60,6 +65,12 @@ input {
 .home-link {
   color: #1c64f2;
   font-weight: 700;
+}
+
+.shell-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .route-panel {
