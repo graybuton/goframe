@@ -46,6 +46,35 @@ input {
   padding: 1.4rem;
 }
 
+.panel-heading {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.panel-heading .muted {
+  margin: 0;
+}
+
+.home-link {
+  color: #1c64f2;
+  font-weight: 700;
+}
+
+.route-panel {
+  min-height: 11rem;
+}
+
+.route-target {
+  background: #f4f7fb;
+  border-radius: 12px;
+  color: #40516e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
+  padding: 0.65rem 0.75rem;
+}
+
 .eyebrow,
 .muted {
   color: #61708a;
