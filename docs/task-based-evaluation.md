@@ -5,9 +5,8 @@ browser/WASM preview. The session evaluates the product and its public
 documentation, not the participant. Getting blocked, stopping early, or
 finishing only part of the application still produces useful evidence.
 
-This document is the participant brief. Facilitators use the separate
-[facilitator protocol](task-based-evaluation-facilitator.md) to record the
-session without supplying implementation answers.
+This document is the participant brief. A facilitator records the session
+separately without supplying implementation answers.
 
 ## Participant Profile
 
@@ -38,11 +37,25 @@ For the core session:
 - if you inspect implementation source, record the reason and path;
 - do not copy an existing example wholesale.
 
-Public documentation and examples are available from the
-[repository README](../README.md). The [GOX language](gox-language.md),
-[router](router.md), [resources](resources.md), and
-[deployment](deployment.md) documents describe the relevant published
-surfaces. Choose what to consult and record what you use.
+### Study Materials
+
+Use only this participant brief and the documentation and examples snapshot
+supplied by the facilitator. The facilitator records the exact revisions and
+delivery method before the session; you do not need to determine those values
+yourself.
+
+Do not switch to another branch, tag, commit, archive, or repository snapshot during the session.
+
+The supplied snapshot includes these public study materials:
+
+- `README.md`;
+- `docs/gox-language.md`;
+- `docs/router.md`;
+- `docs/resources.md`;
+- `docs/deployment.md`;
+- public examples from the supplied snapshot.
+
+Choose what to consult and record what you use.
 
 ## Environment Preparation
 

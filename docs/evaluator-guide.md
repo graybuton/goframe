@@ -100,8 +100,14 @@ This guide is a guided walkthrough of an existing repository checkout. To
 evaluate independent application construction with the published preview, give
 participants the [GoFrame Task-Based Evaluation](task-based-evaluation.md)
 brief instead. Facilitators should retain the separate
-[facilitator protocol](task-based-evaluation-facilitator.md) and avoid exposing
-its observation prompts as implementation hints during the task.
+[facilitator protocol](task-based-evaluation-facilitator.md), distribute only
+the participant brief, and avoid exposing observation prompts as implementation
+hints during the task.
+
+For each study series, facilitators must pin exact revisions for the study kit
+and product documentation/examples, record those revisions for every session,
+and avoid moving `main` links as study material. All participants in one series
+should receive the same immutable snapshots.
 
 No external task-based results are recorded yet. A maintainer mechanical pilot
 may verify the instructions, but it is not independent participant evidence or

@@ -53,10 +53,57 @@ If safety, credentials, or accidental destructive work are at risk, intervene
 immediately and record why. Safety intervention time should not be interpreted
 as product-task time.
 
+## Study Material Revisions
+
+Before recruiting or running a study series, record:
+
+```text
+Study series ID:
+Study-kit revision:
+Participant-brief revision:
+Documentation/examples revision:
+Documentation delivery method:
+Published CLI/module version: v0.2.0-preview.6
+```
+
+Use exact Git SHA or tag values. The study-kit revision is the selected commit
+that contains `docs/task-based-evaluation.md`,
+`docs/task-based-evaluation-facilitator.md`, and `docs/evaluator-guide.md`; do
+not assume a future merge SHA. The participant-brief revision records the exact
+commit and `docs/task-based-evaluation.md` path actually delivered. The
+documentation/examples revision identifies the immutable product snapshot
+available during the task.
+
+For the first published-preview series, use this recommended product snapshot:
+
+```text
+tag: v0.2.0-preview.6
+tagged commit: 9548345776e6398cd70e8fc58435dd5dab687c7d
+```
+
+Record one documentation delivery method: pinned GitHub permalinks, a detached
+local checkout, a read-only archive, or another explicitly described immutable
+snapshot. Do not give participants moving default-branch links.
+
+Every participant in one study series must use the same study-kit,
+participant-brief, and documentation/examples revisions. Do not silently
+update documentation or examples during a series. If any study-material
+revision changes, start or clearly label a new series or cohort. Preserve that
+revision difference during aggregation, and do not compare sessions as
+equivalent unless the difference is explicitly recorded and judged irrelevant
+to the repeated observation. A deterministic product defect may be reproduced
+immediately, but its originating material revision remains part of the
+evidence.
+
 ## Session Setup
 
 Before starting, record:
 
+- study series ID;
+- study-kit revision;
+- participant-brief revision;
+- documentation/examples revision;
+- documentation delivery method;
 - an anonymized participant ID;
 - broad Go experience band;
 - prior WASM or TinyGo experience as `yes` or `no`;
@@ -187,6 +234,11 @@ filled participant result to the GoFrame repository by default.
 
 ## Session Metadata
 
+- Study series ID:
+- Study-kit revision:
+- Participant-brief revision:
+- Documentation/examples revision:
+- Documentation delivery method:
 - Participant ID:
 - Go experience band:
 - Prior WASM/TinyGo experience: yes/no
@@ -241,6 +293,8 @@ filled participant result to the GoFrame repository by default.
 - Total failed commands:
 
 ## Documents And Examples Consulted
+
+- Revision confirmed against supplied snapshot: yes/no
 
 | Source | Reason consulted | Useful outcome | Copied or heavily imitated? |
 |---|---|---|---|
@@ -357,6 +411,12 @@ roadmap work.
 ```
 
 ## Aggregation Rules
+
+Aggregate recurring evidence only when the study-kit, participant-brief, and
+documentation/examples revisions are identical, or when each revision
+difference is explicitly labeled and judged irrelevant to the repeated
+observation. Do not hide a documentation or example correction made between
+sessions inside one unqualified aggregate.
 
 Select an engineering follow-up only after at least one of these conditions is
 met:
