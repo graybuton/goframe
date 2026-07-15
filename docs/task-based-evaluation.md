@@ -47,16 +47,30 @@ yourself.
 
 Do not switch to another branch, tag, commit, archive, or repository snapshot during the session.
 
-These are the only GoFrame product materials supplied for the core session:
+These are the only GoFrame product documentation files supplied for the core
+session:
 
 - `docs/gox-language.md`;
 - `docs/router.md`;
 - `docs/resources.md`;
-- `docs/deployment.md`;
-- `examples/counter/**`;
-- `examples/multipackage/**`;
-- `examples/router/**`;
-- `examples/server-backed/**`.
+- `docs/deployment.md`.
+
+The supplied examples are filtered source references, not runnable repository
+copies:
+
+- `examples/counter` supplies authored app source, static assets, and its
+  TinyGo manifest;
+- `examples/multipackage` supplies authored app and internal-package source,
+  static assets, and its TinyGo manifest;
+- `examples/router` supplies authored routed-app and internal-package source,
+  static assets, and its TinyGo manifest;
+- `examples/server-backed` supplies browser-app source, plain Go backend
+  source, and static assets only. Its standard-Go manifest is not supplied.
+
+Example README files are not supplied, and repository-root commands from the
+original examples are not participant instructions. Create your own
+`goframe.json` for the participant application. The exact CLI, module,
+manifest, and TinyGo requirements in this brief are authoritative.
 
 Do not browse or request other repository paths during the timed task. If an
 omitted document appears necessary, record that need as friction rather than

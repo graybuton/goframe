@@ -67,6 +67,8 @@ Documentation/examples revision:
 Documentation delivery method:
 Participant material allowlist:
 Participant material isolation audit:
+Participant material exact file manifest:
+Participant material manifest verification:
 ```
 
 Use exact Git SHA or tag values. The study-kit revision is the selected commit
@@ -100,8 +102,10 @@ a descendant of the tag target; the intervening changes are documentation-only,
 and product source and examples are unchanged.
 
 Record the filtered documentation delivery method, participant material
-allowlist, and isolation-audit result described below. Do not give participants
-moving default-branch links.
+allowlist, isolation-audit result, exact tracked-file manifest, and manifest
+verification described below. The exact file manifest, not a directory name or
+selection rule alone, is the authoritative record of what participants
+received. Do not give participants moving default-branch links.
 
 When the documentation/examples revision differs from the published tag target,
 record why the revisions differ, how the documentation was verified against
@@ -118,14 +122,14 @@ series record.
 
 Every participant in one study series must use the same study-kit,
 participant-brief, documentation/examples revision, participant material
-allowlist, and filtered delivery bundle. Do not silently update documentation,
-examples, or delivered paths during a series. If any study-material revision,
-allowlist, or delivery bundle changes, start or clearly label a new series or
-cohort. Preserve that difference during aggregation, and do not compare
-sessions as equivalent unless it is explicitly recorded and judged irrelevant
-to the repeated observation. A deterministic product defect may be reproduced
-immediately, but its originating material contract remains part of the
-evidence.
+allowlist, exact file manifest, and filtered delivery bundle. Do not silently
+update documentation, examples, or delivered paths during a series. If any
+study-material revision, allowlist, included file, or delivery bundle changes,
+start or clearly label a new series or cohort. Preserve that difference during
+aggregation, and do not compare sessions as equivalent unless it is explicitly
+recorded and judged irrelevant to the repeated observation. A deterministic
+product defect may be reproduced immediately, but its originating material
+contract remains part of the evidence.
 
 The published tag target and documentation/examples revision are intentionally
 different in the first-series material contract. That defined split does not
@@ -134,52 +138,108 @@ create separate cohorts; changing either recorded revision does.
 ## Participant Material Bundle
 
 Deliver the participant brief separately from the product-material bundle. For
-the first published-preview series, filter the bundle at
-`3997797c40f764601df9bf6bbec6a070eaaa0ffb` to exactly this allowlist:
+the first published-preview series, filter the bundle from
+`3997797c40f764601df9bf6bbec6a070eaaa0ffb` using the rules below.
+
+Include these exact product documentation files:
 
 ```text
 docs/gox-language.md
 docs/router.md
 docs/resources.md
 docs/deployment.md
-
-examples/counter/**
-examples/multipackage/**
-examples/router/**
-examples/server-backed/**
 ```
 
-These are the only repository product materials supplied to participants.
-Exclude `README.md`, the organizer-facing `docs/evaluator-guide.md`, the
-organizer-only `docs/task-based-evaluation-facilitator.md`, `docs/release.md`,
+For `examples/counter`:
+
+- include tracked production source, static assets, `service-worker.js`, and
+  its TinyGo `goframe.json`;
+- exclude `README.md`, all Markdown, test-only files not needed to understand
+  the authored app structure, and generated output.
+
+For `examples/multipackage`:
+
+- include tracked production source, internal packages, static assets, and its
+  TinyGo `goframe.json`;
+- exclude `README.md`, all Markdown, test-only files not needed to understand
+  the authored package structure, and generated output.
+
+For `examples/router`:
+
+- include tracked production source, internal packages, static assets, and its
+  TinyGo `goframe.json`;
+- exclude `README.md`, all Markdown, test-only files not needed to understand
+  the routed app structure, and generated output.
+
+For `examples/server-backed`, include only tracked files under:
+
+```text
+examples/server-backed/assets/
+examples/server-backed/cmd/app/
+examples/server-backed/cmd/server/
+```
+
+Exclude `examples/server-backed/README.md`,
+`examples/server-backed/goframe.json`, every other root-level server-backed
+file, all Markdown, and generated output. The participant creates a new
+manifest and follows the brief's TinyGo requirement.
+
+These selected files are the only repository product materials supplied to
+participants. Generate and retain an exact sorted tracked-file manifest for
+the delivered bundle. For the first-series snapshot, these rules produce 39
+files. If a selected file contains a conflicting instruction, remove that file
+from the participant bundle instead of patching product source in the study
+kit.
+
+Exclude `README.md`, all example README files, the organizer-facing
+`docs/evaluator-guide.md`, the organizer-only
+`docs/task-based-evaluation-facilitator.md`, `docs/release.md`,
 `docs/release-notes-*.md`, `docs/roadmap.md`,
-`docs/post-preview6-deep-audit.md`, and every other non-allowlisted repository
-path. Do not deliver a full repository checkout or an unfiltered repository
+`docs/post-preview6-deep-audit.md`, and every other non-selected repository
+path. Do not deliver a GitHub repository tree or directory permalink. Do not
+deliver a full repository checkout. Do not deliver an unfiltered repository
 archive. The facilitator may retain a full private checkout for setup,
 comparison, and evidence verification.
 
 Use one participant-safe delivery method:
 
-- pinned permalinks to exact allowlisted files and directories;
-- a filtered read-only archive containing only allowlisted paths;
-- a filtered local material directory containing only allowlisted paths; or
-- another explicitly described immutable and filtered bundle.
+- a filtered immutable read-only archive containing only selected files;
+- a filtered immutable local material directory containing only selected
+  files; or
+- another explicitly described, physically filtered immutable bundle.
 
 Before a series starts, verify and record that the participant bundle:
 
-- contains only the recorded allowlist;
+- contains only paths in the recorded exact file manifest;
+- contains no example `README.md` or other example Markdown file;
 - contains no `@latest` installation instruction;
+- contains no `go install ./cmd/goxc` instruction;
+- contains no reference to `examples/components` or `examples/cmdapp`;
+- contains no `--compiler=go` participant instruction;
+- contains no manifest that selects `"compiler": "go"`;
 - contains no facilitator-protocol link or path;
 - contains no evaluator-guide link or path;
 - uses no moving default-branch link as required task material;
 - matches the recorded documentation/examples revision;
-- contains every file under each allowlisted example directory; and
-- lets participants complete the core task without accessing excluded paths.
+- contains no repository-root execution requirement or generated artifact;
+- contains the counter, multipackage, and router manifests with TinyGo
+  selected;
+- does not contain `examples/server-backed/goframe.json`;
+- contains every selected file at the recorded revision;
+- includes local package and source dependencies needed to understand each
+  supplied example;
+- does not require an excluded sibling example to understand the task outcome;
+  and
+- lets participants complete the core task without accessing another
+  repository path.
 
 Record the exact paths under `Participant material allowlist:` and the audit
-method and result under `Participant material isolation audit:`. Changing the
-allowlist or delivered bundle is a material study change and requires a new or
-clearly labeled cohort.
+method and result under `Participant material isolation audit:`. Store the
+sorted relative file list under `Participant material exact file manifest:`
+and its revision/content verification under `Participant material manifest
+verification:`. Changing the allowlist, any included file, or the delivered
+bundle is a material study change and requires a new or clearly labeled
+cohort.
 
 ## Session Setup
 
@@ -194,6 +254,8 @@ Before starting, record:
 - documentation delivery method;
 - participant material allowlist;
 - participant material isolation audit;
+- participant material exact file manifest;
+- participant material manifest verification;
 - an anonymized participant ID;
 - broad Go experience band;
 - prior WASM or TinyGo experience as `yes` or `no`;
@@ -339,6 +401,8 @@ filled participant result to the GoFrame repository by default.
 - Documentation delivery method:
 - Participant material allowlist:
 - Participant material isolation audit:
+- Participant material exact file manifest:
+- Participant material manifest verification:
 - Participant ID:
 - Go experience band:
 - Prior WASM/TinyGo experience: yes/no
@@ -514,11 +578,11 @@ roadmap work.
 ## Aggregation Rules
 
 Aggregate recurring evidence only when the study-kit, participant-brief,
-documentation/examples revision, participant material allowlist, and filtered
-delivery bundle are identical, or when each material difference is explicitly
-labeled and judged irrelevant to the repeated observation. Do not hide a
-documentation, example, allowlist, or delivery correction made between
-sessions inside one unqualified aggregate.
+documentation/examples revision, participant material allowlist, exact file
+manifest, and filtered delivery bundle are identical, or when each material
+difference is explicitly labeled and judged irrelevant to the repeated
+observation. Do not hide a documentation, example, included-file, allowlist,
+or delivery correction made between sessions inside one unqualified aggregate.
 
 Select an engineering follow-up only after at least one of these conditions is
 met:
