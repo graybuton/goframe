@@ -30,52 +30,34 @@ For the core session:
 - work in a clean directory outside the GoFrame repository;
 - use the exact published `v0.2.0-preview.6` CLI and module dependency;
 - do not use AI or code-generation assistance;
-- use only the supplied participant brief and product-material bundle, plus
-  ordinary external Go documentation;
-- do not browse or request other GoFrame repository paths during the timed
-  task;
-- record any omitted document or implementation source that appears necessary
-  as friction rather than expanding the supplied materials;
+- use the supplied participant brief and immutable product repository snapshot,
+  plus ordinary external Go documentation;
+- inspect GoFrame implementation source only when the public documentation and
+  examples are insufficient, and record the path and reason;
 - do not copy an existing example wholesale.
 
 ### Study Materials
 
-Use only this participant brief and the closed product-material bundle supplied
-by the facilitator. The facilitator records its exact revision, allowlist, and
-delivery method before the session; you do not need to determine those values
-yourself.
+The facilitator supplies this participant brief separately from one full,
+immutable GoFrame repository snapshot at:
 
-Do not switch to another branch, tag, commit, archive, or repository snapshot during the session.
+```text
+3997797c40f764601df9bf6bbec6a070eaaa0ffb
+```
 
-These are the only GoFrame product documentation files supplied for the core
-session:
+You may use the public documentation and examples in that snapshot. Do not
+switch to another branch, commit, tag, repository snapshot, or moving default
+branch during the timed session.
 
-- `docs/gox-language.md`;
-- `docs/router.md`;
-- `docs/resources.md`;
-- `docs/deployment.md`.
+The exact CLI and module commands in this brief are authoritative. Generic
+`@latest` or local-checkout installation commands found elsewhere in the
+snapshot must not replace the exact study commands.
 
-The supplied examples are filtered source references, not runnable repository
-copies:
-
-- `examples/counter` supplies authored app source, static assets, and its
-  TinyGo manifest;
-- `examples/multipackage` supplies authored app and internal-package source,
-  static assets, and its TinyGo manifest;
-- `examples/router` supplies authored routed-app and internal-package source,
-  static assets, and its TinyGo manifest;
-- `examples/server-backed` supplies browser-app source, plain Go backend
-  source, and static assets only. Its standard-Go manifest is not supplied.
-
-Example README files are not supplied, and repository-root commands from the
-original examples are not participant instructions. Create your own
-`goframe.json` for the participant application. The exact CLI, module,
-manifest, and TinyGo requirements in this brief are authoritative.
-
-Do not browse or request other repository paths during the timed task. If an
-omitted document appears necessary, record that need as friction rather than
-silently expanding the material set. Ordinary external Go documentation
-remains allowed.
+If the public documentation and examples are insufficient, you may inspect
+implementation source in the snapshot. Record every inspected source path and
+why the public material was insufficient. Source inspection is study evidence,
+not a protocol violation. This rule also applies to source reached through the
+Go module cache. Ordinary external Go documentation remains allowed.
 
 Choose what to consult and record what you use.
 
@@ -100,11 +82,14 @@ The participant application must use this module dependency:
 github.com/graybuton/goframe v0.2.0-preview.6
 ```
 
-The version command must print:
+The first output line must be:
 
 ```text
 goxc version v0.2.0-preview.6
 ```
+
+Later lines describing the installed Go and TinyGo environments are expected.
+Their exact wording is not part of the version assertion.
 
 If installation, version verification, or a required tool reported by
 `goxc doctor` blocks you, record the command and result instead of silently
@@ -223,8 +208,8 @@ At the end, provide the facilitator with:
 - the last completed stage;
 - the first unresolved blocker;
 - documents and examples you consulted;
-- any non-allowlisted document or implementation source you believed was
-  necessary, with the reason;
+- every implementation-source path you inspected and why the public
+  documentation or examples were insufficient;
 - one action you expected GoFrame to provide but could not find.
 
 Do not include names, email addresses, employer information, repository
