@@ -247,6 +247,8 @@ Default command outputs:
 - `goxc package <app>` writes standalone output to
   `.goframe/package/standalone`;
 - `goxc serve <app>` serves `.goframe/package/standalone`;
+- `goxc dev <app>` rebuilds and serves the latest completed development package
+  from `.goframe/package/standalone`;
 - `goxc size <app>` reads `.goframe/package/standalone`;
 - `goxc export <app> --out <dir>` copies the standalone package to an explicit
   deployment directory.
@@ -288,6 +290,27 @@ The materialized hidden workspace supports `"entry": "."` apps and child entry
 packages such as `"./cmd/app"`, `"cmd/app"`, `"./src/app"`, and `"app"` when
 they point to package directories inside the app root. GOX discovery remains
 app-root-wide so imported internal packages get generated files too.
+
+## Watched Local Development
+
+`goxc dev <app>` combines the existing development package path with a watched
+local server. It runs a full package after effective authored inputs change,
+keeps the last completed package available through ordinary source or compiler
+failures, and serves only the standalone package on `127.0.0.1`. Development
+responses use `Cache-Control: no-store`; a manual browser refresh loads the
+latest successful package.
+
+This differs from the explicit one-shot workflow:
+
+```bash
+goxc package <app> --compiler=tinygo
+goxc serve <app> --port=8080
+```
+
+`goxc dev` does not enable asset hashing, preload injection, gzip, or Brotli.
+Those release-oriented options remain explicit `goxc package` concerns, followed
+by `goxc export` when a visible deployment directory is needed. The development
+server is loopback-only and is not production hosting.
 
 ## Cache Policy
 

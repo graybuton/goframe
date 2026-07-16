@@ -4,6 +4,9 @@
 
 ### Added
 
+- Watched `goxc dev` workflow with serialized full-package rebuilds, effective
+  authored-input polling, quiet-period debounce, last-successful-package
+  recovery, loopback-only no-store serving, and manual browser refresh.
 - `v0.2.0-preview.6` release notes documenting structured `goxc check`
   diagnostics, the schema-v1 tooling transport, saved-source VS Code
   diagnostics, Unicode position mapping, multi-root and stale-run handling,

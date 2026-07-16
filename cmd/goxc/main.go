@@ -71,6 +71,12 @@ func main() {
 			return
 		}
 		err = serveCommand(os.Args[2:])
+	case "dev":
+		if commandHelpRequested(os.Args[2:]) {
+			commandUsage(os.Stdout, "dev")
+			return
+		}
+		err = devCommand(os.Args[2:])
 	case "clean":
 		if commandHelpRequested(os.Args[2:]) {
 			commandUsage(os.Stdout, "clean")
@@ -105,6 +111,7 @@ func usage(output io.Writer) {
 	fmt.Fprintln(output, "  export <app> --out    copy the latest standalone package to a deploy directory")
 	fmt.Fprintln(output, "  size <app-or-dir>     report artifact sizes")
 	fmt.Fprintln(output, "  serve [app]           serve a packaged application locally")
+	fmt.Fprintln(output, "  dev <app>             package, serve, and rebuild authored changes")
 	fmt.Fprintln(output, "  clean <app>           remove build and package artifacts")
 	fmt.Fprintln(output, "  doctor                inspect the local toolchain")
 	fmt.Fprintln(output, "  version               print goxc and compiler versions")
@@ -144,6 +151,9 @@ func commandUsage(output io.Writer, command string) {
 		fmt.Fprintln(output, "usage: goxc serve <app-directory> [--port=8080] [--workspace=directory]")
 		fmt.Fprintln(output, "       goxc serve --dir=directory [--port=8080]")
 		fmt.Fprintln(output, "serve a packaged application locally on 127.0.0.1")
+	case "dev":
+		fmt.Fprintln(output, "usage: goxc dev <app-directory> [--compiler=go|tinygo] [--port=8080] [--workspace=directory]")
+		fmt.Fprintln(output, "package, serve, and rebuild authored changes on 127.0.0.1")
 	case "size":
 		fmt.Fprintln(output, "usage: goxc size <app-directory-or-package-directory> [--workspace=directory]")
 		fmt.Fprintln(output, "report raw and compressed package artifact sizes")
