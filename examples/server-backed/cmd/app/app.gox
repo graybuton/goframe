@@ -20,13 +20,69 @@ type GreetingRouteProps struct {
 	Target string
 }
 
+type SavedGreetingRouteProps struct {
+	Target string
+}
+
 type NotFoundRouteProps struct {
 	Target string
+}
+
+type savedGreetingMutationOwner struct {
+	active  bool
+	mounted bool
+	cleanup gf.Cleanup
+}
+
+const savedGreetingAPIPath = "/api/saved-greeting"
+
+func newSavedGreetingMutationOwner() *savedGreetingMutationOwner {
+	return &savedGreetingMutationOwner{mounted: true}
+}
+
+func (owner *savedGreetingMutationOwner) begin() bool {
+	if owner == nil || !owner.mounted || owner.active {
+		return false
+	}
+	owner.active = true
+	return true
+}
+
+func (owner *savedGreetingMutationOwner) setCleanup(cleanup gf.Cleanup) {
+	if owner == nil || !owner.mounted || !owner.active {
+		if cleanup != nil {
+			cleanup()
+		}
+		return
+	}
+	owner.cleanup = cleanup
+}
+
+func (owner *savedGreetingMutationOwner) complete() bool {
+	if owner == nil || !owner.mounted || !owner.active {
+		return false
+	}
+	owner.active = false
+	owner.cleanup = nil
+	return true
+}
+
+func (owner *savedGreetingMutationOwner) cancel() {
+	if owner == nil {
+		return
+	}
+	owner.mounted = false
+	owner.active = false
+	if owner.cleanup != nil {
+		owner.cleanup()
+		owner.cleanup = nil
+	}
 }
 
 var router = gf.NewHashRouter([]gf.Route{
 	gf.RoutePath("/", homeRoute),
 	gf.RoutePath("/greeting", greetingRoute),
+	gf.RoutePath("/saved-greeting", savedGreetingRoute),
 	gf.NotFoundRoute(notFoundRoute),
 })
 
@@ -48,11 +104,16 @@ func ServerBackedShell(props ServerBackedShellProps) gf.Node {
 				<h1>Route-driven data from a Go backend</h1>
 				<p class="muted">
 					This browser/WASM app keeps its outer shell mounted while hash routes
-					own greeting form state and same-origin resources.
+					own greeting reads and one server-backed write flow.
 				</p>
-				<gf.RouterLink To="/" Class="home-link" TestID="server-backed-home-link">
-					Home
-				</gf.RouterLink>
+				<nav class="shell-nav" aria-label="Server-backed routes">
+					<gf.RouterLink To="/" Class="home-link" TestID="server-backed-home-link">
+						Home
+					</gf.RouterLink>
+					<gf.RouterLink To="/saved-greeting" Class="home-link" TestID="server-backed-saved-link">
+						Saved greeting
+					</gf.RouterLink>
+				</nav>
 			</section>
 
 			<section class="panel route-panel" data-testid="server-backed-route-content">
@@ -73,8 +134,106 @@ func greetingRoute(ctx gf.RouteContext) gf.Node {
 	/>
 }
 
+func savedGreetingRoute(ctx gf.RouteContext) gf.Node {
+	return <SavedGreetingRoute Target={routeTarget(ctx)} />
+}
+
 func notFoundRoute(ctx gf.RouteContext) gf.Node {
 	return <NotFoundRoute Target={routeTarget(ctx)} />
+}
+
+func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
+	draft, setDraft := gf.UseState("GoFrame")
+	mutationStatus, setMutationStatus := gf.UseState("idle")
+	mutationError, setMutationError := gf.UseState("")
+	mutationOwner, _ := gf.UseState(newSavedGreetingMutationOwner())
+	resource, reload := gf.UseResource(savedGreetingAPIPath, gf.FetchText)
+	gf.UseUnmount(func() {
+		mutationOwner.cancel()
+	})
+
+	submitSavedGreeting := func(event gf.Event) {
+		event.PreventDefault()
+		if mutationOwner.active {
+			return
+		}
+		name := strings.TrimSpace(draft)
+		if name == "" {
+			setMutationStatus("validation failed")
+			setMutationError("Name is required.")
+			return
+		}
+		if !mutationOwner.begin() {
+			return
+		}
+		setMutationStatus("pending")
+		setMutationError("")
+		cleanup := postSavedGreeting(name, func(_ string) {
+			if !mutationOwner.complete() {
+				return
+			}
+			setMutationStatus("success")
+			setMutationError("")
+			reload()
+		}, func(err error) {
+			if !mutationOwner.complete() {
+				return
+			}
+			setMutationStatus("server failed")
+			if err == nil {
+				setMutationError("Saved greeting request failed.")
+				return
+			}
+			setMutationError(err.Error())
+		})
+		mutationOwner.setCleanup(cleanup)
+	}
+
+	return (
+		<div data-testid="server-backed-saved-route">
+			<p class="eyebrow" data-testid="server-backed-route-name">Saved greeting route</p>
+			<h2>Committed server state</h2>
+			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+			<p class="muted" data-testid="saved-greeting-resource-key">{savedGreetingAPIPath}</p>
+			<p class="muted" data-testid="saved-greeting-read-status">{greetingStatus(resource)}</p>
+
+			{resource.Loading() && (
+				<p class="status loading" data-testid="saved-greeting-read-loading">Loading committed greeting...</p>
+			)}
+			{resource.Failed() && (
+				<div class="status failed" data-testid="saved-greeting-read-error">{greetingErrorText(resource)}</div>
+			)}
+			{resource.Ready() && (
+				<p class="status message" data-testid="saved-greeting-committed">{resource.Value}</p>
+			)}
+
+			<form class="greeting-form" data-testid="saved-greeting-form" OnSubmit={submitSavedGreeting}>
+				<label class="field">
+					<span>New committed name</span>
+					<input
+						data-testid="saved-greeting-input"
+						Type="text"
+						Value={draft}
+						OnInput={func(event gf.InputEvent) {
+							setDraft(event.Value())
+						}}
+					/>
+				</label>
+				<button
+					data-testid="saved-greeting-submit"
+					Type="submit"
+					Disabled={mutationStatus == "pending"}
+				>
+					Save greeting
+				</button>
+			</form>
+
+			<p class="muted" data-testid="saved-greeting-mutation-status">{mutationStatus}</p>
+			{mutationError != "" && (
+				<div class="status failed" data-testid="saved-greeting-mutation-error">{mutationError}</div>
+			)}
+		</div>
+	)
 }
 
 func HomeRoute(props HomeRouteProps) gf.Node {
