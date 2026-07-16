@@ -39,7 +39,7 @@ The current baseline includes:
 - the GOX language and compiler, including typed component boundaries,
   package-qualified component tags, fragments, expression-oriented rendering,
   nested markup in Go callbacks, and source-oriented diagnostics;
-- the `goxc` check, generate, build, package, export, serve, size, clean,
+- the `goxc` check, generate, build, package, export, serve, dev, size, clean,
   doctor, and version workflow for standard Go and TinyGo WebAssembly output;
 - generated component identity based on Go package identity where available,
   plus multi-package and child-entry application evidence;
@@ -204,6 +204,11 @@ Design boundaries:
 The line remains subject to focused design and executable evidence before any
 public contract is selected.
 
+The completed async-navigation and server-backed mutation evidence found the
+existing router, component ownership, resource lifecycle, and example-local
+request coordination sufficient for the audited flows. Those stages did not
+select a public route-loader, Action, Mutation, or cache-invalidation API.
+
 ## `v0.4.0-preview.*` - Modular Delivery & Bundle Splitting
 
 Status: **Candidate**. This line must keep distinct delivery concepts separate.
@@ -318,7 +323,8 @@ Resumability, server components, and selective or streaming hydration remain
 
 ## `v0.7.0-preview.*` - Dev Loop & Language Services
 
-Status: **Candidate**.
+Status: **Candidate**, with the bounded watched development command now
+**Current / shipped**.
 
 The CLI-backed saved-source diagnostics in current `main` are
 **Current / shipped**. Semantic tooling remains future language-service work.
@@ -327,7 +333,7 @@ Candidate sequence:
 
 | Planning slot | Candidate capability |
 |---|---|
-| `preview.1` | Incremental development command. |
+| `preview.1` | Watched development command with serialized full-package rebuilds. |
 | `preview.2` | Browser reload and error overlay. |
 | `preview.3` | GOX-to-generated source maps. |
 | `preview.4` | Deterministic formatter. |
@@ -336,7 +342,8 @@ Candidate sequence:
 
 Potential surface, subject to design and evidence:
 
-- `goxc dev` with incremental GOX generation and a bounded build cache;
+- the current `goxc dev` full-package workflow, with later incremental build
+  work requiring separate evidence;
 - browser reload with compiler and source error presentation;
 - GOX-to-generated source maps shared by compiler and editor tooling;
 - a deterministic formatter with explicit syntax-governance rules;
@@ -481,8 +488,7 @@ entries are deliberately not sequenced or assigned to releases.
 
 ### Toolchain
 
-- incremental build cache;
-- development server workflow;
+- incremental build-cache research;
 - bundle graph;
 - multi-entry packaging;
 - prerender;
@@ -516,11 +522,13 @@ that defines behavior boundaries, evidence, cost, and non-goals.
 
 ## Immediate Sequence
 
-1. Begin `v0.3` with an executable Application Model II capability.
-2. Establish route transition state and cancellation through focused evidence.
-3. Continue toward later `v0.3` capabilities only after the first slice is
-   validated.
+1. Establish the bounded watched `goxc dev` command as the immediate selected
+   toolchain capability.
+2. Validate full-package rebuilds, failure recovery, loopback serving, and
+   clean shutdown through focused Go evidence.
+3. Keep browser reload and browser error presentation as a later candidate,
+   selected only after the first workflow evidence is complete.
 
-The first post-release engineering PR should not be another broad audit or a
-wording-only cleanup. It should provide a bounded, observable capability with
-focused evidence. This roadmap does not choose final `v0.3` API signatures.
+The application-model evidence does not justify adding a loader, Action, or
+Mutation API. The selected development-loop slice does not imply incremental
+compilation, HMR, source maps, or a broader language-service commitment.

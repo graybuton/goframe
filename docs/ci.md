@@ -39,6 +39,13 @@ namespace collisions, lexical and physical source/output overlap, partial
 publication metadata, custom/generated standalone `index.html` integrity,
 fail-closed legacy ownership, and dev-server symlink entries.
 
+The same Core `go test` gate covers the watched `goxc dev` workflow. Pure tests
+exercise option parsing, content snapshots, debounce, serialized coordination,
+failure recovery, and shutdown with injected dependencies. A focused integration
+test uses the real standard Go WASM package and static-server path in a temporary
+external application and workspace. Core CI does not claim a TinyGo dev-loop
+automation pass.
+
 ### WASM Size
 
 `.github/workflows/ci-wasm-size.yml` runs on pull requests, pushes to `main`,

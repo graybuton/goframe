@@ -96,7 +96,7 @@ it does not write generated `.gox.go` files next to authored source by default.
   context, events, reconciliation, resources, routing, and fixed-height
   virtualization.
 - `pkg/gox`: GOX lexer/parser/codegen with source-oriented diagnostics.
-- `cmd/goxc`: check, generate, build, package, export, serve, size, clean,
+- `cmd/goxc`: check, generate, build, package, export, serve, dev, size, clean,
   doctor, and version commands.
 - Examples and scripts that exercise the runtime, compiler, package workflow,
   browser smoke paths, and WASM size budgets.
@@ -110,6 +110,8 @@ it does not write generated `.gox.go` files next to authored source by default.
 - [GOX language](docs/gox-language.md) - syntax, diagnostics, and limits.
 - [Runtime model](docs/runtime-model.md) - component identity, hooks,
   reconciliation, resources, and errors.
+- [Local development](docs/development.md) - watched development packaging,
+  loopback serving, failure recovery, and current non-goals.
 - [Deployment](docs/deployment.md) - package layout, asset hashing, preloads,
   export, and cache-safe static delivery.
 - [API stability](docs/api-stability.md) and
@@ -409,6 +411,7 @@ Common commands:
 | `goxc export <app> --out <dir>` | Copy the latest package to an explicit deploy directory. |
 | `goxc size <app>` | Report size from `.goframe/package/standalone`. |
 | `goxc serve <app>` | Serve the local package for development. |
+| `goxc dev <app>` | Package, serve, and rebuild effective authored inputs for local development. |
 | `goxc clean <app>` | Remove tool-owned workspace/build/package artifacts. |
 | `goxc doctor` | Check local Go/TinyGo/compression/runtime-shim tools. |
 
@@ -545,6 +548,7 @@ Runtime topics:
 Toolchain and delivery:
 
 - [Multi-package GOX workspace](docs/multi-package-workspace.md)
+- [Local development workflow](docs/development.md)
 - [Cache-safe package delivery](docs/deployment.md)
 - [Manifest compatibility](docs/manifest-compatibility.md)
 - [Symlink and file safety policy](docs/security-symlink-policy.md)
