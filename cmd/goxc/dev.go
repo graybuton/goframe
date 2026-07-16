@@ -408,18 +408,12 @@ func (collector *devSnapshotCollector) collect() (devSnapshot, error) {
 
 	manifest, err := loadManifest(collector.appDir)
 	if err != nil {
-		if collector.haveAssets {
-			_ = collector.collectAssets(&snapshot, collector.lastAssets)
-		}
-		return snapshot, devBuildableScanError{err: err}
+		return snapshot, collector.collectRetainedAssets(&snapshot, err)
 	}
 	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
 	_, planErr := planPackageAssets(collector.appDir, manifest, wasmLogicalName, packageOptions{compress: map[string]bool{}})
 	if planErr != nil {
-		if collector.haveAssets {
-			_ = collector.collectAssets(&snapshot, collector.lastAssets)
-		}
-		return snapshot, devBuildableScanError{err: planErr}
+		return snapshot, collector.collectRetainedAssets(&snapshot, planErr)
 	}
 
 	spec, err := collector.assetWatchSpec(manifest)
@@ -432,6 +426,15 @@ func (collector *devSnapshotCollector) collect() (devSnapshot, error) {
 		return snapshot, err
 	}
 	return snapshot, nil
+}
+
+func (collector *devSnapshotCollector) collectRetainedAssets(snapshot *devSnapshot, scanErr error) error {
+	if collector.haveAssets {
+		if err := collector.collectAssets(snapshot, collector.lastAssets); err != nil {
+			scanErr = errors.Join(scanErr, err)
+		}
+	}
+	return devBuildableScanError{err: scanErr}
 }
 
 func (collector *devSnapshotCollector) collectAuthoredSource(snapshot *devSnapshot) error {
@@ -547,11 +550,17 @@ func (collector *devSnapshotCollector) assetWatchSpec(manifest projectManifest) 
 
 func (collector *devSnapshotCollector) collectAssets(snapshot *devSnapshot, spec devAssetWatchSpec) error {
 	for _, directory := range spec.directories {
+		if err := validatePathBelowRoot(collector.appDir, directory.path, "watched asset directory", true); err != nil {
+			return err
+		}
 		if err := collector.collectAssetDirectory(snapshot, directory); err != nil {
 			return err
 		}
 	}
 	for _, file := range spec.files {
+		if err := validatePathBelowRoot(collector.appDir, file, "watched asset path", true); err != nil {
+			return err
+		}
 		if err := collector.collectFile(snapshot, file, true); err != nil {
 			return err
 		}

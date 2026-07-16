@@ -352,6 +352,150 @@ func TestDevSnapshotUsesLastAssetsDuringMalformedManifest(t *testing.T) {
 	}
 }
 
+func TestDevSnapshotRetainedAssetFileRejectsIntermediateSymlink(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	assetPath := ".site/static/styles.css"
+	manifest := `{"compiler":"go","assets":[".site/static/styles.css"]}`
+	writeTestFile(t, appDir, manifestName, manifest)
+	writeTestFile(t, appDir, "main.go", "package main\n")
+	writeTestFile(t, appDir, assetPath, "local first")
+	collector := newDevSnapshotCollector(appDir)
+
+	healthy, err := collector.collect()
+	if err != nil {
+		t.Fatalf("initial collect() error: %v", err)
+	}
+	if _, ok := healthy.files[assetPath]; !ok {
+		t.Fatalf("initial snapshot missing retained asset file: %#v", healthy.paths())
+	}
+
+	writeTestFile(t, appDir, manifestName, `{"compiler":`)
+	staticPath := filepath.Join(appDir, ".site", "static")
+	if err := os.RemoveAll(staticPath); err != nil {
+		t.Fatal(err)
+	}
+	externalDir := filepath.Join(root, "external-file-assets")
+	writeTestFile(t, externalDir, "styles.css", "external first")
+	if err := os.Symlink(externalDir, staticPath); err != nil {
+		t.Fatal(err)
+	}
+
+	unsafeSnapshot, err := collector.collect()
+	assertDevBuildableScanError(t, err, "parse goframe.json", "symlink")
+	if _, ok := unsafeSnapshot.files[assetPath]; ok {
+		t.Fatalf("external retained asset file was fingerprinted: %#v", unsafeSnapshot.files)
+	}
+	unsafeError := err.Error()
+
+	writeTestFile(t, externalDir, "styles.css", "external second")
+	changedExternal, err := collector.collect()
+	assertDevBuildableScanError(t, err, "parse goframe.json", "symlink")
+	if err.Error() != unsafeError {
+		t.Fatalf("repeated retained-file error changed:\nfirst:  %s\nsecond: %s", unsafeError, err)
+	}
+	if !devSnapshotsEqual(unsafeSnapshot, changedExternal) {
+		t.Fatalf("external file content changed safe snapshot: %#v", diffDevSnapshots(unsafeSnapshot, changedExternal))
+	}
+
+	if err := os.Remove(staticPath); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, assetPath, "local restored")
+	retained, err := collector.collect()
+	assertDevBuildableScanError(t, err, "parse goframe.json")
+	if strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("restored retained-file error still reports symlink: %v", err)
+	}
+	if _, ok := retained.files[assetPath]; !ok {
+		t.Fatalf("restored retained asset file missing: %#v", retained.paths())
+	}
+
+	writeTestFile(t, appDir, manifestName, manifest)
+	recovered, err := collector.collect()
+	if err != nil {
+		t.Fatalf("recovered collect() error: %v", err)
+	}
+	if _, ok := recovered.files[assetPath]; !ok {
+		t.Fatalf("recovered snapshot missing local asset file: %#v", recovered.paths())
+	}
+}
+
+func TestDevSnapshotRetainedAssetDirectoryRejectsIntermediateSymlink(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	assetDirectory := ".site/static/public"
+	assetPath := assetDirectory + "/data.txt"
+	manifest := `{"compiler":"go","assets":".site/static/public"}`
+	writeTestFile(t, appDir, manifestName, manifest)
+	writeTestFile(t, appDir, "main.go", "package main\n")
+	writeTestFile(t, appDir, assetPath, "local first")
+	collector := newDevSnapshotCollector(appDir)
+
+	healthy, err := collector.collect()
+	if err != nil {
+		t.Fatalf("initial collect() error: %v", err)
+	}
+	if _, ok := healthy.files[assetPath]; !ok {
+		t.Fatalf("initial snapshot missing retained directory asset: %#v", healthy.paths())
+	}
+
+	writeTestFile(t, appDir, manifestName, `{"compiler":`)
+	staticPath := filepath.Join(appDir, ".site", "static")
+	if err := os.RemoveAll(staticPath); err != nil {
+		t.Fatal(err)
+	}
+	externalDir := filepath.Join(root, "external-directory-assets")
+	writeTestFile(t, externalDir, "public/data.txt", "external first")
+	if err := os.Symlink(externalDir, staticPath); err != nil {
+		t.Fatal(err)
+	}
+
+	unsafeSnapshot, err := collector.collect()
+	assertDevBuildableScanError(t, err, "parse goframe.json", "symlink")
+	if _, ok := unsafeSnapshot.files[assetDirectory+"/"]; ok {
+		t.Fatalf("external retained asset directory was traversed: %#v", unsafeSnapshot.files)
+	}
+	if _, ok := unsafeSnapshot.files[assetPath]; ok {
+		t.Fatalf("external retained directory asset was fingerprinted: %#v", unsafeSnapshot.files)
+	}
+	unsafeError := err.Error()
+
+	writeTestFile(t, externalDir, "public/data.txt", "external second")
+	changedExternal, err := collector.collect()
+	assertDevBuildableScanError(t, err, "parse goframe.json", "symlink")
+	if err.Error() != unsafeError {
+		t.Fatalf("repeated retained-directory error changed:\nfirst:  %s\nsecond: %s", unsafeError, err)
+	}
+	if !devSnapshotsEqual(unsafeSnapshot, changedExternal) {
+		t.Fatalf("external directory content changed safe snapshot: %#v", diffDevSnapshots(unsafeSnapshot, changedExternal))
+	}
+
+	if err := os.Remove(staticPath); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, assetPath, "local restored")
+	retained, err := collector.collect()
+	assertDevBuildableScanError(t, err, "parse goframe.json")
+	if strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("restored retained-directory error still reports symlink: %v", err)
+	}
+	if _, ok := retained.files[assetPath]; !ok {
+		t.Fatalf("restored retained directory asset missing: %#v", retained.paths())
+	}
+
+	writeTestFile(t, appDir, manifestName, manifest)
+	recovered, err := collector.collect()
+	if err != nil {
+		t.Fatalf("recovered collect() error: %v", err)
+	}
+	if _, ok := recovered.files[assetPath]; !ok {
+		t.Fatalf("recovered snapshot missing local directory asset: %#v", recovered.paths())
+	}
+}
+
 func TestDevSnapshotRejectsSymlinksWithoutTraversal(t *testing.T) {
 	requireSymlinkSupport(t)
 	root := t.TempDir()
@@ -598,6 +742,19 @@ func assertDevChangedPath(t *testing.T, previous, current devSnapshot, want stri
 		}
 	}
 	t.Fatalf("changed paths = %#v, want %q", diffDevSnapshots(previous, current), want)
+}
+
+func assertDevBuildableScanError(t *testing.T, err error, contains ...string) {
+	t.Helper()
+	var buildable devBuildableScanError
+	if !errors.As(err, &buildable) {
+		t.Fatalf("collect() error = %v, want devBuildableScanError", err)
+	}
+	for _, want := range contains {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("collect() error = %v, want %q", err, want)
+		}
+	}
 }
 
 type fakeDevScanner struct {
