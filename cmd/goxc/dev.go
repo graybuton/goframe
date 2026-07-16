@@ -664,6 +664,14 @@ func (failure devBuildableScanError) Unwrap() error {
 	return failure.err
 }
 
+func devScanAllowsBuild(err error) bool {
+	if err == nil {
+		return true
+	}
+	var buildable devBuildableScanError
+	return errors.As(err, &buildable)
+}
+
 func runDevCoordinator(ctx context.Context, config devCoordinatorConfig) error {
 	if config.scan == nil || config.build == nil {
 		return errors.New("development coordinator requires scan and build functions")
@@ -681,23 +689,40 @@ func runDevCoordinator(ctx context.Context, config devCoordinatorConfig) error {
 		return nil
 	}
 
-	lastAttempted, scanErr := config.scan()
+	initialSnapshot, scanErr := config.scan()
 	haveHealthySnapshot := scanErr == nil
 	lastScanError := reportDevScanState(config.stderr, "", scanErr)
 	if ctx.Err() != nil {
 		return nil
 	}
-	if err := runDevBuild(config, devBuildRequest{Number: 1, Initial: true}); err != nil {
-		var fatal devFatalError
-		if errors.As(err, &fatal) {
-			return fatal.err
+
+	lastAttempted := newDevSnapshot()
+	buildNumber := 0
+	attemptBuild := func(snapshot devSnapshot, changed []string) error {
+		initial := buildNumber == 0
+		buildNumber++
+		lastAttempted = snapshot
+		if initial {
+			changed = nil
+		}
+		return runDevBuild(config, devBuildRequest{
+			Number:  buildNumber,
+			Initial: initial,
+			Changed: changed,
+		})
+	}
+	if devScanAllowsBuild(scanErr) {
+		if err := attemptBuild(initialSnapshot, nil); err != nil {
+			var fatal devFatalError
+			if errors.As(err, &fatal) {
+				return fatal.err
+			}
 		}
 	}
 	if ctx.Err() != nil {
 		return nil
 	}
 
-	buildNumber := 1
 	pollTicker := time.NewTicker(config.pollInterval)
 	defer pollTicker.Stop()
 	var debounceTimer *time.Timer
@@ -736,18 +761,33 @@ func runDevCoordinator(ctx context.Context, config devCoordinatorConfig) error {
 	handleScan := func(snapshot devSnapshot, err error) {
 		previousError := lastScanError
 		lastScanError = reportDevScanState(config.stderr, lastScanError, err)
+		if !devScanAllowsBuild(err) {
+			havePending = false
+			forcePending = false
+			stopDebounce()
+			return
+		}
+		if buildNumber == 0 {
+			if err == nil {
+				haveHealthySnapshot = true
+			}
+			if !havePending || !devSnapshotsEqual(pending, snapshot) {
+				pending = snapshot
+				havePending = true
+				forcePending = true
+				resetDebounce()
+			}
+			return
+		}
 		if err != nil {
-			var buildable devBuildableScanError
-			if errors.As(err, &buildable) {
-				if !devSnapshotsEqual(lastAttempted, snapshot) {
-					if !havePending || !devSnapshotsEqual(pending, snapshot) {
-						pending = snapshot
-						havePending = true
-						forcePending = false
-						resetDebounce()
-					}
-					return
+			if !devSnapshotsEqual(lastAttempted, snapshot) {
+				if !havePending || !devSnapshotsEqual(pending, snapshot) {
+					pending = snapshot
+					havePending = true
+					forcePending = false
+					resetDebounce()
 				}
+				return
 			}
 			havePending = false
 			forcePending = false
@@ -794,19 +834,14 @@ func runDevCoordinator(ctx context.Context, config devCoordinatorConfig) error {
 				return nil
 			}
 			changed := diffDevSnapshots(lastAttempted, pending)
-			if len(changed) == 0 && !forcePending {
+			if buildNumber > 0 && len(changed) == 0 && !forcePending {
 				continue
 			}
-			if len(changed) == 0 {
+			if buildNumber > 0 && len(changed) == 0 {
 				changed = []string{"watch inputs recovered"}
 			}
-			lastAttempted = pending
 			forcePending = false
-			buildNumber++
-			err := runDevBuild(config, devBuildRequest{
-				Number:  buildNumber,
-				Changed: changed,
-			})
+			err := attemptBuild(pending, changed)
 			var fatal devFatalError
 			if errors.As(err, &fatal) {
 				return fatal.err

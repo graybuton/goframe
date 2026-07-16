@@ -531,6 +531,139 @@ func TestDevStaticHandlerAddsNoStore(t *testing.T) {
 	}
 }
 
+func TestDevInitialWatchBuildableErrorStartsInitialBuild(t *testing.T) {
+	broken := devTestSnapshot(manifestName, "broken")
+	scanner := newFakeDevScanner(broken)
+	scanner.set(broken, devBuildableScanError{err: errors.New("parse goframe.json")})
+	builds := make(chan devBuildRequest, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startDevCoordinator(t, ctx, scanner.scan, func(request devBuildRequest) error {
+		builds <- request
+		return nil
+	}, 3*time.Millisecond, 20*time.Millisecond, nil)
+
+	assertInitialDevBuild(t, waitDevBuild(t, builds))
+	scanner.set(devTestSnapshot(manifestName, "fixed"), nil)
+	recovered := waitDevBuild(t, builds)
+	if recovered.Number != 2 || recovered.Initial {
+		t.Fatalf("recovery request = %+v, want build 2 with Initial=false", recovered)
+	}
+
+	cancel()
+	if err := waitDevDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDevInitialWatchBlockedUntilHealthy(t *testing.T) {
+	blocked := errors.New("unsafe watched module input")
+	scanner := newFakeDevScanner(devTestSnapshot("app.gox", "one"))
+	scanner.set(devTestSnapshot("app.gox", "one"), blocked)
+	builds := make(chan devBuildRequest, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startDevCoordinator(t, ctx, scanner.scan, func(request devBuildRequest) error {
+		builds <- request
+		return nil
+	}, 3*time.Millisecond, 20*time.Millisecond, nil)
+
+	assertNoDevBuild(t, builds, 40*time.Millisecond)
+	assertDevCoordinatorRunning(t, done)
+	scanner.set(devTestSnapshot("app.gox", "two"), blocked)
+	assertNoDevBuild(t, builds, 40*time.Millisecond)
+	assertDevCoordinatorRunning(t, done)
+
+	scanner.set(devTestSnapshot("app.gox", "two"), nil)
+	assertInitialDevBuild(t, waitDevBuild(t, builds))
+	cancel()
+	if err := waitDevDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDevInitialWatchBlockedToBuildableStartsInitialBuild(t *testing.T) {
+	snapshot := devTestSnapshot(manifestName, "same")
+	scanner := newFakeDevScanner(snapshot)
+	scanner.set(snapshot, errors.New("unsafe watched manifest path"))
+	builds := make(chan devBuildRequest, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startDevCoordinator(t, ctx, scanner.scan, func(request devBuildRequest) error {
+		builds <- request
+		return nil
+	}, 3*time.Millisecond, 20*time.Millisecond, nil)
+
+	assertNoDevBuild(t, builds, 40*time.Millisecond)
+	scanner.set(snapshot, devBuildableScanError{err: errors.New("parse goframe.json")})
+	assertInitialDevBuild(t, waitDevBuild(t, builds))
+	cancel()
+	if err := waitDevDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDevInitialWatchCancellationBeforeBuild(t *testing.T) {
+	snapshot := devTestSnapshot("app.gox", "one")
+	scanner := newFakeDevScanner(snapshot)
+	scanner.set(snapshot, errors.New("unsafe watched module input"))
+	builds := make(chan devBuildRequest, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startDevCoordinator(t, ctx, scanner.scan, func(request devBuildRequest) error {
+		builds <- request
+		return nil
+	}, 3*time.Millisecond, 20*time.Millisecond, nil)
+
+	assertNoDevBuild(t, builds, 40*time.Millisecond)
+	cancel()
+	if err := waitDevDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+	assertNoDevBuild(t, builds, 30*time.Millisecond)
+}
+
+func TestDevInitialWatchSymlinkedModuleBlocksBuild(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	moduleRoot := filepath.Join(root, "module-root")
+	appDir := filepath.Join(moduleRoot, "app")
+	writeTestFile(t, moduleRoot, "go.mod.target", "module example.com/dev\n\ngo 1.22\n")
+	if err := os.Symlink("go.mod.target", filepath.Join(moduleRoot, "go.mod")); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, manifestName, `{"compiler":"go"}`)
+	writeTestFile(t, appDir, "main.go", "package main\n")
+	collector := newDevSnapshotCollector(appDir)
+
+	_, scanErr := collector.collect()
+	if scanErr == nil || !strings.Contains(scanErr.Error(), "symlink") {
+		t.Fatalf("initial collect() error = %v, want symlink rejection", scanErr)
+	}
+	var buildable devBuildableScanError
+	if errors.As(scanErr, &buildable) {
+		t.Fatalf("symlinked module error is buildable: %v", scanErr)
+	}
+
+	builds := make(chan devBuildRequest, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startDevCoordinator(t, ctx, collector.collect, func(request devBuildRequest) error {
+		builds <- request
+		return nil
+	}, 3*time.Millisecond, 20*time.Millisecond, nil)
+
+	assertNoDevBuild(t, builds, 40*time.Millisecond)
+	writeTestFile(t, appDir, "main.go", "package main\n\nvar changedWhileBlocked = true\n")
+	assertNoDevBuild(t, builds, 40*time.Millisecond)
+	assertDevCoordinatorRunning(t, done)
+
+	if err := os.Remove(filepath.Join(moduleRoot, "go.mod")); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, moduleRoot, "go.mod", "module example.com/dev\n\ngo 1.22\n")
+	assertInitialDevBuild(t, waitDevBuild(t, builds))
+	cancel()
+	if err := waitDevDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDevCoordinatorDebouncesAndCoalescesBurst(t *testing.T) {
 	scanner := newFakeDevScanner(devTestSnapshot("app.gox", "one"))
 	builds := make(chan devBuildRequest, 8)
@@ -678,7 +811,6 @@ func TestDevCoordinatorCancellationDuringIdleStops(t *testing.T) {
 
 func TestDevCoordinatorSuppressesRepeatedScanErrors(t *testing.T) {
 	scanner := newFakeDevScanner(devTestSnapshot("app.gox", "one"))
-	scanner.set(devTestSnapshot("app.gox", "one"), errors.New("unreadable watched input"))
 	builds := make(chan devBuildRequest, 8)
 	var stderr bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())
@@ -687,18 +819,20 @@ func TestDevCoordinatorSuppressesRepeatedScanErrors(t *testing.T) {
 		return nil
 	}, 3*time.Millisecond, 20*time.Millisecond, &stderr)
 	waitDevBuild(t, builds)
+	scanner.set(devTestSnapshot("app.gox", "one"), errors.New("unreadable watched input"))
 	time.Sleep(40 * time.Millisecond)
-	if got := strings.Count(stderr.String(), "dev watch error:"); got != 1 {
-		t.Fatalf("watch error count = %d, output:\n%s", got, stderr.String())
-	}
 	scanner.set(devTestSnapshot("app.gox", "one"), nil)
 	waitDevBuild(t, builds)
 	cancel()
 	if err := waitDevDone(t, done); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(stderr.String(), "dev watch recovered"); got != 1 {
-		t.Fatalf("watch recovery count = %d, output:\n%s", got, stderr.String())
+	output := stderr.String()
+	if got := strings.Count(output, "dev watch error:"); got != 1 {
+		t.Fatalf("watch error count = %d, output:\n%s", got, output)
+	}
+	if got := strings.Count(output, "dev watch recovered"); got != 1 {
+		t.Fatalf("watch recovery count = %d, output:\n%s", got, output)
 	}
 }
 
@@ -754,6 +888,22 @@ func assertDevBuildableScanError(t *testing.T, err error, contains ...string) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("collect() error = %v, want %q", err, want)
 		}
+	}
+}
+
+func assertInitialDevBuild(t *testing.T, request devBuildRequest) {
+	t.Helper()
+	if request.Number != 1 || !request.Initial || len(request.Changed) != 0 {
+		t.Fatalf("initial request = %+v, want build 1 with Initial=true and no changed paths", request)
+	}
+}
+
+func assertDevCoordinatorRunning(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		t.Fatalf("development coordinator exited while watch was blocked: %v", err)
+	default:
 	}
 }
 
