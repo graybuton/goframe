@@ -210,6 +210,115 @@ func TestDevSnapshotDetectsAssetAndModuleChanges(t *testing.T) {
 	assertDevChangedPath(t, withoutSum, withUpdatedModule, "../go.mod")
 }
 
+func TestDevSnapshotAutoAssetsIgnoresNonDirectoryAndDetectsDirectoryTransitions(t *testing.T) {
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, manifestName, `{"compiler":"go"}`)
+	writeTestFile(t, appDir, "main.go", "package main\n")
+	writeTestFile(t, appDir, indexHTMLAssetName, "<main>fallback</main>")
+	writeTestFile(t, appDir, assetDirectoryName, "ignored first")
+	collector := newDevSnapshotCollector(appDir)
+
+	initial, err := collector.collect()
+	if err != nil {
+		t.Fatalf("initial collect() error: %v", err)
+	}
+	if got := initial.files[assetDirectoryName+"/"]; got != "missing" {
+		t.Fatalf("non-directory auto assets marker = %q, want missing", got)
+	}
+	if _, ok := initial.files[assetDirectoryName]; ok {
+		t.Fatalf("non-directory auto assets content was fingerprinted: %#v", initial.files)
+	}
+	if _, ok := initial.files[indexHTMLAssetName]; !ok {
+		t.Fatalf("fallback index missing from snapshot: %#v", initial.paths())
+	}
+
+	writeTestFile(t, appDir, assetDirectoryName, "ignored second")
+	withChangedIgnoredFile, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after ignored file change: %v", err)
+	}
+	if !devSnapshotsEqual(initial, withChangedIgnoredFile) {
+		t.Fatalf("ignored auto assets content changed snapshot paths: %#v", diffDevSnapshots(initial, withChangedIgnoredFile))
+	}
+
+	writeTestFile(t, appDir, "main.go", "package main\n\nvar sourceChanged = true\n")
+	withSourceChange, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after source change: %v", err)
+	}
+	assertDevChangedPath(t, withChangedIgnoredFile, withSourceChange, "main.go")
+
+	if err := os.Remove(filepath.Join(appDir, assetDirectoryName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(appDir, assetDirectoryName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withDirectory, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after directory transition: %v", err)
+	}
+	if got := withDirectory.files[assetDirectoryName+"/"]; got != "directory" {
+		t.Fatalf("auto assets directory marker = %q, want directory", got)
+	}
+	if _, ok := withDirectory.files[indexHTMLAssetName]; ok {
+		t.Fatalf("fallback index remained effective with assets directory: %#v", withDirectory.paths())
+	}
+	assertDevChangedPath(t, withSourceChange, withDirectory, assetDirectoryName+"/")
+
+	writeTestFile(t, appDir, "assets/styles.css", "body{}")
+	withDirectoryAsset, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after directory asset creation: %v", err)
+	}
+	if _, ok := withDirectoryAsset.files["assets/styles.css"]; !ok {
+		t.Fatalf("directory asset missing from snapshot: %#v", withDirectoryAsset.paths())
+	}
+	assertDevChangedPath(t, withDirectory, withDirectoryAsset, "assets/styles.css")
+
+	if err := os.RemoveAll(filepath.Join(appDir, assetDirectoryName)); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, assetDirectoryName, "ignored again")
+	withFallback, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after fallback transition: %v", err)
+	}
+	if got := withFallback.files[assetDirectoryName+"/"]; got != "missing" {
+		t.Fatalf("fallback auto assets marker = %q, want missing", got)
+	}
+	if _, ok := withFallback.files[indexHTMLAssetName]; !ok {
+		t.Fatalf("root index missing after fallback transition: %#v", withFallback.paths())
+	}
+	if _, ok := withFallback.files["assets/styles.css"]; ok {
+		t.Fatalf("removed directory asset remained in snapshot: %#v", withFallback.paths())
+	}
+	assertDevChangedPath(t, withDirectoryAsset, withFallback, assetDirectoryName+"/")
+
+	if err := os.Remove(filepath.Join(appDir, assetDirectoryName)); err != nil {
+		t.Fatal(err)
+	}
+	withMissingPath, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after removing ignored path: %v", err)
+	}
+	if !devSnapshotsEqual(withFallback, withMissingPath) {
+		t.Fatalf("missing and non-directory auto assets differ: %#v", diffDevSnapshots(withFallback, withMissingPath))
+	}
+}
+
+func TestDevSnapshotExplicitAssetDirectoryRejectsNonDirectory(t *testing.T) {
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, manifestName, `{"compiler":"go","assets":"assets"}`)
+	writeTestFile(t, appDir, "main.go", "package main\n")
+	writeTestFile(t, appDir, assetDirectoryName, "not a directory")
+
+	_, err := newDevSnapshotCollector(appDir).collect()
+	if err == nil || !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("collect() error = %v, want explicit asset-directory rejection", err)
+	}
+}
+
 func TestDevSnapshotUsesLastAssetsDuringMalformedManifest(t *testing.T) {
 	appDir := t.TempDir()
 	writeTestFile(t, appDir, manifestName, `{"compiler":"go","assets":"assets"}`)

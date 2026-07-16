@@ -575,6 +575,10 @@ func (collector *devSnapshotCollector) collectAssetDirectory(snapshot *devSnapsh
 		return fmt.Errorf("watched asset directory %s is a symlink; symlink paths are not supported", directory.path)
 	}
 	if !info.IsDir() {
+		if !directory.required {
+			snapshot.files[collector.displayPath(directory.path)+"/"] = "missing"
+			return nil
+		}
 		return fmt.Errorf("watched asset directory %s is not a directory", directory.path)
 	}
 	snapshot.files[collector.displayPath(directory.path)+"/"] = "directory"
