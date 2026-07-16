@@ -11,7 +11,7 @@ import (
 )
 
 func TestCommandUsage(t *testing.T) {
-	for _, command := range []string{"check", "generate", "build", "package", "export", "serve", "size", "doctor", "clean", "version"} {
+	for _, command := range []string{"check", "generate", "build", "package", "export", "serve", "dev", "size", "doctor", "clean", "version"} {
 		t.Run(command, func(t *testing.T) {
 			var output bytes.Buffer
 			commandUsage(&output, command)
