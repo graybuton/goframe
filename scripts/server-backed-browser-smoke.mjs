@@ -466,6 +466,7 @@ try {
         samePattern: false,
         getsStarted: 1,
         getsCompleted: 1,
+        routeLoadGets: 1,
         postsStarted: 0,
     });
     assertState(await appState(client), {
@@ -523,6 +524,7 @@ try {
         samePattern: true,
         getsStarted: 1,
         getsCompleted: 1,
+        mutationReloadGets: 1,
         postsStarted: 1,
         postsCompleted: 1,
         duplicateSubmitAttempts: 1,
@@ -571,6 +573,7 @@ try {
         samePattern: true,
         getsStarted: 1,
         getsCompleted: 1,
+        mutationReloadGets: 1,
         postsStarted: 1,
         postsCompleted: 1,
         committedValues: [savedRecoveryName],
@@ -586,21 +589,127 @@ try {
     }, "server-backed saved greeting recovery state");
     await assertSavedGreetingAPI(savedRecoveryName);
 
+    await prepareSavedGreetingName(client, savedSlowName);
+    const savedUnmountBaseline = await evidenceState(client);
+    await startScenario(client, "saved-unmount-cancellation");
+    await dispatchSavedGreetingSubmit(client);
+    await waitForSavedMutationPending(client, savedRecoveryName, "saved greeting unmount mutation pending");
+    const unmountedMutationRequest = await waitForActiveSavedMutationRequest(
+        client,
+        savedUnmountBaseline.mutationPostsStarted + 1,
+        "saved greeting unmount POST active",
+    );
+    assertEvidence(await evidenceState(client), {
+        activeMutationRequests: 1,
+        savedGetsStarted: savedUnmountBaseline.savedGetsStarted,
+        successfulMutationReloadGets: savedUnmountBaseline.successfulMutationReloadGets,
+    }, "saved greeting unmount pending evidence");
+
+    await navigateHome(client);
+    await waitForRoute(client, "home", "/");
+    await waitForSavedMutationAbort(client, unmountedMutationRequest.id, "saved greeting unmount POST abort");
+    const savedRouteCountsAfterUnmount = await componentActivity(client, "SavedGreetingRoute");
+    assertState(await appState(client), {
+        route: "home",
+        hash: "#/",
+        routeTarget: "/",
+        savedForm: false,
+        savedInput: "",
+        mutationStatus: "",
+        mutationError: "",
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+    }, "server-backed saved greeting route unmounted");
+    assertEvidence(await evidenceState(client), {
+        savedGetsStarted: savedUnmountBaseline.savedGetsStarted,
+        savedRouteLoadGets: savedUnmountBaseline.savedRouteLoadGets,
+        successfulMutationReloadGets: savedUnmountBaseline.successfulMutationReloadGets,
+        pendingExpectedMutationReloads: 0,
+        mutationPostsAborted: savedUnmountBaseline.mutationPostsAborted + 1,
+        activeMutationRequests: 0,
+    }, "saved greeting unmount abort evidence");
+
+    await wait(staleSettleMS);
+    const savedRouteCountsAfterSettle = await componentActivity(client, "SavedGreetingRoute");
+    assertState(savedRouteCountsAfterSettle, savedRouteCountsAfterUnmount, "saved greeting route stayed unmounted after slow delay");
+    assertEvidence(await evidenceState(client), {
+        savedGetsStarted: savedUnmountBaseline.savedGetsStarted,
+        savedRouteLoadGets: savedUnmountBaseline.savedRouteLoadGets,
+        successfulMutationReloadGets: savedUnmountBaseline.successfulMutationReloadGets,
+        pendingExpectedMutationReloads: 0,
+        mutationPostsCompleted: savedUnmountBaseline.mutationPostsCompleted,
+        mutationPostsFailed: savedUnmountBaseline.mutationPostsFailed,
+        mutationPostsAborted: savedUnmountBaseline.mutationPostsAborted + 1,
+        activeMutationRequests: 0,
+    }, "saved greeting unmount settled evidence");
+    assertState(await appState(client), {
+        route: "home",
+        hash: "#/",
+        routeTarget: "/",
+        savedForm: false,
+        savedInput: "",
+        mutationStatus: "",
+        mutationError: "",
+    }, "server-backed saved greeting late callbacks absent");
+    await assertSavedGreetingAPI(savedRecoveryName);
+    const savedUnmountReport = await finishScenario(client, "saved-unmount-cancellation");
+    assertSavedMutationUnmountReport(savedUnmountReport, "saved greeting unmount cancellation");
+    assertRequest(await savedRequestEvidence(client, unmountedMutationRequest.id), {
+        method: "POST",
+        name: savedSlowName,
+        outcome: "aborted",
+        aborted: true,
+    }, "saved greeting route-unmounted mutation");
+
+    await startScenario(client, "saved-return-after-cancellation");
+    await navigateSavedGreeting(client);
+    await waitForSavedReadLoading(client, "saved greeting return read loading");
+    await waitForSavedCommitted(client, savedRecoveryName, "saved greeting return committed state");
+    const savedReturnReport = await finishScenario(client, "saved-return-after-cancellation");
+    assertSavedGreetingReport(savedReturnReport, "saved greeting return after cancellation", {
+        routeChanges: 1,
+        samePattern: false,
+        getsStarted: 1,
+        getsCompleted: 1,
+        routeLoadGets: 1,
+        postsStarted: 0,
+    });
+    assertState(await appState(client), {
+        route: "savedGreeting",
+        hash: savedGreetingHash,
+        routeTarget: savedGreetingTarget,
+        savedReadStatus: "ready",
+        savedCommitted: savedRecoveryName,
+        mutationStatus: "idle",
+        mutationError: "",
+        mutationErrorNonEmpty: false,
+        mutationPending: false,
+        mutationSubmitDisabled: false,
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+    }, "server-backed saved greeting return after cancellation");
+    await assertSavedGreetingAPI(savedRecoveryName);
+
     const finalEvidence = await evidenceState(client);
     assertEvidence(finalEvidence, {
         fetchesStarted: 11,
         aborts: 2,
         successfulCompletions: 6,
         failedCompletions: 3,
-        savedGetsStarted: 3,
-        savedGetsCompleted: 3,
+        savedGetsStarted: 4,
+        savedGetsCompleted: 4,
         savedGetsFailed: 0,
-        mutationPostsStarted: 3,
+        savedRouteLoadGets: 2,
+        successfulMutationReloadGets: 2,
+        pendingExpectedMutationReloads: 0,
+        mutationPostsStarted: 4,
         mutationPostsCompleted: 2,
         mutationPostsFailed: 1,
+        mutationPostsAborted: 1,
         activeMutationRequests: 0,
         duplicateSubmitAttempts: 1,
-        readReloadsAfterSuccess: 2,
         staleCommittedValueAppearances: 0,
         appIdentityChanges: 0,
         shellIdentityChanges: 0,
@@ -624,7 +733,25 @@ try {
         greetingHash(failureName),
         greetingHash(updatedName),
         savedGreetingHash,
+        "#/",
+        savedGreetingHash,
     ], "final route targets visited");
+    assertStringArray(finalEvidence.savedRequests
+        .filter((request) => request.method === "GET")
+        .map((request) => request.cause), [
+        "route-load",
+        "mutation-reload",
+        "mutation-reload",
+        "route-load",
+    ], "saved greeting GET causes");
+    assertStringArray(finalEvidence.savedRequests
+        .filter((request) => request.method === "POST")
+        .map((request) => request.outcome), [
+        "success",
+        "failed",
+        "success",
+        "aborted",
+    ], "saved greeting POST outcomes");
     console.log(`server-backed mutation evidence: ${JSON.stringify(finalEvidence)}`);
 
     client.close();
@@ -796,6 +923,15 @@ async function savedInputPreparationState(client) {
             value: document.querySelector("[data-testid='saved-greeting-input']")?.value ?? "",
         };
     }`);
+}
+
+async function componentActivity(client, name) {
+    return await client.callFunction(`function(name) {
+        return {
+            renders: window.goframeComponentRenderCounts?.[name] || 0,
+            patches: window.goframeComponentPatchCounts?.[name] || 0,
+        };
+    }`, name);
 }
 
 async function inputPreparationState(client, owner) {
@@ -978,6 +1114,32 @@ async function waitForMutationPostCount(client, expected, label) {
     }, label);
 }
 
+async function waitForActiveSavedMutationRequest(client, expectedPostCount, label) {
+    let request = null;
+    await waitForCondition(async () => {
+        const evidence = await evidenceState(client);
+        request = [...evidence.savedRequests].reverse().find((entry) =>
+            entry.method === "POST" &&
+            entry.name === savedSlowName &&
+            entry.outcome === "pending",
+        ) ?? null;
+        return evidence.mutationPostsStarted === expectedPostCount &&
+            evidence.activeMutationRequests === 1 &&
+            request !== null;
+    }, label);
+    return request;
+}
+
+async function waitForSavedMutationAbort(client, requestID, label) {
+    await waitForCondition(async () => {
+        const evidence = await evidenceState(client);
+        const request = await savedRequestEvidence(client, requestID);
+        return request?.aborted === true &&
+            request.outcome === "aborted" &&
+            evidence.activeMutationRequests === 0;
+    }, label);
+}
+
 async function waitForDuplicateSubmitCount(client, expected, label) {
     await waitForCondition(async () => {
         return (await evidenceState(client)).duplicateSubmitAttempts === expected;
@@ -1059,6 +1221,12 @@ async function requestEvidence(client, requestID) {
     }`, requestID);
 }
 
+async function savedRequestEvidence(client, requestID) {
+    return await client.callFunction(`function(requestID) {
+        return window.__serverBackedEvidence?.savedRequest(requestID) ?? null;
+    }`, requestID);
+}
+
 async function startScenario(client, label) {
     const started = await client.callFunction(`function(label) {
         return window.__serverBackedAudit?.start(label) ?? false;
@@ -1121,11 +1289,15 @@ function assertSavedGreetingReport(report, label, options) {
         getsStarted: options.getsStarted ?? 0,
         getsCompleted: options.getsCompleted ?? 0,
         getsFailed: options.getsFailed ?? 0,
+        routeLoadGets: options.routeLoadGets ?? 0,
+        mutationReloadGets: options.mutationReloadGets ?? 0,
         postsStarted: options.postsStarted ?? 0,
         postsCompleted: options.postsCompleted ?? 0,
         postsFailed: options.postsFailed ?? 0,
+        postsAborted: options.postsAborted ?? 0,
         duplicateSubmitAttempts: options.duplicateSubmitAttempts ?? 0,
         activeMutationRequests: 0,
+        pendingExpectedMutationReloads: 0,
     }, `${label} saved request delta`);
     if (report.routeTargets.length !== options.routeChanges || report.routeContentMutations < 1) {
         throw new Error(`APP FAILURE: ${label} route evidence changed: ${JSON.stringify(report)}`);
@@ -1140,6 +1312,42 @@ function assertSavedGreetingReport(report, label, options) {
     if (options.committedValues) {
         assertStringArray(report.committedValues, options.committedValues, `${label} committed values`);
     }
+}
+
+function assertSavedMutationUnmountReport(report, label) {
+    assertSchedulingReport(report, label, "HomeRoute");
+    assertState(report.requests, {
+        started: 0,
+        aborted: 0,
+        succeeded: 0,
+        failed: 0,
+    }, `${label} greeting request delta`);
+    assertState(report.savedRequests, {
+        getsStarted: 0,
+        getsCompleted: 0,
+        getsFailed: 0,
+        routeLoadGets: 0,
+        mutationReloadGets: 0,
+        postsStarted: 1,
+        postsCompleted: 0,
+        postsFailed: 0,
+        postsAborted: 1,
+        duplicateSubmitAttempts: 0,
+        activeMutationRequests: 0,
+        pendingExpectedMutationReloads: 0,
+    }, `${label} saved request delta`);
+    if (report.routeTargets.length !== 1 ||
+        report.routeTargets[0] !== "#/" ||
+        report.routeContentMutations < 1) {
+        throw new Error(`APP FAILURE: ${label} route evidence changed: ${JSON.stringify(report)}`);
+    }
+    assertState(report.identity, {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        savedFormSame: false,
+        savedInputSame: false,
+    }, `${label} identity`);
 }
 
 function assertSchedulingReport(report, label, component) {
@@ -1249,12 +1457,15 @@ function installServerBackedEvidenceExpression() {
     let savedGetsStarted = 0;
     let savedGetsCompleted = 0;
     let savedGetsFailed = 0;
+    let savedRouteLoadGets = 0;
+    let successfulMutationReloadGets = 0;
+    let pendingExpectedMutationReloads = 0;
     let mutationPostsStarted = 0;
     let mutationPostsCompleted = 0;
     let mutationPostsFailed = 0;
+    let mutationPostsAborted = 0;
     let activeMutationRequests = 0;
     let duplicateSubmitAttempts = 0;
-    let readReloadsAfterSuccess = 0;
     let staleCommittedValueAppearances = 0;
 
     window.goframeComponentRenderCounts = {};
@@ -1331,6 +1542,10 @@ function installServerBackedEvidenceExpression() {
             const request = requests.find((entry) => entry.id === id);
             return request ? { ...request } : null;
         },
+        savedRequest(id) {
+            const request = savedRequests.find((entry) => entry.id === id);
+            return request ? { ...request } : null;
+        },
         snapshot() {
             return {
                 routeTargetsVisited: [...routeTargetsVisited],
@@ -1342,12 +1557,15 @@ function installServerBackedEvidenceExpression() {
                 savedGetsStarted,
                 savedGetsCompleted,
                 savedGetsFailed,
+                savedRouteLoadGets,
+                successfulMutationReloadGets,
+                pendingExpectedMutationReloads,
                 mutationPostsStarted,
                 mutationPostsCompleted,
                 mutationPostsFailed,
+                mutationPostsAborted,
                 activeMutationRequests,
                 duplicateSubmitAttempts,
-                readReloadsAfterSuccess,
                 staleCommittedValueAppearances,
                 committedValuesObserved: [...committedValuesObserved],
                 appIdentityChanges: this.identityChanged.app ? 1 : 0,
@@ -1435,7 +1653,14 @@ function installServerBackedEvidenceExpression() {
         };
         savedRequests.push(request);
         if (method === "GET") {
-            if (savedGetsStarted > 0) readReloadsAfterSuccess++;
+            if (pendingExpectedMutationReloads > 0) {
+                pendingExpectedMutationReloads--;
+                successfulMutationReloadGets++;
+                request.cause = "mutation-reload";
+            } else {
+                savedRouteLoadGets++;
+                request.cause = "route-load";
+            }
             savedGetsStarted++;
         } else if (method === "POST") {
             mutationPostsStarted++;
@@ -1449,18 +1674,21 @@ function installServerBackedEvidenceExpression() {
                 else savedGetsFailed++;
             } else if (method === "POST") {
                 activeMutationRequests--;
-                if (outcome === "success") mutationPostsCompleted++;
-                else mutationPostsFailed++;
+                if (outcome === "success") {
+                    mutationPostsCompleted++;
+                    pendingExpectedMutationReloads++;
+                } else if (outcome === "aborted") {
+                    mutationPostsAborted++;
+                } else {
+                    mutationPostsFailed++;
+                }
             }
         };
         if (signal) {
             signal.addEventListener("abort", () => {
-                if (request.aborted) return;
+                if (request.aborted || request.outcome !== "pending") return;
                 request.aborted = true;
-                if (request.outcome === "pending" && method === "POST") {
-                    activeMutationRequests--;
-                }
-                request.outcome = "aborted";
+                finish("aborted");
             }, { once: true });
         }
         return originalFetch(input, init).then((response) => {
@@ -1473,7 +1701,7 @@ function installServerBackedEvidenceExpression() {
         }, (error) => {
             if (signal?.aborted) {
                 request.aborted = true;
-                request.outcome = "aborted";
+                finish("aborted");
             } else {
                 finish("failed");
             }
@@ -1505,9 +1733,13 @@ function installServerBackedEvidenceExpression() {
                 savedGetsStarted,
                 savedGetsCompleted,
                 savedGetsFailed,
+                savedRouteLoadGets,
+                successfulMutationReloadGets,
+                pendingExpectedMutationReloads,
                 mutationPostsStarted,
                 mutationPostsCompleted,
                 mutationPostsFailed,
+                mutationPostsAborted,
                 activeMutationRequests,
                 duplicateSubmitAttempts,
             };
@@ -1558,11 +1790,15 @@ function installServerBackedEvidenceExpression() {
                     getsStarted: savedGetsStarted - this.requestBaseline.savedGetsStarted,
                     getsCompleted: savedGetsCompleted - this.requestBaseline.savedGetsCompleted,
                     getsFailed: savedGetsFailed - this.requestBaseline.savedGetsFailed,
+                    routeLoadGets: savedRouteLoadGets - this.requestBaseline.savedRouteLoadGets,
+                    mutationReloadGets: successfulMutationReloadGets - this.requestBaseline.successfulMutationReloadGets,
                     postsStarted: mutationPostsStarted - this.requestBaseline.mutationPostsStarted,
                     postsCompleted: mutationPostsCompleted - this.requestBaseline.mutationPostsCompleted,
                     postsFailed: mutationPostsFailed - this.requestBaseline.mutationPostsFailed,
+                    postsAborted: mutationPostsAborted - this.requestBaseline.mutationPostsAborted,
                     duplicateSubmitAttempts: duplicateSubmitAttempts - this.requestBaseline.duplicateSubmitAttempts,
                     activeMutationRequests,
+                    pendingExpectedMutationReloads,
                 },
                 committedValues: committedValuesObserved.slice(this.committedValueBaseline),
             };

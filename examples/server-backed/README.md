@@ -220,9 +220,10 @@ The application contains:
 
 `scripts/server-backed-browser-smoke.mjs` installs browser-only instrumentation
 before loading the app. It records greeting GETs and their exact abort signals,
-saved-state GETs, mutation POSTs, active writes, duplicate submit attempts,
-committed values, debug-tag render/update flushes, structural DOM operations,
-route targets, global shell identity, and per-scenario form/input identity.
+saved-state GET causes, completed, failed, and aborted mutation POSTs, active
+writes, duplicate submit attempts, committed values, debug-tag render/update
+flushes, structural DOM operations, route targets, global shell identity, and
+per-scenario form/input identity.
 Before a form scenario starts, the harness waits for the state-owning route's
 render and patch counts to advance, verifies the controlled value, and observes
 two additional stable frames. Production runtime code is not instrumented.
@@ -264,21 +265,29 @@ simulated with extra application state.
 
 The same two final runs produced identical mutation request evidence:
 
-- three saved-state GETs started and completed, with zero GET failures;
-- three mutation POSTs: two completed and one controlled failure;
+- four saved-state GETs started and completed, with zero GET failures: two
+  ordinary route loads and two successful-mutation reloads;
+- four mutation POSTs: two completed, one controlled failure, and one aborted
+  when the saved-greeting route unmounted;
 - one duplicate submit attempt during the slow write and exactly one POST in
   that scenario;
 - two read-resource reloads, one after each successful mutation;
+- zero read-resource reloads after the canceled mutation;
 - committed values observed in order: `GoFrame`, `slow`, `Grace`;
 - zero stale or contradictory committed-value appearances;
 - zero app-root, outer-shell, or route-content-container identity changes;
 - the previous committed value remained visible during pending, client
   validation, and controlled server failure.
 
-The harness also confirmed the final `Grace` value through a direct backend GET.
-Scheduling and DOM-operation totals remain printed observations. The mutation
-assertions fix request deltas, visible lifecycle states, committed-value order,
-reload behavior, and identity invariants rather than browser-specific operation
+The browser executed the saved route's unmount-cancellation path while a slow
+POST was active. The POST's real `AbortSignal` fired once, active mutation work
+returned to zero, the route received no late render or patch, and a direct
+backend GET remained `Grace` after the slow delay. Returning to
+`/saved-greeting` performed an ordinary route-load GET, not a mutation reload,
+and loaded `Grace` without appending a false committed version. Scheduling and
+DOM-operation totals remain printed observations. The mutation assertions fix
+request deltas, visible lifecycle states, committed-value order, reload cause,
+abort behavior, and identity invariants rather than browser-specific operation
 counts.
 
 Focused backend tests cover the initial GET, a successful trimmed POST and
@@ -311,10 +320,11 @@ Verdict: **SUFFICIENT**.
 Ordinary component state and handlers, one route-local request owner, one
 example-local browser POST helper, and `gf.UseResource.reload` express the
 required write lifecycle. Client and server failures preserve committed state,
-pending synchronously blocks duplicate writes, unmount owns cancellation, and a
-fresh read confirms each successful commit. The backend tests, two matching
-browser runs, and the incremental compressed size show a bounded flow without a
-second read-resource lifecycle or cross-route state bridge.
+pending synchronously blocks duplicate writes, browser-proven unmount cleanup
+aborts active work without committing or reloading, and a fresh read confirms
+each successful commit. The backend tests, two matching browser runs, and the
+incremental compressed size show a bounded flow without a second read-resource
+lifecycle or cross-route state bridge.
 
 The app does manually own the write-specific pending/error state, one
 `AbortController`, and completion guards. In this single workflow those concerns
@@ -360,7 +370,8 @@ synchronization, exact request aborts, stale-result suppression, controlled
 failure and recovery, global shell retention, same-pattern form/input retention,
 expected cross-pattern remounts, saved-state loading, validation without a POST,
 duplicate-write suppression, failure preservation, successful reload
-confirmation, final backend/UI consistency, and update/DOM bridge evidence.
+confirmation, mutation unmount cancellation, route-load versus reload
+attribution, final backend/UI consistency, and update/DOM bridge evidence.
 
 ## Non-goals
 
