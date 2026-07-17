@@ -383,6 +383,11 @@ run_with_server ./examples/resource "$RESOURCE_PORT" "$RESOURCE_URL" \
 	node --experimental-websocket scripts/resource-browser-smoke.mjs
 
 echo
+echo "== goxc dev reload browser smoke =="
+export GOFRAME_DEV_RELOAD_CHROME_DEBUG_PORT="${GOFRAME_DEV_RELOAD_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+GOXC="$GOXC" CHROME="$CHROME_BIN" node --experimental-websocket scripts/goxc-dev-reload-browser-smoke.mjs
+
+echo
 echo "== Server-backed reference browser smoke =="
 export GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT="${GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT:-$(pick_free_port)}"
 node --experimental-websocket scripts/server-backed-browser-smoke.mjs

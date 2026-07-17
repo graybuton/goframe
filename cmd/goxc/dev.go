@@ -46,9 +46,11 @@ type devBuildEvent struct {
 }
 
 type devHooks struct {
-	BuildStarted  func(devBuildRequest)
-	BuildFinished func(devBuildEvent)
-	ServerStarted func(string)
+	BuildStarted        func(devBuildRequest)
+	BuildFinished       func(devBuildEvent)
+	GenerationActivated func(uint64)
+	ReloadPublished     func(uint64)
+	ServerStarted       func(string)
 }
 
 type devDependencies struct {
@@ -232,6 +234,7 @@ type devServer struct {
 	stdout      io.Writer
 	hooks       devHooks
 	generations *devGenerationManager
+	reload      *devReloadBroker
 
 	mu       sync.Mutex
 	server   *http.Server
@@ -251,12 +254,25 @@ func newDevServer(packageDir string, port int, dependencies devDependencies) (*d
 		stdout:      dependencies.stdout,
 		hooks:       dependencies.hooks,
 		generations: generations,
+		reload:      newDevReloadBroker(),
 		errCh:       make(chan error, 1),
 	}, nil
 }
 
 func (server *devServer) activatePackage() (uint64, error) {
-	return server.generations.activatePackage(server.packageDir)
+	notify := server.started()
+	generation, err := server.generations.activatePackage(server.packageDir)
+	if err != nil {
+		return 0, err
+	}
+	server.reload.activate(generation, notify)
+	if server.hooks.GenerationActivated != nil {
+		server.hooks.GenerationActivated(generation)
+	}
+	if notify && server.hooks.ReloadPublished != nil {
+		server.hooks.ReloadPublished(generation)
+	}
+	return generation, nil
 }
 
 func (server *devServer) start() error {
@@ -269,7 +285,7 @@ func (server *devServer) start() error {
 	if err != nil {
 		return fmt.Errorf("start development server: %w", err)
 	}
-	httpServer := &http.Server{Handler: devGenerationHandler(server.generations)}
+	httpServer := &http.Server{Handler: devReloadHandler(server.generations, server.reload)}
 	server.listener = listener
 	server.server = httpServer
 	url := "http://" + listener.Addr().String()
@@ -304,6 +320,7 @@ func (server *devServer) shutdown() error {
 	server.mu.Lock()
 	httpServer := server.server
 	server.mu.Unlock()
+	server.reload.close()
 	var shutdownErr error
 	if httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), devShutdownTimeout)
