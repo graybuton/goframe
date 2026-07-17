@@ -46,6 +46,26 @@ func TestDevReloadPublishesToTwoSubscribersOnce(t *testing.T) {
 	assertNoQueuedDevReload(t, second)
 }
 
+func TestDevReloadSubscriberAlreadyOnActivatingGenerationDoesNotReload(t *testing.T) {
+	broker := newDevReloadBroker()
+	broker.activate(1, false)
+	oldPage := mustDevReloadSubscription(t, broker, 1)
+	newPage := mustDevReloadSubscription(t, broker, 2)
+	defer oldPage.Close()
+	defer newPage.Close()
+
+	broker.activate(2, true)
+	assertDevReloadGeneration(t, oldPage, 2)
+	assertNoQueuedDevReload(t, oldPage)
+	assertNoQueuedDevReload(t, newPage)
+
+	broker.activate(3, true)
+	assertDevReloadGeneration(t, oldPage, 3)
+	assertDevReloadGeneration(t, newPage, 3)
+	assertNoQueuedDevReload(t, oldPage)
+	assertNoQueuedDevReload(t, newPage)
+}
+
 func TestDevReloadSlowSubscriberCollapsesToNewestGeneration(t *testing.T) {
 	broker := newDevReloadBroker()
 	broker.activate(1, false)

@@ -42,9 +42,9 @@ type devReloadBroker struct {
 }
 
 type devReloadSubscriber struct {
-	id         uint64
-	events     chan uint64
-	lastQueued uint64
+	id              uint64
+	events          chan uint64
+	generationFloor uint64
 }
 
 type devReloadSubscription struct {
@@ -81,8 +81,9 @@ func (broker *devReloadBroker) subscribe(generation uint64) (*devReloadSubscript
 	}
 	broker.nextSubscriber++
 	subscriber := &devReloadSubscriber{
-		id:     broker.nextSubscriber,
-		events: make(chan uint64, 1),
+		id:              broker.nextSubscriber,
+		events:          make(chan uint64, 1),
+		generationFloor: generation,
 	}
 	broker.subscribers[subscriber.id] = subscriber
 	if generation < broker.current {
@@ -96,7 +97,7 @@ func (broker *devReloadBroker) subscribe(generation uint64) (*devReloadSubscript
 }
 
 func (broker *devReloadBroker) queueLocked(subscriber *devReloadSubscriber, generation uint64) {
-	if generation <= subscriber.lastQueued {
+	if generation <= subscriber.generationFloor {
 		return
 	}
 	select {
@@ -104,7 +105,7 @@ func (broker *devReloadBroker) queueLocked(subscriber *devReloadSubscriber, gene
 	default:
 	}
 	subscriber.events <- generation
-	subscriber.lastQueued = generation
+	subscriber.generationFloor = generation
 }
 
 func (subscription *devReloadSubscription) Events() <-chan uint64 {
