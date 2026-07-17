@@ -36,8 +36,12 @@ const counters = {
     reloadEventsPublished: 0,
     catchUpReloads: 0,
     previousProcessCatchUpReloads: 0,
-    requestsServedByOldGeneration: 0,
+    publicationProbeBatches: 0,
+    completeResponsesDuringBuild: 0,
+    oldGenerationIndexResponses: 0,
+    newGenerationIndexResponses: 0,
     responses404DuringBuild: 0,
+    partialResponsesDuringBuild: 0,
 };
 
 try {
@@ -106,12 +110,20 @@ try {
     const goxStart = lines.length;
     await writeGOX("gox-rebuild");
     await waitForBuildStarted(nextBuild, goxStart);
-    const publicationProbe = probeOldGenerationUntilBuildCompletes(serverURL, wasmPath, activeGeneration, nextBuild);
-    await waitForBuild(nextBuild, "succeeded", goxStart);
-    const publicationEvidence = await publicationProbe;
-    counters.requestsServedByOldGeneration += publicationEvidence.oldGenerationResponses;
+    const [, publicationEvidence] = await Promise.all([
+        waitForBuild(nextBuild, "succeeded", goxStart),
+        probeCompletedGenerationUntilBuildCompletes(serverURL, wasmPath, activeGeneration, nextBuild),
+    ]);
+    counters.publicationProbeBatches += publicationEvidence.batches;
+    counters.completeResponsesDuringBuild += publicationEvidence.completeResponses;
+    counters.oldGenerationIndexResponses += publicationEvidence.oldGenerationIndexResponses;
+    counters.newGenerationIndexResponses += publicationEvidence.newGenerationIndexResponses;
     counters.responses404DuringBuild += publicationEvidence.responses404;
-    assert(publicationEvidence.oldGenerationResponses > 0, "no old-generation response was observed during the later build");
+    counters.partialResponsesDuringBuild += publicationEvidence.partialResponses;
+    assert(publicationEvidence.batches > 0, "publication probe issued no request batches");
+    assert(publicationEvidence.completeResponses > 0, "publication probe observed no complete responses");
+    assert(publicationEvidence.responses404 === 0, `publication probe observed ${publicationEvidence.responses404} HTTP 404 responses`);
+    assert(publicationEvidence.partialResponses === 0, `publication probe observed ${publicationEvidence.partialResponses} partial responses`);
     await assertSuccessfulReload(client1, goxBaseline, { gox: "gox-rebuild", go: "go-initial", index: "index-initial" }, ++activeGeneration);
     recordSuccessfulReload();
     nextBuild++;
@@ -287,8 +299,12 @@ try {
     console.log(`catch-up reloads: ${counters.catchUpReloads}`);
     console.log(`previous-process catch-up reloads: ${counters.previousProcessCatchUpReloads}`);
     console.log("connected subscribers at shutdown: 0");
-    console.log(`requests served by old generation during later build: ${counters.requestsServedByOldGeneration}`);
-    console.log(`404 responses during later build: ${counters.responses404DuringBuild}`);
+    console.log(`publication probe batches: ${counters.publicationProbeBatches}`);
+    console.log(`complete responses during rebuild: ${counters.completeResponsesDuringBuild}`);
+    console.log(`old-generation index responses: ${counters.oldGenerationIndexResponses}`);
+    console.log(`new-generation index responses: ${counters.newGenerationIndexResponses}`);
+    console.log(`404 responses during rebuild: ${counters.responses404DuringBuild}`);
+    console.log(`partial responses during rebuild: ${counters.partialResponsesDuringBuild}`);
     console.log("goxc dev reload browser smoke: ok");
 } catch (error) {
     throw new Error(`${error.message}\n\nDevelopment output:\n${devOutput.slice(-12000)}\n\nChrome stderr:\n${browserError.slice(-6000)}`);
@@ -444,26 +460,83 @@ async function waitForEventSourceOpen(client, want) {
     throw new Error(`HARNESS FAILURE: EventSource open count did not reach ${want}`);
 }
 
-async function probeOldGenerationUntilBuildCompletes(serverURL, wasmPath, generation, build) {
-    let oldGenerationResponses = 0;
-    let responses404 = 0;
-    assert(!hasBuildResult(build, "succeeded"), `build ${build} completed before the publication probe started`);
+async function probeCompletedGenerationUntilBuildCompletes(serverURL, wasmPath, generation, build) {
+    const evidence = {
+        batches: 0,
+        completeResponses: 0,
+        oldGenerationIndexResponses: 0,
+        newGenerationIndexResponses: 0,
+        responses404: 0,
+        partialResponses: 0,
+    };
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+        if (hasBuildResult(build, "failed")) {
+            throw new Error(`APP FAILURE: dev build ${build} failed during the publication probe`);
+        }
+        if (dev && (dev.exitCode !== null || dev.signalCode !== null)) {
+            throw new Error(`HARNESS FAILURE: goxc dev exited during publication probe for build ${build}`);
+        }
+        if (Date.now() >= deadline) {
+            throw new Error(`HARNESS FAILURE: publication probe timed out waiting for build ${build}`);
+        }
+
+        const batch = await probeCompletedGenerationBatch(serverURL, wasmPath, generation, build, evidence.batches);
+        evidence.batches++;
+        evidence.completeResponses += batch.completeResponses;
+        evidence.oldGenerationIndexResponses += batch.oldGenerationIndexResponses;
+        evidence.newGenerationIndexResponses += batch.newGenerationIndexResponses;
+        evidence.responses404 += batch.responses404;
+        evidence.partialResponses += batch.partialResponses;
+
+        if (hasBuildResult(build, "failed")) {
+            throw new Error(`APP FAILURE: dev build ${build} failed during the publication probe`);
+        }
+        if (hasBuildResult(build, "succeeded")) return evidence;
+        await wait(0);
+    }
+}
+
+async function probeCompletedGenerationBatch(serverURL, wasmPath, generation, build, batch) {
+    const signal = AbortSignal.timeout(5_000);
+    const query = `publication=${build}-${batch}`;
     const [indexResponse, metadataResponse, wasmResponse] = await Promise.all([
-        fetch(`${serverURL}/?publication=0`, { cache: "no-store" }),
-        fetch(`${serverURL}/goframe-package.json?publication=0`, { cache: "no-store" }),
-        fetch(`${serverURL}/${wasmPath}?publication=0`, { cache: "no-store" }),
+        fetch(`${serverURL}/?${query}`, { cache: "no-store", signal }),
+        fetch(`${serverURL}/goframe-package.json?${query}`, { cache: "no-store", signal }),
+        fetch(`${serverURL}/${wasmPath}?${query}`, { cache: "no-store", signal }),
     ]);
+    let responses404 = 0;
     for (const response of [indexResponse, metadataResponse, wasmResponse]) {
         if (response.status === 404) responses404++;
-        assert(response.ok, `HTTP ${response.status} during later build for ${response.url}`);
+        assert(response.ok, `HTTP ${response.status} during publication probe for ${response.url}`);
     }
+
     const index = await indexResponse.text();
-    const metadata = await metadataResponse.json();
+    const metadataText = await metadataResponse.text();
     const wasm = await wasmResponse.arrayBuffer();
+    let metadata = null;
+    try {
+        metadata = JSON.parse(metadataText);
+    } catch {}
+
+    const markerCount = index.split("data-goframe-dev-reload").length - 1;
     const servedGeneration = Number(index.match(/data-goframe-generation="(\d+)"/)?.[1] || "0");
-    assert(metadata.version === 1 && wasm.byteLength > 0, "partial package response observed during later build");
-    if (servedGeneration === generation) oldGenerationResponses += 3;
-    return { oldGenerationResponses, responses404 };
+    const indexComplete = markerCount === 1
+        && servedGeneration > 0
+        && (servedGeneration === generation || servedGeneration === generation + 1);
+    const metadataComplete = metadata?.version === 1 && metadata?.entrypoints?.wasm === wasmPath;
+    const wasmComplete = wasm.byteLength > 0;
+    const partialResponses = [indexComplete, metadataComplete, wasmComplete].filter((complete) => !complete).length;
+    assert(partialResponses === 0,
+        `partial package response during publication probe: ${JSON.stringify({ markerCount, servedGeneration, metadata, wasmBytes: wasm.byteLength })}`);
+
+    return {
+        completeResponses: 3,
+        oldGenerationIndexResponses: servedGeneration === generation ? 1 : 0,
+        newGenerationIndexResponses: servedGeneration === generation + 1 ? 1 : 0,
+        responses404,
+        partialResponses,
+    };
 }
 
 async function openReloadProbe(serverURL, instance, generation) {
