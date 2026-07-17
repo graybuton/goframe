@@ -159,7 +159,10 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 	}
 
 	collector := newDevSnapshotCollector(layout.AppDir)
-	server := newDevServer(layout.PackageDir, options.port, dependencies)
+	server, err := newDevServer(layout.PackageDir, options.port, dependencies)
+	if err != nil {
+		return err
+	}
 
 	build := func(request devBuildRequest) error {
 		err := dependencies.packageApp(packageOptions{
@@ -171,7 +174,7 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 		if err != nil {
 			return err
 		}
-		if err := verifyPublishedPackage(layout.PackageDir); err != nil {
+		if _, err := server.activatePackage(); err != nil {
 			return err
 		}
 		if !server.started() {
@@ -223,11 +226,12 @@ func normalizeDevDependencies(dependencies devDependencies) devDependencies {
 }
 
 type devServer struct {
-	packageDir string
-	port       int
-	listen     func(string, string) (net.Listener, error)
-	stdout     io.Writer
-	hooks      devHooks
+	packageDir  string
+	port        int
+	listen      func(string, string) (net.Listener, error)
+	stdout      io.Writer
+	hooks       devHooks
+	generations *devGenerationManager
 
 	mu       sync.Mutex
 	server   *http.Server
@@ -235,15 +239,24 @@ type devServer struct {
 	errCh    chan error
 }
 
-func newDevServer(packageDir string, port int, dependencies devDependencies) *devServer {
-	return &devServer{
-		packageDir: packageDir,
-		port:       port,
-		listen:     dependencies.listen,
-		stdout:     dependencies.stdout,
-		hooks:      dependencies.hooks,
-		errCh:      make(chan error, 1),
+func newDevServer(packageDir string, port int, dependencies devDependencies) (*devServer, error) {
+	generations, err := newDevGenerationManager()
+	if err != nil {
+		return nil, err
 	}
+	return &devServer{
+		packageDir:  packageDir,
+		port:        port,
+		listen:      dependencies.listen,
+		stdout:      dependencies.stdout,
+		hooks:       dependencies.hooks,
+		generations: generations,
+		errCh:       make(chan error, 1),
+	}, nil
+}
+
+func (server *devServer) activatePackage() (uint64, error) {
+	return server.generations.activatePackage(server.packageDir)
 }
 
 func (server *devServer) start() error {
@@ -252,14 +265,11 @@ func (server *devServer) start() error {
 	if server.server != nil {
 		return nil
 	}
-	if err := directoryNoFollow(server.packageDir, "development package directory"); err != nil {
-		return err
-	}
 	listener, err := server.listen("tcp", fmt.Sprintf("127.0.0.1:%d", server.port))
 	if err != nil {
 		return fmt.Errorf("start development server: %w", err)
 	}
-	httpServer := &http.Server{Handler: devStaticHandler(server.packageDir)}
+	httpServer := &http.Server{Handler: devGenerationHandler(server.generations)}
 	server.listener = listener
 	server.server = httpServer
 	url := "http://" + listener.Addr().String()
@@ -294,15 +304,15 @@ func (server *devServer) shutdown() error {
 	server.mu.Lock()
 	httpServer := server.server
 	server.mu.Unlock()
-	if httpServer == nil {
-		return nil
+	var shutdownErr error
+	if httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), devShutdownTimeout)
+		if err := httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			shutdownErr = fmt.Errorf("shut down development server: %w", err)
+		}
+		cancel()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), devShutdownTimeout)
-	defer cancel()
-	if err := httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("shut down development server: %w", err)
-	}
-	return nil
+	return errors.Join(shutdownErr, server.generations.close())
 }
 
 func devStaticHandler(directory string) http.Handler {
