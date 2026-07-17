@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,7 +16,11 @@ type devGenerationManager struct {
 	nextID      uint64
 	active      *devGeneration
 	generations map[uint64]*devGeneration
+	leaseCount  int
+	closing     bool
 	closed      bool
+	drained     chan struct{}
+	drainClosed bool
 }
 
 type devGeneration struct {
@@ -40,6 +45,7 @@ func newDevGenerationManager() (*devGenerationManager, error) {
 	return &devGenerationManager{
 		root:        root,
 		generations: map[uint64]*devGeneration{},
+		drained:     make(chan struct{}),
 	}, nil
 }
 
@@ -49,9 +55,9 @@ func (manager *devGenerationManager) activatePackage(packageDir string) (uint64,
 	}
 
 	manager.mu.Lock()
-	if manager.closed {
+	if manager.closing || manager.closed {
 		manager.mu.Unlock()
-		return 0, errors.New("development generation manager is closed")
+		return 0, errors.New("development generation manager is closing")
 	}
 	root := manager.root
 	manager.mu.Unlock()
@@ -75,9 +81,9 @@ func (manager *devGenerationManager) activatePackage(packageDir string) (uint64,
 	}
 
 	manager.mu.Lock()
-	if manager.closed {
+	if manager.closing || manager.closed {
 		manager.mu.Unlock()
-		return 0, errors.New("development generation manager is closed")
+		return 0, errors.New("development generation manager is closing")
 	}
 	manager.nextID++
 	id := manager.nextID
@@ -120,13 +126,14 @@ func (manager *devGenerationManager) activeID() (uint64, bool) {
 func (manager *devGenerationManager) acquire() (*devGenerationLease, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	if manager.closed {
-		return nil, errors.New("development generation manager is closed")
+	if manager.closing || manager.closed {
+		return nil, errors.New("development generation manager is closing")
 	}
 	if manager.active == nil {
 		return nil, errors.New("no completed development generation is active")
 	}
 	manager.active.leases++
+	manager.leaseCount++
 	return &devGenerationLease{
 		manager:    manager,
 		generation: manager.active,
@@ -155,10 +162,14 @@ func (manager *devGenerationManager) release(generation *devGeneration) error {
 		return fmt.Errorf("development generation %d has no active request lease", generation.id)
 	}
 	generation.leases--
+	manager.leaseCount--
 	var removeDirectory string
-	if generation.retired && generation.leases == 0 {
+	if !manager.closing && generation.retired && generation.leases == 0 {
 		delete(manager.generations, generation.id)
 		removeDirectory = generation.directory
+	}
+	if manager.closing && manager.leaseCount == 0 {
+		manager.signalDrainedLocked()
 	}
 	manager.mu.Unlock()
 
@@ -170,28 +181,47 @@ func (manager *devGenerationManager) release(generation *devGeneration) error {
 	return nil
 }
 
-func (manager *devGenerationManager) close() error {
+func (manager *devGenerationManager) close(ctx context.Context) error {
 	manager.mu.Lock()
 	if manager.closed {
 		manager.mu.Unlock()
 		return nil
 	}
-	for _, generation := range manager.generations {
-		if generation.leases != 0 {
-			manager.mu.Unlock()
-			return fmt.Errorf("close development generations with %d active request leases", generation.leases)
+	if !manager.closing {
+		manager.closing = true
+		if manager.leaseCount == 0 {
+			manager.signalDrainedLocked()
 		}
 	}
-	root := manager.root
-	manager.closed = true
-	manager.active = nil
-	manager.generations = nil
+	drained := manager.drained
 	manager.mu.Unlock()
 
-	if err := os.RemoveAll(root); err != nil {
+	select {
+	case <-drained:
+	case <-ctx.Done():
+		return fmt.Errorf("wait for development generation leases to drain: %w", ctx.Err())
+	}
+
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if manager.closed {
+		return nil
+	}
+	if err := os.RemoveAll(manager.root); err != nil {
 		return fmt.Errorf("remove development generation root: %w", err)
 	}
+	manager.active = nil
+	manager.generations = nil
+	manager.closed = true
 	return nil
+}
+
+func (manager *devGenerationManager) signalDrainedLocked() {
+	if manager.drainClosed {
+		return
+	}
+	manager.drainClosed = true
+	close(manager.drained)
 }
 
 func devGenerationHandler(manager *devGenerationManager) http.Handler {

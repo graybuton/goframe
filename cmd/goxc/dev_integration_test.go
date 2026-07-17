@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -377,6 +379,90 @@ func TestDevCancellationDuringBuildSkipsGenerationAndReload(t *testing.T) {
 			t.Fatalf("generation root remained after canceled initial build: %v", err)
 		}
 	})
+}
+
+func TestDevServerShutdownForceClosesActiveGenerationLease(t *testing.T) {
+	packageDir := t.TempDir()
+	writeDevGenerationPackage(t, packageDir, "completed generation")
+	manager := newTestDevGenerationManager(t)
+	if _, err := manager.activatePackage(packageDir); err != nil {
+		t.Fatal(err)
+	}
+	root := manager.root
+
+	leaseHeld := make(chan struct{})
+	requestCanceled := make(chan struct{})
+	handlerDone := make(chan error, 1)
+	handler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		lease, err := manager.acquire()
+		if err != nil {
+			handlerDone <- err
+			return
+		}
+		close(leaseHeld)
+		<-request.Context().Done()
+		close(requestCanceled)
+		handlerDone <- lease.Release()
+	})
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := &http.Server{Handler: handler}
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- httpServer.Serve(listener)
+	}()
+	server := &devServer{
+		generations:   manager,
+		reload:        newDevReloadBroker(testDevReloadInstance),
+		server:        httpServer,
+		listener:      listener,
+		shutdownGrace: 20 * time.Millisecond,
+		shutdownDrain: time.Second,
+	}
+
+	requestDone := make(chan error, 1)
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	go func() {
+		response, err := client.Get("http://" + listener.Addr().String() + "/blocked")
+		if response != nil {
+			response.Body.Close()
+		}
+		requestDone <- err
+	}()
+	waitDevSignal(t, leaseHeld, "active HTTP generation lease")
+
+	shutdownErr := server.shutdown()
+	if !errors.Is(shutdownErr, context.DeadlineExceeded) || !strings.Contains(shutdownErr.Error(), "shut down development server") {
+		t.Fatalf("shutdown() error = %v, want precise graceful deadline", shutdownErr)
+	}
+	waitDevSignal(t, requestCanceled, "forced request cancellation")
+	select {
+	case err := <-handlerDone:
+		if err != nil {
+			t.Fatalf("release generation lease: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("HTTP handler did not return after force close")
+	}
+	select {
+	case <-requestDone:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP request did not terminate after force close")
+	}
+	select {
+	case err := <-serveDone:
+		if !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("Serve() error = %v, want http.ErrServerClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("HTTP server goroutine remained active after shutdown")
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("generation root remained after forced shutdown: %v", err)
+	}
 }
 
 func TestDevInitialFailureRecoversBeforeServerStarts(t *testing.T) {

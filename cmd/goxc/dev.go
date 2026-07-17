@@ -54,23 +54,27 @@ type devHooks struct {
 }
 
 type devDependencies struct {
-	packageApp   func(packageOptions) error
-	listen       func(string, string) (net.Listener, error)
-	pollInterval time.Duration
-	debounce     time.Duration
-	stdout       io.Writer
-	stderr       io.Writer
-	hooks        devHooks
+	packageApp    func(packageOptions) error
+	listen        func(string, string) (net.Listener, error)
+	pollInterval  time.Duration
+	debounce      time.Duration
+	shutdownGrace time.Duration
+	shutdownDrain time.Duration
+	stdout        io.Writer
+	stderr        io.Writer
+	hooks         devHooks
 }
 
 func defaultDevDependencies() devDependencies {
 	return devDependencies{
-		packageApp:   packageApp,
-		listen:       net.Listen,
-		pollInterval: defaultDevPollInterval,
-		debounce:     defaultDevDebounce,
-		stdout:       os.Stdout,
-		stderr:       os.Stderr,
+		packageApp:    packageApp,
+		listen:        net.Listen,
+		pollInterval:  defaultDevPollInterval,
+		debounce:      defaultDevDebounce,
+		shutdownGrace: devShutdownTimeout,
+		shutdownDrain: devShutdownTimeout,
+		stdout:        os.Stdout,
+		stderr:        os.Stderr,
 	}
 }
 
@@ -221,6 +225,12 @@ func normalizeDevDependencies(dependencies devDependencies) devDependencies {
 	if dependencies.debounce <= 0 {
 		dependencies.debounce = defaults.debounce
 	}
+	if dependencies.shutdownGrace <= 0 {
+		dependencies.shutdownGrace = defaults.shutdownGrace
+	}
+	if dependencies.shutdownDrain <= 0 {
+		dependencies.shutdownDrain = defaults.shutdownDrain
+	}
 	if dependencies.stdout == nil {
 		dependencies.stdout = defaults.stdout
 	}
@@ -231,13 +241,15 @@ func normalizeDevDependencies(dependencies devDependencies) devDependencies {
 }
 
 type devServer struct {
-	packageDir  string
-	port        int
-	listen      func(string, string) (net.Listener, error)
-	stdout      io.Writer
-	hooks       devHooks
-	generations *devGenerationManager
-	reload      *devReloadBroker
+	packageDir    string
+	port          int
+	listen        func(string, string) (net.Listener, error)
+	stdout        io.Writer
+	hooks         devHooks
+	generations   *devGenerationManager
+	reload        *devReloadBroker
+	shutdownGrace time.Duration
+	shutdownDrain time.Duration
 
 	mu       sync.Mutex
 	server   *http.Server
@@ -255,14 +267,16 @@ func newDevServer(packageDir string, port int, dependencies devDependencies) (*d
 		return nil, err
 	}
 	return &devServer{
-		packageDir:  packageDir,
-		port:        port,
-		listen:      dependencies.listen,
-		stdout:      dependencies.stdout,
-		hooks:       dependencies.hooks,
-		generations: generations,
-		reload:      newDevReloadBroker(instance),
-		errCh:       make(chan error, 1),
+		packageDir:    packageDir,
+		port:          port,
+		listen:        dependencies.listen,
+		stdout:        dependencies.stdout,
+		hooks:         dependencies.hooks,
+		generations:   generations,
+		reload:        newDevReloadBroker(instance),
+		shutdownGrace: dependencies.shutdownGrace,
+		shutdownDrain: dependencies.shutdownDrain,
+		errCh:         make(chan error, 1),
 	}, nil
 }
 
@@ -328,15 +342,21 @@ func (server *devServer) shutdown() error {
 	httpServer := server.server
 	server.mu.Unlock()
 	server.reload.close()
-	var shutdownErr error
+	var shutdownErr, closeErr error
 	if httpServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), devShutdownTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), server.shutdownGrace)
 		if err := httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			shutdownErr = fmt.Errorf("shut down development server: %w", err)
+			if err := httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				closeErr = fmt.Errorf("force close development server: %w", err)
+			}
 		}
 		cancel()
 	}
-	return errors.Join(shutdownErr, server.generations.close())
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), server.shutdownDrain)
+	generationErr := server.generations.close(drainCtx)
+	cancelDrain()
+	return errors.Join(shutdownErr, closeErr, generationErr)
 }
 
 func devStaticHandler(directory string) http.Handler {

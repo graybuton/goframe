@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestDevGenerationFirstCompletedActivation(t *testing.T) {
@@ -134,7 +137,7 @@ func TestDevGenerationActivationRetainsInflightGeneration(t *testing.T) {
 	}
 }
 
-func TestDevGenerationShutdownRemovesPrivateRoot(t *testing.T) {
+func TestDevGenerationCloseWithNoLeasesRemovesPrivateRoot(t *testing.T) {
 	packageDir := t.TempDir()
 	writeDevGenerationPackage(t, packageDir, "generation one")
 	manager, err := newDevGenerationManager()
@@ -145,11 +148,163 @@ func TestDevGenerationShutdownRemovesPrivateRoot(t *testing.T) {
 	if _, err := manager.activatePackage(packageDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.close(); err != nil {
+	if err := manager.close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("generation root remained after shutdown: %v", err)
+	}
+}
+
+func TestDevGenerationCloseWaitsForActiveLease(t *testing.T) {
+	packageDir := t.TempDir()
+	writeDevGenerationPackage(t, packageDir, "generation one")
+	manager := newTestDevGenerationManager(t)
+	if _, err := manager.activatePackage(packageDir); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := manager.root
+
+	baseCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	closeCtx := newObservedDoneContext(baseCtx)
+	closed := make(chan error, 1)
+	go func() {
+		closed <- manager.close(closeCtx)
+	}()
+	waitForObservedDone(t, closeCtx)
+
+	if _, err := manager.acquire(); err == nil || !strings.Contains(err.Error(), "closing") {
+		t.Fatalf("acquire() after close began error = %v, want closing error", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("generation root removed with an active lease: %v", err)
+	}
+	select {
+	case err := <-closed:
+		t.Fatalf("close returned before lease release: %v", err)
+	default:
+	}
+
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close() error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish after the active lease was released")
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("generation root remained after lease drain: %v", err)
+	}
+	if err := manager.close(context.Background()); err != nil {
+		t.Fatalf("repeated close() error: %v", err)
+	}
+}
+
+func TestDevGenerationCloseTimeoutCanRecoverAfterRelease(t *testing.T) {
+	packageDir := t.TempDir()
+	writeDevGenerationPackage(t, packageDir, "generation one")
+	manager := newTestDevGenerationManager(t)
+	if _, err := manager.activatePackage(packageDir); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := manager.acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := manager.root
+
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err = manager.close(expired)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "leases to drain") {
+		t.Fatalf("close() error = %v, want generation lease drain deadline", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("generation root removed after drain timeout: %v", err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.close(context.Background()); err != nil {
+		t.Fatalf("close() after release error: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("generation root remained after recovered close: %v", err)
+	}
+}
+
+func TestDevGenerationConcurrentAcquireReleaseClose(t *testing.T) {
+	packageDir := t.TempDir()
+	writeDevGenerationPackage(t, packageDir, "generation one")
+	manager := newTestDevGenerationManager(t)
+	if _, err := manager.activatePackage(packageDir); err != nil {
+		t.Fatal(err)
+	}
+
+	const workers = 16
+	acquired := make(chan struct{}, workers)
+	release := make(chan struct{})
+	errorCh := make(chan error, workers)
+	var group sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			lease, err := manager.acquire()
+			if err != nil {
+				errorCh <- err
+				return
+			}
+			acquired <- struct{}{}
+			<-release
+			if _, err := manager.acquire(); err == nil {
+				errorCh <- errors.New("acquire succeeded after close began")
+			}
+			if err := lease.Release(); err != nil {
+				errorCh <- err
+			}
+		}()
+	}
+	for worker := 0; worker < workers; worker++ {
+		<-acquired
+	}
+
+	baseCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	closeCtx := newObservedDoneContext(baseCtx)
+	closed := make(chan error, 1)
+	go func() {
+		closed <- manager.close(closeCtx)
+	}()
+	waitForObservedDone(t, closeCtx)
+	close(release)
+	group.Wait()
+	close(errorCh)
+	for err := range errorCh {
+		t.Errorf("concurrent close operation: %v", err)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close() error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish after concurrent releases")
+	}
+	manager.mu.Lock()
+	leaseCount := manager.leaseCount
+	manager.mu.Unlock()
+	if leaseCount != 0 {
+		t.Fatalf("active lease count = %d, want 0", leaseCount)
 	}
 }
 
@@ -210,11 +365,39 @@ func newTestDevGenerationManager(t *testing.T) *devGenerationManager {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := manager.close(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := manager.close(ctx); err != nil {
 			t.Errorf("close development generations: %v", err)
 		}
 	})
 	return manager
+}
+
+type observedDoneContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func newObservedDoneContext(ctx context.Context) *observedDoneContext {
+	return &observedDoneContext{Context: ctx, observed: make(chan struct{})}
+}
+
+func (ctx *observedDoneContext) Done() <-chan struct{} {
+	ctx.once.Do(func() {
+		close(ctx.observed)
+	})
+	return ctx.Context.Done()
+}
+
+func waitForObservedDone(t *testing.T, ctx *observedDoneContext) {
+	t.Helper()
+	select {
+	case <-ctx.observed:
+	case <-time.After(time.Second):
+		t.Fatal("close did not begin waiting for generation leases")
+	}
 }
 
 func writeDevGenerationPackage(t *testing.T, directory, index string) {
