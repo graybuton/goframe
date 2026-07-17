@@ -46,29 +46,35 @@ type devBuildEvent struct {
 }
 
 type devHooks struct {
-	BuildStarted  func(devBuildRequest)
-	BuildFinished func(devBuildEvent)
-	ServerStarted func(string)
+	BuildStarted        func(devBuildRequest)
+	BuildFinished       func(devBuildEvent)
+	GenerationActivated func(uint64)
+	ReloadPublished     func(uint64)
+	ServerStarted       func(string)
 }
 
 type devDependencies struct {
-	packageApp   func(packageOptions) error
-	listen       func(string, string) (net.Listener, error)
-	pollInterval time.Duration
-	debounce     time.Duration
-	stdout       io.Writer
-	stderr       io.Writer
-	hooks        devHooks
+	packageApp    func(packageOptions) error
+	listen        func(string, string) (net.Listener, error)
+	pollInterval  time.Duration
+	debounce      time.Duration
+	shutdownGrace time.Duration
+	shutdownDrain time.Duration
+	stdout        io.Writer
+	stderr        io.Writer
+	hooks         devHooks
 }
 
 func defaultDevDependencies() devDependencies {
 	return devDependencies{
-		packageApp:   packageApp,
-		listen:       net.Listen,
-		pollInterval: defaultDevPollInterval,
-		debounce:     defaultDevDebounce,
-		stdout:       os.Stdout,
-		stderr:       os.Stderr,
+		packageApp:    packageApp,
+		listen:        net.Listen,
+		pollInterval:  defaultDevPollInterval,
+		debounce:      defaultDevDebounce,
+		shutdownGrace: devShutdownTimeout,
+		shutdownDrain: devShutdownTimeout,
+		stdout:        os.Stdout,
+		stderr:        os.Stderr,
 	}
 }
 
@@ -159,7 +165,10 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 	}
 
 	collector := newDevSnapshotCollector(layout.AppDir)
-	server := newDevServer(layout.PackageDir, options.port, dependencies)
+	server, err := newDevServer(layout.PackageDir, options.port, dependencies)
+	if err != nil {
+		return err
+	}
 
 	build := func(request devBuildRequest) error {
 		err := dependencies.packageApp(packageOptions{
@@ -171,7 +180,10 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 		if err != nil {
 			return err
 		}
-		if err := verifyPublishedPackage(layout.PackageDir); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if _, err := server.activatePackage(); err != nil {
 			return err
 		}
 		if !server.started() {
@@ -213,6 +225,12 @@ func normalizeDevDependencies(dependencies devDependencies) devDependencies {
 	if dependencies.debounce <= 0 {
 		dependencies.debounce = defaults.debounce
 	}
+	if dependencies.shutdownGrace <= 0 {
+		dependencies.shutdownGrace = defaults.shutdownGrace
+	}
+	if dependencies.shutdownDrain <= 0 {
+		dependencies.shutdownDrain = defaults.shutdownDrain
+	}
 	if dependencies.stdout == nil {
 		dependencies.stdout = defaults.stdout
 	}
@@ -223,11 +241,15 @@ func normalizeDevDependencies(dependencies devDependencies) devDependencies {
 }
 
 type devServer struct {
-	packageDir string
-	port       int
-	listen     func(string, string) (net.Listener, error)
-	stdout     io.Writer
-	hooks      devHooks
+	packageDir    string
+	port          int
+	listen        func(string, string) (net.Listener, error)
+	stdout        io.Writer
+	hooks         devHooks
+	generations   *devGenerationManager
+	reload        *devReloadBroker
+	shutdownGrace time.Duration
+	shutdownDrain time.Duration
 
 	mu       sync.Mutex
 	server   *http.Server
@@ -235,15 +257,43 @@ type devServer struct {
 	errCh    chan error
 }
 
-func newDevServer(packageDir string, port int, dependencies devDependencies) *devServer {
-	return &devServer{
-		packageDir: packageDir,
-		port:       port,
-		listen:     dependencies.listen,
-		stdout:     dependencies.stdout,
-		hooks:      dependencies.hooks,
-		errCh:      make(chan error, 1),
+func newDevServer(packageDir string, port int, dependencies devDependencies) (*devServer, error) {
+	instance, err := newDevReloadInstance()
+	if err != nil {
+		return nil, err
 	}
+	generations, err := newDevGenerationManager()
+	if err != nil {
+		return nil, err
+	}
+	return &devServer{
+		packageDir:    packageDir,
+		port:          port,
+		listen:        dependencies.listen,
+		stdout:        dependencies.stdout,
+		hooks:         dependencies.hooks,
+		generations:   generations,
+		reload:        newDevReloadBroker(instance),
+		shutdownGrace: dependencies.shutdownGrace,
+		shutdownDrain: dependencies.shutdownDrain,
+		errCh:         make(chan error, 1),
+	}, nil
+}
+
+func (server *devServer) activatePackage() (uint64, error) {
+	notify := server.started()
+	generation, err := server.generations.activatePackage(server.packageDir)
+	if err != nil {
+		return 0, err
+	}
+	server.reload.activate(generation, notify)
+	if server.hooks.GenerationActivated != nil {
+		server.hooks.GenerationActivated(generation)
+	}
+	if notify && server.hooks.ReloadPublished != nil {
+		server.hooks.ReloadPublished(generation)
+	}
+	return generation, nil
 }
 
 func (server *devServer) start() error {
@@ -252,14 +302,11 @@ func (server *devServer) start() error {
 	if server.server != nil {
 		return nil
 	}
-	if err := directoryNoFollow(server.packageDir, "development package directory"); err != nil {
-		return err
-	}
 	listener, err := server.listen("tcp", fmt.Sprintf("127.0.0.1:%d", server.port))
 	if err != nil {
 		return fmt.Errorf("start development server: %w", err)
 	}
-	httpServer := &http.Server{Handler: devStaticHandler(server.packageDir)}
+	httpServer := &http.Server{Handler: devReloadHandler(server.generations, server.reload)}
 	server.listener = listener
 	server.server = httpServer
 	url := "http://" + listener.Addr().String()
@@ -294,15 +341,22 @@ func (server *devServer) shutdown() error {
 	server.mu.Lock()
 	httpServer := server.server
 	server.mu.Unlock()
-	if httpServer == nil {
-		return nil
+	server.reload.close()
+	var shutdownErr, closeErr error
+	if httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), server.shutdownGrace)
+		if err := httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			shutdownErr = fmt.Errorf("shut down development server: %w", err)
+			if err := httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				closeErr = fmt.Errorf("force close development server: %w", err)
+			}
+		}
+		cancel()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), devShutdownTimeout)
-	defer cancel()
-	if err := httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("shut down development server: %w", err)
-	}
-	return nil
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), server.shutdownDrain)
+	generationErr := server.generations.close(drainCtx)
+	cancelDrain()
+	return errors.Join(shutdownErr, closeErr, generationErr)
 }
 
 func devStaticHandler(directory string) http.Handler {
