@@ -228,13 +228,13 @@ func TestDevRealWorkflowServesCompletedGenerationDuringPublication(t *testing.T)
 	assertNoDevGenerationEvent(t, reloads)
 	serverURL := waitDevServerURL(t, serverURLs)
 	oldMetadata := readDevHTTPBody(t, serverURL+"/"+packageMetadataName)
-	assertDevHTTPBody(t, serverURL+"/", injectDevReloadClient("old completed index", 1))
+	assertDevInjectedHTTPBody(t, serverURL+"/", "old completed index", 1)
 	assertDevHTTPBody(t, serverURL+"/assets/bundle.12345678.wasm", "old completed wasm")
 
 	writeTestFile(t, appDir, "main.go", "package main\n\nvar rebuild = true\n")
 	waitDevSignal(t, publicationOpen, "mutable canonical publication")
 	for request := 0; request < 12; request++ {
-		assertDevHTTPBody(t, serverURL+"/", injectDevReloadClient("old completed index", 1))
+		assertDevInjectedHTTPBody(t, serverURL+"/", "old completed index", 1)
 		assertDevHTTPBody(t, serverURL+"/"+packageMetadataName, oldMetadata)
 		assertDevHTTPBody(t, serverURL+"/assets/bundle.12345678.wasm", "old completed wasm")
 	}
@@ -242,7 +242,7 @@ func TestDevRealWorkflowServesCompletedGenerationDuringPublication(t *testing.T)
 	assertDevEvent(t, waitDevEvent(t, builds), 2, false, false)
 	assertDevGenerationEvent(t, generations, 2)
 	assertDevGenerationEvent(t, reloads, 2)
-	assertDevHTTPBody(t, serverURL+"/", injectDevReloadClient("new completed index", 2))
+	assertDevInjectedHTTPBody(t, serverURL+"/", "new completed index", 2)
 	assertDevHTTPBody(t, serverURL+"/assets/bundle.12345678.wasm", "new completed wasm")
 
 	cancel()
@@ -250,6 +250,133 @@ func TestDevRealWorkflowServesCompletedGenerationDuringPublication(t *testing.T)
 		t.Fatal(err)
 	}
 	waitDevListenerClosed(t, serverURL)
+}
+
+func TestDevCancellationDuringBuildSkipsGenerationAndReload(t *testing.T) {
+	t.Run("later rebuild", func(t *testing.T) {
+		appDir := filepath.Join(t.TempDir(), "app")
+		workspace := filepath.Join(t.TempDir(), "workspace")
+		writeTestFile(t, appDir, manifestName, `{"compiler":"go"}`)
+		writeTestFile(t, appDir, "main.go", "package main\n")
+		completedPackage := t.TempDir()
+		writeDevGenerationPackage(t, completedPackage, "initial completed index")
+
+		builds := make(chan devBuildEvent, 4)
+		serverURLs := make(chan string, 1)
+		generations := make(chan uint64, 4)
+		reloads := make(chan uint64, 4)
+		packageCalls := make(chan int, 4)
+		releaseSecond := make(chan struct{})
+		callNumber := 0
+		dependencies := devIntegrationDependencies(builds, serverURLs)
+		dependencies.hooks.GenerationActivated = func(generation uint64) {
+			generations <- generation
+		}
+		dependencies.hooks.ReloadPublished = func(generation uint64) {
+			reloads <- generation
+		}
+		dependencies.packageApp = func(options packageOptions) error {
+			callNumber++
+			packageCalls <- callNumber
+			if callNumber == 2 {
+				<-releaseSecond
+				return nil
+			}
+			if callNumber != 1 {
+				return fmt.Errorf("unexpected package call %d", callNumber)
+			}
+			layout, err := newBuildLayout(layoutOptions{appDir: options.appDir, compiler: "go", workspace: options.workspace})
+			if err != nil {
+				return err
+			}
+			return replaceDevCanonicalPackage(completedPackage, layout.PackageDir)
+		}
+
+		rootsBefore := devGenerationRootSet(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- runDev(ctx, devOptions{appDir: appDir, compiler: "go", workspace: workspace, port: 0}, dependencies)
+		}()
+
+		assertDevPackageCall(t, packageCalls, 1)
+		assertDevEvent(t, waitDevEvent(t, builds), 1, true, false)
+		assertDevGenerationEvent(t, generations, 1)
+		assertNoDevGenerationEvent(t, reloads)
+		serverURL := waitDevServerURL(t, serverURLs)
+		generationRoot := assertOneNewDevGenerationRoot(t, rootsBefore)
+
+		writeTestFile(t, appDir, "main.go", "package main\n\nvar rebuild = true\n")
+		assertDevPackageCall(t, packageCalls, 2)
+		writeTestFile(t, appDir, "main.go", "package main\n\nvar followUp = true\n")
+		cancel()
+		close(releaseSecond)
+
+		assertDevEvent(t, waitDevEvent(t, builds), 2, false, false)
+		if err := waitDevRun(t, done); err != nil {
+			t.Fatalf("runDev() shutdown error: %v", err)
+		}
+		waitDevListenerClosed(t, serverURL)
+		assertNoDevGenerationEvent(t, generations)
+		assertNoDevGenerationEvent(t, reloads)
+		assertNoDevPackageCall(t, packageCalls)
+		if _, err := os.Stat(generationRoot); !os.IsNotExist(err) {
+			t.Fatalf("generation root remained after canceled rebuild: %v", err)
+		}
+	})
+
+	t.Run("initial build", func(t *testing.T) {
+		appDir := filepath.Join(t.TempDir(), "app")
+		workspace := filepath.Join(t.TempDir(), "workspace")
+		writeTestFile(t, appDir, manifestName, `{"compiler":"go"}`)
+		writeTestFile(t, appDir, "main.go", "package main\n")
+
+		builds := make(chan devBuildEvent, 2)
+		serverURLs := make(chan string, 1)
+		generations := make(chan uint64, 2)
+		reloads := make(chan uint64, 2)
+		packageCalls := make(chan int, 2)
+		releasePackage := make(chan struct{})
+		dependencies := devIntegrationDependencies(builds, serverURLs)
+		dependencies.hooks.GenerationActivated = func(generation uint64) {
+			generations <- generation
+		}
+		dependencies.hooks.ReloadPublished = func(generation uint64) {
+			reloads <- generation
+		}
+		dependencies.packageApp = func(packageOptions) error {
+			packageCalls <- 1
+			<-releasePackage
+			return nil
+		}
+
+		rootsBefore := devGenerationRootSet(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- runDev(ctx, devOptions{appDir: appDir, compiler: "go", workspace: workspace, port: 0}, dependencies)
+		}()
+
+		assertDevPackageCall(t, packageCalls, 1)
+		generationRoot := assertOneNewDevGenerationRoot(t, rootsBefore)
+		cancel()
+		close(releasePackage)
+		assertDevEvent(t, waitDevEvent(t, builds), 1, true, false)
+		if err := waitDevRun(t, done); err != nil {
+			t.Fatalf("runDev() shutdown error: %v", err)
+		}
+		assertNoDevGenerationEvent(t, generations)
+		assertNoDevGenerationEvent(t, reloads)
+		assertNoDevPackageCall(t, packageCalls)
+		select {
+		case url := <-serverURLs:
+			t.Fatalf("server started after canceled initial package: %s", url)
+		default:
+		}
+		if _, err := os.Stat(generationRoot); !os.IsNotExist(err) {
+			t.Fatalf("generation root remained after canceled initial build: %v", err)
+		}
+	})
 }
 
 func TestDevInitialFailureRecoversBeforeServerStarts(t *testing.T) {
@@ -467,6 +594,29 @@ func assertDevHTTPBody(t *testing.T, url, want string) {
 	}
 }
 
+func assertDevInjectedHTTPBody(t *testing.T, url, canonical string, generation uint64) {
+	t.Helper()
+	got := readDevHTTPBody(t, url)
+	if !strings.HasPrefix(got, canonical+"\n<script ") {
+		t.Fatalf("GET %s body does not preserve canonical index %q: %q", url, canonical, got)
+	}
+	if strings.Count(got, devReloadMarker) != 1 {
+		t.Fatalf("GET %s reload marker count = %d, want 1", url, strings.Count(got, devReloadMarker))
+	}
+	if !strings.Contains(got, fmt.Sprintf(`data-goframe-generation="%d"`, generation)) {
+		t.Fatalf("GET %s body does not contain generation %d: %q", url, generation, got)
+	}
+	instancePrefix := `data-goframe-instance="`
+	instanceStart := strings.Index(got, instancePrefix)
+	if instanceStart < 0 {
+		t.Fatalf("GET %s body does not contain a reload instance: %q", url, got)
+	}
+	instanceValue := got[instanceStart+len(instancePrefix):]
+	if end := strings.IndexByte(instanceValue, '"'); end <= 0 {
+		t.Fatalf("GET %s body has an empty reload instance: %q", url, got)
+	}
+}
+
 func assertDevHTTPContains(t *testing.T, url, want string) {
 	t.Helper()
 	if got := readDevHTTPBody(t, url); !strings.Contains(got, want) {
@@ -542,4 +692,54 @@ func waitDevSignal(t *testing.T, signal <-chan struct{}, label string) {
 	case <-time.After(3 * time.Second):
 		t.Fatalf("timed out waiting for %s", label)
 	}
+}
+
+func assertDevPackageCall(t *testing.T, calls <-chan int, want int) {
+	t.Helper()
+	select {
+	case got := <-calls:
+		if got != want {
+			t.Fatalf("package call = %d, want %d", got, want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for package call %d", want)
+	}
+}
+
+func assertNoDevPackageCall(t *testing.T, calls <-chan int) {
+	t.Helper()
+	select {
+	case call := <-calls:
+		t.Fatalf("unexpected package call %d", call)
+	default:
+	}
+}
+
+func devGenerationRootSet(t *testing.T) map[string]struct{} {
+	t.Helper()
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "goxc-dev-generations-") {
+			roots[filepath.Join(os.TempDir(), entry.Name())] = struct{}{}
+		}
+	}
+	return roots
+}
+
+func assertOneNewDevGenerationRoot(t *testing.T, before map[string]struct{}) string {
+	t.Helper()
+	var added []string
+	for root := range devGenerationRootSet(t) {
+		if _, ok := before[root]; !ok {
+			added = append(added, root)
+		}
+	}
+	if len(added) != 1 {
+		t.Fatalf("new development generation roots = %#v, want one", added)
+	}
+	return added[0]
 }

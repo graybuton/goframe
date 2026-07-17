@@ -11,10 +11,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
+const testDevReloadInstance = "0123456789abcdef0123456789abcdef"
+
 func TestDevReloadSameGenerationConnectionWaits(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(1, false)
 	subscription := mustDevReloadSubscription(t, broker, 1)
 	defer subscription.Close()
@@ -22,7 +25,7 @@ func TestDevReloadSameGenerationConnectionWaits(t *testing.T) {
 }
 
 func TestDevReloadStaleGenerationReceivesCatchUp(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(3, false)
 	subscription := mustDevReloadSubscription(t, broker, 1)
 	defer subscription.Close()
@@ -31,7 +34,7 @@ func TestDevReloadStaleGenerationReceivesCatchUp(t *testing.T) {
 }
 
 func TestDevReloadPublishesToTwoSubscribersOnce(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(1, false)
 	first := mustDevReloadSubscription(t, broker, 1)
 	second := mustDevReloadSubscription(t, broker, 1)
@@ -47,7 +50,7 @@ func TestDevReloadPublishesToTwoSubscribersOnce(t *testing.T) {
 }
 
 func TestDevReloadSubscriberAlreadyOnActivatingGenerationDoesNotReload(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(1, false)
 	oldPage := mustDevReloadSubscription(t, broker, 1)
 	newPage := mustDevReloadSubscription(t, broker, 2)
@@ -66,8 +69,30 @@ func TestDevReloadSubscriberAlreadyOnActivatingGenerationDoesNotReload(t *testin
 	assertNoQueuedDevReload(t, newPage)
 }
 
+func TestDevReloadProcessInstanceMismatchCatchesUpWithoutAffectingCurrentClient(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	broker.activate(2, false)
+	currentPage := mustDevReloadSubscription(t, broker, 2)
+	previousProcess, err := broker.subscribe("fedcba9876543210fedcba9876543210", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer currentPage.Close()
+	defer previousProcess.Close()
+
+	assertDevReloadGeneration(t, previousProcess, 2)
+	assertNoQueuedDevReload(t, previousProcess)
+	assertNoQueuedDevReload(t, currentPage)
+
+	broker.activate(3, true)
+	assertDevReloadGeneration(t, previousProcess, 3)
+	assertDevReloadGeneration(t, currentPage, 3)
+	assertNoQueuedDevReload(t, previousProcess)
+	assertNoQueuedDevReload(t, currentPage)
+}
+
 func TestDevReloadSlowSubscriberCollapsesToNewestGeneration(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(1, false)
 	subscription := mustDevReloadSubscription(t, broker, 1)
 	defer subscription.Close()
@@ -80,7 +105,7 @@ func TestDevReloadSlowSubscriberCollapsesToNewestGeneration(t *testing.T) {
 }
 
 func TestDevReloadDisconnectAndShutdownReleaseSubscribers(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	first := mustDevReloadSubscription(t, broker, 0)
 	second := mustDevReloadSubscription(t, broker, 0)
 	if got := broker.subscriberCount(); got != 2 {
@@ -101,7 +126,7 @@ func TestDevReloadDisconnectAndShutdownReleaseSubscribers(t *testing.T) {
 }
 
 func TestDevReloadConcurrentPublishSubscribeDisconnect(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(1, false)
 	var workers sync.WaitGroup
 	for worker := 0; worker < 12; worker++ {
@@ -109,7 +134,7 @@ func TestDevReloadConcurrentPublishSubscribeDisconnect(t *testing.T) {
 		go func(worker int) {
 			defer workers.Done()
 			for iteration := 0; iteration < 100; iteration++ {
-				subscription, err := broker.subscribe(uint64(worker % 4))
+				subscription, err := broker.subscribe(testDevReloadInstance, uint64(worker%4))
 				if err != nil {
 					return
 				}
@@ -132,14 +157,14 @@ func TestDevReloadConcurrentPublishSubscribeDisconnect(t *testing.T) {
 }
 
 func TestDevReloadEventsEndpointStreamsReload(t *testing.T) {
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(1, false)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		serveDevEvents(response, request, broker)
 	}))
 	defer server.Close()
 
-	response, err := http.Get(server.URL + "?generation=1")
+	response, err := http.Get(server.URL + "?instance=" + testDevReloadInstance + "&generation=1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,9 +198,72 @@ func TestDevReloadEventsEndpointStreamsReload(t *testing.T) {
 
 func TestDevReloadEventsEndpointRejectsUnsupportedMethod(t *testing.T) {
 	response := httptest.NewRecorder()
-	serveDevEvents(response, httptest.NewRequest(http.MethodPost, devEventsPath+"?generation=1", nil), newDevReloadBroker())
+	serveDevEvents(response, httptest.NewRequest(http.MethodPost, devEventsPath+"?instance="+testDevReloadInstance+"&generation=1", nil), newDevReloadBroker(testDevReloadInstance))
 	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet {
 		t.Fatalf("response = %d Allow=%q, want 405 GET", response.Code, response.Header().Get("Allow"))
+	}
+}
+
+func TestDevReloadEventsEndpointRejectsMalformedOrMissingSubscriptionParameters(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	for _, test := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "missing instance", path: devEventsPath + "?generation=1", want: "invalid development instance"},
+		{name: "missing generation", path: devEventsPath + "?instance=" + testDevReloadInstance, want: "invalid development generation"},
+		{name: "malformed generation", path: devEventsPath + "?instance=" + testDevReloadInstance + "&generation=nope", want: "invalid development generation"},
+		{name: "zero generation", path: devEventsPath + "?instance=" + testDevReloadInstance + "&generation=0", want: "invalid development generation"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			serveDevEvents(response, httptest.NewRequest(http.MethodGet, test.path, nil), broker)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("response = %d %q, want 400 containing %q", response.Code, response.Body.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestDevReloadInjectionBodyCaseVariants(t *testing.T) {
+	for _, closingTag := range []string{"</body>", "</BODY>", "</BoDy>"} {
+		t.Run(closingTag, func(t *testing.T) {
+			canonical := "<!doctype html><html><body><main>app</main>" + closingTag + "</html>"
+			tag := fmt.Sprintf(`<script %s src="%s" data-goframe-instance="%s" data-goframe-generation="7"></script>`, devReloadMarker, devReloadScriptPath, testDevReloadInstance)
+			want := strings.Replace(canonical, closingTag, tag+"\n"+closingTag, 1)
+			got := injectDevReloadClient(canonical, testDevReloadInstance, 7)
+			if got != want {
+				t.Fatalf("injected index = %q, want %q", got, want)
+			}
+			if strings.Count(got, devReloadMarker) != 1 {
+				t.Fatalf("reload marker count = %d, want 1", strings.Count(got, devReloadMarker))
+			}
+		})
+	}
+}
+
+func TestDevReloadInjectionPreservesUnicodeByteOffsets(t *testing.T) {
+	const canonical = "<!doctype html><html><body><main>İstanbul</main></BoDy></html>"
+	original := canonical
+	tag := fmt.Sprintf(`<script %s src="%s" data-goframe-instance="%s" data-goframe-generation="9"></script>`, devReloadMarker, devReloadScriptPath, testDevReloadInstance)
+	want := strings.Replace(canonical, "</BoDy>", tag+"\n</BoDy>", 1)
+	got := injectDevReloadClient(canonical, testDevReloadInstance, 9)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("injected index is not valid UTF-8: %q", got)
+	}
+	if got != want {
+		t.Fatalf("injected index = %q, want %q", got, want)
+	}
+	if !strings.Contains(got, "<main>İstanbul</main>") {
+		t.Fatalf("non-ASCII content changed: %q", got)
+	}
+	if canonical != original {
+		t.Fatalf("canonical input changed from %q to %q", original, canonical)
+	}
+	if strings.Count(got, devReloadMarker) != 1 {
+		t.Fatalf("reload marker count = %d, want 1", strings.Count(got, devReloadMarker))
 	}
 }
 
@@ -188,7 +276,7 @@ func TestDevReloadHandlerInjectsOneGenerationClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(generation, false)
 	handler := devReloadHandler(manager, broker)
 
@@ -202,7 +290,7 @@ func TestDevReloadHandlerInjectsOneGenerationClient(t *testing.T) {
 		if strings.Count(body, devReloadMarker) != 1 {
 			t.Fatalf("GET %s reload marker count = %d, body=%q", requestPath, strings.Count(body, devReloadMarker), body)
 		}
-		wantTag := fmt.Sprintf(`%s src="%s" data-goframe-generation="%d"`, devReloadMarker, devReloadScriptPath, generation)
+		wantTag := fmt.Sprintf(`%s src="%s" data-goframe-instance="%s" data-goframe-generation="%d"`, devReloadMarker, devReloadScriptPath, testDevReloadInstance, generation)
 		if !strings.Contains(body, wantTag) || strings.Index(body, wantTag) > strings.Index(strings.ToLower(body), "</body>") {
 			t.Fatalf("GET %s did not inject generation client before body: %q", requestPath, body)
 		}
@@ -230,7 +318,7 @@ func TestDevReloadHandlerAppendsClientWithoutClosingBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	broker := newDevReloadBroker()
+	broker := newDevReloadBroker(testDevReloadInstance)
 	broker.activate(generation, false)
 	response := httptest.NewRecorder()
 	devReloadHandler(manager, broker).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -245,7 +333,7 @@ func TestDevReloadClientIsDevelopmentOnlyResponse(t *testing.T) {
 	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("reload client response = %d Cache-Control=%q", response.Code, response.Header().Get("Cache-Control"))
 	}
-	for _, want := range []string{"EventSource", "data-goframe-generation", "window.location.reload()"} {
+	for _, want := range []string{"EventSource", "data-goframe-instance", "data-goframe-generation", "window.location.reload()"} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatalf("reload client missing %q: %q", want, response.Body.String())
 		}
@@ -260,7 +348,7 @@ func TestDevReloadClientIsDevelopmentOnlyResponse(t *testing.T) {
 
 func mustDevReloadSubscription(t *testing.T, broker *devReloadBroker, generation uint64) *devReloadSubscription {
 	t.Helper()
-	subscription, err := broker.subscribe(generation)
+	subscription, err := broker.subscribe(broker.instance, generation)
 	if err != nil {
 		t.Fatal(err)
 	}

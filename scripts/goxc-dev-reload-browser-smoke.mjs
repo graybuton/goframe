@@ -24,6 +24,7 @@ let dev = null;
 let browser = null;
 let client1 = null;
 let client2 = null;
+let activationGapProbe = null;
 let devOutput = "";
 let browserError = "";
 const lines = [];
@@ -34,6 +35,7 @@ const counters = {
     generationActivations: 0,
     reloadEventsPublished: 0,
     catchUpReloads: 0,
+    previousProcessCatchUpReloads: 0,
     requestsServedByOldGeneration: 0,
     responses404DuringBuild: 0,
 };
@@ -89,6 +91,8 @@ try {
     const initial = await waitForPageState(client1, { gox: "gox-initial", go: "go-initial", index: "index-initial" });
     assert(initial.pageLoads === 1, `initial page loads = ${initial.pageLoads}, want 1`);
     assert(initial.generation === 1, `initial generation = ${initial.generation}, want 1`);
+    assert(/^[0-9a-f]{32}$/.test(initial.instance), `initial process instance = ${JSON.stringify(initial.instance)}, want a 32-character hex token`);
+    const activeInstance = initial.instance;
     await waitForEventSourceOpen(client1, 1);
     await wait(250);
     const stableInitial = await pageState(client1);
@@ -173,12 +177,15 @@ try {
     await prepareClient(client2);
     await navigate(client2, `${serverURL}/?smoke=second-client`);
     const secondInitial = await waitForPageState(client2, { gox: "recovered", go: "go-rebuild", index: "index-rebuild" });
+    assert(secondInitial.instance === activeInstance, `second client process instance = ${secondInitial.instance}, want ${activeInstance}`);
     await waitForEventSourceOpen(client2, 1);
     await wait(250);
     assert((await pageState(client2)).pageLoads === 1, "second client entered an initial reload loop");
 
     const firstMultiBaseline = await pageState(client1);
     const secondMultiBaseline = await pageState(client2);
+    activationGapProbe = await openReloadProbe(serverURL, activeInstance, activeGeneration + 1);
+    await activationGapProbe.waitConnected();
     await writeGoMessage("two-clients");
     await waitForBuild(nextBuild, "succeeded");
     const nextGeneration = ++activeGeneration;
@@ -188,10 +195,32 @@ try {
     ]);
     recordSuccessfulReload();
     nextBuild++;
+    await wait(100);
+    activationGapProbe.assertHealthy();
+    assert(activationGapProbe.events.length === 0,
+        `activation-gap subscriber received its declared generation: ${JSON.stringify(activationGapProbe.events)}`);
     console.log("two-client reload: ok");
 
+    const firstGapFollowUpBaseline = await pageState(client1);
+    const secondGapFollowUpBaseline = await pageState(client2);
+    await writeGoMessage("activation-gap-follow-up");
+    await waitForBuild(nextBuild, "succeeded");
+    const gapFollowUpGeneration = ++activeGeneration;
+    await Promise.all([
+        assertSuccessfulReload(client1, firstGapFollowUpBaseline, { gox: "recovered", go: "activation-gap-follow-up", index: "index-rebuild" }, gapFollowUpGeneration),
+        assertSuccessfulReload(client2, secondGapFollowUpBaseline, { gox: "recovered", go: "activation-gap-follow-up", index: "index-rebuild" }, gapFollowUpGeneration),
+    ]);
+    recordSuccessfulReload();
+    nextBuild++;
+    await activationGapProbe.waitForEvents(1);
+    assert(JSON.stringify(activationGapProbe.events) === JSON.stringify([gapFollowUpGeneration]),
+        `activation-gap subscriber events = ${JSON.stringify(activationGapProbe.events)}, want [${gapFollowUpGeneration}]`);
+    await activationGapProbe.close();
+    activationGapProbe = null;
+    console.log("same-generation activation gap: ok");
+
     const currentReconnect = await pageState(client1);
-    await reconnectReloadClient(client1, activeGeneration);
+    await reconnectReloadClient(client1, activeInstance, activeGeneration);
     await waitForEventSourceOpen(client1, currentReconnect.eventSourceOpens + 1);
     await wait(250);
     const afterCurrentReconnect = await pageState(client1);
@@ -199,10 +228,10 @@ try {
         `current-generation reconnect reloaded: ${JSON.stringify(afterCurrentReconnect)}`);
     console.log("same-generation reconnect: ok");
 
-    await reconnectReloadClient(client1, activeGeneration - 1);
+    await reconnectReloadClient(client1, activeInstance, activeGeneration - 1);
     const caughtUp = await waitForPageState(client1, {
         gox: "recovered",
-        go: "two-clients",
+        go: "activation-gap-follow-up",
         index: "index-rebuild",
         pageLoads: afterCurrentReconnect.pageLoads + 1,
         reloadEvents: afterCurrentReconnect.reloadEvents + 1,
@@ -211,6 +240,27 @@ try {
     counters.catchUpReloads++;
     assert(caughtUp.generation === activeGeneration, `catch-up loaded generation ${caughtUp.generation}`);
     console.log("stale-generation catch-up reload: ok");
+
+    const previousProcessBaseline = caughtUp;
+    const previousInstance = activeInstance === "f".repeat(32) ? "e".repeat(32) : "f".repeat(32);
+    await reconnectReloadClient(client1, previousInstance, activeGeneration + 1000);
+    const previousProcessCaughtUp = await waitForPageState(client1, {
+        gox: "recovered",
+        go: "activation-gap-follow-up",
+        index: "index-rebuild",
+        pageLoads: previousProcessBaseline.pageLoads + 1,
+        reloadEvents: previousProcessBaseline.reloadEvents + 1,
+        generation: activeGeneration,
+        instance: activeInstance,
+    });
+    counters.catchUpReloads++;
+    counters.previousProcessCatchUpReloads++;
+    await wait(250);
+    const stablePreviousProcessCatchUp = await pageState(client1);
+    assert(stablePreviousProcessCatchUp.pageLoads === previousProcessCaughtUp.pageLoads
+        && stablePreviousProcessCatchUp.reloadEvents === previousProcessCaughtUp.reloadEvents,
+        `previous-process catch-up entered a reload loop: ${JSON.stringify(stablePreviousProcessCatchUp)}`);
+    console.log("previous-process catch-up reload: ok");
 
     const client1Final = await pageState(client1);
     const client2Final = await pageState(client2);
@@ -235,6 +285,7 @@ try {
     console.log(`reload events received by client 1: ${client1Final.reloadEvents}`);
     console.log(`reload events received by client 2: ${client2Final.reloadEvents}`);
     console.log(`catch-up reloads: ${counters.catchUpReloads}`);
+    console.log(`previous-process catch-up reloads: ${counters.previousProcessCatchUpReloads}`);
     console.log("connected subscribers at shutdown: 0");
     console.log(`requests served by old generation during later build: ${counters.requestsServedByOldGeneration}`);
     console.log(`404 responses during later build: ${counters.responses404DuringBuild}`);
@@ -242,6 +293,7 @@ try {
 } catch (error) {
     throw new Error(`${error.message}\n\nDevelopment output:\n${devOutput.slice(-12000)}\n\nChrome stderr:\n${browserError.slice(-6000)}`);
 } finally {
+    await activationGapProbe?.close();
     client1?.close();
     client2?.close();
     if (dev) {
@@ -345,6 +397,7 @@ async function pageState(client) {
             reloadEvents: Number(sessionStorage.getItem("goframe-dev-reload-events") || "0"),
             eventSourceOpens: Number(sessionStorage.getItem("goframe-dev-event-source-opens") || "0"),
             generation: Number(script?.getAttribute("data-goframe-generation") || "0"),
+            instance: script?.getAttribute("data-goframe-instance") || "",
             reloadTags: document.querySelectorAll("script[data-goframe-dev-reload]").length,
         };
     })()`);
@@ -371,11 +424,12 @@ async function assertSuccessfulReload(client, baseline, expected, generation) {
     assert(state.reloadTags === 1, `reload tag count = ${state.reloadTags}, want 1`);
 }
 
-async function reconnectReloadClient(client, generation) {
+async function reconnectReloadClient(client, instance, generation) {
     await client.evaluate(`(() => {
         for (const source of window.__goframeDevEventSources || []) source.close();
         const script = document.createElement("script");
         script.src = ${JSON.stringify("/_goframe/dev/reload.js")} + "?reconnect=" + Date.now();
+        script.setAttribute("data-goframe-instance", ${JSON.stringify(String(instance))});
         script.setAttribute("data-goframe-generation", ${JSON.stringify(String(generation))});
         document.body.appendChild(script);
     })()`);
@@ -410,6 +464,67 @@ async function probeOldGenerationUntilBuildCompletes(serverURL, wasmPath, genera
     assert(metadata.version === 1 && wasm.byteLength > 0, "partial package response observed during later build");
     if (servedGeneration === generation) oldGenerationResponses += 3;
     return { oldGenerationResponses, responses404 };
+}
+
+async function openReloadProbe(serverURL, instance, generation) {
+    const controller = new AbortController();
+    const response = await fetch(`${serverURL}/_goframe/dev/events?instance=${encodeURIComponent(instance)}&generation=${encodeURIComponent(generation)}`, {
+        signal: controller.signal,
+    });
+    assert(response.ok && response.body, `activation-gap probe HTTP ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const state = {
+        connected: false,
+        events: [],
+        failure: null,
+    };
+    let buffer = "";
+    const pump = (async () => {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) return;
+            buffer += decoder.decode(value, { stream: true });
+            for (;;) {
+                const boundary = buffer.indexOf("\n\n");
+                if (boundary < 0) break;
+                const block = buffer.slice(0, boundary);
+                buffer = buffer.slice(boundary + 2);
+                if (block.startsWith(": connected")) state.connected = true;
+                const event = block.split("\n").find((line) => line.startsWith("event: "))?.slice(7);
+                const data = block.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+                if (event === "reload" && data) state.events.push(Number(data));
+            }
+        }
+    })().catch((error) => {
+        if (!controller.signal.aborted) state.failure = error;
+    });
+
+    const waitFor = async (predicate, label) => {
+        for (let attempt = 0; attempt < 200; attempt++) {
+            if (state.failure) throw state.failure;
+            if (predicate()) return;
+            await wait(25);
+        }
+        throw new Error(`HARNESS FAILURE: timed out waiting for ${label}`);
+    };
+    return {
+        events: state.events,
+        assertHealthy() {
+            if (state.failure) throw state.failure;
+        },
+        async waitConnected() {
+            await waitFor(() => state.connected, "activation-gap SSE connection");
+        },
+        async waitForEvents(count) {
+            await waitFor(() => state.events.length >= count, `${count} activation-gap SSE events`);
+        },
+        async close() {
+            controller.abort();
+            await reader.cancel().catch(() => {});
+            await pump;
+        },
+    };
 }
 
 function captureLines(stream, source) {

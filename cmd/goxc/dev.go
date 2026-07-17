@@ -176,6 +176,9 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 		if err != nil {
 			return err
 		}
+		if ctx.Err() != nil {
+			return nil
+		}
 		if _, err := server.activatePackage(); err != nil {
 			return err
 		}
@@ -243,6 +246,10 @@ type devServer struct {
 }
 
 func newDevServer(packageDir string, port int, dependencies devDependencies) (*devServer, error) {
+	instance, err := newDevReloadInstance()
+	if err != nil {
+		return nil, err
+	}
 	generations, err := newDevGenerationManager()
 	if err != nil {
 		return nil, err
@@ -254,7 +261,7 @@ func newDevServer(packageDir string, port int, dependencies devDependencies) (*d
 		stdout:      dependencies.stdout,
 		hooks:       dependencies.hooks,
 		generations: generations,
-		reload:      newDevReloadBroker(),
+		reload:      newDevReloadBroker(instance),
 		errCh:       make(chan error, 1),
 	}, nil
 }
