@@ -323,8 +323,9 @@ Resumability, server components, and selective or streaming hydration remain
 
 ## `v0.7.0-preview.*` - Dev Loop & Language Services
 
-Status: **Candidate**, with the bounded watched development command now
-**Current / shipped**.
+Status: **Candidate**, with the bounded watched development command and
+successful-build browser reload now **Current / shipped**. Browser build-error
+presentation remains **Candidate**.
 
 The CLI-backed saved-source diagnostics in current `main` are
 **Current / shipped**. Semantic tooling remains future language-service work.
@@ -334,7 +335,7 @@ Candidate sequence:
 | Planning slot | Candidate capability |
 |---|---|
 | `preview.1` | Watched development command with serialized full-package rebuilds. |
-| `preview.2` | Browser reload and error overlay. |
+| `preview.2` | Successful-build browser reload is current; browser build-error overlay remains candidate. |
 | `preview.3` | GOX-to-generated source maps. |
 | `preview.4` | Deterministic formatter. |
 | `preview.5` | LSP baseline. |
@@ -344,7 +345,9 @@ Potential surface, subject to design and evidence:
 
 - the current `goxc dev` full-package workflow, with later incremental build
   work requiring separate evidence;
-- browser reload with compiler and source error presentation;
+- the current completed-generation serving and successful-build full-page
+  reload workflow;
+- browser compiler and source error presentation as a separate candidate;
 - GOX-to-generated source maps shared by compiler and editor tooling;
 - a deterministic formatter with explicit syntax-governance rules;
 - diagnostics, hover, completion, definition, and references;
@@ -522,12 +525,10 @@ that defines behavior boundaries, evidence, cost, and non-goals.
 
 ## Immediate Sequence
 
-1. Establish the bounded watched `goxc dev` command as the immediate selected
-   toolchain capability.
-2. Validate full-package rebuilds, failure recovery, loopback serving, and
-   clean shutdown through focused Go evidence.
-3. Keep browser reload and browser error presentation as a later candidate,
-   selected only after the first workflow evidence is complete.
+1. Retain the bounded watched `goxc dev` command as **Current / shipped**.
+2. Retain completed-generation serving and successful-build browser reload as
+   **Current / shipped** after focused Go and browser evidence.
+3. Keep browser build-error presentation as a separate later candidate.
 
 The application-model evidence does not justify adding a loader, Action, or
 Mutation API. The selected development-loop slice does not imply incremental

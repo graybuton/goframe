@@ -100,6 +100,13 @@ identity. It also covers route Error Boundary fallback and safe navigation
 recovery in the reference app. It also covers the resource example for explicit
 loading/ready/failed state, reload, stale completion guards, and
 cleanup-after-unmount behavior.
+The suite also runs a focused `goxc dev` reload lifecycle against a temporary
+standard-Go browser/WASM application. It verifies the initial non-reloading
+connection, GOX, Go, and asset rebuild reloads, burst coalescing, failure
+preservation and recovery, two connected pages, current and stale generation
+reconnection, completed-generation serving during a later package attempt, and
+shutdown cleanup. This is standard-Go browser evidence; it does not claim a
+TinyGo development-reload pass.
 The persistent `examples/server-backed` smoke records a narrow Go `net/http`
 backend integration boundary. A packaged GoFrame browser/WASM app is served by
 a same-origin Go backend and renders data from `/api/greeting` before and after
