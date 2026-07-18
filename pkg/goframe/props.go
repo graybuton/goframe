@@ -134,6 +134,15 @@ func normalizeAttributeName(name string) string {
 	}
 }
 
+func isARIAAttribute(name string) bool {
+	return len(name) > 5 &&
+		name[0]|0x20 == 'a' &&
+		name[1]|0x20 == 'r' &&
+		name[2]|0x20 == 'i' &&
+		name[3]|0x20 == 'a' &&
+		name[4] == '-'
+}
+
 func splitProps(props Props) (splitDOMProps, splitEventProps) {
 	if len(props) == 0 {
 		return nil, nil
@@ -143,6 +152,13 @@ func splitProps(props Props) (splitDOMProps, splitEventProps) {
 	var events splitEventProps
 	for name, value := range props {
 		if value == nil {
+			continue
+		}
+		if boolean, ok := value.(bool); ok && isARIAAttribute(name) {
+			if dom == nil {
+				dom = make(splitDOMProps, 0, len(props))
+			}
+			dom.set(name, domProp{value: strconv.FormatBool(boolean)})
 			continue
 		}
 		if boolean, ok := value.(bool); ok && !boolean {

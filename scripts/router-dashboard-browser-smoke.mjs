@@ -138,6 +138,7 @@ try {
         hash: "#/issues/RD-2/edit",
         formTitle: "Billing dashboard needs clearer empty state",
         formDirty: "No local changes",
+        titleAriaInvalid: "false",
         resourceStatus: "ready",
         resourceAttempt: "2",
         boundaryFallback: false,
@@ -235,6 +236,7 @@ try {
         hash: "#/issues/RD-2/edit",
         formTitle: "Billing dashboard needs clearer empty state",
         formDirty: "No local changes",
+        titleAriaInvalid: "false",
         resourceStatus: "ready",
         resourceAttempt: "4",
         boundaryFallback: false,
@@ -249,6 +251,7 @@ try {
     assertState(await appState(client), {
         route: "edit",
         titleError: "Title is required.",
+        titleAriaInvalid: "true",
         formDirty: "Unsaved local changes",
         saved: false,
         resourceStatus: "ready",
@@ -265,6 +268,7 @@ try {
     assertState(await appState(client), {
         route: "edit",
         titleError: "",
+        titleAriaInvalid: "false",
         saved: true,
         resourceStatus: "ready",
         resourceAttempt: "4",
@@ -278,7 +282,8 @@ try {
         return state.formTitle === "Billing dashboard needs clearer empty state" &&
             state.formDirty === "No local changes" &&
             !state.saved &&
-            state.titleError === "";
+            state.titleError === "" &&
+            state.titleAriaInvalid === "false";
     }, "form reset");
     assertState(await appState(client), {
         route: "edit",
@@ -286,6 +291,7 @@ try {
         formDirty: "No local changes",
         saved: false,
         titleError: "",
+        titleAriaInvalid: "false",
         resourceStatus: "ready",
         resourceAttempt: "4",
         boundaryFallback: false,
@@ -338,6 +344,7 @@ async function appState(client) {
             formTitle: document.querySelector("[data-testid='rd-field-title']")?.value ?? "",
             formDirty: document.querySelector("[data-testid='rd-form-dirty']")?.textContent.trim() ?? "",
             titleError: document.querySelector("[data-testid='rd-field-error-title']")?.textContent.trim() ?? "",
+            titleAriaInvalid: document.querySelector("[data-testid='rd-field-title']")?.getAttribute("aria-invalid") ?? "<missing>",
             saved: Boolean(document.querySelector("[data-testid='rd-form-saved']")),
             notFoundPath: document.querySelector("[data-testid='rd-not-found-path']")?.textContent.trim() ?? "",
             resourceStatus: document.querySelector("[data-testid='rd-resource-status']")?.textContent.trim() ?? "",
