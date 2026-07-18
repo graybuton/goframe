@@ -165,25 +165,49 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 	}
 
 	collector := newDevSnapshotCollector(layout.AppDir)
+	collector.resolveEmbedPlan = func() (embedInputPlan, error) {
+		return resolveCurrentEmbedInputPlan(packageOptions{
+			appDir:    layout.AppDir,
+			compiler:  options.compiler,
+			workspace: options.workspace,
+			compress:  map[string]bool{},
+		})
+	}
 	server, err := newDevServer(layout.PackageDir, options.port, dependencies)
 	if err != nil {
 		return err
 	}
 
 	build := func(request devBuildRequest) error {
+		var attemptPlan embedInputPlan
+		haveAttemptPlan := false
 		err := dependencies.packageApp(packageOptions{
 			appDir:    layout.AppDir,
 			compiler:  options.compiler,
 			workspace: options.workspace,
 			compress:  map[string]bool{},
+			recordEmbedPlan: func(plan embedInputPlan) {
+				attemptPlan = plan
+				haveAttemptPlan = true
+			},
 		})
 		if err != nil {
+			if haveAttemptPlan {
+				collector.finishEmbedBuild(attemptPlan, false, err)
+			}
 			return err
 		}
 		if ctx.Err() != nil {
 			return nil
 		}
-		if _, err := server.activatePackage(); err != nil {
+		if _, err := server.activatePackageWithCommit(func() {
+			if haveAttemptPlan {
+				collector.finishEmbedBuild(attemptPlan, true)
+			}
+		}); err != nil {
+			if haveAttemptPlan {
+				collector.finishEmbedBuild(attemptPlan, false, err)
+			}
 			return err
 		}
 		if !server.started() {
@@ -195,14 +219,15 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 	}
 
 	runErr := runDevCoordinator(ctx, devCoordinatorConfig{
-		scan:         collector.collect,
-		build:        build,
-		serverErrors: server.errors(),
-		pollInterval: dependencies.pollInterval,
-		debounce:     dependencies.debounce,
-		stdout:       dependencies.stdout,
-		stderr:       dependencies.stderr,
-		hooks:        dependencies.hooks,
+		scan:              collector.collect,
+		build:             build,
+		serverErrors:      server.errors(),
+		pollInterval:      dependencies.pollInterval,
+		debounce:          dependencies.debounce,
+		stdout:            dependencies.stdout,
+		stderr:            dependencies.stderr,
+		hooks:             dependencies.hooks,
+		reconcileSnapshot: collector.reconcileEmbedSnapshot,
 	})
 	shutdownErr := server.shutdown()
 	if runErr != nil {
@@ -281,15 +306,22 @@ func newDevServer(packageDir string, port int, dependencies devDependencies) (*d
 }
 
 func (server *devServer) activatePackage() (uint64, error) {
+	return server.activatePackageWithCommit(nil)
+}
+
+func (server *devServer) activatePackageWithCommit(commit func()) (uint64, error) {
 	notify := server.started()
 	generation, err := server.generations.activatePackage(server.packageDir)
 	if err != nil {
 		return 0, err
 	}
-	server.reload.activate(generation, notify)
 	if server.hooks.GenerationActivated != nil {
 		server.hooks.GenerationActivated(generation)
 	}
+	if commit != nil {
+		commit()
+	}
+	server.reload.activate(generation, notify)
 	if notify && server.hooks.ReloadPublished != nil {
 		server.hooks.ReloadPublished(generation)
 	}
@@ -429,9 +461,19 @@ func diffDevSnapshots(previous, current devSnapshot) []string {
 }
 
 type devSnapshotCollector struct {
-	appDir     string
-	lastAssets devAssetWatchSpec
-	haveAssets bool
+	appDir           string
+	lastAssets       devAssetWatchSpec
+	haveAssets       bool
+	embedPlan        embedInputPlan
+	embedCandidate   embedInputPlan
+	haveCandidate    bool
+	embedRecovery    embedInputPlan
+	haveRecovery     bool
+	embedMembership  map[string]string
+	resolveEmbedPlan func() (embedInputPlan, error)
+	embedBuildOK     bool
+	haveEmbedOutcome bool
+	embedRecoveryErr error
 }
 
 type devAssetWatchSpec struct {
@@ -445,7 +487,10 @@ type devAssetDirectory struct {
 }
 
 func newDevSnapshotCollector(appDir string) *devSnapshotCollector {
-	return &devSnapshotCollector{appDir: appDir}
+	return &devSnapshotCollector{
+		appDir:          appDir,
+		embedMembership: map[string]string{},
+	}
 }
 
 func (collector *devSnapshotCollector) collect() (devSnapshot, error) {
@@ -459,15 +504,19 @@ func (collector *devSnapshotCollector) collect() (devSnapshot, error) {
 	if err := collector.collectModuleInputs(&snapshot); err != nil {
 		return snapshot, err
 	}
+	embedErr := collector.collectEmbedInputs(&snapshot)
+	if embedErr != nil && !devScanAllowsBuild(embedErr) {
+		return snapshot, embedErr
+	}
 
 	manifest, err := loadManifest(collector.appDir)
 	if err != nil {
-		return snapshot, collector.collectRetainedAssets(&snapshot, err)
+		return snapshot, collector.collectRetainedAssets(&snapshot, errors.Join(err, embedErr))
 	}
 	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
 	_, planErr := planPackageAssets(collector.appDir, manifest, wasmLogicalName, packageOptions{compress: map[string]bool{}})
 	if planErr != nil {
-		return snapshot, collector.collectRetainedAssets(&snapshot, planErr)
+		return snapshot, collector.collectRetainedAssets(&snapshot, errors.Join(planErr, embedErr))
 	}
 
 	spec, err := collector.assetWatchSpec(manifest)
@@ -479,7 +528,197 @@ func (collector *devSnapshotCollector) collect() (devSnapshot, error) {
 	if err := collector.collectAssets(&snapshot, spec); err != nil {
 		return snapshot, err
 	}
+	if embedErr != nil {
+		return snapshot, embedErr
+	}
 	return snapshot, nil
+}
+
+const devEmbedSnapshotPrefix = "go:embed:"
+
+func (collector *devSnapshotCollector) collectEmbedInputs(snapshot *devSnapshot) error {
+	currentMembership, err := collector.currentEmbedMembership()
+	if err != nil {
+		return err
+	}
+	if collector.resolveEmbedPlan != nil && !stringMapsEqual(currentMembership, collector.embedMembership) {
+		candidate, resolveErr := collector.resolveEmbedPlan()
+		if resolveErr != nil {
+			collector.haveCandidate = false
+			if len(candidate.WatchRoots) > 0 {
+				collector.embedRecovery = candidate
+				collector.haveRecovery = true
+			}
+			collector.embedMembership = collector.mergedEmbedMembership(candidate)
+			collector.embedRecoveryErr = resolveErr
+			if collectErr := collector.collectEmbedPlan(snapshot, collector.embedPlan); collectErr != nil {
+				return collectErr
+			}
+			return devBuildableScanError{err: resolveErr}
+		}
+		collector.embedMembership = cloneStringMap(candidate.WatchMembership)
+		collector.embedRecoveryErr = nil
+		if embedInputPlansEqual(candidate, collector.embedPlan) {
+			collector.haveCandidate = false
+		} else {
+			collector.embedCandidate = candidate
+			collector.haveCandidate = true
+		}
+	}
+	plan := collector.embedPlan
+	if collector.haveCandidate {
+		plan = collector.embedCandidate
+	}
+	if err := collector.collectEmbedPlan(snapshot, plan); err != nil {
+		return err
+	}
+	if collector.haveCandidate {
+		return collector.collectOmittedCommittedEmbedInputs(snapshot, plan)
+	}
+	if collector.haveRecovery && collector.embedRecoveryErr != nil {
+		return devBuildableScanError{err: collector.embedRecoveryErr}
+	}
+	return nil
+}
+
+func (collector *devSnapshotCollector) collectEmbedPlan(snapshot *devSnapshot, plan embedInputPlan) error {
+	for _, input := range plan.Files {
+		if err := validatePathBelowRoot(collector.appDir, input.SourcePath, "watched embedded input", true); err != nil {
+			return err
+		}
+		fingerprint, err := collector.fileFingerprint(input.SourcePath, true)
+		if err != nil {
+			return err
+		}
+		snapshot.files[devEmbedSnapshotPrefix+input.DisplayPath] = fingerprint
+	}
+	return nil
+}
+
+func (collector *devSnapshotCollector) collectOmittedCommittedEmbedInputs(snapshot *devSnapshot, candidate embedInputPlan) error {
+	included := make(map[string]struct{}, len(candidate.Files))
+	for _, input := range candidate.Files {
+		included[input.DisplayPath] = struct{}{}
+	}
+	for _, input := range collector.embedPlan.Files {
+		if _, ok := included[input.DisplayPath]; ok {
+			continue
+		}
+		if err := validatePathBelowRoot(collector.appDir, input.SourcePath, "watched embedded input", true); err != nil {
+			return err
+		}
+		fingerprint, err := collector.fileFingerprint(input.SourcePath, true)
+		if err != nil {
+			return err
+		}
+		snapshot.files[devEmbedSnapshotPrefix+input.DisplayPath] = fingerprint
+	}
+	return nil
+}
+
+func (collector *devSnapshotCollector) currentEmbedMembership() (map[string]string, error) {
+	roots := map[string]struct{}{}
+	for _, root := range collector.embedPlan.WatchRoots {
+		roots[root] = struct{}{}
+	}
+	if collector.haveRecovery {
+		for _, root := range collector.embedRecovery.WatchRoots {
+			roots[root] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(roots))
+	for root := range roots {
+		ordered = append(ordered, root)
+	}
+	sort.Strings(ordered)
+	return embedWatchMembership(collector.appDir, ordered)
+}
+
+func (collector *devSnapshotCollector) finishEmbedBuild(plan embedInputPlan, succeeded bool, failures ...error) {
+	collector.embedBuildOK = succeeded
+	collector.haveEmbedOutcome = true
+	collector.haveCandidate = false
+	if succeeded && plan.Resolved {
+		collector.embedPlan = plan
+		collector.embedRecovery = embedInputPlan{}
+		collector.haveRecovery = false
+		collector.embedRecoveryErr = nil
+		collector.embedMembership = cloneStringMap(plan.WatchMembership)
+		return
+	}
+	if !plan.Resolved && len(plan.WatchRoots) > 0 {
+		collector.embedRecovery = plan
+		collector.haveRecovery = true
+		collector.embedMembership = collector.mergedEmbedMembership(plan)
+		if len(failures) > 0 {
+			collector.embedRecoveryErr = failures[0]
+		}
+	} else if plan.Resolved {
+		collector.embedRecovery = embedInputPlan{}
+		collector.haveRecovery = false
+		collector.embedRecoveryErr = nil
+		membership := map[string]string{}
+		for _, root := range collector.embedPlan.WatchRoots {
+			if fingerprint, ok := plan.WatchMembership[root]; ok {
+				membership[root] = fingerprint
+			} else if fingerprint, ok := collector.embedMembership[root]; ok {
+				membership[root] = fingerprint
+			} else if fingerprint, ok := collector.embedPlan.WatchMembership[root]; ok {
+				membership[root] = fingerprint
+			}
+		}
+		collector.embedMembership = membership
+	}
+}
+
+func (collector *devSnapshotCollector) reconcileEmbedSnapshot(snapshot devSnapshot) devSnapshot {
+	committed := make(map[string]embedInputFile, len(collector.embedPlan.Files))
+	for _, input := range collector.embedPlan.Files {
+		committed[devEmbedSnapshotPrefix+input.DisplayPath] = input
+	}
+	for path := range snapshot.files {
+		if !strings.HasPrefix(path, devEmbedSnapshotPrefix) {
+			continue
+		}
+		if _, ok := committed[path]; !ok || (collector.haveEmbedOutcome && collector.embedBuildOK) {
+			delete(snapshot.files, path)
+		}
+	}
+	if !collector.haveEmbedOutcome || collector.embedBuildOK {
+		for path, input := range committed {
+			snapshot.files[path] = input.Fingerprint
+		}
+	}
+	collector.haveEmbedOutcome = false
+	return snapshot
+}
+
+func (collector *devSnapshotCollector) mergedEmbedMembership(additional embedInputPlan) map[string]string {
+	merged := cloneStringMap(collector.embedPlan.WatchMembership)
+	for root, fingerprint := range additional.WatchMembership {
+		merged[root] = fingerprint
+	}
+	return merged
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func stringMapsEqual(first, second map[string]string) bool {
+	if len(first) != len(second) {
+		return false
+	}
+	for key, value := range first {
+		if second[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func (collector *devSnapshotCollector) collectRetainedAssets(snapshot *devSnapshot, scanErr error) error {
@@ -664,27 +903,34 @@ func (collector *devSnapshotCollector) collectAssetDirectory(snapshot *devSnapsh
 }
 
 func (collector *devSnapshotCollector) collectFile(snapshot *devSnapshot, file string, allowMissing bool) error {
+	fingerprint, err := collector.fileFingerprint(file, allowMissing)
+	if err != nil {
+		return err
+	}
+	snapshot.files[collector.displayPath(file)] = fingerprint
+	return nil
+}
+
+func (collector *devSnapshotCollector) fileFingerprint(file string, allowMissing bool) (string, error) {
 	info, err := os.Lstat(file)
 	if errors.Is(err, os.ErrNotExist) && allowMissing {
-		snapshot.files[collector.displayPath(file)] = "missing"
-		return nil
+		return "missing", nil
 	}
 	if err != nil {
-		return fmt.Errorf("inspect watched input %s: %w", file, err)
+		return "", fmt.Errorf("inspect watched input %s: %w", file, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("watched input %s is a symlink; symlink paths are not supported", file)
+		return "", fmt.Errorf("watched input %s is a symlink; symlink paths are not supported", file)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("watched input %s is not a regular file", file)
+		return "", fmt.Errorf("watched input %s is not a regular file", file)
 	}
 	content, err := os.ReadFile(file)
 	if err != nil {
-		return fmt.Errorf("read watched input %s: %w", file, err)
+		return "", fmt.Errorf("read watched input %s: %w", file, err)
 	}
 	sum := sha256.Sum256(content)
-	snapshot.files[collector.displayPath(file)] = "sha256:" + hex.EncodeToString(sum[:])
-	return nil
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func (collector *devSnapshotCollector) displayPath(file string) string {
@@ -696,14 +942,15 @@ func (collector *devSnapshotCollector) displayPath(file string) string {
 }
 
 type devCoordinatorConfig struct {
-	scan         func() (devSnapshot, error)
-	build        func(devBuildRequest) error
-	serverErrors <-chan error
-	pollInterval time.Duration
-	debounce     time.Duration
-	stdout       io.Writer
-	stderr       io.Writer
-	hooks        devHooks
+	scan              func() (devSnapshot, error)
+	build             func(devBuildRequest) error
+	serverErrors      <-chan error
+	pollInterval      time.Duration
+	debounce          time.Duration
+	stdout            io.Writer
+	stderr            io.Writer
+	hooks             devHooks
+	reconcileSnapshot func(devSnapshot) devSnapshot
 }
 
 type devBuildableScanError struct {
@@ -759,11 +1006,15 @@ func runDevCoordinator(ctx context.Context, config devCoordinatorConfig) error {
 		if initial {
 			changed = nil
 		}
-		return runDevBuild(config, devBuildRequest{
+		err := runDevBuild(config, devBuildRequest{
 			Number:  buildNumber,
 			Initial: initial,
 			Changed: changed,
 		})
+		if config.reconcileSnapshot != nil {
+			lastAttempted = config.reconcileSnapshot(lastAttempted)
+		}
+		return err
 	}
 	if devScanAllowsBuild(scanErr) {
 		if err := attemptBuild(initialSnapshot, nil); err != nil {

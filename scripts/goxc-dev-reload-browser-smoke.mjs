@@ -36,6 +36,8 @@ const counters = {
     reloadEventsPublished: 0,
     catchUpReloads: 0,
     previousProcessCatchUpReloads: 0,
+    embedReloads: 0,
+    embedFailedAttempts: 0,
     publicationProbeBatches: 0,
     completeResponsesDuringBuild: 0,
     oldGenerationIndexResponses: 0,
@@ -92,7 +94,7 @@ try {
     client1 = await connect(initialTarget.webSocketDebuggerUrl);
     await prepareClient(client1);
     await navigate(client1, `${serverURL}/?smoke=initial`);
-    const initial = await waitForPageState(client1, { gox: "gox-initial", go: "go-initial", index: "index-initial" });
+    const initial = await waitForPageState(client1, { gox: "gox-initial", go: "go-initial", index: "index-initial", embedded: "embed-alpha" });
     assert(initial.pageLoads === 1, `initial page loads = ${initial.pageLoads}, want 1`);
     assert(initial.generation === 1, `initial generation = ${initial.generation}, want 1`);
     assert(/^[0-9a-f]{32}$/.test(initial.instance), `initial process instance = ${JSON.stringify(initial.instance)}, want a 32-character hex token`);
@@ -149,7 +151,6 @@ try {
     const burstStart = lines.length;
     for (const value of ["burst-one", "burst-two", "burst-final"]) {
         await writeGOX(value);
-        await wait(20);
     }
     await waitForBuild(nextBuild, "succeeded", burstStart);
     await assertSuccessfulReload(client1, burstBaseline, { gox: "burst-final", go: "go-rebuild", index: "index-rebuild" }, ++activeGeneration);
@@ -182,6 +183,47 @@ try {
     recordSuccessfulReload();
     nextBuild++;
     console.log("failed build recovery reload: ok");
+
+    const embedBaseline = await pageState(client1);
+    await writeEmbeddedMessage("embed-beta");
+    await waitForBuild(nextBuild, "succeeded");
+    await assertSuccessfulReload(client1, embedBaseline, {
+        gox: "recovered",
+        go: "go-rebuild",
+        index: "index-rebuild",
+        embedded: "embed-beta",
+    }, ++activeGeneration);
+    counters.embedReloads++;
+    recordSuccessfulReload();
+    nextBuild++;
+    console.log("embedded payload reload: ok");
+
+    const removedEmbedBaseline = await pageState(client1);
+    await rm(join(appDir, "embedded-message.txt"));
+    await waitForBuild(nextBuild, "failed");
+    counters.failedPackageAttempts++;
+    counters.embedFailedAttempts++;
+    nextBuild++;
+    await wait(250);
+    const afterEmbedRemoval = await pageState(client1);
+    assert(afterEmbedRemoval.pageLoads === removedEmbedBaseline.pageLoads
+        && afterEmbedRemoval.reloadEvents === removedEmbedBaseline.reloadEvents,
+        `removed embedded payload reloaded the browser: ${JSON.stringify({ removedEmbedBaseline, afterEmbedRemoval })}`);
+    assert(afterEmbedRemoval.embedded === "embed-beta", `removed embedded payload changed the active page: ${JSON.stringify(afterEmbedRemoval)}`);
+    console.log("embedded payload removal preservation: ok");
+
+    await writeEmbeddedMessage("embed-gamma");
+    await waitForBuild(nextBuild, "succeeded");
+    await assertSuccessfulReload(client1, afterEmbedRemoval, {
+        gox: "recovered",
+        go: "go-rebuild",
+        index: "index-rebuild",
+        embedded: "embed-gamma",
+    }, ++activeGeneration);
+    counters.embedReloads++;
+    recordSuccessfulReload();
+    nextBuild++;
+    console.log("embedded payload recovery reload: ok");
 
     const secondTarget = await client1.call("Target.createTarget", { url: "about:blank" });
     const target = await waitForTarget(debugPort, secondTarget.targetId);
@@ -298,6 +340,8 @@ try {
     console.log(`reload events received by client 2: ${client2Final.reloadEvents}`);
     console.log(`catch-up reloads: ${counters.catchUpReloads}`);
     console.log(`previous-process catch-up reloads: ${counters.previousProcessCatchUpReloads}`);
+    console.log(`embedded payload reloads: ${counters.embedReloads}`);
+    console.log(`embedded payload failed attempts: ${counters.embedFailedAttempts}`);
     console.log("connected subscribers at shutdown: 0");
     console.log(`publication probe batches: ${counters.publicationProbeBatches}`);
     console.log(`complete responses during rebuild: ${counters.completeResponsesDuringBuild}`);
@@ -334,17 +378,23 @@ async function writeApplication(gox, go, index) {
     await writeFile(join(appDir, "goframe.json"), `{"name":"dev-reload-smoke","entry":".","compiler":"go","assets":"assets"}\n`);
     await writeFile(join(appDir, "main.go"), `//go:build js && wasm\n\npackage main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc main() {\n    done := make(chan struct{})\n    gf.Mount("root", App)\n    <-done\n}\n`);
     await writeGoMessage(go);
+    await writeFile(join(appDir, "embedded.go"), `package main\n\nimport _ "embed"\n\n//go:embed embedded-message.txt\nvar embeddedMessage string\n`);
+    await writeEmbeddedMessage("embed-alpha");
     await writeGOX(gox);
     await writeIndex(index);
     await writeFile(join(appDir, "assets", "marker.txt"), "complete asset\n");
 }
 
 async function writeGOX(value) {
-    await writeFile(join(appDir, "app.gox"), `package main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc App() gf.Node {\n    return <main id="app-version"><span id="gox-version">${value}</span><span id="go-version">{message()}</span></main>\n}\n`);
+    await writeFile(join(appDir, "app.gox"), `package main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc App() gf.Node {\n    return <main id="app-version"><span id="gox-version">${value}</span><span id="go-version">{message()}</span><span id="embedded-value">{embeddedMessage}</span></main>\n}\n`);
 }
 
 async function writeGoMessage(value) {
     await writeFile(join(appDir, "message.go"), `package main\n\nfunc message() string { return ${JSON.stringify(value)} }\n`);
+}
+
+async function writeEmbeddedMessage(value) {
+    await writeFile(join(appDir, "embedded-message.txt"), value);
 }
 
 async function writeIndex(value) {
@@ -408,6 +458,7 @@ async function pageState(client) {
             readyState: document.readyState,
             gox: document.querySelector("#gox-version")?.textContent || "",
             go: document.querySelector("#go-version")?.textContent || "",
+            embedded: document.querySelector("#embedded-value")?.textContent || "",
             index: document.querySelector("#index-version")?.textContent || "",
             pageLoads: Number(sessionStorage.getItem("goframe-dev-page-loads") || "0"),
             reloadEvents: Number(sessionStorage.getItem("goframe-dev-reload-events") || "0"),

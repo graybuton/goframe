@@ -18,9 +18,10 @@ import (
 )
 
 type embedInputPlan struct {
-	Files      []embedInputFile
-	WatchRoots []string
-	Resolved   bool
+	Files           []embedInputFile
+	WatchRoots      []string
+	WatchMembership map[string]string
+	Resolved        bool
 }
 
 type embedInputFile struct {
@@ -66,14 +67,18 @@ func discoverAndMaterializeEmbedInputs(layout BuildLayout, appWorkDir, entryPath
 		}
 	}
 	inputs, plan, planErr := resolveEmbedInputPlan(layout.AppDir, appWorkDir, replacements, packages)
+	membershipErr := populateEmbedWatchMembership(layout.AppDir, &plan)
 	if planErr != nil {
-		return plan, errors.Join(listErr, planErr)
+		return plan, errors.Join(listErr, planErr, membershipErr)
 	}
 	if metadataErr := embedPackageMetadataError(packages); metadataErr != nil {
-		return plan, errors.Join(listErr, metadataErr)
+		return plan, errors.Join(listErr, metadataErr, membershipErr)
 	}
 	if listErr != nil {
-		return plan, listErr
+		return plan, errors.Join(listErr, membershipErr)
+	}
+	if membershipErr != nil {
+		return plan, membershipErr
 	}
 	for _, input := range inputs {
 		if !input.copy {
@@ -422,4 +427,118 @@ func embedPackageMetadataError(packages []embedListPackage) error {
 		return nil
 	}
 	return fmt.Errorf("resolve go:embed inputs: %w", errors.Join(failures...))
+}
+
+func populateEmbedWatchMembership(appDir string, plan *embedInputPlan) error {
+	membership, err := embedWatchMembership(appDir, plan.WatchRoots)
+	plan.WatchMembership = membership
+	return err
+}
+
+func embedWatchMembership(appDir string, roots []string) (map[string]string, error) {
+	membership := make(map[string]string, len(roots))
+	for _, root := range roots {
+		fingerprint, err := embedWatchRootFingerprint(appDir, root)
+		if err != nil {
+			return membership, err
+		}
+		membership[root] = fingerprint
+	}
+	return membership, nil
+}
+
+func embedWatchRootFingerprint(appDir, root string) (string, error) {
+	if err := validatePathBelowRoot(appDir, root, "embed watch root", true); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("inspect embed watch root %s: %w", root, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("embed watch root %s is a symlink; symlink paths are not supported", root)
+	}
+	if !info.IsDir() {
+		return "not-directory:" + info.Mode().Type().String(), nil
+	}
+	hash := sha256.New()
+	err = filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("inspect embed watch input %s: %w", current, walkErr)
+		}
+		if current != root {
+			relativeToApp, err := filepath.Rel(appDir, current)
+			if err != nil {
+				return fmt.Errorf("resolve embed watch input %s: %w", current, err)
+			}
+			if shouldSkipEmbedCandidate(relativeToApp, entry) {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return fmt.Errorf("resolve embed watch input %s: %w", current, err)
+		}
+		kind := entry.Type().String()
+		if entry.IsDir() {
+			kind = "directory"
+		} else if entry.Type().IsRegular() {
+			kind = "file"
+		} else if entry.Type()&os.ModeSymlink != 0 {
+			kind = "symlink"
+		}
+		_, _ = fmt.Fprintf(hash, "%s\x00%s\n", filepath.ToSlash(relative), kind)
+		if current != root && entry.IsDir() && nestedModuleBoundary(current) {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func embedInputPlansEqual(first, second embedInputPlan) bool {
+	if len(first.Files) != len(second.Files) {
+		return false
+	}
+	for index := range first.Files {
+		if first.Files[index].DisplayPath != second.Files[index].DisplayPath ||
+			first.Files[index].Fingerprint != second.Files[index].Fingerprint {
+			return false
+		}
+	}
+	return true
+}
+
+func resolveCurrentEmbedInputPlan(options packageOptions) (embedInputPlan, error) {
+	manifest, err := loadManifest(options.appDir)
+	if err != nil {
+		return embedInputPlan{}, err
+	}
+	compiler := options.compiler
+	if compiler == "" {
+		compiler = manifest.Compiler
+	}
+	if err := validateCompiler(compiler); err != nil {
+		return embedInputPlan{}, err
+	}
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    options.appDir,
+		compiler:  compiler,
+		profile:   packageProfile(options.assetHash, options.preload, options.compress),
+		workspace: options.workspace,
+	})
+	if err != nil {
+		return embedInputPlan{}, err
+	}
+	result, err := prepareBuildWorkspaceResult(layout, manifest)
+	return result.EmbedPlan, err
 }

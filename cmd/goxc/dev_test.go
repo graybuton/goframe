@@ -319,6 +319,218 @@ func TestDevSnapshotExplicitAssetDirectoryRejectsNonDirectory(t *testing.T) {
 	}
 }
 
+func TestDevSnapshotWatchesCommittedEmbedContentOnly(t *testing.T) {
+	appDir := newDevEmbedTestApp(t)
+	writeTestFile(t, appDir, "templates/message.txt", "alpha")
+	writeTestFile(t, appDir, "notes.txt", "unrelated one")
+	collector := newDevSnapshotCollector(appDir)
+	plan := devEmbedTestPlan(t, appDir, []string{"templates"}, "templates/message.txt")
+	collector.finishEmbedBuild(plan, true)
+
+	initial, err := collector.collect()
+	if err != nil {
+		t.Fatalf("initial collect() error: %v", err)
+	}
+	writeTestFile(t, appDir, "notes.txt", "unrelated two")
+	unrelated, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after unrelated edit: %v", err)
+	}
+	if !devSnapshotsEqual(initial, unrelated) {
+		t.Fatalf("unrelated file changed effective snapshot: %#v", diffDevSnapshots(initial, unrelated))
+	}
+
+	writeTestFile(t, appDir, "templates/message.txt", "beta")
+	changed, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after embedded edit: %v", err)
+	}
+	assertDevChangedPath(t, unrelated, changed, devEmbedSnapshotPrefix+"templates/message.txt")
+}
+
+func TestDevSnapshotRefreshesEmbedMembershipWithoutFalseBuilds(t *testing.T) {
+	appDir := newDevEmbedTestApp(t)
+	writeTestFile(t, appDir, "templates/one.txt", "one")
+	collector := newDevSnapshotCollector(appDir)
+	committed := devEmbedTestPlan(t, appDir, []string{"templates"}, "templates/one.txt")
+	collector.finishEmbedBuild(committed, true)
+
+	resolved := committed
+	refreshes := 0
+	collector.resolveEmbedPlan = func() (embedInputPlan, error) {
+		refreshes++
+		return resolved, nil
+	}
+	initial, err := collector.collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, appDir, "templates/ignored.bin", "ignored")
+	resolved = devEmbedTestPlan(t, appDir, []string{"templates"}, "templates/one.txt")
+	unmatched, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after unmatched creation: %v", err)
+	}
+	if refreshes != 1 {
+		t.Fatalf("metadata refreshes = %d, want 1", refreshes)
+	}
+	if !devSnapshotsEqual(initial, unmatched) {
+		t.Fatalf("unmatched file changed effective snapshot: %#v", diffDevSnapshots(initial, unmatched))
+	}
+
+	writeTestFile(t, appDir, "templates/two.txt", "two")
+	resolved = devEmbedTestPlan(t, appDir, []string{"templates"}, "templates/one.txt", "templates/two.txt")
+	matching, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after matching creation: %v", err)
+	}
+	if refreshes != 2 {
+		t.Fatalf("metadata refreshes = %d, want 2", refreshes)
+	}
+	assertDevChangedPath(t, unmatched, matching, devEmbedSnapshotPrefix+"templates/two.txt")
+
+	collector.finishEmbedBuild(resolved, false)
+	reconciled := collector.reconcileEmbedSnapshot(matching)
+	afterFailure, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after failed candidate build: %v", err)
+	}
+	if !devSnapshotsEqual(reconciled, afterFailure) {
+		t.Fatalf("failed build did not return to committed plan: %#v", diffDevSnapshots(reconciled, afterFailure))
+	}
+	if len(collector.embedPlan.Files) != 1 {
+		t.Fatalf("failed build published candidate plan: %#v", collector.embedPlan.Files)
+	}
+
+	collector.finishEmbedBuild(resolved, true)
+	reconciled = collector.reconcileEmbedSnapshot(afterFailure)
+	if _, ok := reconciled.files[devEmbedSnapshotPrefix+"templates/two.txt"]; !ok {
+		t.Fatalf("successful plan did not publish second input: %#v", reconciled.paths())
+	}
+}
+
+func TestDevSnapshotEmbedRemovalAndRestoration(t *testing.T) {
+	appDir := newDevEmbedTestApp(t)
+	writeTestFile(t, appDir, "message.txt", "alpha")
+	collector := newDevSnapshotCollector(appDir)
+	committed := devEmbedTestPlan(t, appDir, []string{"."}, "message.txt")
+	collector.finishEmbedBuild(committed, true)
+	initial, err := collector.collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var resolved embedInputPlan
+	var resolveErr error
+	collector.resolveEmbedPlan = func() (embedInputPlan, error) {
+		return resolved, resolveErr
+	}
+	if err := os.Remove(filepath.Join(appDir, "message.txt")); err != nil {
+		t.Fatal(err)
+	}
+	resolved = devEmbedTestPlan(t, appDir, []string{"."})
+	resolved.Resolved = false
+	resolveErr = errors.New("pattern message.txt: no matching files found")
+	missing, err := collector.collect()
+	var buildable devBuildableScanError
+	if !errors.As(err, &buildable) || !strings.Contains(err.Error(), "no matching files") {
+		t.Fatalf("collect() removal error = %v, want buildable no-match error", err)
+	}
+	assertDevChangedPath(t, initial, missing, devEmbedSnapshotPrefix+"message.txt")
+	if got := missing.files[devEmbedSnapshotPrefix+"message.txt"]; got != "missing" {
+		t.Fatalf("removed embed fingerprint = %q, want missing", got)
+	}
+	collector.finishEmbedBuild(resolved, false)
+	missing = collector.reconcileEmbedSnapshot(missing)
+
+	writeTestFile(t, appDir, "message.txt", "gamma")
+	resolved = devEmbedTestPlan(t, appDir, []string{"."}, "message.txt")
+	resolveErr = nil
+	restored, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() restoration error: %v", err)
+	}
+	assertDevChangedPath(t, missing, restored, devEmbedSnapshotPrefix+"message.txt")
+	if collector.embedPlan.Files[0].Fingerprint != committed.Files[0].Fingerprint {
+		t.Fatal("restoration candidate changed the committed plan before a successful build")
+	}
+}
+
+func TestDevSnapshotEmbedPlanPublicationAndSymlinkSafety(t *testing.T) {
+	appDir := newDevEmbedTestApp(t)
+	writeTestFile(t, appDir, "internal/content/first.txt", "first")
+	writeTestFile(t, appDir, "internal/content/second.txt", "second")
+	collector := newDevSnapshotCollector(appDir)
+	first := devEmbedTestPlan(t, appDir, []string{"internal/content"}, "internal/content/first.txt")
+	second := devEmbedTestPlan(t, appDir, []string{"internal/content"}, "internal/content/second.txt")
+	collector.finishEmbedBuild(first, true)
+	collector.finishEmbedBuild(second, false)
+	if got := collector.embedPlan.Files[0].DisplayPath; got != "internal/content/first.txt" {
+		t.Fatalf("failed build published %q, want first plan", got)
+	}
+	collector.finishEmbedBuild(second, true)
+	if got := collector.embedPlan.Files[0].DisplayPath; got != "internal/content/second.txt" {
+		t.Fatalf("successful build retained %q, want second plan", got)
+	}
+
+	requireSymlinkSupport(t)
+	external := filepath.Join(t.TempDir(), "outside.txt")
+	writeTestFile(t, filepath.Dir(external), filepath.Base(external), "external secret")
+	local := filepath.Join(appDir, "internal", "content", "second.txt")
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, local); err != nil {
+		t.Fatal(err)
+	}
+	collector.resolveEmbedPlan = func() (embedInputPlan, error) {
+		return embedInputPlan{}, errors.New("symlinked embed input")
+	}
+	_, err := collector.collect()
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("collect() symlink error = %v", err)
+	}
+}
+
+func newDevEmbedTestApp(t *testing.T) string {
+	t.Helper()
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, manifestName, `{"compiler":"go"}`)
+	writeTestFile(t, appDir, "main.go", "package main\n\nfunc main() {}\n")
+	writeTestFile(t, appDir, indexHTMLAssetName, "<main>embed test</main>")
+	return appDir
+}
+
+func devEmbedTestPlan(t *testing.T, appDir string, roots []string, files ...string) embedInputPlan {
+	t.Helper()
+	collector := newDevSnapshotCollector(appDir)
+	plan := embedInputPlan{Resolved: true}
+	for _, root := range roots {
+		plan.WatchRoots = append(plan.WatchRoots, filepath.Join(appDir, filepath.FromSlash(root)))
+	}
+	for _, relative := range files {
+		path := filepath.Join(appDir, filepath.FromSlash(relative))
+		fingerprint, err := collector.fileFingerprint(path, true)
+		if err != nil {
+			t.Fatalf("fingerprint %s: %v", relative, err)
+		}
+		plan.Files = append(plan.Files, embedInputFile{
+			SourcePath:  path,
+			DisplayPath: filepath.ToSlash(relative),
+			Fingerprint: fingerprint,
+		})
+	}
+	sort.Slice(plan.Files, func(first, second int) bool {
+		return plan.Files[first].DisplayPath < plan.Files[second].DisplayPath
+	})
+	sort.Strings(plan.WatchRoots)
+	if err := populateEmbedWatchMembership(appDir, &plan); err != nil {
+		t.Fatalf("populate embed watch membership: %v", err)
+	}
+	return plan
+}
+
 func TestDevSnapshotUsesLastAssetsDuringMalformedManifest(t *testing.T) {
 	appDir := t.TempDir()
 	writeTestFile(t, appDir, manifestName, `{"compiler":"go","assets":"assets"}`)
