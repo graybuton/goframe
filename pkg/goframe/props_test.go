@@ -26,6 +26,7 @@ func TestSplitPropsContract(t *testing.T) {
 		"data-count":        42,
 		"data-ratio":        3.5,
 		"aria-expanded":     true,
+		"aria-hidden":       false,
 		"data-unsupported":  struct{ label string }{"unsupported"},
 		"data-bool-skipped": false,
 	})
@@ -41,7 +42,8 @@ func TestSplitPropsContract(t *testing.T) {
 		"disabled":         {boolean: true},
 		"data-count":       {value: "42"},
 		"data-ratio":       {value: "3.5"},
-		"aria-expanded":    {boolean: true},
+		"aria-expanded":    {value: "true"},
+		"aria-hidden":      {value: "false"},
 		"data-unsupported": {},
 	}
 	if len(dom) != len(wantDOM) {
@@ -69,6 +71,127 @@ func TestSplitPropsContract(t *testing.T) {
 	}
 	if _, exists := events.get("change"); exists {
 		t.Fatalf("events[change] should be absent")
+	}
+}
+
+func TestSplitPropsSerializesARIABooleanValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		prop  string
+		value bool
+		want  string
+	}{
+		{name: "expanded true", prop: "aria-expanded", value: true, want: "true"},
+		{name: "expanded false", prop: "aria-expanded", value: false, want: "false"},
+		{name: "hidden true", prop: "aria-hidden", value: true, want: "true"},
+		{name: "hidden false", prop: "aria-hidden", value: false, want: "false"},
+		{name: "invalid true", prop: "aria-invalid", value: true, want: "true"},
+		{name: "invalid false", prop: "aria-invalid", value: false, want: "false"},
+		{name: "upper prefix", prop: "ARIA-expanded", value: false, want: "false"},
+		{name: "title prefix", prop: "Aria-hidden", value: true, want: "true"},
+		{name: "mixed prefix", prop: "aRiA-invalid", value: false, want: "false"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dom, events := splitProps(Props{test.prop: test.value})
+			if len(dom) != 1 {
+				t.Fatalf("dom = %#v, want exactly one prop", dom)
+			}
+			if len(events) != 0 {
+				t.Fatalf("events = %#v, want empty", events)
+			}
+			got, ok := dom.get(test.prop)
+			if !ok {
+				t.Fatalf("dom[%q] absent; dom = %#v", test.prop, dom)
+			}
+			if got != (domProp{value: test.want}) {
+				t.Fatalf("dom[%q] = %#v, want %#v", test.prop, got, domProp{value: test.want})
+			}
+			if got.boolean {
+				t.Fatalf("dom[%q].boolean = true, want false", test.prop)
+			}
+		})
+	}
+}
+
+func TestSplitPropsARIAPrefixBoundariesUseGenericBooleanSemantics(t *testing.T) {
+	for _, prop := range []string{"aria", "aria-", "ariax-expanded", "xaria-expanded"} {
+		t.Run(prop+" true", func(t *testing.T) {
+			dom, events := splitProps(Props{prop: true})
+			if len(events) != 0 {
+				t.Fatalf("events = %#v, want empty", events)
+			}
+			if got, ok := dom.get(prop); !ok || got != (domProp{boolean: true}) {
+				t.Fatalf("dom[%q] = %#v, %v; want presence boolean", prop, got, ok)
+			}
+		})
+
+		t.Run(prop+" false", func(t *testing.T) {
+			dom, events := splitProps(Props{prop: false})
+			if len(dom) != 0 {
+				t.Fatalf("dom = %#v, want empty", dom)
+			}
+			if len(events) != 0 {
+				t.Fatalf("events = %#v, want empty", events)
+			}
+		})
+	}
+}
+
+func TestSplitPropsPreservesNonARIABooleanSemantics(t *testing.T) {
+	for _, prop := range []string{"disabled", "checked", "selected", "hidden", "data-flag", "custom-flag"} {
+		t.Run(prop+" true", func(t *testing.T) {
+			dom, events := splitProps(Props{prop: true})
+			if len(events) != 0 {
+				t.Fatalf("events = %#v, want empty", events)
+			}
+			if got, ok := dom.get(prop); !ok || got != (domProp{boolean: true}) {
+				t.Fatalf("dom[%q] = %#v, %v; want presence boolean", prop, got, ok)
+			}
+		})
+
+		t.Run(prop+" false", func(t *testing.T) {
+			dom, events := splitProps(Props{prop: false})
+			if len(dom) != 0 {
+				t.Fatalf("dom = %#v, want empty", dom)
+			}
+			if len(events) != 0 {
+				t.Fatalf("events = %#v, want empty", events)
+			}
+		})
+	}
+
+	dom, events := splitProps(Props{"OnChange": false})
+	if len(dom) != 0 || len(events) != 0 {
+		t.Fatalf("false event split = %#v, %#v; want empty", dom, events)
+	}
+}
+
+func TestSplitPropsPreservesNonBooleanARIAValues(t *testing.T) {
+	dom, events := splitProps(Props{
+		"aria-current":  "page",
+		"aria-checked":  "mixed",
+		"aria-rowindex": 3,
+		"aria-label":    "Save",
+	})
+
+	want := map[string]domProp{
+		"aria-current":  {value: "page"},
+		"aria-checked":  {value: "mixed"},
+		"aria-rowindex": {value: "3"},
+		"aria-label":    {value: "Save"},
+	}
+	if len(dom) != len(want) {
+		t.Fatalf("dom = %#v, want %d props", dom, len(want))
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want empty", events)
+	}
+	for name, wantProp := range want {
+		if got, ok := dom.get(name); !ok || got != wantProp {
+			t.Fatalf("dom[%q] = %#v, %v; want %#v, true", name, got, ok, wantProp)
+		}
 	}
 }
 
