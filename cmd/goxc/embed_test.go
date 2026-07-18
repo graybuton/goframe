@@ -1,0 +1,492 @@
+package main
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+)
+
+func TestEmbedMaterializationUsesGoToolSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		files   map[string]string
+		want    []string
+		absent  []string
+		wantErr string
+	}{
+		{
+			name:   "single file",
+			source: embedStringSource("message.txt"),
+			files:  map[string]string{"message.txt": "hello"},
+			want:   []string{"message.txt"},
+		},
+		{
+			name:   "multiple patterns",
+			source: embedFSSource("templates/*.txt config/app.json"),
+			files: map[string]string{
+				"templates/first.txt":  "first",
+				"templates/second.txt": "second",
+				"templates/skip.html":  "skip",
+				"config/app.json":      `{}`,
+			},
+			want:   []string{"config/app.json", "templates/first.txt", "templates/second.txt"},
+			absent: []string{"templates/skip.html"},
+		},
+		{
+			name: "repeated directives",
+			source: `package main
+
+import "embed"
+
+//go:embed first.txt
+//go:embed second.txt
+var files embed.FS
+
+func main() { _ = files }
+`,
+			files: map[string]string{"first.txt": "first", "second.txt": "second"},
+			want:  []string{"first.txt", "second.txt"},
+		},
+		{
+			name:   "quoted filename",
+			source: embedStringSource(`"hello world.txt"`),
+			files:  map[string]string{"hello world.txt": "hello"},
+			want:   []string{"hello world.txt"},
+		},
+		{
+			name:   "directory default exclusions",
+			source: embedFSSource("templates"),
+			files: map[string]string{
+				"templates/visible.txt":        "visible",
+				"templates/nested/data.txt":    "nested",
+				"templates/.hidden.txt":        "hidden",
+				"templates/_private.txt":       "private",
+				"templates/nested/.hidden.txt": "nested hidden",
+			},
+			want: []string{"templates/nested/data.txt", "templates/visible.txt"},
+			absent: []string{
+				"templates/.hidden.txt",
+				"templates/_private.txt",
+				"templates/nested/.hidden.txt",
+			},
+		},
+		{
+			name:   "all directory includes hidden names",
+			source: embedFSSource("all:templates"),
+			files: map[string]string{
+				"templates/visible.txt":  "visible",
+				"templates/.hidden.txt":  "hidden",
+				"templates/_private.txt": "private",
+			},
+			want: []string{"templates/.hidden.txt", "templates/_private.txt", "templates/visible.txt"},
+		},
+		{
+			name:   "overlapping patterns deduplicate",
+			source: embedFSSource("templates/*.txt templates/one.txt"),
+			files:  map[string]string{"templates/one.txt": "one", "templates/two.txt": "two"},
+			want:   []string{"templates/one.txt", "templates/two.txt"},
+		},
+		{
+			name:    "no match",
+			source:  embedStringSource("missing.txt"),
+			wantErr: "pattern missing.txt: no matching files found",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := newEmbedTestApp(t, test.source, test.files)
+			layout := newEmbedTestLayout(t, appDir, "go", "")
+			result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("prepareBuildWorkspaceResult() error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+			}
+			got := embedPlanPaths(result.EmbedPlan)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("embed plan = %#v, want %#v", got, test.want)
+			}
+			for _, relative := range test.want {
+				workspacePath := filepath.Join(layout.WorkDir, filepath.FromSlash(relative))
+				gotContent, readErr := os.ReadFile(workspacePath)
+				if readErr != nil {
+					t.Fatalf("read materialized %s: %v", relative, readErr)
+				}
+				if string(gotContent) != test.files[relative] {
+					t.Fatalf("materialized %s = %q, want %q", relative, gotContent, test.files[relative])
+				}
+			}
+			for _, relative := range test.absent {
+				if _, statErr := os.Stat(filepath.Join(layout.WorkDir, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+					t.Fatalf("unmatched input %s was materialized: %v", relative, statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestEmbedDiscoveryUsesBrowserBuildConstraints(t *testing.T) {
+	appDir := newEmbedTestApp(t, `package main
+
+func main() {}
+`, map[string]string{
+		"active.txt": "active",
+	})
+	writeTestFile(t, appDir, "browser.go", `//go:build js && wasm
+
+package main
+
+import _ "embed"
+
+//go:embed active.txt
+var active string
+`)
+	writeTestFile(t, appDir, "host.go", `//go:build linux
+
+package main
+
+import _ "embed"
+
+//go:embed missing-host.txt
+var host string
+`)
+
+	layout := newEmbedTestLayout(t, appDir, "go", "")
+	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if got, want := embedPlanPaths(result.EmbedPlan), []string{"active.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+}
+
+func TestEmbedDiscoveryUsesTinyGoBuildConstraint(t *testing.T) {
+	if _, err := exec.LookPath("tinygo"); err != nil {
+		t.Skip("TinyGo is not available")
+	}
+	appDir := newEmbedTestApp(t, `package main
+
+func main() {}
+`, map[string]string{"tiny.txt": "tiny"})
+	writeTestFile(t, appDir, "tiny.go", `//go:build tinygo
+
+package main
+
+import _ "embed"
+
+//go:embed tiny.txt
+var tiny string
+`)
+	layout := newEmbedTestLayout(t, appDir, "tinygo", "")
+	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("tinygo", "."))
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if got, want := embedPlanPaths(result.EmbedPlan), []string{"tiny.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+}
+
+func TestEmbedDiscoveryFiltersExternalDependencyInputs(t *testing.T) {
+	root := t.TempDir()
+	externalDir := filepath.Join(root, "external")
+	writeTestFile(t, externalDir, "go.mod", "module example.com/external\n\ngo 1.22\n")
+	writeTestFile(t, externalDir, "content.go", `package external
+
+import _ "embed"
+
+//go:embed external.txt
+var Message string
+`)
+	writeTestFile(t, externalDir, "external.txt", "external-secret")
+	appDir := filepath.Join(root, "app")
+	writeTestFile(t, appDir, "go.mod", "module example.com/app\n\ngo 1.22\n\nrequire example.com/external v0.0.0\n\nreplace example.com/external => ../external\n")
+	writeTestFile(t, appDir, "main.go", `package main
+
+import "example.com/external"
+
+func main() { _ = external.Message }
+`)
+	layout := newEmbedTestLayout(t, appDir, "go", "")
+	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if len(result.EmbedPlan.Files) != 0 {
+		t.Fatalf("external embed files entered local plan: %#v", result.EmbedPlan.Files)
+	}
+	if matches, err := filepath.Glob(filepath.Join(layout.WorkDir, "**", "external.txt")); err != nil || len(matches) != 0 {
+		t.Fatalf("external embed file materialized: matches=%#v err=%v", matches, err)
+	}
+}
+
+func TestEmbedWorkspaceBuildsRootAndInternalPackageInputs(t *testing.T) {
+	t.Run("root package", func(t *testing.T) {
+		appDir := newEmbedTestApp(t, embedStringSource("message.txt"), map[string]string{"message.txt": "root payload"})
+		output, err := buildApp(buildOptions{appDir: appDir, compiler: "go"})
+		if err != nil {
+			t.Fatalf("buildApp() error: %v", err)
+		}
+		if _, err := os.Stat(output); err != nil {
+			t.Fatalf("built output missing: %v", err)
+		}
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		assertEmbedFileContent(t, filepath.Join(layout.WorkDir, "message.txt"), "root payload")
+	})
+
+	t.Run("child entry with generated GOX dependency", func(t *testing.T) {
+		appDir := t.TempDir()
+		writeTestFile(t, appDir, "go.mod", "module example.com/multiembed\n\ngo 1.22\n")
+		writeTestFile(t, appDir, "cmd/app/main.go", "package main\n\nfunc main() {}\n")
+		writeTestFile(t, appDir, "cmd/app/app.gox", `package main
+
+import (
+	"example.com/multiembed/internal/content"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func App() gf.Node {
+	return <p>{content.Message}</p>
+}
+`)
+		writeTestFile(t, appDir, "internal/content/content.go", `package content
+
+import _ "embed"
+
+//go:embed payload.txt
+var Message string
+`)
+		writeTestFile(t, appDir, "internal/content/payload.txt", "internal payload")
+		writeTestFile(t, appDir, manifestName, `{"entry":"cmd/app","compiler":"go"}`)
+		output, err := buildApp(buildOptions{appDir: appDir, compiler: "go"})
+		if err != nil {
+			t.Fatalf("buildApp() error: %v", err)
+		}
+		if _, err := os.Stat(output); err != nil {
+			t.Fatalf("built output missing: %v", err)
+		}
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		assertEmbedFileContent(t, filepath.Join(layout.WorkDir, "internal", "content", "payload.txt"), "internal payload")
+	})
+}
+
+func TestEmbedWorkspaceSupportsExternalWorkspace(t *testing.T) {
+	appDir := newEmbedTestApp(t, embedStringSource("message.txt"), map[string]string{"message.txt": "external workspace"})
+	externalBase := t.TempDir()
+	output, err := buildApp(buildOptions{appDir: appDir, compiler: "go", workspace: externalBase})
+	if err != nil {
+		t.Fatalf("buildApp() error: %v", err)
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("built output missing: %v", err)
+	}
+	layout := newEmbedTestLayout(t, appDir, "go", externalBase)
+	assertEmbedFileContent(t, filepath.Join(layout.WorkDir, "message.txt"), "external workspace")
+	if matches, err := filepath.Glob(filepath.Join(layout.WorkspaceRoot, "**", "goxc-embed-overlay-*.json")); err != nil || len(matches) != 0 {
+		t.Fatalf("temporary overlay leaked into workspace: matches=%#v err=%v", matches, err)
+	}
+}
+
+func TestEmbedWorkspaceBuildsWithTinyGo(t *testing.T) {
+	if _, err := exec.LookPath("tinygo"); err != nil {
+		t.Skip("TinyGo is not available")
+	}
+	t.Setenv("GOFLAGS", strings.TrimSpace(os.Getenv("GOFLAGS")+" -buildvcs=false"))
+	appDir := newEmbedTestApp(t, embedStringSource("message.txt"), map[string]string{"message.txt": "tinygo payload"})
+	output, err := buildApp(buildOptions{appDir: appDir, compiler: "tinygo"})
+	if err != nil {
+		t.Fatalf("buildApp() error: %v", err)
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("built output missing: %v", err)
+	}
+	layout := newEmbedTestLayout(t, appDir, "tinygo", "")
+	assertEmbedFileContent(t, filepath.Join(layout.WorkDir, "message.txt"), "tinygo payload")
+}
+
+func TestEmbedMaterializationRejectsUnsafeInputs(t *testing.T) {
+	t.Run("symlinked file", func(t *testing.T) {
+		appDir := newEmbedTestApp(t, embedStringSource("message.txt"), nil)
+		external := filepath.Join(t.TempDir(), "outside.txt")
+		writeTestFile(t, filepath.Dir(external), filepath.Base(external), "outside-secret")
+		if err := os.Symlink(external, filepath.Join(appDir, "message.txt")); err != nil {
+			t.Skipf("symlink creation is unavailable: %v", err)
+		}
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		_, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+		if err == nil {
+			t.Fatal("prepareBuildWorkspaceResult() succeeded for symlinked embedded input")
+		}
+		if content, readErr := os.ReadFile(filepath.Join(layout.WorkDir, "message.txt")); readErr == nil && string(content) == "outside-secret" {
+			t.Fatal("external symlink target was copied")
+		}
+	})
+
+	t.Run("symlinked directory", func(t *testing.T) {
+		appDir := newEmbedTestApp(t, embedFSSource("templates"), nil)
+		external := t.TempDir()
+		writeTestFile(t, external, "outside.txt", "outside-secret")
+		if err := os.Symlink(external, filepath.Join(appDir, "templates")); err != nil {
+			t.Skipf("symlink creation is unavailable: %v", err)
+		}
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		if _, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", ".")); err == nil {
+			t.Fatal("prepareBuildWorkspaceResult() succeeded for symlinked embedded directory")
+		}
+	})
+
+	t.Run("destination traversal", func(t *testing.T) {
+		appDir := t.TempDir()
+		appWorkDir := t.TempDir()
+		outside := filepath.Join(filepath.Dir(appWorkDir), "escape.txt")
+		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[string]string{outside: filepath.Join(appDir, "source.txt")}, []embedListPackage{{
+			Dir:        appWorkDir,
+			ImportPath: "example.com/app",
+			EmbedFiles: []string{"../escape.txt"},
+		}})
+		if err == nil || !strings.Contains(err.Error(), "must stay inside") {
+			t.Fatalf("resolveEmbedInputPlan() error = %v, want workspace escape", err)
+		}
+	})
+
+	t.Run("nested module and tool output", func(t *testing.T) {
+		appDir := newEmbedTestApp(t, embedFSSource("nested .goframe"), nil)
+		writeTestFile(t, appDir, "nested/go.mod", "module example.com/nested\n\ngo 1.22\n")
+		writeTestFile(t, appDir, "nested/secret.txt", "nested-secret")
+		writeTestFile(t, appDir, ".goframe/secret.txt", "tool-secret")
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		_, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+		if err == nil {
+			t.Fatal("prepareBuildWorkspaceResult() succeeded for excluded embed trees")
+		}
+		for _, secret := range []string{"nested-secret", "tool-secret"} {
+			if workspaceContainsBytes(t, layout.WorkDir, secret) {
+				t.Fatalf("workspace contains excluded bytes %q", secret)
+			}
+		}
+	})
+}
+
+func TestEmbedMaterializationDoesNotCopyUnrelatedFiles(t *testing.T) {
+	appDir := newEmbedTestApp(t, embedStringSource("message.txt"), map[string]string{
+		"message.txt": "included",
+		"secret.txt":  "sensitive-unrelated-bytes",
+	})
+	layout := newEmbedTestLayout(t, appDir, "go", "")
+	if _, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", ".")); err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(layout.WorkDir, "secret.txt")); !os.IsNotExist(err) {
+		t.Fatalf("unrelated file was copied: %v", err)
+	}
+}
+
+func newEmbedTestApp(t *testing.T, source string, files map[string]string) string {
+	t.Helper()
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, "go.mod", "module example.com/embedapp\n\ngo 1.22\n")
+	writeTestFile(t, appDir, "main.go", source)
+	for relative, content := range files {
+		writeTestFile(t, appDir, relative, content)
+	}
+	return appDir
+}
+
+func newEmbedTestLayout(t *testing.T, appDir, compiler, workspace string) BuildLayout {
+	t.Helper()
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir, compiler: compiler, workspace: workspace})
+	if err != nil {
+		t.Fatalf("newBuildLayout() error: %v", err)
+	}
+	return layout
+}
+
+func defaultEmbedManifest(compiler, entry string) projectManifest {
+	return projectManifest{
+		Name:     "embed-test",
+		Entry:    entry,
+		Compiler: compiler,
+		WASM:     "bundle.wasm",
+		Assets:   autoManifestAssets(),
+	}
+}
+
+func embedStringSource(pattern string) string {
+	return `package main
+
+import _ "embed"
+
+//go:embed ` + pattern + `
+var payload string
+
+func main() { _ = payload }
+`
+}
+
+func embedFSSource(pattern string) string {
+	return `package main
+
+import "embed"
+
+//go:embed ` + pattern + `
+var payload embed.FS
+
+func main() { _ = payload }
+`
+}
+
+func embedPlanPaths(plan embedInputPlan) []string {
+	paths := make([]string, 0, len(plan.Files))
+	for _, file := range plan.Files {
+		paths = append(paths, file.DisplayPath)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func assertEmbedFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(content) != want {
+		t.Fatalf("%s = %q, want %q", path, content, want)
+	}
+}
+
+func workspaceContainsBytes(t *testing.T, root, value string) bool {
+	t.Helper()
+	found := false
+	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		content, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(content), value) {
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("inspect workspace: %v", err)
+	}
+	return found
+}

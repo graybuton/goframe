@@ -32,13 +32,14 @@ const (
 )
 
 type packageOptions struct {
-	appDir    string
-	compiler  string
-	outDir    string
-	workspace string
-	compress  map[string]bool
-	assetHash bool
-	preload   bool
+	appDir          string
+	compiler        string
+	outDir          string
+	workspace       string
+	compress        map[string]bool
+	assetHash       bool
+	preload         bool
+	recordEmbedPlan func(embedInputPlan)
 }
 
 type packageAssetPlan struct {
@@ -223,10 +224,14 @@ func packageApp(options packageOptions) error {
 	} else if err := validatePathBelowRoot(layout.WorkspaceRoot, options.outDir, "package output directory", true); err != nil {
 		return err
 	}
-	entryPath, err := prepareBuildWorkspace(layout, manifest)
+	workspaceResult, err := prepareBuildWorkspaceResult(layout, manifest)
+	if options.recordEmbedPlan != nil {
+		options.recordEmbedPlan(workspaceResult.EmbedPlan)
+	}
 	if err != nil {
 		return fmt.Errorf("prepare package workspace: %w", err)
 	}
+	entryPath := workspaceResult.EntryPath
 
 	tempDir, err := os.MkdirTemp("", "goxc-package-*")
 	if err != nil {

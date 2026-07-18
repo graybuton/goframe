@@ -100,10 +100,11 @@ func buildApp(options buildOptions) (string, error) {
 	if err := validateWorkspaceRoot(layout); err != nil {
 		return "", err
 	}
-	entryPath, err := prepareBuildWorkspace(layout, manifest)
+	workspaceResult, err := prepareBuildWorkspaceResult(layout, manifest)
 	if err != nil {
 		return "", fmt.Errorf("prepare build workspace: %w", err)
 	}
+	entryPath := workspaceResult.EntryPath
 	outputPath := buildOutputPath(options, manifest, layout)
 	outputRoot := layout.BuildDir
 	if options.outDir != "" {
