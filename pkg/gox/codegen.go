@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Codegen turns a parsed GOX node into calls to the goframe runtime. The MVP
@@ -604,8 +605,10 @@ func normalizeText(value string) string {
 		return strings.Join(strings.Fields(value), " ")
 	}
 
-	leading := unicode.IsSpace(rune(value[0]))
-	trailing := unicode.IsSpace(rune(value[len(value)-1]))
+	first, _ := utf8.DecodeRuneInString(value)
+	last, _ := utf8.DecodeLastRuneInString(value)
+	leading := unicode.IsSpace(first)
+	trailing := unicode.IsSpace(last)
 	normalized := strings.Join(strings.Fields(value), " ")
 	if leading {
 		normalized = " " + normalized
