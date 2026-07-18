@@ -110,7 +110,7 @@ type componentInstance struct {
 	stateIndex       int
 	effectSlots      []*effectSlot
 	effectIndex      int
-	unmountSlots     []*unmountSlot
+	unmountSlots     []Cleanup
 	unmountIndex     int
 	lifecycleAttempt renderLifecycleAttempt
 	contextSlots     []*contextSubscription
@@ -172,14 +172,11 @@ func shouldSkipMemoizedProps(instance *componentInstance, nextNode ComponentNode
 func renderComponentInstance(instance *componentInstance) (rendered Node) {
 	previous := currentComponent
 	currentComponent = instance
-	attemptStarted := false
 	contextFinalizationStarted := false
 	defer func() {
 		currentComponent = previous
 		if recovered := recover(); recovered != nil {
-			if attemptStarted {
-				rollbackLifecycleRenderAttempt(instance)
-			}
+			rollbackLifecycleRenderAttempt(instance)
 			if isRuntimeInvariantPanic(recovered) {
 				panic(recovered)
 			}
@@ -197,9 +194,11 @@ func renderComponentInstance(instance *componentInstance) (rendered Node) {
 			rendered = Empty()
 		}
 	}()
+	return renderComponentLifecycle(instance, &contextFinalizationStarted)
+}
 
+func renderComponentLifecycle(instance *componentInstance, contextFinalizationStarted *bool) Node {
 	beginLifecycleRenderAttempt(instance)
-	attemptStarted = true
 	instance.stateIndex = 0
 	instance.effectIndex = 0
 	instance.unmountIndex = 0
@@ -209,11 +208,10 @@ func renderComponentInstance(instance *componentInstance) (rendered Node) {
 
 	reportComponentRender(instance.name)
 	node := instance.node.render()
-	contextFinalizationStarted = true
+	*contextFinalizationStarted = true
 	finishComponentContextRender(instance)
-	rendered = Child(node)
+	rendered := Child(node)
 	commitLifecycleRenderAttempt(instance)
-	attemptStarted = false
 	return rendered
 }
 
