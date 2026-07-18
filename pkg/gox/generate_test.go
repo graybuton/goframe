@@ -8,7 +8,102 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
+
+func TestNormalizeTextPreservesUnicodeBoundaries(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "ASCII whitespace only", input: " \t ", want: ""},
+		{name: "Unicode whitespace only", input: "\u00a0\u2003", want: ""},
+		{name: "ordinary ASCII", input: "hello", want: "hello"},
+		{name: "ASCII boundaries", input: " hello ", want: " hello "},
+		{name: "leading NBSP", input: "\u00a0hello", want: " hello"},
+		{name: "trailing NBSP", input: "hello\u00a0", want: "hello "},
+		{name: "leading EM SPACE", input: "\u2003hello", want: " hello"},
+		{name: "trailing narrow NBSP", input: "hello\u202f", want: "hello "},
+		{name: "both Unicode boundaries", input: "\u3000hello\u2003", want: " hello "},
+		{name: "internal Unicode whitespace", input: "hello\u2003world", want: "hello world"},
+		{name: "Cyrillic", input: "Привет", want: "Привет"},
+		{name: "emoji boundary", input: "🙂 hello 🙂", want: "🙂 hello 🙂"},
+		{name: "trailing a with ogonek", input: "drogą", want: "drogą"},
+		{name: "actual trailing NEL", input: "hello\u0085", want: "hello "},
+		{name: "multiline Unicode", input: "\u00a0hello\u2003\nworld\u202f", want: "hello world"},
+		{name: "invalid leading byte", input: string([]byte{0x85, 'x'}), want: string([]byte{0x85, 'x'})},
+		{name: "invalid trailing byte", input: string([]byte{'x', 0x85}), want: string([]byte{'x', 0x85})},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := normalizeText(test.input)
+			if got != test.want {
+				t.Fatalf("normalizeText() bytes = % x (%q), want % x (%q)", []byte(got), got, []byte(test.want), test.want)
+			}
+		})
+	}
+}
+
+func TestGeneratePreservesUnicodeTextBoundaries(t *testing.T) {
+	source := []byte("package main\n\n" +
+		"import gf \"github.com/graybuton/goframe/pkg/goframe\"\n\n" +
+		"func Cyrillic() gf.Node {\n\treturn <p>\u00a0Привет\u00a0</p>\n}\n\n" +
+		"func Polish() gf.Node {\n\treturn <p>drogą</p>\n}\n\n" +
+		"func Emoji() gf.Node {\n\treturn <p>🙂</p>\n}\n")
+
+	generated, err := Generate(source)
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if !utf8.Valid(generated) {
+		t.Fatalf("generated Go is not valid UTF-8: % x", generated)
+	}
+	if _, err := parser.ParseFile(gotoken.NewFileSet(), "unicode_text.gox.go", generated, parser.AllErrors); err != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", err, generated)
+	}
+
+	text := string(generated)
+	for _, want := range []string{
+		`gf.Text(" Привет ")`,
+		`gf.Text("drogą")`,
+		`gf.Text("🙂")`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated source does not contain %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, `gf.Text("drogą ")`) {
+		t.Fatalf("generated source invented trailing whitespace after ą:\n%s", text)
+	}
+	if got := strings.Count(text, `gf.El("p", nil,`); got != 3 {
+		t.Fatalf("generated paragraph count = %d, want 3:\n%s", got, text)
+	}
+
+	invalidSource := append([]byte("package main\n\n"+
+		"import gf \"github.com/graybuton/goframe/pkg/goframe\"\n\n"+
+		"func Invalid() gf.Node {\n\treturn <p>x"), 0x85)
+	invalidSource = append(invalidSource, []byte("</p>\n}\n")...)
+	generated, err = Generate(invalidSource)
+	if err != nil {
+		t.Fatalf("Generate(invalid UTF-8) error: %v", err)
+	}
+	if !utf8.Valid(generated) {
+		t.Fatalf("generated Go for invalid source text is not valid UTF-8: % x", generated)
+	}
+	if _, err := parser.ParseFile(gotoken.NewFileSet(), "invalid_text.gox.go", generated, parser.AllErrors); err != nil {
+		t.Fatalf("generated Go for invalid source text does not parse: %v\n%s", err, generated)
+	}
+	invalidText := string(generated)
+	if !strings.Contains(invalidText, `gf.Text("x\x85")`) {
+		t.Fatalf("generated source did not preserve the invalid byte through quoting:\n%s", invalidText)
+	}
+	if strings.Contains(invalidText, `gf.Text("x\x85 ")`) {
+		t.Fatalf("generated source invented trailing whitespace after an invalid byte:\n%s", invalidText)
+	}
+}
 
 func TestGenerateCounter(t *testing.T) {
 	source := []byte(`package main
