@@ -119,19 +119,6 @@ func nearestErrorBoundary(instance *componentInstance) *componentInstance {
 	return nil
 }
 
-func cancelPendingEffectsForRenderFailure(instance *componentInstance) {
-	if instance == nil {
-		return
-	}
-	for _, slot := range instance.effectSlots {
-		if slot == nil {
-			continue
-		}
-		slot.pending = false
-		slot.queued = false
-	}
-}
-
 func cancelPendingEffectsUnderBoundary(boundary *componentInstance) {
 	if boundary == nil {
 		return

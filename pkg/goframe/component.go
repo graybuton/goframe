@@ -110,8 +110,9 @@ type componentInstance struct {
 	stateIndex       int
 	effectSlots      []*effectSlot
 	effectIndex      int
-	unmountSlots     []*unmountSlot
+	unmountSlots     []Cleanup
 	unmountIndex     int
+	lifecycleAttempt renderLifecycleAttempt
 	contextSlots     []*contextSubscription
 	contextIndex     int
 	contextProviders map[int]*contextProvider
@@ -171,20 +172,17 @@ func shouldSkipMemoizedProps(instance *componentInstance, nextNode ComponentNode
 func renderComponentInstance(instance *componentInstance) (rendered Node) {
 	previous := currentComponent
 	currentComponent = instance
-	instance.stateIndex = 0
-	instance.effectIndex = 0
-	instance.unmountIndex = 0
-	instance.contextIndex = 0
-	instance.providedContexts = instance.providedContexts[:0]
-	clearComponentDirty(instance)
+	contextFinalizationStarted := false
 	defer func() {
 		currentComponent = previous
 		if recovered := recover(); recovered != nil {
+			rollbackLifecycleRenderAttempt(instance)
 			if isRuntimeInvariantPanic(recovered) {
 				panic(recovered)
 			}
-			finishComponentContextRender(instance)
-			cancelPendingEffectsForRenderFailure(instance)
+			if !contextFinalizationStarted {
+				finishComponentContextRender(instance)
+			}
 			info := ErrorInfo{
 				Phase:     ErrorPhaseRender,
 				Component: runtimeComponentName(instance),
@@ -196,11 +194,25 @@ func renderComponentInstance(instance *componentInstance) (rendered Node) {
 			rendered = Empty()
 		}
 	}()
+	return renderComponentLifecycle(instance, &contextFinalizationStarted)
+}
+
+func renderComponentLifecycle(instance *componentInstance, contextFinalizationStarted *bool) Node {
+	beginLifecycleRenderAttempt(instance)
+	instance.stateIndex = 0
+	instance.effectIndex = 0
+	instance.unmountIndex = 0
+	instance.contextIndex = 0
+	instance.providedContexts = instance.providedContexts[:0]
+	clearComponentDirty(instance)
 
 	reportComponentRender(instance.name)
 	node := instance.node.render()
+	*contextFinalizationStarted = true
 	finishComponentContextRender(instance)
-	return Child(node)
+	rendered := Child(node)
+	commitLifecycleRenderAttempt(instance)
+	return rendered
 }
 
 func markComponentDirty(instance *componentInstance) {
@@ -314,6 +326,7 @@ func deactivateComponent(instance *componentInstance) {
 	instance.stateSlots = nil
 	instance.effectSlots = nil
 	instance.unmountSlots = nil
+	releaseLifecycleRenderAttempt(instance)
 	instance.contextSlots = nil
 	instance.contextProviders = nil
 	instance.providedContexts = nil
