@@ -237,10 +237,10 @@ func UseUnmount(cleanup Cleanup) {
 	instance := requireCurrentComponent("UseUnmount")
 	index := instance.unmountIndex
 	instance.unmountIndex++
-	if index > len(instance.unmountSlots) {
+	attempt := requireLifecycleRenderAttempt(instance)
+	if index != len(attempt.unmounts) {
 		panic("goframe: invalid unmount hook index")
 	}
-	attempt := requireLifecycleRenderAttempt(instance)
 	attempt.unmounts = append(attempt.unmounts, unmountRenderUpdate{
 		index:   index,
 		cleanup: cleanup,
@@ -270,7 +270,8 @@ func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 	instance := requireCurrentComponent("UseEffect")
 	index := instance.effectIndex
 	instance.effectIndex++
-	if index > len(instance.effectSlots) {
+	attempt := requireLifecycleRenderAttempt(instance)
+	if index != len(attempt.effects) {
 		panic("goframe: invalid effect hook index")
 	}
 
@@ -279,7 +280,7 @@ func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 		kind:   kind,
 		effect: effect,
 	}
-	if index == len(instance.effectSlots) {
+	if index >= len(instance.effectSlots) {
 		update.deps = copyDeps(deps)
 		update.queue = true
 	} else {
@@ -292,7 +293,6 @@ func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 			update.queue = true
 		}
 	}
-	attempt := requireLifecycleRenderAttempt(instance)
 	attempt.effects = append(attempt.effects, update)
 }
 

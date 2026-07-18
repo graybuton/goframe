@@ -230,6 +230,195 @@ func TestUseUnmountOutsideComponentPanics(t *testing.T) {
 	UseUnmount(func() {})
 }
 
+func TestMultipleNewEffectsCommitInOrder(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	instance := testComponentInstance("MultipleEffects", func() Node {
+		UseEffect(func() Cleanup {
+			events = append(events, "setup A")
+			return func() {
+				events = append(events, "cleanup A")
+			}
+		})
+		UseEffect(func() Cleanup {
+			events = append(events, "setup B")
+			return func() {
+				events = append(events, "cleanup B")
+			}
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	assertEffectEvents(t, events, nil)
+	if len(instance.effectSlots) != 2 {
+		t.Fatalf("committed effect slots = %d, want 2", len(instance.effectSlots))
+	}
+	if len(pendingEffects) != 2 || pendingEffects[0] != instance.effectSlots[0] || pendingEffects[1] != instance.effectSlots[1] {
+		t.Fatalf("pending effects = %#v, want one ordered entry per committed slot", pendingEffects)
+	}
+
+	flushPendingEffects()
+	assertEffectEvents(t, events, []string{"setup A", "setup B"})
+	deactivateComponent(instance)
+	assertEffectEvents(t, events, []string{"setup A", "setup B", "cleanup A", "cleanup B"})
+}
+
+func TestMultipleNewEffectsRollbackAndRetry(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	fail := true
+	instance := testComponentInstance("MultipleEffectRetry", func() Node {
+		UseEffect(func() Cleanup {
+			events = append(events, "setup A")
+			return func() {
+				events = append(events, "cleanup A")
+			}
+		})
+		UseEffect(func() Cleanup {
+			events = append(events, "setup B")
+			return func() {
+				events = append(events, "cleanup B")
+			}
+		})
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	if len(instance.effectSlots) != 0 || len(pendingEffects) != 0 {
+		t.Fatalf("failed render slots=%d pending=%d, want 0/0", len(instance.effectSlots), len(pendingEffects))
+	}
+	assertEffectEvents(t, events, nil)
+
+	fail = false
+	renderComponentInstance(instance)
+	if len(instance.effectSlots) != 2 || len(pendingEffects) != 2 {
+		t.Fatalf("successful retry slots=%d pending=%d, want 2/2", len(instance.effectSlots), len(pendingEffects))
+	}
+	flushPendingEffects()
+	deactivateComponent(instance)
+	assertEffectEvents(t, events, []string{"setup A", "setup B", "cleanup A", "cleanup B"})
+}
+
+func TestMultipleNewUnmountsCommitInOrder(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	instance := testComponentInstance("MultipleUnmounts", func() Node {
+		UseUnmount(func() {
+			events = append(events, "cleanup A")
+		})
+		UseUnmount(func() {
+			events = append(events, "cleanup B")
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	assertEffectEvents(t, events, nil)
+	if len(instance.unmountSlots) != 2 {
+		t.Fatalf("committed unmount slots = %d, want 2", len(instance.unmountSlots))
+	}
+	deactivateComponent(instance)
+	assertEffectEvents(t, events, []string{"cleanup A", "cleanup B"})
+}
+
+func TestMultipleNewUnmountsRollbackAndRetry(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	failed := testComponentInstance("MultipleUnmountFailure", func() Node {
+		UseUnmount(func() {
+			events = append(events, "failed cleanup A")
+		})
+		UseUnmount(func() {
+			events = append(events, "failed cleanup B")
+		})
+		panic("failed render")
+	}, nil)
+
+	renderComponentInstance(failed)
+	if len(failed.unmountSlots) != 0 {
+		t.Fatalf("failed render unmount slots = %d, want 0", len(failed.unmountSlots))
+	}
+	deactivateComponent(failed)
+	assertEffectEvents(t, events, nil)
+
+	retry := testComponentInstance("MultipleUnmountRetry", func() Node {
+		UseUnmount(func() {
+			events = append(events, "cleanup A")
+		})
+		UseUnmount(func() {
+			events = append(events, "cleanup B")
+		})
+		return Empty()
+	}, nil)
+	renderComponentInstance(retry)
+	deactivateComponent(retry)
+	assertEffectEvents(t, events, []string{"cleanup A", "cleanup B"})
+}
+
+func TestMultipleNewLifecycleHooksAppendAfterCommittedSlots(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	appendHooks := false
+	instance := testComponentInstance("AppendLifecycleHooks", func() Node {
+		UseEffect(func() Cleanup {
+			events = append(events, "setup effect A")
+			return func() {
+				events = append(events, "cleanup effect A")
+			}
+		})
+		UseUnmount(func() {
+			events = append(events, "cleanup unmount A")
+		})
+		if appendHooks {
+			UseEffect(func() Cleanup {
+				events = append(events, "setup effect B")
+				return func() {
+					events = append(events, "cleanup effect B")
+				}
+			})
+			UseEffect(func() Cleanup {
+				events = append(events, "setup effect C")
+				return func() {
+					events = append(events, "cleanup effect C")
+				}
+			})
+			UseUnmount(func() {
+				events = append(events, "cleanup unmount B")
+			})
+			UseUnmount(func() {
+				events = append(events, "cleanup unmount C")
+			})
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	appendHooks = true
+	renderComponentInstance(instance)
+	if len(instance.effectSlots) != 3 || len(instance.unmountSlots) != 3 {
+		t.Fatalf("appended lifecycle slots effects=%d unmounts=%d, want 3/3",
+			len(instance.effectSlots), len(instance.unmountSlots))
+	}
+	flushPendingEffects()
+	deactivateComponent(instance)
+	assertEffectEvents(t, events, []string{
+		"setup effect A",
+		"setup effect B",
+		"setup effect C",
+		"cleanup effect A",
+		"cleanup effect B",
+		"cleanup effect C",
+		"cleanup unmount A",
+		"cleanup unmount B",
+		"cleanup unmount C",
+	})
+}
+
 func TestLifecycleHookTypeMismatchPanics(t *testing.T) {
 	resetEffectsForTest()
 	useMount := false
