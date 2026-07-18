@@ -193,6 +193,26 @@ type unmountSlot struct {
 	cleanup Cleanup
 }
 
+type effectRenderUpdate struct {
+	index  int
+	kind   effectKind
+	effect func() Cleanup
+	deps   EffectDeps
+	queue  bool
+	slot   *effectSlot
+}
+
+type unmountRenderUpdate struct {
+	index   int
+	cleanup Cleanup
+}
+
+type renderLifecycleAttempt struct {
+	active   bool
+	effects  []effectRenderUpdate
+	unmounts []unmountRenderUpdate
+}
+
 var (
 	pendingEffects  []*effectSlot
 	flushingEffects bool
@@ -211,10 +231,14 @@ func UseUnmount(cleanup Cleanup) {
 	instance := requireCurrentComponent("UseUnmount")
 	index := instance.unmountIndex
 	instance.unmountIndex++
-	if index == len(instance.unmountSlots) {
-		instance.unmountSlots = append(instance.unmountSlots, &unmountSlot{})
+	if index > len(instance.unmountSlots) {
+		panic("goframe: invalid unmount hook index")
 	}
-	instance.unmountSlots[index].cleanup = cleanup
+	attempt := requireLifecycleRenderAttempt(instance)
+	attempt.unmounts = append(attempt.unmounts, unmountRenderUpdate{
+		index:   index,
+		cleanup: cleanup,
+	})
 }
 
 // UseEffect runs effect after mount. With Deps it reruns after dependency
@@ -240,27 +264,30 @@ func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 	instance := requireCurrentComponent("UseEffect")
 	index := instance.effectIndex
 	instance.effectIndex++
-	if index == len(instance.effectSlots) {
-		slot := &effectSlot{
-			owner:  instance,
-			kind:   kind,
-			effect: effect,
-			deps:   copyDeps(deps),
-		}
-		instance.effectSlots = append(instance.effectSlots, slot)
-		queueEffect(slot)
-		return
+	if index > len(instance.effectSlots) {
+		panic("goframe: invalid effect hook index")
 	}
 
-	slot := instance.effectSlots[index]
-	if slot.kind != kind {
-		panic("goframe: lifecycle hook type changed between component renders")
+	update := effectRenderUpdate{
+		index:  index,
+		kind:   kind,
+		effect: effect,
 	}
-	slot.effect = effect
-	if shouldRunEffect(slot, deps) {
-		slot.deps = copyDeps(deps)
-		queueEffect(slot)
+	if index == len(instance.effectSlots) {
+		update.deps = copyDeps(deps)
+		update.queue = true
+	} else {
+		slot := instance.effectSlots[index]
+		if slot.kind != kind {
+			panic("goframe: lifecycle hook type changed between component renders")
+		}
+		if shouldRunEffect(slot, deps) {
+			update.deps = copyDeps(deps)
+			update.queue = true
+		}
 	}
+	attempt := requireLifecycleRenderAttempt(instance)
+	attempt.effects = append(attempt.effects, update)
 }
 
 func requireCurrentComponent(hook string) *componentInstance {
@@ -269,6 +296,86 @@ func requireCurrentComponent(hook string) *componentInstance {
 		panic("goframe: " + hook + " must be called during component render")
 	}
 	return instance
+}
+
+func beginLifecycleRenderAttempt(instance *componentInstance) {
+	if instance == nil {
+		panic("goframe: lifecycle render attempt requires a component")
+	}
+	attempt := &instance.lifecycleAttempt
+	if attempt.active {
+		panic("goframe: component lifecycle render attempt is already active")
+	}
+	attempt.active = true
+	attempt.effects = attempt.effects[:0]
+	attempt.unmounts = attempt.unmounts[:0]
+}
+
+func requireLifecycleRenderAttempt(instance *componentInstance) *renderLifecycleAttempt {
+	if instance == nil || !instance.lifecycleAttempt.active {
+		panic("goframe: lifecycle hook requires an active render attempt")
+	}
+	return &instance.lifecycleAttempt
+}
+
+func commitLifecycleRenderAttempt(instance *componentInstance) {
+	attempt := requireLifecycleRenderAttempt(instance)
+	for index := range attempt.effects {
+		update := &attempt.effects[index]
+		var slot *effectSlot
+		if update.index == len(instance.effectSlots) {
+			slot = &effectSlot{
+				owner: instance,
+				kind:  update.kind,
+			}
+			instance.effectSlots = append(instance.effectSlots, slot)
+		} else {
+			slot = instance.effectSlots[update.index]
+		}
+		slot.effect = update.effect
+		if update.queue {
+			slot.deps = update.deps
+		}
+		update.slot = slot
+	}
+	for _, update := range attempt.unmounts {
+		if update.index == len(instance.unmountSlots) {
+			instance.unmountSlots = append(instance.unmountSlots, &unmountSlot{
+				cleanup: update.cleanup,
+			})
+			continue
+		}
+		instance.unmountSlots[update.index].cleanup = update.cleanup
+	}
+	for index := range attempt.effects {
+		update := &attempt.effects[index]
+		if update.queue {
+			queueEffect(update.slot)
+		}
+	}
+	finishLifecycleRenderAttempt(attempt)
+}
+
+func rollbackLifecycleRenderAttempt(instance *componentInstance) {
+	if instance == nil || !instance.lifecycleAttempt.active {
+		return
+	}
+	finishLifecycleRenderAttempt(&instance.lifecycleAttempt)
+}
+
+func finishLifecycleRenderAttempt(attempt *renderLifecycleAttempt) {
+	clear(attempt.effects)
+	clear(attempt.unmounts)
+	attempt.effects = attempt.effects[:0]
+	attempt.unmounts = attempt.unmounts[:0]
+	attempt.active = false
+}
+
+func releaseLifecycleRenderAttempt(instance *componentInstance) {
+	if instance == nil {
+		return
+	}
+	instance.lifecycleAttempt = renderLifecycleAttempt{}
 }
 
 func shouldRunEffect(slot *effectSlot, deps EffectDeps) bool {

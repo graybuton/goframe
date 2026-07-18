@@ -288,6 +288,308 @@ func TestUseEffectUnsupportedDependencyPanics(t *testing.T) {
 	renderComponentInstance(instance)
 }
 
+func TestUseEffectChangedDepsRetryAfterFailedRender(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	dep := 1
+	label := "A"
+	fail := false
+	instance := testComponentInstance("EffectTransaction", func() Node {
+		committedLabel := label
+		UseEffect(func() Cleanup {
+			events = append(events, "setup "+committedLabel)
+			return func() {
+				events = append(events, "cleanup "+committedLabel)
+			}
+		}, Deps(dep))
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	dep = 2
+	label = "B"
+	fail = true
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	assertEffectEvents(t, events, []string{"setup A"})
+
+	label = "C"
+	fail = false
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	deactivateComponent(instance)
+
+	assertEffectEvents(t, events, []string{
+		"setup A",
+		"cleanup A",
+		"setup C",
+		"cleanup C",
+	})
+}
+
+func TestUseEffectCommittedPendingStateSurvivesFailedRender(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	label := "A"
+	fail := false
+	instance := testComponentInstance("PendingEffectTransaction", func() Node {
+		committedLabel := label
+		UseEffect(func() Cleanup {
+			events = append(events, "setup "+committedLabel)
+			return nil
+		})
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	if len(pendingEffects) != 1 {
+		t.Fatalf("pending effects after committed render = %d, want 1", len(pendingEffects))
+	}
+	label = "B"
+	fail = true
+	renderComponentInstance(instance)
+	if len(pendingEffects) != 1 {
+		t.Fatalf("pending effects after failed render = %d, want preserved queue entry", len(pendingEffects))
+	}
+
+	flushPendingEffects()
+	assertEffectEvents(t, events, []string{"setup A"})
+	if len(pendingEffects) != 0 {
+		t.Fatalf("pending effects after flush = %d, want 0", len(pendingEffects))
+	}
+}
+
+func TestUseEffectSuccessfulRerenderBeforeFlushUsesLatestCommittedClosure(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	label := "A"
+	instance := testComponentInstance("CoalescedEffectTransaction", func() Node {
+		committedLabel := label
+		UseEffect(func() Cleanup {
+			events = append(events, "setup "+committedLabel)
+			return nil
+		})
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	label = "B"
+	renderComponentInstance(instance)
+	if len(pendingEffects) != 1 {
+		t.Fatalf("pending effects before flush = %d, want one coalesced slot", len(pendingEffects))
+	}
+	flushPendingEffects()
+
+	assertEffectEvents(t, events, []string{"setup B"})
+}
+
+func TestUseEffectInitialFailedRenderQueuesNothing(t *testing.T) {
+	isolateLifecycleTestState(t)
+	setups := 0
+	fail := true
+	instance := testComponentInstance("InitialEffectTransaction", func() Node {
+		UseEffect(func() Cleanup {
+			setups++
+			return nil
+		})
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if setups != 0 || len(instance.effectSlots) != 0 || len(pendingEffects) != 0 {
+		t.Fatalf("failed initial render setups=%d slots=%d pending=%d, want 0/0/0",
+			setups, len(instance.effectSlots), len(pendingEffects))
+	}
+
+	fail = false
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if setups != 1 || len(instance.effectSlots) != 1 {
+		t.Fatalf("successful retry setups=%d slots=%d, want 1/1", setups, len(instance.effectSlots))
+	}
+}
+
+func TestUseEffectEveryRenderFailedAttemptQueuesNothing(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	label := "A"
+	fail := false
+	instance := testComponentInstance("EveryRenderTransaction", func() Node {
+		committedLabel := label
+		UseEffect(func() Cleanup {
+			events = append(events, "setup "+committedLabel)
+			return nil
+		}, EveryRender())
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	label = "B"
+	fail = true
+	renderComponentInstance(instance)
+	flushPendingEffects()
+
+	assertEffectEvents(t, events, []string{"setup A"})
+	if len(pendingEffects) != 0 {
+		t.Fatalf("pending EveryRender effects after failed attempt = %d, want 0", len(pendingEffects))
+	}
+}
+
+func TestUseUnmountFailedRenderPreservesCommittedCleanup(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	label := "A"
+	fail := false
+	instance := testComponentInstance("UnmountTransaction", func() Node {
+		committedLabel := label
+		UseUnmount(func() {
+			events = append(events, "cleanup "+committedLabel)
+		})
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	label = "B"
+	fail = true
+	renderComponentInstance(instance)
+	deactivateComponent(instance)
+
+	assertEffectEvents(t, events, []string{"cleanup A"})
+}
+
+func TestUseUnmountInitialFailedRenderCommitsNoCleanup(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	failed := testComponentInstance("InitialUnmountFailure", func() Node {
+		UseUnmount(func() {
+			events = append(events, "cleanup failed")
+		})
+		panic("failed render")
+	}, nil)
+
+	renderComponentInstance(failed)
+	if len(failed.unmountSlots) != 0 {
+		t.Fatalf("unmount slots after failed initial render = %d, want 0", len(failed.unmountSlots))
+	}
+	deactivateComponent(failed)
+	assertEffectEvents(t, events, nil)
+
+	fail := true
+	retry := testComponentInstance("InitialUnmountRetry", func() Node {
+		UseUnmount(func() {
+			events = append(events, "cleanup committed")
+		})
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+	renderComponentInstance(retry)
+	fail = false
+	renderComponentInstance(retry)
+	deactivateComponent(retry)
+	assertEffectEvents(t, events, []string{"cleanup committed"})
+}
+
+func TestLifecycleRollbackRunsBeforeInvariantRepanic(t *testing.T) {
+	isolateLifecycleTestState(t)
+	events := []string{}
+	dep := 1
+	label := "A"
+	panicInvariant := false
+	instance := testComponentInstance("InvariantLifecycleTransaction", func() Node {
+		committedLabel := label
+		UseEffect(func() Cleanup {
+			events = append(events, "setup "+committedLabel)
+			return func() {
+				events = append(events, "cleanup "+committedLabel)
+			}
+		}, Deps(dep))
+		UseUnmount(func() {
+			events = append(events, "unmount "+committedLabel)
+		})
+		if panicInvariant {
+			UseEffect(func() Cleanup { return nil }, Deps(struct{}{}))
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	dep = 2
+	label = "B"
+	panicInvariant = true
+	assertPanic(t,
+		"goframe: unsupported effect dependency type; reduce complex values to string, id, version, or counter",
+		func() {
+			renderComponentInstance(instance)
+		})
+	if instance.lifecycleAttempt.active || len(instance.lifecycleAttempt.effects) != 0 || len(instance.lifecycleAttempt.unmounts) != 0 {
+		t.Fatalf("lifecycle attempt after invariant panic = %#v, want rolled back", instance.lifecycleAttempt)
+	}
+	if len(instance.effectSlots) != 1 || !depsEqual(instance.effectSlots[0].deps, Deps(1)) {
+		t.Fatalf("committed effect state changed after invariant panic: %#v", instance.effectSlots)
+	}
+
+	label = "C"
+	panicInvariant = false
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	deactivateComponent(instance)
+	assertEffectEvents(t, events, []string{
+		"setup A",
+		"cleanup A",
+		"setup C",
+		"cleanup C",
+		"unmount C",
+	})
+}
+
+func isolateLifecycleTestState(t *testing.T) {
+	t.Helper()
+	previousPending := pendingEffects
+	previousCurrent := currentComponent
+	previousFlushing := flushingEffects
+	pendingEffects = nil
+	currentComponent = nil
+	flushingEffects = false
+	t.Cleanup(func() {
+		pendingEffects = previousPending
+		currentComponent = previousCurrent
+		flushingEffects = previousFlushing
+	})
+}
+
+func assertEffectEvents(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("events = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("events = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func resetEffectsForTest() {
 	pendingEffects = nil
 	currentComponent = nil
