@@ -207,10 +207,16 @@ type unmountRenderUpdate struct {
 	cleanup Cleanup
 }
 
+type lifecycleRenderParticipant interface {
+	commitLifecycleRender(*renderLifecycleAttempt)
+	rollbackLifecycleRender(*renderLifecycleAttempt)
+}
+
 type renderLifecycleAttempt struct {
-	active   bool
-	effects  []effectRenderUpdate
-	unmounts []unmountRenderUpdate
+	active       bool
+	effects      []effectRenderUpdate
+	unmounts     []unmountRenderUpdate
+	participants []lifecycleRenderParticipant
 }
 
 var (
@@ -309,6 +315,7 @@ func beginLifecycleRenderAttempt(instance *componentInstance) {
 	attempt.active = true
 	attempt.effects = attempt.effects[:0]
 	attempt.unmounts = attempt.unmounts[:0]
+	attempt.participants = attempt.participants[:0]
 }
 
 func requireLifecycleRenderAttempt(instance *componentInstance) *renderLifecycleAttempt {
@@ -320,6 +327,9 @@ func requireLifecycleRenderAttempt(instance *componentInstance) *renderLifecycle
 
 func commitLifecycleRenderAttempt(instance *componentInstance) {
 	attempt := requireLifecycleRenderAttempt(instance)
+	for _, participant := range attempt.participants {
+		participant.commitLifecycleRender(attempt)
+	}
 	for index := range attempt.effects {
 		update := &attempt.effects[index]
 		var slot *effectSlot
@@ -360,14 +370,20 @@ func rollbackLifecycleRenderAttempt(instance *componentInstance) {
 	if instance == nil || !instance.lifecycleAttempt.active {
 		return
 	}
-	finishLifecycleRenderAttempt(&instance.lifecycleAttempt)
+	attempt := &instance.lifecycleAttempt
+	for _, participant := range attempt.participants {
+		participant.rollbackLifecycleRender(attempt)
+	}
+	finishLifecycleRenderAttempt(attempt)
 }
 
 func finishLifecycleRenderAttempt(attempt *renderLifecycleAttempt) {
 	clear(attempt.effects)
 	clear(attempt.unmounts)
+	clear(attempt.participants)
 	attempt.effects = attempt.effects[:0]
 	attempt.unmounts = attempt.unmounts[:0]
+	attempt.participants = attempt.participants[:0]
 	attempt.active = false
 }
 
@@ -375,6 +391,7 @@ func releaseLifecycleRenderAttempt(instance *componentInstance) {
 	if instance == nil {
 		return
 	}
+	rollbackLifecycleRenderAttempt(instance)
 	instance.lifecycleAttempt = renderLifecycleAttempt{}
 }
 

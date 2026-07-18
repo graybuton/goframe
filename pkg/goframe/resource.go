@@ -48,28 +48,39 @@ func UseResource[T any](key string, loader ResourceLoader[T]) (Resource[T], func
 	slot := useStateSlot[*resourceControl[T]](nil, "UseResource")
 	control := slot.get()
 	if control == nil {
-		control = newResourceControl[T](currentComponent, key, loader)
+		control = newResourceControl[T]()
 		slot.slot.value = control
 	}
-	control.owner = currentComponent
-	control.loader = loader
-	control.prepareKey(key)
+	attempt := requireLifecycleRenderAttempt(currentComponent)
+	snapshot, generation := control.prepareRender(attempt, currentComponent, key, loader)
 
-	generation := control.generation
 	UseEffect(func() Cleanup {
 		return control.start(key, generation)
 	}, Deps(key, generation))
 
-	return control.snapshot, control.reload
+	return snapshot, control.reload
 }
 
 type resourceControl[T any] struct {
+	committed  bool
 	owner      *componentInstance
 	key        string
 	generation int
 	loader     ResourceLoader[T]
 	snapshot   Resource[T]
 	current    *resourceRun[T]
+	pending    resourceRenderState[T]
+}
+
+type resourceRenderState[T any] struct {
+	attempt    *renderLifecycleAttempt
+	owner      *componentInstance
+	key        string
+	generation int
+	loader     ResourceLoader[T]
+	snapshot   Resource[T]
+	initial    bool
+	keyChanged bool
 }
 
 type resourceRun[T any] struct {
@@ -92,27 +103,73 @@ const (
 	resourceLoaderPanicError resourceInternalError = "goframe: resource loader panicked"
 )
 
-func newResourceControl[T any](owner *componentInstance, key string, loader ResourceLoader[T]) *resourceControl[T] {
+func newResourceControl[T any]() *resourceControl[T] {
 	return &resourceControl[T]{
-		owner:    owner,
-		key:      key,
-		loader:   loader,
 		snapshot: resourceLoading[T](),
 	}
 }
 
-func (control *resourceControl[T]) prepareKey(key string) {
-	if control.key == key {
+func (control *resourceControl[T]) prepareRender(
+	attempt *renderLifecycleAttempt,
+	owner *componentInstance,
+	key string,
+	loader ResourceLoader[T],
+) (Resource[T], int) {
+	if control.pending.attempt != nil {
+		panic("goframe: resource already participated in this render attempt")
+	}
+	pending := resourceRenderState[T]{
+		attempt:    attempt,
+		owner:      owner,
+		key:        control.key,
+		generation: control.generation,
+		loader:     loader,
+		snapshot:   control.snapshot,
+	}
+	if !control.committed {
+		pending.initial = true
+		pending.key = key
+		pending.snapshot = resourceLoading[T]()
+	} else if control.key != key {
+		pending.keyChanged = true
+		pending.key = key
+		pending.generation++
+		pending.snapshot = resourceLoading[T]()
+	}
+	control.pending = pending
+	attempt.participants = append(attempt.participants, control)
+	return pending.snapshot, pending.generation
+}
+
+func (control *resourceControl[T]) commitLifecycleRender(attempt *renderLifecycleAttempt) {
+	pending := control.pending
+	if pending.attempt != attempt {
 		return
 	}
-	control.invalidateCurrent()
-	control.key = key
-	control.generation++
-	control.snapshot = resourceLoading[T]()
+	control.owner = pending.owner
+	control.loader = pending.loader
+	if pending.initial {
+		control.committed = true
+		control.key = pending.key
+		control.generation = pending.generation
+		control.snapshot = pending.snapshot
+	} else if pending.keyChanged {
+		control.invalidateCurrent()
+		control.key = pending.key
+		control.generation = pending.generation
+		control.snapshot = pending.snapshot
+	}
+	control.pending = resourceRenderState[T]{}
+}
+
+func (control *resourceControl[T]) rollbackLifecycleRender(attempt *renderLifecycleAttempt) {
+	if control.pending.attempt == attempt {
+		control.pending = resourceRenderState[T]{}
+	}
 }
 
 func (control *resourceControl[T]) reload() {
-	if control == nil || control.owner == nil || !control.owner.active {
+	if control == nil || !control.committed || control.owner == nil || !control.owner.active {
 		return
 	}
 	control.invalidateCurrent()

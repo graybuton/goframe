@@ -855,6 +855,224 @@ func TestUseResourceNilLoaderPanics(t *testing.T) {
 	})
 }
 
+func TestUseResourceKeyRetryAfterFailedRender(t *testing.T) {
+	isolateLifecycleTestState(t)
+	loader := &resourceTestLoader{}
+	key := "a"
+	fail := false
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceKeyTransaction", func() Node {
+		resource, _ = UseResource(key, loader.load)
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	loader.resolves[0]("ready-a")
+	renderComponentInstance(instance)
+	control := resourceControlForTest[string](t, instance)
+	if !resource.Ready() || resource.Value != "ready-a" {
+		t.Fatalf("resource before failed key render = %#v, want ready-a", resource)
+	}
+
+	key = "b"
+	fail = true
+	renderComponentInstance(instance)
+	if control.key != "a" || control.generation != 0 || !control.snapshot.Ready() || control.snapshot.Value != "ready-a" {
+		t.Fatalf("committed control after failed key render = key %q generation %d snapshot %#v, want committed a",
+			control.key, control.generation, control.snapshot)
+	}
+	if got := loader.starts; len(got) != 1 || got[0] != "a" {
+		t.Fatalf("loader starts after failed key render = %#v, want [a]", got)
+	}
+	if loader.cleanups != 0 {
+		t.Fatalf("loader cleanups after failed key render = %d, want 0", loader.cleanups)
+	}
+
+	fail = false
+	renderComponentInstance(instance)
+	if !resource.Loading() || control.key != "b" || control.generation != 1 {
+		t.Fatalf("resource/control after successful key retry = %#v key %q generation %d, want loading b/1",
+			resource, control.key, control.generation)
+	}
+	if len(loader.starts) != 1 || loader.cleanups != 0 {
+		t.Fatalf("before retry effect flush starts=%d cleanups=%d, want 1/0", len(loader.starts), loader.cleanups)
+	}
+	flushPendingEffects()
+	if got := loader.starts; len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("loader starts after successful key retry = %#v, want [a b]", got)
+	}
+	if loader.cleanups != 1 {
+		t.Fatalf("loader cleanups after successful key retry = %d, want 1", loader.cleanups)
+	}
+	loader.resolves[1]("ready-b")
+	renderComponentInstance(instance)
+	if !resource.Ready() || resource.Value != "ready-b" {
+		t.Fatalf("resource after retry resolve = %#v, want ready-b", resource)
+	}
+}
+
+func TestUseResourceFailedRenderPreservesCommittedRun(t *testing.T) {
+	isolateLifecycleTestState(t)
+	loader := &resourceTestLoader{}
+	key := "a"
+	fail := false
+	schedules := 0
+	var resource Resource[string]
+	instance := testComponentInstance("ResourceRunTransaction", func() Node {
+		resource, _ = UseResource(key, loader.load)
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, func(*componentInstance) {
+		schedules++
+	})
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	control := resourceControlForTest[string](t, instance)
+	committedRun := control.current
+	oldResolve := loader.resolves[0]
+	oldReject := loader.rejects[0]
+
+	key = "b"
+	fail = true
+	renderComponentInstance(instance)
+	if control.current != committedRun || !committedRun.active || control.key != "a" {
+		t.Fatalf("committed run after failed key render = current %p active %v key %q, want original active a",
+			control.current, committedRun.active, control.key)
+	}
+	oldResolve("ready-a")
+	if schedules != 1 || !control.snapshot.Ready() || control.snapshot.Value != "ready-a" {
+		t.Fatalf("old callback after failed render schedules=%d snapshot=%#v, want accepted ready-a",
+			schedules, control.snapshot)
+	}
+
+	key = "a"
+	fail = false
+	renderComponentInstance(instance)
+	if !resource.Ready() || resource.Value != "ready-a" {
+		t.Fatalf("resource after committed callback render = %#v, want ready-a", resource)
+	}
+	key = "b"
+	renderComponentInstance(instance)
+	if !resource.Loading() {
+		t.Fatalf("resource after committed key change = %#v, want loading", resource)
+	}
+	oldResolve("late-ready-a")
+	oldReject(errors.New("late-failed-a"))
+	if schedules != 1 || instance.dirty || !control.snapshot.Loading() {
+		t.Fatalf("stale callbacks after committed key change schedules=%d dirty=%v snapshot=%#v, want ignored",
+			schedules, instance.dirty, control.snapshot)
+	}
+	flushPendingEffects()
+}
+
+func TestUseResourceFailedLoaderReplacementIsNotCommitted(t *testing.T) {
+	isolateLifecycleTestState(t)
+	first := &resourceTestLoader{}
+	second := &resourceTestLoader{}
+	useSecond := false
+	fail := false
+	var reload func()
+	instance := testComponentInstance("ResourceLoaderTransaction", func() Node {
+		loader := first.load
+		if useSecond {
+			loader = second.load
+		}
+		_, reload = UseResource("same", loader)
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	useSecond = true
+	fail = true
+	renderComponentInstance(instance)
+
+	reload()
+	useSecond = false
+	fail = false
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if len(first.starts) != 2 || len(second.starts) != 0 {
+		t.Fatalf("starts after reload following failed replacement = first %d second %d, want 2/0",
+			len(first.starts), len(second.starts))
+	}
+
+	useSecond = true
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if len(first.starts) != 2 || len(second.starts) != 0 {
+		t.Fatalf("starts after successful same-key loader replacement = first %d second %d, want no restart",
+			len(first.starts), len(second.starts))
+	}
+	reload()
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if len(first.starts) != 2 || len(second.starts) != 1 {
+		t.Fatalf("starts after reload with committed replacement = first %d second %d, want 2/1",
+			len(first.starts), len(second.starts))
+	}
+}
+
+func TestUseResourceInitialFailedRenderStartsNoLoader(t *testing.T) {
+	isolateLifecycleTestState(t)
+	loader := &resourceTestLoader{}
+	fail := true
+	var resource Resource[string]
+	instance := testComponentInstance("InitialResourceTransaction", func() Node {
+		resource, _ = UseResource("initial", loader.load)
+		if fail {
+			panic("failed render")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	control := resourceControlForTest[string](t, instance)
+	if control.committed || control.owner != nil || control.loader != nil || control.key != "" || control.current != nil {
+		t.Fatalf("control after failed initial render = %#v, want no committed lifecycle state", control)
+	}
+	if control.pending.attempt != nil || len(instance.effectSlots) != 0 || len(loader.starts) != 0 {
+		t.Fatalf("failed initial resource pending=%#v effect slots=%d starts=%d, want cleared/0/0",
+			control.pending, len(instance.effectSlots), len(loader.starts))
+	}
+
+	fail = false
+	renderComponentInstance(instance)
+	if !resource.Loading() || !control.committed || control.key != "initial" || control.owner != instance {
+		t.Fatalf("resource/control after successful retry = %#v/%#v, want committed loading initial", resource, control)
+	}
+	if len(loader.starts) != 0 {
+		t.Fatalf("loader starts before retry effect flush = %d, want 0", len(loader.starts))
+	}
+	flushPendingEffects()
+	if got := loader.starts; len(got) != 1 || got[0] != "initial" {
+		t.Fatalf("loader starts after successful retry = %#v, want [initial]", got)
+	}
+}
+
+func resourceControlForTest[T any](t *testing.T, instance *componentInstance) *resourceControl[T] {
+	t.Helper()
+	if len(instance.stateSlots) == 0 {
+		t.Fatal("component has no resource state slot")
+	}
+	control, ok := instance.stateSlots[0].value.(*resourceControl[T])
+	if !ok || control == nil {
+		t.Fatalf("resource state slot = %#v, want *resourceControl", instance.stateSlots[0].value)
+	}
+	return control
+}
+
 func requireResourceEffectSlotCompleted(t *testing.T, instance *componentInstance) {
 	t.Helper()
 	if len(instance.effectSlots) != 1 {
