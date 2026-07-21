@@ -354,7 +354,11 @@ func main() { _ = message }
 		t.Fatal(err)
 	}
 	defer discovery.Cleanup()
-	t.Setenv("PWD", workspaceAlias)
+	stalePWD := filepath.Join(root, "unrelated-pwd")
+	if err := os.MkdirAll(stalePWD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PWD", stalePWD)
 	packages, err := listGoEmbedPackages(workspaceAlias, discovery.OverlayPath, false)
 	if err != nil {
 		t.Fatalf("listGoEmbedPackages() error: %v", err)
@@ -387,6 +391,197 @@ func main() { _ = message }
 	}
 }
 
+func TestEmbedDiscoveryTinyGoUsesLexicalWorkspaceAliasIntegration(t *testing.T) {
+	if _, err := exec.LookPath("tinygo"); err != nil {
+		t.Skip("TinyGo is not available")
+	}
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	physicalParent := filepath.Join(root, "physical")
+	workspaceRoot := filepath.Join(physicalParent, "workspace")
+	aliasParent := filepath.Join(root, "physical-alias")
+	workspaceAlias := filepath.Join(aliasParent, "workspace")
+	source := `package main
+
+import _ "embed"
+
+//go:embed message.txt
+var message string
+
+func main() { _ = message }
+`
+	writeTestFile(t, appDir, "go.mod", "module example.com/lexical-tinygo-overlay\n\ngo 1.22\n")
+	writeTestFile(t, appDir, "main.go", source)
+	writeTestFile(t, appDir, "message.txt", "authored")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(physicalParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, workspaceRoot, "go.mod", "module example.com/lexical-tinygo-overlay\n\ngo 1.22\n")
+	writeTestFile(t, workspaceRoot, "main.go", source)
+
+	discovery, err := createEmbedDiscoveryOverlay(appDir, workspaceAlias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Cleanup()
+	stalePWD := filepath.Join(root, "unrelated-pwd")
+	if err := os.MkdirAll(stalePWD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PWD", stalePWD)
+	packages, err := listTinyGoEmbedPackages(workspaceAlias, discovery.OverlayPath)
+	if err != nil {
+		t.Fatalf("listTinyGoEmbedPackages() error: %v", err)
+	}
+	if err := embedPackageMetadataError(packages); err != nil {
+		t.Fatalf("embedPackageMetadataError() error: %v", err)
+	}
+	var discovered *embedListPackage
+	for index := range packages {
+		if packages[index].ImportPath == "example.com/lexical-tinygo-overlay" {
+			discovered = &packages[index]
+			break
+		}
+	}
+	if discovered == nil {
+		t.Fatalf("root package missing from tinygo list output: %#v", packages)
+	}
+	if got, want := discovered.EmbedPatterns, []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("EmbedPatterns = %#v, want %#v", got, want)
+	}
+	if got, want := discovered.EmbedFiles, []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("EmbedFiles = %#v, want %#v", got, want)
+	}
+	_, plan, err := resolveEmbedInputPlan(appDir, workspaceAlias, discovery.Candidates, packages)
+	if err != nil {
+		t.Fatalf("resolveEmbedInputPlan() error: %v", err)
+	}
+	if got, want := embedPlanPaths(plan), []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+}
+
+func TestEmbedDiscoveryUsesOrdinaryWorkspaceWithStalePWD(t *testing.T) {
+	appDir := newEmbedTestApp(t, embedStringSource("message.txt"), map[string]string{"message.txt": "ordinary workspace"})
+	layout := newEmbedTestLayout(t, appDir, "go", "")
+	stalePWD := t.TempDir()
+	t.Setenv("PWD", stalePWD)
+	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if got, want := embedPlanPaths(result.EmbedPlan), []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+	assertEmbedFileContent(t, filepath.Join(layout.WorkDir, "message.txt"), "ordinary workspace")
+}
+
+func TestEmbedListCommandPreservesLexicalWorkingDirectory(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	physicalEntryPath := filepath.Join(root, "physical", "entry")
+	aliasParent := filepath.Join(root, "physical-alias")
+	lexicalEntryPath := filepath.Join(aliasParent, "entry")
+	if err := os.MkdirAll(physicalEntryPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "physical"), aliasParent); err != nil {
+		t.Fatal(err)
+	}
+	stalePWD := filepath.Join(root, "stale-pwd")
+	parentPWD := filepath.Join(root, "parent-pwd")
+	if err := os.MkdirAll(stalePWD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(parentPWD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PWD", parentPWD)
+	want, err := filepath.Abs(lexicalEntryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = filepath.Clean(want)
+	physical, err := canonicalPathForComparison(lexicalEntryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if physical == want {
+		t.Fatalf("test alias did not preserve a distinct lexical path: %q", want)
+	}
+
+	for _, test := range []struct {
+		name        string
+		environment func() []string
+		wantValues  []string
+	}{
+		{
+			name: "go",
+			environment: func() []string {
+				return append(compilerEnvironment("go"), "GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0", "PWD="+stalePWD)
+			},
+			wantValues: []string{"GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0"},
+		},
+		{
+			name: "tinygo",
+			environment: func() []string {
+				environment := setEnvironmentValue(compilerEnvironment("tinygo"), "GOFLAGS", "-buildvcs=false -overlay=overlay.json")
+				return append(environment, "PWD="+stalePWD)
+			},
+			wantValues: []string{"GOFLAGS=-buildvcs=false -overlay=overlay.json"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := &exec.Cmd{}
+			if err := configureEmbedListCommand(command, lexicalEntryPath, test.environment()); err != nil {
+				t.Fatalf("configureEmbedListCommand() error: %v", err)
+			}
+			if command.Dir != want {
+				t.Fatalf("command.Dir = %q, want lexical path %q", command.Dir, want)
+			}
+			pwdCount := 0
+			for _, item := range command.Env {
+				if strings.HasPrefix(item, "PWD=") {
+					pwdCount++
+					if item != "PWD="+want {
+						t.Fatalf("command PWD = %q, want %q", item, "PWD="+want)
+					}
+				}
+				if item == "PWD="+stalePWD {
+					t.Fatalf("stale PWD remained in command environment: %#v", command.Env)
+				}
+			}
+			if pwdCount != 1 {
+				t.Fatalf("command environment contains %d PWD entries, want 1: %#v", pwdCount, command.Env)
+			}
+			for _, wantValue := range test.wantValues {
+				if !stringSliceContains(command.Env, wantValue) {
+					t.Fatalf("command environment lost %q: %#v", wantValue, command.Env)
+				}
+			}
+			if command.Dir == physical {
+				t.Fatalf("command directory was physically canonicalized to %q", physical)
+			}
+			if got := os.Getenv("PWD"); got != parentPWD {
+				t.Fatalf("parent PWD = %q, want unchanged %q", got, parentPWD)
+			}
+		})
+	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEmbedWorkspacePreparesThroughExternalWorkspaceAlias(t *testing.T) {
 	requireSymlinkSupport(t)
 	root := t.TempDir()
@@ -402,7 +597,11 @@ func TestEmbedWorkspacePreparesThroughExternalWorkspaceAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	layout := newEmbedTestLayout(t, appDir, "go", workspaceAlias)
-	t.Setenv("PWD", layout.WorkDir)
+	stalePWD := filepath.Join(root, "unrelated-pwd")
+	if err := os.MkdirAll(stalePWD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PWD", stalePWD)
 	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
 	if err != nil {
 		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)

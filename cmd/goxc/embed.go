@@ -306,8 +306,10 @@ func listGoEmbedPackages(entryPath, overlayPath string, tinyGoTags bool) ([]embe
 	}
 	args = append(args, ".")
 	command := exec.Command(compilerPath, args...)
-	command.Dir = entryPath
-	command.Env = append(compilerEnvironment("go"), "GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0")
+	environment := append(compilerEnvironment("go"), "GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0")
+	if err := configureEmbedListCommand(command, entryPath, environment); err != nil {
+		return nil, err
+	}
 	return runEmbedListCommand(command, "go list")
 }
 
@@ -317,10 +319,23 @@ func listTinyGoEmbedPackages(entryPath, overlayPath string) ([]embedListPackage,
 		return nil, errors.New("TinyGo compiler not found in PATH; install TinyGo or use --compiler=go")
 	}
 	command := exec.Command(compilerPath, "list", "-target=wasm", "-deps", "-json", ".")
-	command.Dir = entryPath
 	flags := strings.TrimSpace(os.Getenv("GOFLAGS") + " -buildvcs=false " + strconv.Quote("-overlay="+overlayPath))
-	command.Env = setEnvironmentValue(compilerEnvironment("tinygo"), "GOFLAGS", flags)
+	environment := setEnvironmentValue(compilerEnvironment("tinygo"), "GOFLAGS", flags)
+	if err := configureEmbedListCommand(command, entryPath, environment); err != nil {
+		return nil, err
+	}
 	return runEmbedListCommand(command, "tinygo list")
+}
+
+func configureEmbedListCommand(command *exec.Cmd, entryPath string, environment []string) error {
+	lexicalEntryPath, err := filepath.Abs(entryPath)
+	if err != nil {
+		return fmt.Errorf("resolve embed discovery entry %s: %w", entryPath, err)
+	}
+	lexicalEntryPath = filepath.Clean(lexicalEntryPath)
+	command.Dir = lexicalEntryPath
+	command.Env = setEnvironmentValue(environment, "PWD", lexicalEntryPath)
+	return nil
 }
 
 func runEmbedListCommand(command *exec.Cmd, description string) ([]embedListPackage, error) {
