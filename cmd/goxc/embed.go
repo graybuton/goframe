@@ -60,9 +60,11 @@ type embedCandidate struct {
 	Kind       embedCandidateKind
 }
 
+type embedInputKey string
+
 type embedDiscoveryContext struct {
 	OverlayPath string
-	Candidates  map[string]embedCandidate
+	Candidates  map[embedInputKey]embedCandidate
 	Cleanup     func()
 }
 
@@ -74,8 +76,9 @@ const (
 )
 
 type embedWatchSpec struct {
-	Path string
-	Kind embedWatchKind
+	Path     string
+	Kind     embedWatchKind
+	Identity string
 }
 
 type resolvedEmbedInput struct {
@@ -137,7 +140,7 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryConte
 		return empty, fmt.Errorf("resolve embed workspace root: %w", err)
 	}
 	replacements := map[string]string{}
-	candidates := map[string]embedCandidate{}
+	candidates := map[embedInputKey]embedCandidate{}
 	unsafeSentinel := ""
 	cleanupTemporary := func() {
 		if unsafeSentinel != "" {
@@ -182,11 +185,15 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryConte
 			}
 			return nil
 		}
+		key, err := newEmbedInputKey(relative)
+		if err != nil {
+			return fmt.Errorf("resolve embed candidate %s: %w", sourcePath, err)
+		}
 		destination := filepath.Join(appWorkDir, relative)
 		if err := validatePathBelowRoot(appWorkDir, destination, "embed overlay destination", true); err != nil {
 			return err
 		}
-		destination, err = filepath.Abs(destination)
+		destination, err = canonicalPathForComparison(destination)
 		if err != nil {
 			return fmt.Errorf("resolve embed overlay destination %s: %w", destination, err)
 		}
@@ -209,9 +216,9 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryConte
 				return err
 			}
 		}
-		candidates[destination] = embedCandidate{SourcePath: sourcePath, Kind: kind}
+		candidates[key] = embedCandidate{SourcePath: sourcePath, Kind: kind}
 
-		if destination == filepath.Join(appWorkDir, "go.mod") {
+		if key == embedInputKey("go.mod") {
 			return nil
 		}
 		if kind != embedCandidateRegular {
@@ -362,7 +369,7 @@ func setEnvironmentValue(environment []string, key, value string) []string {
 	return append(result, prefix+value)
 }
 
-func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embedCandidate, packages []embedListPackage) ([]resolvedEmbedInput, embedInputPlan, error) {
+func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[embedInputKey]embedCandidate, packages []embedListPackage) ([]resolvedEmbedInput, embedInputPlan, error) {
 	appDir, err := filepath.Abs(appDir)
 	if err != nil {
 		return nil, embedInputPlan{}, fmt.Errorf("resolve embed source root: %w", err)
@@ -371,9 +378,8 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embe
 	if err != nil {
 		return nil, embedInputPlan{}, fmt.Errorf("resolve embed workspace root: %w", err)
 	}
-	inputsByDestination := map[string]resolvedEmbedInput{}
+	inputsByKey := map[embedInputKey]resolvedEmbedInput{}
 	watches := map[string]embedWatchSpec{}
-	generatedGoMod := filepath.Join(appWorkDir, "go.mod")
 	for _, packageInfo := range packages {
 		packageRelative, ok, err := relativePathBelow(appWorkDir, packageInfo.Dir)
 		if err != nil {
@@ -394,7 +400,11 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embe
 			if filepath.IsAbs(filepath.FromSlash(embedFile)) {
 				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s must be package-relative", embedFile, packageInfo.ImportPath)
 			}
-			destination := filepath.Join(packageInfo.Dir, filepath.FromSlash(embedFile))
+			key, err := newEmbedInputKey(filepath.Join(packageRelative, filepath.FromSlash(embedFile)))
+			if err != nil {
+				return nil, embedInputPlan{}, fmt.Errorf("resolve embedded input %q for %s: %w", embedFile, packageInfo.ImportPath, err)
+			}
+			destination := filepath.Join(appWorkDir, filepath.FromSlash(string(key)))
 			if err := validatePathBelowRoot(appWorkDir, destination, "embedded workspace input", true); err != nil {
 				return nil, embedInputPlan{}, err
 			}
@@ -402,13 +412,13 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embe
 			if err != nil {
 				return nil, embedInputPlan{}, fmt.Errorf("resolve embedded workspace input %s: %w", destination, err)
 			}
-			if destination == generatedGoMod {
+			if key == embedInputKey("go.mod") {
 				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s collides with generated workspace state at %s; workspace go.mod is not authored embed content", embedFile, packageInfo.ImportPath, destination)
 			}
-			if strings.HasSuffix(filepath.ToSlash(destination), ".gox.go") {
+			if strings.HasSuffix(string(key), ".gox.go") {
 				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s resolves to workspace-generated GOX source at %s; generated workspace files are not authored embed content", embedFile, packageInfo.ImportPath, destination)
 			}
-			candidate, ok := candidates[destination]
+			candidate, ok := candidates[key]
 			if !ok {
 				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s at workspace destination %s has no valid authored backing file", embedFile, packageInfo.ImportPath, destination)
 			}
@@ -451,15 +461,11 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embe
 			default:
 				return nil, embedInputPlan{}, fmt.Errorf("inspect embedded workspace destination %s: %w", destination, workspaceErr)
 			}
-			displayPath, err := filepath.Rel(appDir, source)
-			if err != nil {
-				return nil, embedInputPlan{}, fmt.Errorf("resolve embedded source input %s: %w", source, err)
-			}
 			sum := sha256.Sum256(content)
-			inputsByDestination[destination] = resolvedEmbedInput{
+			inputsByKey[key] = resolvedEmbedInput{
 				file: embedInputFile{
 					SourcePath:  source,
-					DisplayPath: filepath.ToSlash(displayPath),
+					DisplayPath: string(key),
 					Fingerprint: "sha256:" + hex.EncodeToString(sum[:]),
 				},
 				destination: destination,
@@ -468,15 +474,17 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embe
 		}
 	}
 
-	destinations := make([]string, 0, len(inputsByDestination))
-	for destination := range inputsByDestination {
-		destinations = append(destinations, destination)
+	keys := make([]embedInputKey, 0, len(inputsByKey))
+	for key := range inputsByKey {
+		keys = append(keys, key)
 	}
-	sort.Strings(destinations)
-	inputs := make([]resolvedEmbedInput, 0, len(destinations))
+	sort.Slice(keys, func(first, second int) bool {
+		return keys[first] < keys[second]
+	})
+	inputs := make([]resolvedEmbedInput, 0, len(keys))
 	plan := embedInputPlan{}
-	for _, destination := range destinations {
-		input := inputsByDestination[destination]
+	for _, key := range keys {
+		input := inputsByKey[key]
 		inputs = append(inputs, input)
 		plan.Files = append(plan.Files, input.file)
 	}
@@ -490,18 +498,27 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embe
 }
 
 func relativePathBelow(root, target string) (string, bool, error) {
-	root, target, err := cleanRootAndTarget(root, target)
+	originalRoot, originalTarget := root, target
+	root, err := canonicalPathForComparison(root)
 	if err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("resolve package root %s: %w", originalRoot, err)
 	}
-	relative, err := filepath.Rel(root, target)
+	target, err = canonicalPathForComparison(target)
 	if err != nil {
-		return "", false, fmt.Errorf("resolve package path %s below %s: %w", target, root, err)
+		return "", false, fmt.Errorf("resolve package path %s: %w", originalTarget, err)
 	}
-	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", false, nil
+	return relativeCanonicalPathBelow(root, target, originalRoot, originalTarget)
+}
+
+func newEmbedInputKey(relative string) (embedInputKey, error) {
+	if relative == "" || filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" {
+		return "", fmt.Errorf("embed input path %q must be relative", relative)
 	}
-	return relative, true, nil
+	cleaned := filepath.ToSlash(filepath.Clean(relative))
+	if cleaned == "" || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || path.IsAbs(cleaned) {
+		return "", fmt.Errorf("embed input path %q must stay inside the application workspace", relative)
+	}
+	return embedInputKey(cleaned), nil
 }
 
 func embedPatternWatchSpec(appDir, sourcePackageDir, pattern string) (embedWatchSpec, error) {
@@ -522,7 +539,7 @@ func embedPatternWatchSpec(appDir, sourcePackageDir, pattern string) (embedWatch
 		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return embedWatchSpec{}, fmt.Errorf("inspect embed pattern watch path %s: %w", candidate, err)
 		}
-		return embedWatchSpec{Path: candidate, Kind: kind}, nil
+		return newEmbedWatchSpec(appDir, candidate, kind)
 	}
 
 	rootRelative := ""
@@ -544,11 +561,69 @@ func embedPatternWatchSpec(appDir, sourcePackageDir, pattern string) (embedWatch
 	if err != nil {
 		return embedWatchSpec{}, fmt.Errorf("resolve embed pattern watch root %s: %w", root, err)
 	}
-	return embedWatchSpec{Path: root, Kind: embedWatchTree}, nil
+	return newEmbedWatchSpec(appDir, root, embedWatchTree)
 }
 
 func embedWatchKey(watch embedWatchSpec) string {
-	return strconv.Itoa(int(watch.Kind)) + ":" + watch.Path
+	identity := watch.Identity
+	if identity == "" {
+		identity = filepath.ToSlash(filepath.Clean(watch.Path))
+	}
+	return strconv.Itoa(int(watch.Kind)) + ":" + identity
+}
+
+func newEmbedWatchSpec(appDir, watchPath string, kind embedWatchKind) (embedWatchSpec, error) {
+	relative, inside, err := relativeEmbedWatchPathBelow(appDir, watchPath)
+	if err != nil {
+		return embedWatchSpec{}, err
+	}
+	if !inside {
+		return embedWatchSpec{}, fmt.Errorf("embed watch path %s must stay inside %s", watchPath, appDir)
+	}
+	identity := filepath.ToSlash(filepath.Clean(relative))
+	if identity == "" || identity == ".." || strings.HasPrefix(identity, "../") || path.IsAbs(identity) {
+		return embedWatchSpec{}, fmt.Errorf("embed watch path %s has invalid application-relative identity %q", watchPath, identity)
+	}
+	return embedWatchSpec{Path: watchPath, Kind: kind, Identity: identity}, nil
+}
+
+func relativeEmbedWatchPathBelow(root, target string) (string, bool, error) {
+	originalRoot, originalTarget := root, target
+	root, err := canonicalPathForComparison(root)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve embed watch root %s: %w", originalRoot, err)
+	}
+	info, lstatErr := os.Lstat(target)
+	if lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		parent, err := canonicalPathForComparison(filepath.Dir(target))
+		if err != nil {
+			return "", false, fmt.Errorf("resolve embed watch parent %s: %w", filepath.Dir(originalTarget), err)
+		}
+		target = filepath.Join(parent, filepath.Base(target))
+	} else {
+		if lstatErr != nil && !errors.Is(lstatErr, os.ErrNotExist) {
+			return "", false, fmt.Errorf("inspect embed watch path %s: %w", originalTarget, lstatErr)
+		}
+		target, err = canonicalPathForComparison(target)
+		if err != nil {
+			return "", false, fmt.Errorf("resolve embed watch path %s: %w", originalTarget, err)
+		}
+	}
+	return relativeCanonicalPathBelow(root, target, originalRoot, originalTarget)
+}
+
+func relativeCanonicalPathBelow(root, target, originalRoot, originalTarget string) (string, bool, error) {
+	if !strings.EqualFold(filepath.VolumeName(root), filepath.VolumeName(target)) {
+		return "", false, nil
+	}
+	relative, err := filepath.Rel(root, target)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve package path %s below %s: %w", originalTarget, originalRoot, err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", false, nil
+	}
+	return relative, true, nil
 }
 
 func embedPackageMetadataError(packages []embedListPackage) error {
@@ -632,11 +707,15 @@ func embedWatchExactFingerprint(appDir, target string) (string, error) {
 }
 
 func validateEmbedWatchExactPath(appDir, target string) error {
-	_, inside, err := relativePathBelow(appDir, target)
+	root, target, err := cleanRootAndTarget(appDir, target)
 	if err != nil {
 		return err
 	}
-	if !inside {
+	relative, err := filepath.Rel(root, target)
+	if err != nil {
+		return fmt.Errorf("resolve exact embed watch path %s below %s: %w", target, root, err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("exact embed watch path %s must stay inside %s", target, appDir)
 	}
 	return validatePathBelowRoot(appDir, filepath.Dir(target), "exact embed watch parent", true)
@@ -714,7 +793,7 @@ func embedInputPlansEqual(first, second embedInputPlan) bool {
 		return false
 	}
 	for index := range first.Watches {
-		if first.Watches[index] != second.Watches[index] {
+		if embedWatchKey(first.Watches[index]) != embedWatchKey(second.Watches[index]) {
 			return false
 		}
 	}

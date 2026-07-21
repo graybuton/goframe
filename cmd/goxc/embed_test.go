@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -234,6 +235,321 @@ func main() { _ = external.Message }
 	}
 }
 
+func TestEmbedInputPlanResolvesPhysicalWorkspaceAlias(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	workspaceParent := filepath.Join(root, "physical")
+	workspaceRoot := filepath.Join(workspaceParent, "workspace")
+	workspaceAliasParent := filepath.Join(root, "physical-alias")
+	workspaceAlias := filepath.Join(workspaceAliasParent, "workspace")
+	writeTestFile(t, appDir, "message.txt", "authored")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(workspaceParent, workspaceAliasParent); err != nil {
+		t.Fatal(err)
+	}
+
+	discovery, err := createEmbedDiscoveryOverlay(appDir, workspaceAlias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Cleanup()
+	_, plan, err := resolveEmbedInputPlan(appDir, workspaceAlias, discovery.Candidates, []embedListPackage{{
+		Dir:        workspaceRoot,
+		ImportPath: "example.com/alias",
+		EmbedFiles: []string{"message.txt"},
+	}})
+	if err != nil {
+		t.Fatalf("resolveEmbedInputPlan() error: %v", err)
+	}
+	if got, want := embedPlanPaths(plan), []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+	if got := plan.Files[0].SourcePath; got != filepath.Join(appDir, "message.txt") {
+		t.Fatalf("authored source = %q, want app-local message.txt", got)
+	}
+}
+
+func TestEmbedDiscoveryOverlayUsesPhysicalWorkspacePath(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	workspaceParent := filepath.Join(root, "physical")
+	workspaceRoot := filepath.Join(workspaceParent, "workspace")
+	workspaceAliasParent := filepath.Join(root, "physical-alias")
+	workspaceAlias := filepath.Join(workspaceAliasParent, "workspace")
+	writeTestFile(t, appDir, "message.txt", "authored")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(workspaceParent, workspaceAliasParent); err != nil {
+		t.Fatal(err)
+	}
+
+	discovery, err := createEmbedDiscoveryOverlay(appDir, workspaceAlias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Cleanup()
+	content, err := os.ReadFile(discovery.OverlayPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var overlay embedDiscoveryOverlay
+	if err := json.Unmarshal(content, &overlay); err != nil {
+		t.Fatal(err)
+	}
+	want, err := canonicalPathForComparison(filepath.Join(workspaceRoot, "message.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := overlay.Replace[want]; got != filepath.Join(appDir, "message.txt") {
+		t.Fatalf("physical overlay replacement = %q, want authored message.txt; replacements=%#v", got, overlay.Replace)
+	}
+}
+
+func TestEmbedInputKeysPreservePhysicalApplicationAliasIdentity(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	physicalParent := filepath.Join(root, "physical")
+	appDir := filepath.Join(physicalParent, "app")
+	aliasParent := filepath.Join(root, "physical-alias")
+	appAlias := filepath.Join(aliasParent, "app")
+	source := filepath.Join(appDir, "internal", "content", "payload.txt")
+	writeTestFile(t, appDir, "internal/content/payload.txt", "payload")
+	if err := os.Symlink(physicalParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+
+	realRelative, inside, err := relativePathBelow(appDir, source)
+	if err != nil || !inside {
+		t.Fatalf("real source relation = %q, inside=%v, err=%v", realRelative, inside, err)
+	}
+	aliasRelative, inside, err := relativePathBelow(appAlias, source)
+	if err != nil || !inside {
+		t.Fatalf("aliased source relation = %q, inside=%v, err=%v", aliasRelative, inside, err)
+	}
+	realKey, err := newEmbedInputKey(realRelative)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasKey, err := newEmbedInputKey(aliasRelative)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if realKey != aliasKey || realKey != embedInputKey("internal/content/payload.txt") {
+		t.Fatalf("physical alias keys = %q and %q", realKey, aliasKey)
+	}
+	if err := validatePathBelowRoot(appDir, source, "embedded source input", false); err != nil {
+		t.Fatalf("validate physical authored source: %v", err)
+	}
+}
+
+func TestEmbedInputPlanResolvesMissingWorkspaceTail(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	workspaceParent := filepath.Join(root, "workspace")
+	appWorkDir := filepath.Join(workspaceParent, "missing-app")
+	source := filepath.Join(appDir, "cmd", "app", "message.txt")
+	writeTestFile(t, appDir, "cmd/app/message.txt", "payload")
+	if err := os.MkdirAll(workspaceParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	inputs, plan, err := resolveEmbedInputPlan(appDir, appWorkDir, map[embedInputKey]embedCandidate{
+		"cmd/app/message.txt": {SourcePath: source, Kind: embedCandidateRegular},
+	}, []embedListPackage{{
+		Dir:        filepath.Join(appWorkDir, "cmd", "app"),
+		ImportPath: "example.com/missing/cmd/app",
+		EmbedFiles: []string{"message.txt"},
+	}})
+	if err != nil {
+		t.Fatalf("resolveEmbedInputPlan() error: %v", err)
+	}
+	if got, want := embedPlanPaths(plan), []string{"cmd/app/message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+	if len(inputs) != 1 || !inputs[0].copy || inputs[0].destination != filepath.Join(appWorkDir, "cmd", "app", "message.txt") {
+		t.Fatalf("missing-tail input = %+v", inputs)
+	}
+}
+
+func TestEmbedDiscoveryCandidatesUseDistinctRelativeKeys(t *testing.T) {
+	appDir := t.TempDir()
+	appWorkDir := t.TempDir()
+	writeTestFile(t, appDir, "first/payload.txt", "first")
+	writeTestFile(t, appDir, "second/payload.txt", "second")
+	discovery, err := createEmbedDiscoveryOverlay(appDir, appWorkDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Cleanup()
+	if len(discovery.Candidates) != 2 {
+		t.Fatalf("candidate count = %d, want 2", len(discovery.Candidates))
+	}
+	for _, key := range []embedInputKey{"first/payload.txt", "second/payload.txt"} {
+		if _, ok := discovery.Candidates[key]; !ok {
+			t.Fatalf("candidate key %q missing: %#v", key, discovery.Candidates)
+		}
+	}
+}
+
+func TestEmbedInputPlanFiltersPhysicalPackageOutsideWorkspace(t *testing.T) {
+	appDir := t.TempDir()
+	appWorkDir := t.TempDir()
+	externalPackage := filepath.Join(t.TempDir(), "external")
+	if err := os.MkdirAll(externalPackage, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inputs, plan, err := resolveEmbedInputPlan(appDir, appWorkDir, nil, []embedListPackage{{
+		Dir:           externalPackage,
+		ImportPath:    "example.com/external",
+		EmbedPatterns: []string{"payload.txt"},
+		EmbedFiles:    []string{"payload.txt"},
+	}})
+	if err != nil {
+		t.Fatalf("resolveEmbedInputPlan() error: %v", err)
+	}
+	if len(inputs) != 0 || len(plan.Files) != 0 || len(plan.Watches) != 0 {
+		t.Fatalf("external package entered embed plan: inputs=%#v plan=%#v", inputs, plan)
+	}
+}
+
+func TestEmbedInputPlanFiltersPackageOnDifferentWindowsVolume(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows volume identity regression")
+	}
+	if relative, inside, err := relativeCanonicalPathBelow(
+		`C:\workspace\app`,
+		`D:\repository\pkg\goframe`,
+		`C:\workspace\app`,
+		`D:\repository\pkg\goframe`,
+	); err != nil || inside || relative != "" {
+		t.Fatalf("different-volume relation = %q, inside=%v, err=%v", relative, inside, err)
+	}
+
+	repositoryRoot, ok := findRepositoryRoot(".")
+	if !ok {
+		t.Fatal("repository root not found")
+	}
+	appDir := t.TempDir()
+	appWorkDir := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(appWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	externalPackage := filepath.Join(repositoryRoot, "pkg", "goframe")
+	if strings.EqualFold(filepath.VolumeName(appWorkDir), filepath.VolumeName(externalPackage)) {
+		return
+	}
+	_, plan, err := resolveEmbedInputPlan(appDir, appWorkDir, nil, []embedListPackage{{
+		Dir:        externalPackage,
+		ImportPath: canonicalModulePath + "/pkg/goframe",
+	}})
+	if err != nil {
+		t.Fatalf("different-volume external package error: %v", err)
+	}
+	if len(plan.Files) != 0 || len(plan.Watches) != 0 {
+		t.Fatalf("different-volume external package entered plan: %#v", plan)
+	}
+}
+
+func TestEmbedInputPlanRejectsReservedWorkspaceInputsThroughAlias(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	workspaceParent := filepath.Join(root, "physical")
+	workspaceRoot := filepath.Join(workspaceParent, "workspace")
+	aliasParent := filepath.Join(root, "physical-alias")
+	workspaceAlias := filepath.Join(aliasParent, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "cmd", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(workspaceParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name       string
+		packageDir string
+		embedFile  string
+		want       string
+	}{
+		{name: "go.mod", packageDir: workspaceRoot, embedFile: "go.mod", want: "workspace go.mod"},
+		{name: "generated GOX", packageDir: filepath.Join(workspaceRoot, "cmd", "app"), embedFile: "app.gox.go", want: "workspace-generated GOX source"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := resolveEmbedInputPlan(appDir, workspaceAlias, nil, []embedListPackage{{
+				Dir:        test.packageDir,
+				ImportPath: "example.com/reserved",
+				EmbedFiles: []string{test.embedFile},
+			}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("resolveEmbedInputPlan() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestEmbedWatchIdentityDeduplicatesPhysicalAliases(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	physicalParent := filepath.Join(root, "physical")
+	appDir := filepath.Join(physicalParent, "app")
+	aliasParent := filepath.Join(root, "physical-alias")
+	appAlias := filepath.Join(aliasParent, "app")
+	writeTestFile(t, appDir, "message.txt", "payload")
+	writeTestFile(t, appDir, "templates/page.html", "page")
+	if err := os.Symlink(physicalParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+
+	realWatch, err := embedPatternWatchSpec(appDir, appDir, "message.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasWatch, err := embedPatternWatchSpec(appAlias, appAlias, "message.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embedWatchKey(realWatch) != embedWatchKey(aliasWatch) {
+		t.Fatalf("equivalent watch keys = %q and %q", embedWatchKey(realWatch), embedWatchKey(aliasWatch))
+	}
+	watches := map[string]embedWatchSpec{
+		embedWatchKey(realWatch):  realWatch,
+		embedWatchKey(aliasWatch): aliasWatch,
+	}
+	if len(watches) != 1 {
+		t.Fatalf("deduplicated watch count = %d, want 1", len(watches))
+	}
+	realTreeWatch, err := embedPatternWatchSpec(appDir, appDir, "templates/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasTreeWatch, err := embedPatternWatchSpec(appAlias, appAlias, "templates/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embedWatchKey(realTreeWatch) != embedWatchKey(aliasTreeWatch) {
+		t.Fatalf("equivalent tree watch keys = %q and %q", embedWatchKey(realTreeWatch), embedWatchKey(aliasTreeWatch))
+	}
+	treeWatches := map[string]embedWatchSpec{
+		embedWatchKey(realTreeWatch):  realTreeWatch,
+		embedWatchKey(aliasTreeWatch): aliasTreeWatch,
+	}
+	if len(treeWatches) != 1 {
+		t.Fatalf("deduplicated tree watch count = %d, want 1", len(treeWatches))
+	}
+	exactTreePath, err := newEmbedWatchSpec(appDir, realTreeWatch.Path, embedWatchExact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embedWatchKey(exactTreePath) == embedWatchKey(realTreeWatch) {
+		t.Fatal("exact and tree watches collapsed to one identity")
+	}
+}
+
 func TestEmbedWorkspaceBuildsRootAndInternalPackageInputs(t *testing.T) {
 	t.Run("root package", func(t *testing.T) {
 		appDir := newEmbedTestApp(t, embedStringSource("message.txt"), map[string]string{"message.txt": "root payload"})
@@ -352,8 +668,7 @@ func TestEmbedMaterializationRejectsUnsafeInputs(t *testing.T) {
 	t.Run("destination traversal", func(t *testing.T) {
 		appDir := t.TempDir()
 		appWorkDir := t.TempDir()
-		outside := filepath.Join(filepath.Dir(appWorkDir), "escape.txt")
-		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[string]embedCandidate{outside: {
+		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[embedInputKey]embedCandidate{"escape.txt": {
 			SourcePath: filepath.Join(appDir, "source.txt"),
 			Kind:       embedCandidateRegular,
 		}}, []embedListPackage{{
@@ -405,7 +720,7 @@ func TestEmbedDiscoveryPreservesUnsafeCandidateProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(appWorkDir, "link.txt")
-	candidate, ok := discovery.Candidates[destination]
+	candidate, ok := discovery.Candidates["link.txt"]
 	if !ok {
 		discovery.Cleanup()
 		t.Fatalf("symlink candidate missing for %s", destination)
@@ -561,9 +876,8 @@ func TestEmbedMaterializationRejectsIrregularPatternCandidate(t *testing.T) {
 	t.Run("candidate validation", func(t *testing.T) {
 		appDir := t.TempDir()
 		appWorkDir := t.TempDir()
-		destination := filepath.Join(appWorkDir, "payload.irregular")
-		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[string]embedCandidate{
-			destination: {SourcePath: filepath.Join(appDir, "payload.irregular"), Kind: embedCandidateIrregular},
+		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[embedInputKey]embedCandidate{
+			"payload.irregular": {SourcePath: filepath.Join(appDir, "payload.irregular"), Kind: embedCandidateIrregular},
 		}, []embedListPackage{{
 			Dir:        appWorkDir,
 			ImportPath: "example.com/irregular",
