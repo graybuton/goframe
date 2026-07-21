@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -350,7 +353,10 @@ func TestEmbedMaterializationRejectsUnsafeInputs(t *testing.T) {
 		appDir := t.TempDir()
 		appWorkDir := t.TempDir()
 		outside := filepath.Join(filepath.Dir(appWorkDir), "escape.txt")
-		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[string]string{outside: filepath.Join(appDir, "source.txt")}, []embedListPackage{{
+		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[string]embedCandidate{outside: {
+			SourcePath: filepath.Join(appDir, "source.txt"),
+			Kind:       embedCandidateRegular,
+		}}, []embedListPackage{{
 			Dir:        appWorkDir,
 			ImportPath: "example.com/app",
 			EmbedFiles: []string{"../escape.txt"},
@@ -376,6 +382,337 @@ func TestEmbedMaterializationRejectsUnsafeInputs(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestEmbedDiscoveryPreservesUnsafeCandidateProvenance(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	appWorkDir := filepath.Join(root, "work")
+	writeTestFile(t, appDir, "main.go", embedFSSource("*"))
+	if err := os.MkdirAll(appWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(root, "external.txt")
+	writeTestFile(t, root, "external.txt", "external-secret")
+	link := filepath.Join(appDir, "link.txt")
+	if err := os.Symlink(external, link); err != nil {
+		t.Fatal(err)
+	}
+
+	discovery, err := createEmbedDiscoveryOverlay(appDir, appWorkDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(appWorkDir, "link.txt")
+	candidate, ok := discovery.Candidates[destination]
+	if !ok {
+		discovery.Cleanup()
+		t.Fatalf("symlink candidate missing for %s", destination)
+	}
+	if candidate.Kind != embedCandidateSymlink || candidate.SourcePath != link {
+		discovery.Cleanup()
+		t.Fatalf("symlink candidate = %+v", candidate)
+	}
+	overlayContent, err := os.ReadFile(discovery.OverlayPath)
+	if err != nil {
+		discovery.Cleanup()
+		t.Fatal(err)
+	}
+	var overlay embedDiscoveryOverlay
+	if err := json.Unmarshal(overlayContent, &overlay); err != nil {
+		discovery.Cleanup()
+		t.Fatal(err)
+	}
+	sentinel := overlay.Replace[destination]
+	if sentinel == "" || sentinel == external || sentinel == link {
+		discovery.Cleanup()
+		t.Fatalf("unsafe overlay backing = %q", sentinel)
+	}
+	if _, inside, err := relativePathBelow(appDir, sentinel); err != nil || inside {
+		discovery.Cleanup()
+		t.Fatalf("sentinel %q is inside app: inside=%v err=%v", sentinel, inside, err)
+	}
+	if content, err := os.ReadFile(sentinel); err != nil || len(content) != 0 {
+		discovery.Cleanup()
+		t.Fatalf("sentinel content = %q, err=%v", content, err)
+	}
+
+	discovery.Cleanup()
+	for _, temporary := range []string{discovery.OverlayPath, sentinel} {
+		if _, err := os.Lstat(temporary); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("temporary discovery file %s remained: %v", temporary, err)
+		}
+	}
+}
+
+func TestEmbedMaterializationRejectsUnsafePatternCandidates(t *testing.T) {
+	requireSymlinkSupport(t)
+	tests := []struct {
+		name       string
+		pattern    string
+		link       string
+		additional map[string]string
+	}{
+		{
+			name:       "broad root pattern",
+			pattern:    "*",
+			link:       "link.txt",
+			additional: map[string]string{"regular.txt": "regular"},
+		},
+		{
+			name:       "directory pattern with nested symlink",
+			pattern:    "templates",
+			link:       "templates/link.txt",
+			additional: map[string]string{"templates/visible.txt": "visible"},
+		},
+		{
+			name:       "all directory pattern",
+			pattern:    "all:templates",
+			link:       "templates/link.txt",
+			additional: map[string]string{"templates/visible.txt": "visible"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			appDir := filepath.Join(root, "app")
+			packageDir := filepath.Join(appDir, "cmd", "app")
+			writeTestFile(t, appDir, "go.mod", "module example.com/unsafeembed\n\ngo 1.22\n")
+			writeTestFile(t, packageDir, "main.go", embedFSSource(test.pattern))
+			for relative, content := range test.additional {
+				writeTestFile(t, packageDir, relative, content)
+			}
+			external := filepath.Join(root, "external.txt")
+			writeTestFile(t, root, "external.txt", "external-secret")
+			link := filepath.Join(packageDir, filepath.FromSlash(test.link))
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(external, link); err != nil {
+				t.Fatal(err)
+			}
+			layout := newEmbedTestLayout(t, appDir, "go", "")
+			_, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "cmd/app"))
+			if err == nil || !strings.Contains(err.Error(), "symlinked authored input") || !strings.Contains(err.Error(), test.link) {
+				t.Fatalf("prepareBuildWorkspaceResult() error = %v, want selected symlink rejection", err)
+			}
+			if workspaceContainsBytes(t, layout.WorkDir, "external-secret") {
+				t.Fatal("external symlink target bytes entered the workspace")
+			}
+		})
+	}
+}
+
+func TestEmbedMaterializationIgnoresUnselectedUnsafeCandidate(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	packageDir := filepath.Join(appDir, "cmd", "app")
+	writeTestFile(t, appDir, "go.mod", "module example.com/unselectedembed\n\ngo 1.22\n")
+	writeTestFile(t, packageDir, "main.go", embedStringSource("regular.txt"))
+	writeTestFile(t, packageDir, "regular.txt", "regular")
+	external := filepath.Join(root, "external.txt")
+	writeTestFile(t, root, "external.txt", "external-secret")
+	if err := os.Symlink(external, filepath.Join(packageDir, "unselected.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	layout := newEmbedTestLayout(t, appDir, "go", "")
+	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "cmd/app"))
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if got, want := embedPlanPaths(result.EmbedPlan), []string{"cmd/app/regular.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+	if workspaceContainsBytes(t, layout.WorkDir, "external-secret") {
+		t.Fatal("unselected symlink target bytes entered the workspace")
+	}
+}
+
+func TestEmbedMaterializationRejectsIrregularPatternCandidate(t *testing.T) {
+	t.Run("real socket", func(t *testing.T) {
+		root, err := os.MkdirTemp("", "ge-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(root) })
+		appDir := filepath.Join(root, "app")
+		packageDir := filepath.Join(appDir, "cmd", "app")
+		writeTestFile(t, appDir, "go.mod", "module example.com/irregularembed\n\ngo 1.22\n")
+		writeTestFile(t, packageDir, "main.go", embedFSSource("*"))
+		writeTestFile(t, packageDir, "regular.txt", "regular")
+		socketPath := filepath.Join(packageDir, "payload.sock")
+		listener, err := net.Listen("unix", socketPath)
+		if err != nil {
+			t.Skipf("Unix-domain socket creation is unavailable: %v", err)
+		}
+		defer listener.Close()
+
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		_, err = prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "cmd/app"))
+		if err == nil || !strings.Contains(err.Error(), "irregular authored input") || !strings.Contains(err.Error(), "payload.sock") {
+			t.Fatalf("prepareBuildWorkspaceResult() error = %v, want irregular input rejection", err)
+		}
+	})
+
+	t.Run("candidate validation", func(t *testing.T) {
+		appDir := t.TempDir()
+		appWorkDir := t.TempDir()
+		destination := filepath.Join(appWorkDir, "payload.irregular")
+		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, map[string]embedCandidate{
+			destination: {SourcePath: filepath.Join(appDir, "payload.irregular"), Kind: embedCandidateIrregular},
+		}, []embedListPackage{{
+			Dir:        appWorkDir,
+			ImportPath: "example.com/irregular",
+			EmbedFiles: []string{"payload.irregular"},
+		}})
+		if err == nil || !strings.Contains(err.Error(), "irregular authored input") {
+			t.Fatalf("resolveEmbedInputPlan() error = %v, want irregular candidate rejection", err)
+		}
+	})
+}
+
+func TestEmbedMaterializationRejectsWorkspaceOnlyInputs(t *testing.T) {
+	t.Run("missing authored go.mod", func(t *testing.T) {
+		appDir := t.TempDir()
+		writeTestFile(t, appDir, "main.go", embedStringSource("go.mod"))
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		_, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+		if err == nil || !strings.Contains(err.Error(), "collides with generated workspace state") {
+			t.Fatalf("prepareBuildWorkspaceResult() error = %v, want workspace go.mod rejection", err)
+		}
+	})
+
+	t.Run("authored go.mod collision", func(t *testing.T) {
+		appDir := newEmbedTestApp(t, embedStringSource("go.mod"), nil)
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		_, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+		if err == nil || !strings.Contains(err.Error(), "workspace go.mod is not authored embed content") {
+			t.Fatalf("prepareBuildWorkspaceResult() error = %v, want transformed go.mod rejection", err)
+		}
+	})
+
+	t.Run("generated GOX output", func(t *testing.T) {
+		repositoryRoot, ok := findRepositoryRoot(".")
+		if !ok {
+			t.Fatal("repository root not found")
+		}
+		appDir := t.TempDir()
+		writeTestFile(t, appDir, "go.mod", "module example.com/generatedembed\n\ngo 1.22\n\nrequire "+canonicalModulePath+" v0.0.0\n\nreplace "+canonicalModulePath+" => "+filepath.ToSlash(repositoryRoot)+"\n")
+		writeTestFile(t, appDir, "cmd/app/main.go", embedFSSource("*"))
+		writeTestFile(t, appDir, "cmd/app/app.gox", `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node { return <p>generated</p> }
+`)
+		layout := newEmbedTestLayout(t, appDir, "go", "")
+		_, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "cmd/app"))
+		if err == nil || !strings.Contains(err.Error(), ".gox.go") || !strings.Contains(err.Error(), "workspace-generated GOX source") {
+			t.Fatalf("prepareBuildWorkspaceResult() error = %v, want generated GOX rejection", err)
+		}
+	})
+
+	t.Run("synthetic missing provenance", func(t *testing.T) {
+		appDir := t.TempDir()
+		appWorkDir := t.TempDir()
+		writeTestFile(t, appWorkDir, "workspace-only.txt", "generated")
+		_, _, err := resolveEmbedInputPlan(appDir, appWorkDir, nil, []embedListPackage{{
+			Dir:        appWorkDir,
+			ImportPath: "example.com/workspace-only",
+			EmbedFiles: []string{"workspace-only.txt"},
+		}})
+		if err == nil || !strings.Contains(err.Error(), "has no valid authored backing file") {
+			t.Fatalf("resolveEmbedInputPlan() error = %v, want missing provenance", err)
+		}
+	})
+}
+
+func TestEmbedMaterializationAcceptsAuthoredGoFileProvenance(t *testing.T) {
+	appDir := newEmbedTestApp(t, embedStringSource("payload.go"), map[string]string{
+		"payload.go": "package main\n\nconst authoredPayload = true\n",
+	})
+	layout := newEmbedTestLayout(t, appDir, "go", "")
+	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if got, want := embedPlanPaths(result.EmbedPlan), []string{"payload.go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+	assertEmbedFileContent(t, filepath.Join(layout.WorkDir, "payload.go"), "package main\n\nconst authoredPayload = true\n")
+}
+
+func TestEmbedPatternWatchBoundaries(t *testing.T) {
+	appDir := t.TempDir()
+	writeTestFile(t, appDir, "message.txt", "message")
+	writeTestFile(t, appDir, "config/app.json", "{}")
+	writeTestFile(t, appDir, "templates/one.txt", "one")
+	tests := []struct {
+		pattern string
+		kind    embedWatchKind
+		path    string
+	}{
+		{pattern: "message.txt", kind: embedWatchExact, path: "message.txt"},
+		{pattern: "config/app.json", kind: embedWatchExact, path: "config/app.json"},
+		{pattern: "missing.txt", kind: embedWatchExact, path: "missing.txt"},
+		{pattern: "templates", kind: embedWatchTree, path: "templates"},
+		{pattern: "templates/*.txt", kind: embedWatchTree, path: "templates"},
+		{pattern: "*", kind: embedWatchTree, path: "."},
+	}
+	for _, test := range tests {
+		t.Run(test.pattern, func(t *testing.T) {
+			watch, err := embedPatternWatchSpec(appDir, appDir, test.pattern)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if watch.Kind != test.kind || watch.Path != filepath.Join(appDir, filepath.FromSlash(test.path)) {
+				t.Fatalf("watch = %+v, want kind=%d path=%s", watch, test.kind, test.path)
+			}
+		})
+	}
+}
+
+func TestEmbedExactWatchFingerprintTracksOnlyPathType(t *testing.T) {
+	requireSymlinkSupport(t)
+	appDir := t.TempDir()
+	target := filepath.Join(appDir, "message.txt")
+	if got, err := embedWatchExactFingerprint(appDir, target); err != nil || got != "missing" {
+		t.Fatalf("missing fingerprint = %q, err=%v", got, err)
+	}
+	writeTestFile(t, appDir, "message.txt", "first")
+	first, err := embedWatchExactFingerprint(appDir, target)
+	if err != nil || first != "regular" {
+		t.Fatalf("regular fingerprint = %q, err=%v", first, err)
+	}
+	writeTestFile(t, appDir, "message.txt", "second")
+	second, err := embedWatchExactFingerprint(appDir, target)
+	if err != nil || second != first {
+		t.Fatalf("content-only fingerprint = %q, want %q, err=%v", second, first, err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := embedWatchExactFingerprint(appDir, target); err != nil || got != "directory" {
+		t.Fatalf("directory fingerprint = %q, err=%v", got, err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "external.txt")
+	writeTestFile(t, filepath.Dir(external), filepath.Base(external), "external")
+	if err := os.Symlink(external, target); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := embedWatchExactFingerprint(appDir, target); err != nil || got != "symlink" {
+		t.Fatalf("symlink fingerprint = %q, err=%v", got, err)
+	}
 }
 
 func TestEmbedMaterializationDoesNotCopyUnrelatedFiles(t *testing.T) {

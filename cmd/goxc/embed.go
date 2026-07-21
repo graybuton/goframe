@@ -19,7 +19,7 @@ import (
 
 type embedInputPlan struct {
 	Files           []embedInputFile
-	WatchRoots      []string
+	Watches         []embedWatchSpec
 	WatchMembership map[string]string
 	Resolved        bool
 }
@@ -47,6 +47,37 @@ type embedDiscoveryOverlay struct {
 	Replace map[string]string
 }
 
+type embedCandidateKind uint8
+
+const (
+	embedCandidateRegular embedCandidateKind = iota
+	embedCandidateSymlink
+	embedCandidateIrregular
+)
+
+type embedCandidate struct {
+	SourcePath string
+	Kind       embedCandidateKind
+}
+
+type embedDiscoveryContext struct {
+	OverlayPath string
+	Candidates  map[string]embedCandidate
+	Cleanup     func()
+}
+
+type embedWatchKind uint8
+
+const (
+	embedWatchExact embedWatchKind = iota
+	embedWatchTree
+)
+
+type embedWatchSpec struct {
+	Path string
+	Kind embedWatchKind
+}
+
 type resolvedEmbedInput struct {
 	file        embedInputFile
 	destination string
@@ -54,19 +85,19 @@ type resolvedEmbedInput struct {
 }
 
 func discoverAndMaterializeEmbedInputs(layout BuildLayout, appWorkDir, entryPath string) (embedInputPlan, error) {
-	overlayPath, replacements, cleanup, err := createEmbedDiscoveryOverlay(layout.AppDir, appWorkDir)
+	discovery, err := createEmbedDiscoveryOverlay(layout.AppDir, appWorkDir)
 	if err != nil {
 		return embedInputPlan{}, err
 	}
-	defer cleanup()
+	defer discovery.Cleanup()
 
-	packages, listErr := listEmbedPackages(layout.Compiler, entryPath, overlayPath)
+	packages, listErr := listEmbedPackages(layout.Compiler, entryPath, discovery.OverlayPath)
 	if listErr != nil && layout.Compiler == "tinygo" {
-		if partial, partialErr := listGoEmbedPackages(entryPath, overlayPath, true); partialErr == nil {
+		if partial, partialErr := listGoEmbedPackages(entryPath, discovery.OverlayPath, true); partialErr == nil {
 			packages = partial
 		}
 	}
-	inputs, plan, planErr := resolveEmbedInputPlan(layout.AppDir, appWorkDir, replacements, packages)
+	inputs, plan, planErr := resolveEmbedInputPlan(layout.AppDir, appWorkDir, discovery.Candidates, packages)
 	membershipErr := populateEmbedWatchMembership(layout.AppDir, &plan)
 	if planErr != nil {
 		return plan, errors.Join(listErr, planErr, membershipErr)
@@ -95,16 +126,39 @@ func discoverAndMaterializeEmbedInputs(layout BuildLayout, appWorkDir, entryPath
 	return plan, nil
 }
 
-func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (string, map[string]string, func(), error) {
+func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryContext, error) {
+	empty := embedDiscoveryContext{Cleanup: func() {}}
 	appDir, err := filepath.Abs(appDir)
 	if err != nil {
-		return "", nil, func() {}, fmt.Errorf("resolve embed source root: %w", err)
+		return empty, fmt.Errorf("resolve embed source root: %w", err)
 	}
 	appWorkDir, err = filepath.Abs(appWorkDir)
 	if err != nil {
-		return "", nil, func() {}, fmt.Errorf("resolve embed workspace root: %w", err)
+		return empty, fmt.Errorf("resolve embed workspace root: %w", err)
 	}
 	replacements := map[string]string{}
+	candidates := map[string]embedCandidate{}
+	unsafeSentinel := ""
+	cleanupTemporary := func() {
+		if unsafeSentinel != "" {
+			_ = os.Remove(unsafeSentinel)
+		}
+	}
+	ensureUnsafeSentinel := func() (string, error) {
+		if unsafeSentinel != "" {
+			return unsafeSentinel, nil
+		}
+		temporary, err := os.CreateTemp("", "goxc-embed-unsafe-*")
+		if err != nil {
+			return "", fmt.Errorf("create embed discovery sentinel: %w", err)
+		}
+		unsafeSentinel = temporary.Name()
+		if err := temporary.Close(); err != nil {
+			cleanupTemporary()
+			return "", fmt.Errorf("close embed discovery sentinel: %w", err)
+		}
+		return unsafeSentinel, nil
+	}
 	err = filepath.WalkDir(appDir, func(sourcePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return fmt.Errorf("inspect embed candidate %s: %w", sourcePath, walkErr)
@@ -122,26 +176,50 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (string, map[string]
 			}
 			return nil
 		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
 		if entry.IsDir() {
 			if sourcePath != appDir && nestedModuleBoundary(sourcePath) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !entry.Type().IsRegular() || strings.HasSuffix(sourcePath, ".gox.go") {
-			return nil
-		}
-		if err := validatePathBelowRoot(appDir, sourcePath, "embed candidate", false); err != nil {
-			return err
-		}
 		destination := filepath.Join(appWorkDir, relative)
 		if err := validatePathBelowRoot(appWorkDir, destination, "embed overlay destination", true); err != nil {
 			return err
 		}
-		if samePath(destination, filepath.Join(appWorkDir, "go.mod")) {
+		destination, err = filepath.Abs(destination)
+		if err != nil {
+			return fmt.Errorf("resolve embed overlay destination %s: %w", destination, err)
+		}
+
+		kind := embedCandidateRegular
+		switch {
+		case entry.Type()&os.ModeSymlink != 0:
+			kind = embedCandidateSymlink
+		default:
+			info, err := entry.Info()
+			if err != nil {
+				return fmt.Errorf("inspect embed candidate %s: %w", sourcePath, err)
+			}
+			if !info.Mode().IsRegular() {
+				kind = embedCandidateIrregular
+			}
+		}
+		if kind == embedCandidateRegular {
+			if err := validatePathBelowRoot(appDir, sourcePath, "embed candidate", false); err != nil {
+				return err
+			}
+		}
+		candidates[destination] = embedCandidate{SourcePath: sourcePath, Kind: kind}
+
+		if destination == filepath.Join(appWorkDir, "go.mod") {
+			return nil
+		}
+		if kind != embedCandidateRegular {
+			sentinel, err := ensureUnsafeSentinel()
+			if err != nil {
+				return err
+			}
+			replacements[destination] = sentinel
 			return nil
 		}
 		if _, err := os.Lstat(destination); err == nil {
@@ -153,23 +231,32 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (string, map[string]
 		return nil
 	})
 	if err != nil {
-		return "", nil, func() {}, err
+		cleanupTemporary()
+		return empty, err
 	}
 
 	temporary, err := os.CreateTemp("", "goxc-embed-overlay-*.json")
 	if err != nil {
-		return "", nil, func() {}, fmt.Errorf("create embed discovery overlay: %w", err)
+		cleanupTemporary()
+		return empty, fmt.Errorf("create embed discovery overlay: %w", err)
 	}
 	overlayPath := temporary.Name()
-	cleanup := func() { _ = os.Remove(overlayPath) }
+	cleanup := func() {
+		_ = os.Remove(overlayPath)
+		cleanupTemporary()
+	}
 	encoder := json.NewEncoder(temporary)
 	encodeErr := encoder.Encode(embedDiscoveryOverlay{Replace: replacements})
 	closeErr := temporary.Close()
 	if encodeErr != nil || closeErr != nil {
 		cleanup()
-		return "", nil, func() {}, fmt.Errorf("write embed discovery overlay: %w", errors.Join(encodeErr, closeErr))
+		return empty, fmt.Errorf("write embed discovery overlay: %w", errors.Join(encodeErr, closeErr))
 	}
-	return overlayPath, replacements, cleanup, nil
+	return embedDiscoveryContext{
+		OverlayPath: overlayPath,
+		Candidates:  candidates,
+		Cleanup:     cleanup,
+	}, nil
 }
 
 func shouldSkipEmbedCandidate(relative string, entry os.DirEntry) bool {
@@ -275,9 +362,18 @@ func setEnvironmentValue(environment []string, key, value string) []string {
 	return append(result, prefix+value)
 }
 
-func resolveEmbedInputPlan(appDir, appWorkDir string, replacements map[string]string, packages []embedListPackage) ([]resolvedEmbedInput, embedInputPlan, error) {
+func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[string]embedCandidate, packages []embedListPackage) ([]resolvedEmbedInput, embedInputPlan, error) {
+	appDir, err := filepath.Abs(appDir)
+	if err != nil {
+		return nil, embedInputPlan{}, fmt.Errorf("resolve embed source root: %w", err)
+	}
+	appWorkDir, err = filepath.Abs(appWorkDir)
+	if err != nil {
+		return nil, embedInputPlan{}, fmt.Errorf("resolve embed workspace root: %w", err)
+	}
 	inputsByDestination := map[string]resolvedEmbedInput{}
-	watchRoots := map[string]struct{}{}
+	watches := map[string]embedWatchSpec{}
+	generatedGoMod := filepath.Join(appWorkDir, "go.mod")
 	for _, packageInfo := range packages {
 		packageRelative, ok, err := relativePathBelow(appWorkDir, packageInfo.Dir)
 		if err != nil {
@@ -288,11 +384,11 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, replacements map[string]st
 		}
 		sourcePackageDir := filepath.Join(appDir, packageRelative)
 		for _, pattern := range packageInfo.EmbedPatterns {
-			root, err := embedPatternWatchRoot(appDir, sourcePackageDir, pattern)
+			watch, err := embedPatternWatchSpec(appDir, sourcePackageDir, pattern)
 			if err != nil {
 				return nil, embedInputPlan{}, err
 			}
-			watchRoots[root] = struct{}{}
+			watches[embedWatchKey(watch)] = watch
 		}
 		for _, embedFile := range packageInfo.EmbedFiles {
 			if filepath.IsAbs(filepath.FromSlash(embedFile)) {
@@ -302,13 +398,29 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, replacements map[string]st
 			if err := validatePathBelowRoot(appWorkDir, destination, "embedded workspace input", true); err != nil {
 				return nil, embedInputPlan{}, err
 			}
-			source := replacements[destination]
-			needsCopy := source != ""
-			if source == "" {
-				source = filepath.Join(sourcePackageDir, filepath.FromSlash(embedFile))
-				if _, err := regularFileNoFollow(source, "embedded source input"); err != nil {
-					continue
-				}
+			destination, err = filepath.Abs(destination)
+			if err != nil {
+				return nil, embedInputPlan{}, fmt.Errorf("resolve embedded workspace input %s: %w", destination, err)
+			}
+			if destination == generatedGoMod {
+				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s collides with generated workspace state at %s; workspace go.mod is not authored embed content", embedFile, packageInfo.ImportPath, destination)
+			}
+			if strings.HasSuffix(filepath.ToSlash(destination), ".gox.go") {
+				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s resolves to workspace-generated GOX source at %s; generated workspace files are not authored embed content", embedFile, packageInfo.ImportPath, destination)
+			}
+			candidate, ok := candidates[destination]
+			if !ok {
+				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s at workspace destination %s has no valid authored backing file", embedFile, packageInfo.ImportPath, destination)
+			}
+			source := candidate.SourcePath
+			switch candidate.Kind {
+			case embedCandidateSymlink:
+				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s resolves to symlinked authored input %s; symlink embed inputs are not supported", embedFile, packageInfo.ImportPath, source)
+			case embedCandidateIrregular:
+				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s resolves to irregular authored input %s; embed inputs must be regular files", embedFile, packageInfo.ImportPath, source)
+			case embedCandidateRegular:
+			default:
+				return nil, embedInputPlan{}, fmt.Errorf("embedded input %q for %s has unknown authored provenance at %s", embedFile, packageInfo.ImportPath, source)
 			}
 			if err := validatePathBelowRoot(appDir, source, "embedded source input", false); err != nil {
 				return nil, embedInputPlan{}, err
@@ -319,6 +431,25 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, replacements map[string]st
 			content, err := os.ReadFile(source)
 			if err != nil {
 				return nil, embedInputPlan{}, fmt.Errorf("read embedded source input %s: %w", source, err)
+			}
+			needsCopy := true
+			workspaceInfo, workspaceErr := os.Lstat(destination)
+			switch {
+			case workspaceErr == nil:
+				if workspaceInfo.Mode()&os.ModeSymlink != 0 || !workspaceInfo.Mode().IsRegular() {
+					return nil, embedInputPlan{}, fmt.Errorf("embedded workspace destination %s for %q is not a regular authored copy", destination, embedFile)
+				}
+				workspaceContent, err := os.ReadFile(destination)
+				if err != nil {
+					return nil, embedInputPlan{}, fmt.Errorf("read embedded workspace destination %s: %w", destination, err)
+				}
+				if !bytes.Equal(workspaceContent, content) {
+					return nil, embedInputPlan{}, fmt.Errorf("embedded workspace destination %s for %q does not match authored input %s", destination, embedFile, source)
+				}
+				needsCopy = false
+			case errors.Is(workspaceErr, os.ErrNotExist):
+			default:
+				return nil, embedInputPlan{}, fmt.Errorf("inspect embedded workspace destination %s: %w", destination, workspaceErr)
 			}
 			displayPath, err := filepath.Rel(appDir, source)
 			if err != nil {
@@ -349,10 +480,12 @@ func resolveEmbedInputPlan(appDir, appWorkDir string, replacements map[string]st
 		inputs = append(inputs, input)
 		plan.Files = append(plan.Files, input.file)
 	}
-	for root := range watchRoots {
-		plan.WatchRoots = append(plan.WatchRoots, root)
+	for _, watch := range watches {
+		plan.Watches = append(plan.Watches, watch)
 	}
-	sort.Strings(plan.WatchRoots)
+	sort.Slice(plan.Watches, func(first, second int) bool {
+		return embedWatchKey(plan.Watches[first]) < embedWatchKey(plan.Watches[second])
+	})
 	return inputs, plan, nil
 }
 
@@ -371,9 +504,27 @@ func relativePathBelow(root, target string) (string, bool, error) {
 	return relative, true, nil
 }
 
-func embedPatternWatchRoot(appDir, sourcePackageDir, pattern string) (string, error) {
+func embedPatternWatchSpec(appDir, sourcePackageDir, pattern string) (embedWatchSpec, error) {
 	pattern = strings.TrimPrefix(pattern, "all:")
 	firstMeta := strings.IndexAny(pattern, "*?[")
+	if firstMeta < 0 {
+		candidate := filepath.Join(sourcePackageDir, filepath.FromSlash(pattern))
+		if err := validateEmbedWatchExactPath(appDir, candidate); err != nil {
+			return embedWatchSpec{}, err
+		}
+		candidate, err := filepath.Abs(candidate)
+		if err != nil {
+			return embedWatchSpec{}, fmt.Errorf("resolve embed pattern watch path %s: %w", candidate, err)
+		}
+		kind := embedWatchExact
+		if info, err := os.Lstat(candidate); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			kind = embedWatchTree
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return embedWatchSpec{}, fmt.Errorf("inspect embed pattern watch path %s: %w", candidate, err)
+		}
+		return embedWatchSpec{Path: candidate, Kind: kind}, nil
+	}
+
 	rootRelative := ""
 	if firstMeta >= 0 {
 		prefix := strings.TrimSuffix(pattern[:firstMeta], "/")
@@ -381,22 +532,23 @@ func embedPatternWatchRoot(appDir, sourcePackageDir, pattern string) (string, er
 		if strings.HasSuffix(pattern[:firstMeta], "/") {
 			rootRelative = prefix
 		}
-	} else {
-		candidate := filepath.Join(sourcePackageDir, filepath.FromSlash(pattern))
-		if info, err := os.Lstat(candidate); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-			rootRelative = pattern
-		} else {
-			rootRelative = path.Dir(pattern)
-		}
 	}
 	if rootRelative == "" || rootRelative == "." {
 		rootRelative = "."
 	}
 	root := filepath.Join(sourcePackageDir, filepath.FromSlash(rootRelative))
 	if err := validatePathBelowRoot(appDir, root, "embed pattern watch root", true); err != nil {
-		return "", err
+		return embedWatchSpec{}, err
 	}
-	return root, nil
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return embedWatchSpec{}, fmt.Errorf("resolve embed pattern watch root %s: %w", root, err)
+	}
+	return embedWatchSpec{Path: root, Kind: embedWatchTree}, nil
+}
+
+func embedWatchKey(watch embedWatchSpec) string {
+	return strconv.Itoa(int(watch.Kind)) + ":" + watch.Path
 }
 
 func embedPackageMetadataError(packages []embedListPackage) error {
@@ -430,24 +582,67 @@ func embedPackageMetadataError(packages []embedListPackage) error {
 }
 
 func populateEmbedWatchMembership(appDir string, plan *embedInputPlan) error {
-	membership, err := embedWatchMembership(appDir, plan.WatchRoots)
+	membership, err := embedWatchMembership(appDir, plan.Watches)
 	plan.WatchMembership = membership
 	return err
 }
 
-func embedWatchMembership(appDir string, roots []string) (map[string]string, error) {
-	membership := make(map[string]string, len(roots))
-	for _, root := range roots {
-		fingerprint, err := embedWatchRootFingerprint(appDir, root)
+func embedWatchMembership(appDir string, watches []embedWatchSpec) (map[string]string, error) {
+	membership := make(map[string]string, len(watches))
+	for _, watch := range watches {
+		var fingerprint string
+		var err error
+		switch watch.Kind {
+		case embedWatchExact:
+			fingerprint, err = embedWatchExactFingerprint(appDir, watch.Path)
+		case embedWatchTree:
+			fingerprint, err = embedWatchTreeFingerprint(appDir, watch.Path)
+		default:
+			err = fmt.Errorf("embed watch path %s has unknown kind %d", watch.Path, watch.Kind)
+		}
 		if err != nil {
 			return membership, err
 		}
-		membership[root] = fingerprint
+		membership[embedWatchKey(watch)] = fingerprint
 	}
 	return membership, nil
 }
 
-func embedWatchRootFingerprint(appDir, root string) (string, error) {
+func embedWatchExactFingerprint(appDir, target string) (string, error) {
+	if err := validateEmbedWatchExactPath(appDir, target); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("inspect exact embed watch path %s: %w", target, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "symlink", nil
+	}
+	if info.Mode().IsRegular() {
+		return "regular", nil
+	}
+	if info.IsDir() {
+		return "directory", nil
+	}
+	return "other", nil
+}
+
+func validateEmbedWatchExactPath(appDir, target string) error {
+	_, inside, err := relativePathBelow(appDir, target)
+	if err != nil {
+		return err
+	}
+	if !inside {
+		return fmt.Errorf("exact embed watch path %s must stay inside %s", target, appDir)
+	}
+	return validatePathBelowRoot(appDir, filepath.Dir(target), "exact embed watch parent", true)
+}
+
+func embedWatchTreeFingerprint(appDir, root string) (string, error) {
 	if err := validatePathBelowRoot(appDir, root, "embed watch root", true); err != nil {
 		return "", err
 	}
@@ -512,6 +707,14 @@ func embedInputPlansEqual(first, second embedInputPlan) bool {
 	for index := range first.Files {
 		if first.Files[index].DisplayPath != second.Files[index].DisplayPath ||
 			first.Files[index].Fingerprint != second.Files[index].Fingerprint {
+			return false
+		}
+	}
+	if len(first.Watches) != len(second.Watches) {
+		return false
+	}
+	for index := range first.Watches {
+		if first.Watches[index] != second.Watches[index] {
 			return false
 		}
 	}

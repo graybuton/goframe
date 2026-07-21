@@ -410,11 +410,81 @@ func TestDevSnapshotRefreshesEmbedMembershipWithoutFalseBuilds(t *testing.T) {
 	}
 }
 
+func TestDevSnapshotExactEmbedWatchAvoidsRecursiveRefresh(t *testing.T) {
+	appDir := newDevEmbedTestApp(t)
+	writeTestFile(t, appDir, "message.txt", "alpha")
+	exact := []embedWatchSpec{{Path: filepath.Join(appDir, "message.txt"), Kind: embedWatchExact}}
+	collector := newDevSnapshotCollector(appDir)
+	committed := devEmbedTestPlanWithWatches(t, appDir, exact, "message.txt")
+	collector.finishEmbedBuild(committed, true)
+	resolverCalls := 0
+	collector.resolveEmbedPlan = func() (embedInputPlan, error) {
+		resolverCalls++
+		return devEmbedTestPlanWithWatches(t, appDir, exact, "message.txt"), nil
+	}
+
+	initial, err := collector.collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, "unrelated/deep/value.txt", "unrelated")
+	unrelated, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after unrelated creation: %v", err)
+	}
+	if resolverCalls != 0 {
+		t.Fatalf("metadata resolver calls after unrelated creation = %d, want 0", resolverCalls)
+	}
+	if !devSnapshotsEqual(initial, unrelated) {
+		t.Fatalf("unrelated nested file changed exact embed snapshot: %#v", diffDevSnapshots(initial, unrelated))
+	}
+
+	writeTestFile(t, appDir, "message.txt", "beta")
+	contentChanged, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after exact content edit: %v", err)
+	}
+	if resolverCalls != 0 {
+		t.Fatalf("metadata resolver calls after content edit = %d, want 0", resolverCalls)
+	}
+	assertDevChangedPath(t, unrelated, contentChanged, devEmbedSnapshotPrefix+"message.txt")
+}
+
+func TestDevSnapshotNarrowEmbedDirectoryIgnoresSiblingMembership(t *testing.T) {
+	appDir := newDevEmbedTestApp(t)
+	writeTestFile(t, appDir, "templates/one.txt", "one")
+	collector := newDevSnapshotCollector(appDir)
+	committed := devEmbedTestPlan(t, appDir, []string{"templates"}, "templates/one.txt")
+	collector.finishEmbedBuild(committed, true)
+	resolverCalls := 0
+	collector.resolveEmbedPlan = func() (embedInputPlan, error) {
+		resolverCalls++
+		return devEmbedTestPlan(t, appDir, []string{"templates"}, "templates/one.txt"), nil
+	}
+
+	initial, err := collector.collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, "sibling/deep/value.txt", "unrelated")
+	after, err := collector.collect()
+	if err != nil {
+		t.Fatalf("collect() after sibling creation: %v", err)
+	}
+	if resolverCalls != 0 {
+		t.Fatalf("metadata resolver calls after sibling creation = %d, want 0", resolverCalls)
+	}
+	if !devSnapshotsEqual(initial, after) {
+		t.Fatalf("sibling directory changed narrow embed snapshot: %#v", diffDevSnapshots(initial, after))
+	}
+}
+
 func TestDevSnapshotEmbedRemovalAndRestoration(t *testing.T) {
 	appDir := newDevEmbedTestApp(t)
 	writeTestFile(t, appDir, "message.txt", "alpha")
 	collector := newDevSnapshotCollector(appDir)
-	committed := devEmbedTestPlan(t, appDir, []string{"."}, "message.txt")
+	exact := []embedWatchSpec{{Path: filepath.Join(appDir, "message.txt"), Kind: embedWatchExact}}
+	committed := devEmbedTestPlanWithWatches(t, appDir, exact, "message.txt")
 	collector.finishEmbedBuild(committed, true)
 	initial, err := collector.collect()
 	if err != nil {
@@ -423,13 +493,15 @@ func TestDevSnapshotEmbedRemovalAndRestoration(t *testing.T) {
 
 	var resolved embedInputPlan
 	var resolveErr error
+	resolverCalls := 0
 	collector.resolveEmbedPlan = func() (embedInputPlan, error) {
+		resolverCalls++
 		return resolved, resolveErr
 	}
 	if err := os.Remove(filepath.Join(appDir, "message.txt")); err != nil {
 		t.Fatal(err)
 	}
-	resolved = devEmbedTestPlan(t, appDir, []string{"."})
+	resolved = devEmbedTestPlanWithWatches(t, appDir, exact)
 	resolved.Resolved = false
 	resolveErr = errors.New("pattern message.txt: no matching files found")
 	missing, err := collector.collect()
@@ -441,11 +513,14 @@ func TestDevSnapshotEmbedRemovalAndRestoration(t *testing.T) {
 	if got := missing.files[devEmbedSnapshotPrefix+"message.txt"]; got != "missing" {
 		t.Fatalf("removed embed fingerprint = %q, want missing", got)
 	}
+	if resolverCalls != 1 {
+		t.Fatalf("metadata resolver calls after removal = %d, want 1", resolverCalls)
+	}
 	collector.finishEmbedBuild(resolved, false)
 	missing = collector.reconcileEmbedSnapshot(missing)
 
 	writeTestFile(t, appDir, "message.txt", "gamma")
-	resolved = devEmbedTestPlan(t, appDir, []string{"."}, "message.txt")
+	resolved = devEmbedTestPlanWithWatches(t, appDir, exact, "message.txt")
 	resolveErr = nil
 	restored, err := collector.collect()
 	if err != nil {
@@ -454,6 +529,9 @@ func TestDevSnapshotEmbedRemovalAndRestoration(t *testing.T) {
 	assertDevChangedPath(t, missing, restored, devEmbedSnapshotPrefix+"message.txt")
 	if collector.embedPlan.Files[0].Fingerprint != committed.Files[0].Fingerprint {
 		t.Fatal("restoration candidate changed the committed plan before a successful build")
+	}
+	if resolverCalls != 2 {
+		t.Fatalf("metadata resolver calls after restoration = %d, want 2", resolverCalls)
 	}
 }
 
@@ -504,11 +582,20 @@ func newDevEmbedTestApp(t *testing.T) string {
 
 func devEmbedTestPlan(t *testing.T, appDir string, roots []string, files ...string) embedInputPlan {
 	t.Helper()
-	collector := newDevSnapshotCollector(appDir)
-	plan := embedInputPlan{Resolved: true}
+	watches := make([]embedWatchSpec, 0, len(roots))
 	for _, root := range roots {
-		plan.WatchRoots = append(plan.WatchRoots, filepath.Join(appDir, filepath.FromSlash(root)))
+		watches = append(watches, embedWatchSpec{
+			Path: filepath.Join(appDir, filepath.FromSlash(root)),
+			Kind: embedWatchTree,
+		})
 	}
+	return devEmbedTestPlanWithWatches(t, appDir, watches, files...)
+}
+
+func devEmbedTestPlanWithWatches(t *testing.T, appDir string, watches []embedWatchSpec, files ...string) embedInputPlan {
+	t.Helper()
+	collector := newDevSnapshotCollector(appDir)
+	plan := embedInputPlan{Resolved: true, Watches: append([]embedWatchSpec(nil), watches...)}
 	for _, relative := range files {
 		path := filepath.Join(appDir, filepath.FromSlash(relative))
 		fingerprint, err := collector.fileFingerprint(path, true)
@@ -524,7 +611,9 @@ func devEmbedTestPlan(t *testing.T, appDir string, roots []string, files ...stri
 	sort.Slice(plan.Files, func(first, second int) bool {
 		return plan.Files[first].DisplayPath < plan.Files[second].DisplayPath
 	})
-	sort.Strings(plan.WatchRoots)
+	sort.Slice(plan.Watches, func(first, second int) bool {
+		return embedWatchKey(plan.Watches[first]) < embedWatchKey(plan.Watches[second])
+	})
 	if err := populateEmbedWatchMembership(appDir, &plan); err != nil {
 		t.Fatalf("populate embed watch membership: %v", err)
 	}

@@ -205,6 +205,11 @@ func TestDevEmbedIntegrationRealWorkflow(t *testing.T) {
 	serverURL := waitDevServerURL(t, serverURLs)
 	assertDevWASMContains(t, serverURL, "alpha")
 
+	writeTestFile(t, appDir, "unrelated/deep/value.txt", "unrelated")
+	assertNoDevEvent(t, builds, 3*devIntegrationDebounce)
+	assertNoDevGenerationEvent(t, generations)
+	assertNoDevGenerationEvent(t, reloads)
+
 	writeTestFile(t, appDir, "message.txt", "beta")
 	assertDevEvent(t, waitDevEvent(t, builds), 2, false, false)
 	assertDevGenerationEvent(t, generations, 2)

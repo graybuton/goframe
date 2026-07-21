@@ -145,7 +145,10 @@ func copyAuthoredGoFiles(sourceRoot, destinationRoot string) error {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("source path %s is a symlink; symlinked source files are not supported", sourcePath)
+			if filepath.Ext(sourcePath) == ".go" && !strings.HasSuffix(sourcePath, ".gox.go") {
+				return fmt.Errorf("source path %s is a symlink; symlinked source files are not supported", sourcePath)
+			}
+			return nil
 		}
 		if entry.IsDir() {
 			return nil
@@ -335,7 +338,10 @@ func findGOXFiles(path string) ([]string, error) {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("GOX source path %s is a symlink; symlinked source files are not supported", current)
+			if filepath.Ext(current) == ".gox" {
+				return fmt.Errorf("GOX source path %s is a symlink; symlinked source files are not supported", current)
+			}
+			return nil
 		}
 		if !entry.IsDir() && filepath.Ext(current) == ".gox" {
 			files = append(files, current)

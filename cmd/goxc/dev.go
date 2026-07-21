@@ -545,7 +545,7 @@ func (collector *devSnapshotCollector) collectEmbedInputs(snapshot *devSnapshot)
 		candidate, resolveErr := collector.resolveEmbedPlan()
 		if resolveErr != nil {
 			collector.haveCandidate = false
-			if len(candidate.WatchRoots) > 0 {
+			if len(candidate.Watches) > 0 {
 				collector.embedRecovery = candidate
 				collector.haveRecovery = true
 			}
@@ -617,20 +617,22 @@ func (collector *devSnapshotCollector) collectOmittedCommittedEmbedInputs(snapsh
 }
 
 func (collector *devSnapshotCollector) currentEmbedMembership() (map[string]string, error) {
-	roots := map[string]struct{}{}
-	for _, root := range collector.embedPlan.WatchRoots {
-		roots[root] = struct{}{}
+	watches := map[string]embedWatchSpec{}
+	for _, watch := range collector.embedPlan.Watches {
+		watches[embedWatchKey(watch)] = watch
 	}
 	if collector.haveRecovery {
-		for _, root := range collector.embedRecovery.WatchRoots {
-			roots[root] = struct{}{}
+		for _, watch := range collector.embedRecovery.Watches {
+			watches[embedWatchKey(watch)] = watch
 		}
 	}
-	ordered := make([]string, 0, len(roots))
-	for root := range roots {
-		ordered = append(ordered, root)
+	ordered := make([]embedWatchSpec, 0, len(watches))
+	for _, watch := range watches {
+		ordered = append(ordered, watch)
 	}
-	sort.Strings(ordered)
+	sort.Slice(ordered, func(first, second int) bool {
+		return embedWatchKey(ordered[first]) < embedWatchKey(ordered[second])
+	})
 	return embedWatchMembership(collector.appDir, ordered)
 }
 
@@ -646,7 +648,7 @@ func (collector *devSnapshotCollector) finishEmbedBuild(plan embedInputPlan, suc
 		collector.embedMembership = cloneStringMap(plan.WatchMembership)
 		return
 	}
-	if !plan.Resolved && len(plan.WatchRoots) > 0 {
+	if !plan.Resolved && len(plan.Watches) > 0 {
 		collector.embedRecovery = plan
 		collector.haveRecovery = true
 		collector.embedMembership = collector.mergedEmbedMembership(plan)
@@ -658,13 +660,14 @@ func (collector *devSnapshotCollector) finishEmbedBuild(plan embedInputPlan, suc
 		collector.haveRecovery = false
 		collector.embedRecoveryErr = nil
 		membership := map[string]string{}
-		for _, root := range collector.embedPlan.WatchRoots {
-			if fingerprint, ok := plan.WatchMembership[root]; ok {
-				membership[root] = fingerprint
-			} else if fingerprint, ok := collector.embedMembership[root]; ok {
-				membership[root] = fingerprint
-			} else if fingerprint, ok := collector.embedPlan.WatchMembership[root]; ok {
-				membership[root] = fingerprint
+		for _, watch := range collector.embedPlan.Watches {
+			key := embedWatchKey(watch)
+			if fingerprint, ok := plan.WatchMembership[key]; ok {
+				membership[key] = fingerprint
+			} else if fingerprint, ok := collector.embedMembership[key]; ok {
+				membership[key] = fingerprint
+			} else if fingerprint, ok := collector.embedPlan.WatchMembership[key]; ok {
+				membership[key] = fingerprint
 			}
 		}
 		collector.embedMembership = membership
