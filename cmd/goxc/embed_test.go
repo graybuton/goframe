@@ -272,7 +272,7 @@ func TestEmbedInputPlanResolvesPhysicalWorkspaceAlias(t *testing.T) {
 	}
 }
 
-func TestEmbedDiscoveryOverlayUsesPhysicalWorkspacePath(t *testing.T) {
+func TestEmbedDiscoveryOverlayPreservesLexicalWorkspacePath(t *testing.T) {
 	requireSymlinkSupport(t)
 	root := t.TempDir()
 	appDir := filepath.Join(root, "app")
@@ -301,12 +301,121 @@ func TestEmbedDiscoveryOverlayUsesPhysicalWorkspacePath(t *testing.T) {
 	if err := json.Unmarshal(content, &overlay); err != nil {
 		t.Fatal(err)
 	}
-	want, err := canonicalPathForComparison(filepath.Join(workspaceRoot, "message.txt"))
+	want, err := filepath.Abs(filepath.Join(workspaceAlias, "message.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	want = filepath.Clean(want)
 	if got := overlay.Replace[want]; got != filepath.Join(appDir, "message.txt") {
-		t.Fatalf("physical overlay replacement = %q, want authored message.txt; replacements=%#v", got, overlay.Replace)
+		t.Fatalf("lexical overlay replacement = %q, want authored message.txt; replacements=%#v", got, overlay.Replace)
+	}
+	physical, err := canonicalPathForComparison(filepath.Join(workspaceRoot, "message.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if physical != want {
+		if _, ok := overlay.Replace[physical]; ok {
+			t.Fatalf("overlay retained physical replacement key %q: %#v", physical, overlay.Replace)
+		}
+	}
+}
+
+func TestEmbedDiscoveryOverlayUsesLexicalWorkspaceAliasIntegration(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	physicalParent := filepath.Join(root, "physical")
+	workspaceRoot := filepath.Join(physicalParent, "workspace")
+	aliasParent := filepath.Join(root, "physical-alias")
+	workspaceAlias := filepath.Join(aliasParent, "workspace")
+	source := `package main
+
+import _ "embed"
+
+//go:embed message.txt
+var message string
+
+func main() { _ = message }
+`
+	writeTestFile(t, appDir, "go.mod", "module example.com/lexical-overlay\n\ngo 1.22\n")
+	writeTestFile(t, appDir, "main.go", source)
+	writeTestFile(t, appDir, "message.txt", "authored")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(physicalParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, workspaceRoot, "go.mod", "module example.com/lexical-overlay\n\ngo 1.22\n")
+	writeTestFile(t, workspaceRoot, "main.go", source)
+
+	discovery, err := createEmbedDiscoveryOverlay(appDir, workspaceAlias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Cleanup()
+	t.Setenv("PWD", workspaceAlias)
+	packages, err := listGoEmbedPackages(workspaceAlias, discovery.OverlayPath, false)
+	if err != nil {
+		t.Fatalf("listGoEmbedPackages() error: %v", err)
+	}
+	if err := embedPackageMetadataError(packages); err != nil {
+		t.Fatalf("embedPackageMetadataError() error: %v", err)
+	}
+	var discovered *embedListPackage
+	for index := range packages {
+		if packages[index].ImportPath == "example.com/lexical-overlay" {
+			discovered = &packages[index]
+			break
+		}
+	}
+	if discovered == nil {
+		t.Fatalf("root package missing from go list output: %#v", packages)
+	}
+	if got, want := discovered.EmbedPatterns, []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("EmbedPatterns = %#v, want %#v", got, want)
+	}
+	if got, want := discovered.EmbedFiles, []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("EmbedFiles = %#v, want %#v", got, want)
+	}
+	_, plan, err := resolveEmbedInputPlan(appDir, workspaceAlias, discovery.Candidates, packages)
+	if err != nil {
+		t.Fatalf("resolveEmbedInputPlan() error: %v", err)
+	}
+	if got, want := embedPlanPaths(plan), []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+}
+
+func TestEmbedWorkspacePreparesThroughExternalWorkspaceAlias(t *testing.T) {
+	requireSymlinkSupport(t)
+	root := t.TempDir()
+	appDir := newEmbedTestApp(t, embedStringSource("message.txt"), map[string]string{"message.txt": "external workspace"})
+	physicalParent := filepath.Join(root, "physical")
+	physicalWorkspace := filepath.Join(physicalParent, "workspace")
+	aliasParent := filepath.Join(root, "physical-alias")
+	workspaceAlias := filepath.Join(aliasParent, "workspace")
+	if err := os.MkdirAll(physicalWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(physicalParent, aliasParent); err != nil {
+		t.Fatal(err)
+	}
+	layout := newEmbedTestLayout(t, appDir, "go", workspaceAlias)
+	t.Setenv("PWD", layout.WorkDir)
+	result, err := prepareBuildWorkspaceResult(layout, defaultEmbedManifest("go", "."))
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+	if !result.EmbedPlan.Resolved {
+		t.Fatal("embed plan was not resolved")
+	}
+	if got, want := embedPlanPaths(result.EmbedPlan), []string{"message.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("embed plan = %#v, want %#v", got, want)
+	}
+	assertEmbedFileContent(t, filepath.Join(layout.WorkDir, "message.txt"), "external workspace")
+	if matches, err := filepath.Glob(filepath.Join(layout.WorkspaceRoot, "goxc-embed-*.json")); err != nil || len(matches) != 0 {
+		t.Fatalf("temporary overlay leaked into workspace: matches=%#v err=%v", matches, err)
 	}
 }
 
@@ -703,9 +812,14 @@ func TestEmbedDiscoveryPreservesUnsafeCandidateProvenance(t *testing.T) {
 	requireSymlinkSupport(t)
 	root := t.TempDir()
 	appDir := filepath.Join(root, "app")
-	appWorkDir := filepath.Join(root, "work")
+	physicalWorkspace := filepath.Join(root, "physical-workspace")
+	workspaceAlias := filepath.Join(root, "workspace-alias")
+	appWorkDir := filepath.Join(workspaceAlias, "work")
 	writeTestFile(t, appDir, "main.go", embedFSSource("*"))
-	if err := os.MkdirAll(appWorkDir, 0o755); err != nil {
+	if err := os.MkdirAll(physicalWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(physicalWorkspace, workspaceAlias); err != nil {
 		t.Fatal(err)
 	}
 	external := filepath.Join(root, "external.txt")
@@ -743,6 +857,17 @@ func TestEmbedDiscoveryPreservesUnsafeCandidateProvenance(t *testing.T) {
 	if sentinel == "" || sentinel == external || sentinel == link {
 		discovery.Cleanup()
 		t.Fatalf("unsafe overlay backing = %q", sentinel)
+	}
+	physicalDestination, err := canonicalPathForComparison(destination)
+	if err != nil {
+		discovery.Cleanup()
+		t.Fatal(err)
+	}
+	if physicalDestination != destination {
+		if _, ok := overlay.Replace[physicalDestination]; ok {
+			discovery.Cleanup()
+			t.Fatalf("unsafe overlay retained physical replacement key %q: %#v", physicalDestination, overlay.Replace)
+		}
 	}
 	if _, inside, err := relativePathBelow(appDir, sentinel); err != nil || inside {
 		discovery.Cleanup()

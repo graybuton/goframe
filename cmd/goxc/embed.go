@@ -189,14 +189,15 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryConte
 		if err != nil {
 			return fmt.Errorf("resolve embed candidate %s: %w", sourcePath, err)
 		}
-		destination := filepath.Join(appWorkDir, relative)
-		if err := validatePathBelowRoot(appWorkDir, destination, "embed overlay destination", true); err != nil {
+		overlayDestination := filepath.Join(appWorkDir, relative)
+		if err := validatePathBelowRoot(appWorkDir, overlayDestination, "embed overlay destination", true); err != nil {
 			return err
 		}
-		destination, err = canonicalPathForComparison(destination)
+		overlayDestination, err = filepath.Abs(overlayDestination)
 		if err != nil {
-			return fmt.Errorf("resolve embed overlay destination %s: %w", destination, err)
+			return fmt.Errorf("resolve embed overlay destination %s: %w", overlayDestination, err)
 		}
+		overlayDestination = filepath.Clean(overlayDestination)
 
 		kind := embedCandidateRegular
 		switch {
@@ -226,15 +227,15 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryConte
 			if err != nil {
 				return err
 			}
-			replacements[destination] = sentinel
+			replacements[overlayDestination] = sentinel
 			return nil
 		}
-		if _, err := os.Lstat(destination); err == nil {
+		if _, err := os.Lstat(overlayDestination); err == nil {
 			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("inspect embed overlay destination %s: %w", destination, err)
+			return fmt.Errorf("inspect embed overlay destination %s: %w", overlayDestination, err)
 		}
-		replacements[destination] = sourcePath
+		replacements[overlayDestination] = sourcePath
 		return nil
 	})
 	if err != nil {
