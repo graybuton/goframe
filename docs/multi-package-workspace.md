@@ -97,6 +97,15 @@ still point at the original target after `go.mod` is written under
 `.goframe/work/<profile>`. This supports normal Go package resolution for
 external Go component packages declared by the app module.
 
+Compiler and embed-discovery subprocesses treat that generated module as their
+module boundary: `GOWORK=off` is enforced and ambient `GOFLAGS` is replaced by
+the flags owned by `goxc`. A parent `go.work` is therefore not a source of
+hidden-workspace dependencies. Proxy, checksum, cache, private-module
+authentication, certificate, temporary-directory, and Go toolchain environment
+settings remain available to the subprocesses. This isolation preserves the
+authored `require` / `replace` model above; it does not add a broad multi-module
+workspace contract.
+
 This model is intentionally used instead of a Go overlay because TinyGo
 support for overlays is not part of the current baseline.
 

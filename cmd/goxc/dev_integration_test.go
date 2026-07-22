@@ -166,6 +166,58 @@ func App() gf.Node {
 	waitDevListenerClosed(t, serverURL)
 }
 
+func TestDevEnvironmentIsolationRealWorkflow(t *testing.T) {
+	repositoryRoot, ok := findRepositoryRoot(".")
+	if !ok {
+		t.Fatal("repository root not found")
+	}
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	writeDevIntegrationApp(t, appDir, repositoryRoot, "environment-isolation")
+	workPath, workContent := writeHostileParentWorkspace(t, root)
+	setHostileCompilerWorkflowEnvironment(t, workPath, "-mod=vendor")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	builds := make(chan devBuildEvent, 8)
+	serverURLs := make(chan string, 1)
+	generations := make(chan uint64, 4)
+	reloads := make(chan uint64, 4)
+	dependencies := devIntegrationDependencies(builds, serverURLs)
+	dependencies.hooks.GenerationActivated = func(generation uint64) {
+		generations <- generation
+	}
+	dependencies.hooks.ReloadPublished = func(generation uint64) {
+		reloads <- generation
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- runDev(ctx, devOptions{
+			appDir: appDir, compiler: "go", workspace: workspace, port: 0,
+		}, dependencies)
+	}()
+
+	assertDevEvent(t, waitDevEvent(t, builds), 1, true, false)
+	assertDevGenerationEvent(t, generations, 1)
+	assertNoDevGenerationEvent(t, reloads)
+	serverURL := waitDevServerURL(t, serverURLs)
+	assertDevHTTPContains(t, serverURL+"/", "GoFrame dev integration")
+
+	writeTestFile(t, appDir, "message.go", "package main\n\nfunc message() string { return \"isolated rebuild\" }\n")
+	assertDevEvent(t, waitDevEvent(t, builds), 2, false, false)
+	assertDevGenerationEvent(t, generations, 2)
+	assertDevGenerationEvent(t, reloads, 2)
+	assertNoDevEvent(t, builds, 3*devIntegrationDebounce)
+	assertTestFileUnchanged(t, workPath, workContent)
+
+	cancel()
+	if err := waitDevRun(t, done); err != nil {
+		t.Fatalf("runDev() shutdown error: %v", err)
+	}
+	waitDevListenerClosed(t, serverURL)
+}
+
 func TestDevEmbedIntegrationRealWorkflow(t *testing.T) {
 	repositoryRoot, ok := findRepositoryRoot(".")
 	if !ok {

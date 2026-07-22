@@ -202,6 +202,39 @@ var tiny string
 	}
 }
 
+func TestEmbedEnvironmentIsolation(t *testing.T) {
+	compilers := []string{"go"}
+	if _, err := exec.LookPath("tinygo"); err == nil {
+		compilers = append(compilers, "tinygo")
+	}
+	for _, compiler := range compilers {
+		t.Run(compiler, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "root with spaces")
+			appDir := filepath.Join(root, "app")
+			writeTestFile(t, appDir, "go.mod", "module example.com/embed-environment\n\ngo 1.22\n")
+			writeTestFile(t, appDir, manifestName, `{"name":"embed-environment","compiler":"`+compiler+`"}`)
+			writeTestFile(t, appDir, "main.go", embedStringSource("message.txt"))
+			writeTestFile(t, appDir, "message.txt", "isolated embed payload")
+			workPath, workContent := writeHostileParentWorkspace(t, root)
+			setHostileCompilerWorkflowEnvironment(t, workPath, "-mod=vendor")
+
+			workspace := filepath.Join(t.TempDir(), "workspace with spaces")
+			output, err := buildApp(buildOptions{
+				appDir: appDir, compiler: compiler, workspace: workspace,
+			})
+			if err != nil {
+				t.Fatalf("buildApp() embed workflow with hostile environment using %s: %v", compiler, err)
+			}
+			assertNonEmptyCompilerOutput(t, output)
+
+			layout := newEmbedTestLayout(t, appDir, compiler, workspace)
+			appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(workspaceModuleConfigForApp(appDir).AppRel))
+			assertEmbedFileContent(t, filepath.Join(appWorkDir, "message.txt"), "isolated embed payload")
+			assertTestFileUnchanged(t, workPath, workContent)
+		})
+	}
+}
+
 func TestEmbedDiscoveryFiltersExternalDependencyInputs(t *testing.T) {
 	root := t.TempDir()
 	externalDir := filepath.Join(root, "external")
@@ -493,14 +526,9 @@ func TestEmbedListCommandPreservesLexicalWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	stalePWD := filepath.Join(root, "stale-pwd")
-	parentPWD := filepath.Join(root, "parent-pwd")
 	if err := os.MkdirAll(stalePWD, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(parentPWD, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PWD", parentPWD)
 	want, err := filepath.Abs(lexicalEntryPath)
 	if err != nil {
 		t.Fatal(err)
@@ -515,29 +543,28 @@ func TestEmbedListCommandPreservesLexicalWorkingDirectory(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name        string
-		environment func() []string
-		wantValues  []string
+		name       string
+		compiler   string
+		goFlags    string
+		wantValues []string
 	}{
 		{
-			name: "go",
-			environment: func() []string {
-				return append(compilerEnvironment("go"), "GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0", "PWD="+stalePWD)
-			},
+			name:       "go",
+			compiler:   "go",
+			goFlags:    workspaceCompilerBaseGoFlags,
 			wantValues: []string{"GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0"},
 		},
 		{
-			name: "tinygo",
-			environment: func() []string {
-				environment := setEnvironmentValue(compilerEnvironment("tinygo"), "GOFLAGS", "-buildvcs=false -overlay=overlay.json")
-				return append(environment, "PWD="+stalePWD)
-			},
+			name:       "tinygo",
+			compiler:   "tinygo",
+			goFlags:    "-buildvcs=false -overlay=overlay.json",
 			wantValues: []string{"GOFLAGS=-buildvcs=false -overlay=overlay.json"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			command := &exec.Cmd{}
-			if err := configureEmbedListCommand(command, lexicalEntryPath, test.environment()); err != nil {
+			t.Setenv("PWD", stalePWD)
+			if err := configureEmbedListCommand(command, test.compiler, lexicalEntryPath, test.goFlags); err != nil {
 				t.Fatalf("configureEmbedListCommand() error: %v", err)
 			}
 			if command.Dir != want {
@@ -566,8 +593,8 @@ func TestEmbedListCommandPreservesLexicalWorkingDirectory(t *testing.T) {
 			if command.Dir == physical {
 				t.Fatalf("command directory was physically canonicalized to %q", physical)
 			}
-			if got := os.Getenv("PWD"); got != parentPWD {
-				t.Fatalf("parent PWD = %q, want unchanged %q", got, parentPWD)
+			if got := os.Getenv("PWD"); got != stalePWD {
+				t.Fatalf("parent PWD = %q, want unchanged %q", got, stalePWD)
 			}
 		})
 	}

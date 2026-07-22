@@ -41,6 +41,21 @@ If `--compiler` is omitted, every accepted build uses the compiler currently
 selected by `goframe.json`. A command-line `--compiler=go` or
 `--compiler=tinygo` override remains fixed until the process exits.
 
+## Compiler Environment
+
+Each development package attempt and its embed discovery run inside the hidden
+generated module with `GOWORK=off` and module mode enabled. `goxc` supplies its
+own `GOFLAGS`; ambient `GOFLAGS` values do not configure these commands. This
+keeps a parent `go.work`, vendor mode, overlays, build tags, and other caller
+flags from changing the generated workspace.
+
+The rest of the process environment remains available, including module proxy,
+checksum, private-module authentication, certificate, cache, temporary
+directory, and Go toolchain settings. Dependencies must be represented by the
+application module's authored `require` and `replace` directives. Dependencies
+available only through a parent `go.work` are not supported, and this isolation
+does not establish a general multi-module workspace contract.
+
 ## Watched Inputs
 
 The development loop observes the effective inputs used by packaging:
