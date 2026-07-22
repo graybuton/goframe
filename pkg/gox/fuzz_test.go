@@ -53,6 +53,58 @@ func View() any {
 	return <input type="text" value={value} />
 }
 `,
+		`// package fake
+
+package main
+
+func View() any {
+	return <Button />
+}
+`,
+		`package main
+
+import "fmt"
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+var _ = fmt.Sprintf
+
+func View() gf.Node {
+	return <Button />
+}
+`,
+		`package main
+
+import (
+	"fmt" // ) is not the end of the import group
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+var _ = fmt.Sprintf
+
+func View() gf.Node {
+	return <Button />
+}
+`,
+		`package main
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <Button />
+}
+`,
+		`package main
+
+// View renders the page.
+func View() any {
+	return <Button />
+}
+`,
 	} {
 		f.Add(seed)
 	}

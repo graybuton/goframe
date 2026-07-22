@@ -3,6 +3,7 @@ package gox
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
 	"go/format"
 	"go/parser"
 	gotoken "go/token"
@@ -84,7 +85,11 @@ func GenerateWithOptions(source []byte, options GenerateOptions) ([]byte, error)
 	output.WriteString(input[cursor:])
 	generatedSource := output.String()
 	if declarations := ctx.declarations(); declarations != "" {
-		generatedSource = insertGeneratedDeclarations(generatedSource, declarations)
+		inserted, err := insertGeneratedDeclarations(options.Filename, generatedSource, declarations)
+		if err != nil {
+			return nil, err
+		}
+		generatedSource = inserted
 	}
 
 	if generated == 0 {
@@ -299,71 +304,47 @@ func importAliasesFromSource(filename, input string) (map[string]string, map[str
 	return aliases, invalid
 }
 
-func insertGeneratedDeclarations(input string, declarations string) string {
-	position := declarationInsertionPoint(input)
-	return input[:position] + "\n" + declarations + input[position:]
-}
-
-func declarationInsertionPoint(input string) int {
-	packageIndex := strings.Index(input, "package ")
-	if packageIndex < 0 {
-		return 0
+func insertGeneratedDeclarations(filename, input, declarations string) (string, error) {
+	fileSet := gotoken.NewFileSet()
+	file, err := parser.ParseFile(
+		fileSet,
+		filename,
+		input,
+		parser.ParseComments|parser.AllErrors|parser.SkipObjectResolution,
+	)
+	if err != nil {
+		return "", fmt.Errorf("%s: parse transformed Go source before generated declarations: %w", filename, err)
 	}
-	packageLineEnd := strings.IndexByte(input[packageIndex:], '\n')
-	if packageLineEnd < 0 {
-		return len(input)
-	}
-	position := packageIndex + packageLineEnd + 1
-	importStart := skipWhitespace(input, position)
-	if !strings.HasPrefix(input[importStart:], "import") || !isKeywordBoundary(input, importStart+len("import")) {
-		return position
+	if file == nil || !file.Package.IsValid() {
+		return "", fmt.Errorf("%s: parse transformed Go source before generated declarations: missing package clause", filename)
 	}
 
-	index := skipWhitespace(input, importStart+len("import"))
-	if index >= len(input) {
-		return len(input)
-	}
-	if input[index] == '(' {
-		depth := 0
-		for index < len(input) {
-			switch input[index] {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth == 0 {
-					index++
-					return lineEnd(input, index)
-				}
-			}
-			index++
+	position := gotoken.NoPos
+	for _, declaration := range file.Decls {
+		if gen, ok := declaration.(*ast.GenDecl); ok && gen.Tok == gotoken.IMPORT {
+			continue
 		}
-		return len(input)
+		position = declaration.Pos()
+		switch declaration := declaration.(type) {
+		case *ast.GenDecl:
+			if declaration.Doc != nil {
+				position = declaration.Doc.Pos()
+			}
+		case *ast.FuncDecl:
+			if declaration.Doc != nil {
+				position = declaration.Doc.Pos()
+			}
+		}
+		break
 	}
-	return lineEnd(input, index)
-}
 
-func skipWhitespace(input string, index int) int {
-	for index < len(input) && unicode.IsSpace(rune(input[index])) {
-		index++
+	offset := len(input)
+	if position.IsValid() {
+		tokenFile := fileSet.File(position)
+		if tokenFile == nil {
+			return "", fmt.Errorf("%s: locate generated declaration insertion position", filename)
+		}
+		offset = tokenFile.Offset(position)
 	}
-	return index
-}
-
-func isKeywordBoundary(input string, index int) bool {
-	if index >= len(input) {
-		return true
-	}
-	character := rune(input[index])
-	return !unicode.IsLetter(character) && !unicode.IsDigit(character) && character != '_'
-}
-
-func lineEnd(input string, index int) int {
-	for index < len(input) && input[index] != '\n' {
-		index++
-	}
-	if index < len(input) {
-		index++
-	}
-	return index
+	return input[:offset] + "\n" + declarations + "\n" + input[offset:], nil
 }
