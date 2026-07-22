@@ -62,10 +62,7 @@ func workspaceCompilerEnvironmentFrom(base []string, options compilerEnvironment
 
 	environment := append([]string(nil), base...)
 	if options.Compiler == "tinygo" {
-		environment, err = withTinyGoCacheFallback(environment)
-		if err != nil {
-			return nil, "", compilerEnvironmentError(options, "XDG_CACHE_HOME", err)
-		}
+		environment = withTinyGoCacheFallback(environment)
 	}
 
 	controlled := []string{"PWD", "GOWORK", "GO111MODULE", "GOFLAGS", "GOOS", "GOARCH", "CGO_ENABLED"}
@@ -105,19 +102,19 @@ func compilerEnvironmentError(options compilerEnvironmentOptions, key string, er
 	return fmt.Errorf("prepare %s %s compiler environment for %s: %s: %w", compiler, invocation, directory, key, err)
 }
 
-func withTinyGoCacheFallback(environment []string) ([]string, error) {
+func withTinyGoCacheFallback(environment []string) []string {
 	if value, ok := environmentValue(environment, "XDG_CACHE_HOME"); ok && value != "" {
-		return environment, nil
+		return environment
 	}
 	goCache, ok := environmentValue(environment, "GOCACHE")
 	if !ok || goCache == "" {
-		return environment, nil
+		return environment
 	}
 	cache := filepath.Join(filepath.Dir(goCache), "goxc-xdg-cache")
 	if err := os.MkdirAll(cache, 0o755); err != nil {
-		return nil, fmt.Errorf("create TinyGo cache fallback %s: %w", cache, err)
+		return environment
 	}
-	return setEnvironmentValue(environment, "XDG_CACHE_HOME", cache), nil
+	return setEnvironmentValue(environment, "XDG_CACHE_HOME", cache)
 }
 
 func removeEnvironmentKeys(environment []string, keys []string) []string {

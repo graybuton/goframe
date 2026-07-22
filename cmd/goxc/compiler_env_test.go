@@ -179,19 +179,270 @@ func TestCompilerEnvironmentContract(t *testing.T) {
 	}
 }
 
+func TestTinyGoCacheFallbackFailureIsBestEffort(t *testing.T) {
+	root := t.TempDir()
+	blockingPath := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blockingPath, []byte("blocking file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	goCache := filepath.Join(blockingPath, "go-build")
+	workingDirectory := filepath.Join(root, "working", "..", "app")
+	base := []string{
+		"GOCACHE=" + goCache,
+		"SENTINEL=preserved",
+		"PWD=stale",
+		"GOWORK=parent.work",
+		"GO111MODULE=off",
+		"GOFLAGS=-mod=vendor",
+		"GOOS=linux",
+		"GOARCH=amd64",
+		"CGO_ENABLED=1",
+	}
+	wantBase := append([]string(nil), base...)
+	t.Setenv("GOCACHE", "parent-cache")
+	t.Setenv("XDG_CACHE_HOME", "parent-xdg-cache")
+
+	tests := []struct {
+		name       string
+		invocation compilerInvocationKind
+		goFlags    string
+	}{
+		{
+			name:       "build",
+			invocation: compilerInvocationBuild,
+			goFlags:    workspaceCompilerBaseGoFlags,
+		},
+		{
+			name:       "embed discovery",
+			invocation: compilerInvocationEmbedDiscovery,
+			goFlags: workspaceCompilerBaseGoFlags + " " + strconv.Quote(
+				"-overlay="+filepath.Join(root, "overlay with spaces.json"),
+			),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			environment, directory, err := workspaceCompilerEnvironmentFrom(base, compilerEnvironmentOptions{
+				Compiler:         "tinygo",
+				Invocation:       test.invocation,
+				WorkingDirectory: workingDirectory,
+				GoFlags:          test.goFlags,
+			})
+			if err != nil {
+				t.Fatalf("workspaceCompilerEnvironmentFrom() error: %v", err)
+			}
+
+			wantDirectory, err := filepath.Abs(workingDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantDirectory = filepath.Clean(wantDirectory)
+			if directory != wantDirectory {
+				t.Fatalf("directory = %q, want %q", directory, wantDirectory)
+			}
+			for key, want := range map[string]string{
+				"GOCACHE":     goCache,
+				"SENTINEL":    "preserved",
+				"PWD":         wantDirectory,
+				"GOWORK":      "off",
+				"GO111MODULE": "on",
+				"GOFLAGS":     test.goFlags,
+			} {
+				assertCompilerEnvironmentValue(t, environment, key, want)
+			}
+			if count := countCompilerEnvironmentKey(environment, "XDG_CACHE_HOME"); count != 0 {
+				t.Fatalf("environment contains %d XDG_CACHE_HOME values, want 0: %#v", count, environment)
+			}
+			for _, key := range []string{"GOOS", "GOARCH", "CGO_ENABLED"} {
+				if count := countCompilerEnvironmentKey(environment, key); count != 0 {
+					t.Fatalf("TinyGo environment retained %s: %#v", key, environment)
+				}
+			}
+			if !reflect.DeepEqual(base, wantBase) {
+				t.Fatalf("input environment mutated:\ngot  %#v\nwant %#v", base, wantBase)
+			}
+			if got := os.Getenv("GOCACHE"); got != "parent-cache" {
+				t.Fatalf("parent GOCACHE = %q", got)
+			}
+			if got := os.Getenv("XDG_CACHE_HOME"); got != "parent-xdg-cache" {
+				t.Fatalf("parent XDG_CACHE_HOME = %q", got)
+			}
+		})
+	}
+}
+
+func TestTinyGoCacheFallbackSuccess(t *testing.T) {
+	root := t.TempDir()
+	goCache := filepath.Join(root, "go-build")
+	environment, _, err := workspaceCompilerEnvironmentFrom([]string{
+		"GOCACHE=" + goCache,
+		"SENTINEL=preserved",
+		"PWD=stale",
+		"GOWORK=parent.work",
+		"GOFLAGS=-mod=vendor",
+		"GOOS=linux",
+		"GOARCH=amd64",
+		"CGO_ENABLED=1",
+	}, compilerEnvironmentOptions{
+		Compiler:         "tinygo",
+		Invocation:       compilerInvocationBuild,
+		WorkingDirectory: filepath.Join(root, "app"),
+		GoFlags:          workspaceCompilerBaseGoFlags,
+	})
+	if err != nil {
+		t.Fatalf("workspaceCompilerEnvironmentFrom() error: %v", err)
+	}
+
+	fallback := filepath.Join(root, "goxc-xdg-cache")
+	info, err := os.Stat(fallback)
+	if err != nil {
+		t.Fatalf("stat TinyGo cache fallback: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("TinyGo cache fallback mode = %s, want directory", info.Mode())
+	}
+	assertCompilerEnvironmentValue(t, environment, "XDG_CACHE_HOME", fallback)
+	assertCompilerEnvironmentValue(t, environment, "GOCACHE", goCache)
+	assertCompilerEnvironmentValue(t, environment, "GOWORK", "off")
+	assertCompilerEnvironmentValue(t, environment, "GOFLAGS", workspaceCompilerBaseGoFlags)
+}
+
+func TestTinyGoCacheFallbackPreservesExistingValue(t *testing.T) {
+	root := t.TempDir()
+	blockingPath := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blockingPath, []byte("blocking file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	customCache := filepath.Join(root, "custom-cache")
+	environment, _, err := workspaceCompilerEnvironmentFrom([]string{
+		"XDG_CACHE_HOME=" + customCache,
+		"GOCACHE=" + filepath.Join(blockingPath, "go-build"),
+	}, compilerEnvironmentOptions{
+		Compiler:         "tinygo",
+		Invocation:       compilerInvocationBuild,
+		WorkingDirectory: filepath.Join(root, "app"),
+		GoFlags:          workspaceCompilerBaseGoFlags,
+	})
+	if err != nil {
+		t.Fatalf("workspaceCompilerEnvironmentFrom() error: %v", err)
+	}
+	assertCompilerEnvironmentValue(t, environment, "XDG_CACHE_HOME", customCache)
+}
+
+func TestTinyGoCacheFallbackEmptyValue(t *testing.T) {
+	t.Run("successful fallback replaces empty value", func(t *testing.T) {
+		root := t.TempDir()
+		goCache := filepath.Join(root, "go-build")
+		environment, _, err := workspaceCompilerEnvironmentFrom([]string{
+			"XDG_CACHE_HOME=",
+			"GOCACHE=" + goCache,
+		}, compilerEnvironmentOptions{
+			Compiler:         "tinygo",
+			Invocation:       compilerInvocationBuild,
+			WorkingDirectory: filepath.Join(root, "app"),
+			GoFlags:          workspaceCompilerBaseGoFlags,
+		})
+		if err != nil {
+			t.Fatalf("workspaceCompilerEnvironmentFrom() error: %v", err)
+		}
+		assertCompilerEnvironmentValue(t, environment, "XDG_CACHE_HOME", filepath.Join(root, "goxc-xdg-cache"))
+	})
+
+	t.Run("failed fallback preserves empty value", func(t *testing.T) {
+		root := t.TempDir()
+		blockingPath := filepath.Join(root, "not-a-directory")
+		if err := os.WriteFile(blockingPath, []byte("blocking file"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		environment, _, err := workspaceCompilerEnvironmentFrom([]string{
+			"XDG_CACHE_HOME=",
+			"GOCACHE=" + filepath.Join(blockingPath, "go-build"),
+		}, compilerEnvironmentOptions{
+			Compiler:         "tinygo",
+			Invocation:       compilerInvocationBuild,
+			WorkingDirectory: filepath.Join(root, "app"),
+			GoFlags:          workspaceCompilerBaseGoFlags,
+		})
+		if err != nil {
+			t.Fatalf("workspaceCompilerEnvironmentFrom() error: %v", err)
+		}
+		assertCompilerEnvironmentValue(t, environment, "XDG_CACHE_HOME", "")
+	})
+}
+
+func TestTinyGoCacheFallbackWithoutGoCacheLeavesXDGUnset(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		base []string
+	}{
+		{name: "missing", base: []string{"SENTINEL=preserved"}},
+		{name: "empty", base: []string{"GOCACHE=", "SENTINEL=preserved"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			environment, _, err := workspaceCompilerEnvironmentFrom(test.base, compilerEnvironmentOptions{
+				Compiler:         "tinygo",
+				Invocation:       compilerInvocationBuild,
+				WorkingDirectory: t.TempDir(),
+				GoFlags:          workspaceCompilerBaseGoFlags,
+			})
+			if err != nil {
+				t.Fatalf("workspaceCompilerEnvironmentFrom() error: %v", err)
+			}
+			if count := countCompilerEnvironmentKey(environment, "XDG_CACHE_HOME"); count != 0 {
+				t.Fatalf("environment contains %d XDG_CACHE_HOME values, want 0: %#v", count, environment)
+			}
+			assertCompilerEnvironmentValue(t, environment, "SENTINEL", "preserved")
+		})
+	}
+}
+
 func TestCompilerEnvironmentErrorIdentifiesBoundary(t *testing.T) {
 	directory := t.TempDir()
-	_, _, err := workspaceCompilerEnvironmentFrom(nil, compilerEnvironmentOptions{
-		Compiler: "tinygo", Invocation: compilerInvocationBuild,
-		WorkingDirectory: directory,
-	})
-	if err == nil {
-		t.Fatal("workspaceCompilerEnvironmentFrom() succeeded without owned GOFLAGS")
+	tests := []struct {
+		name    string
+		options compilerEnvironmentOptions
+		want    []string
+	}{
+		{
+			name: "unsupported compiler",
+			options: compilerEnvironmentOptions{
+				Compiler: "other", Invocation: compilerInvocationBuild,
+				WorkingDirectory: directory, GoFlags: workspaceCompilerBaseGoFlags,
+			},
+			want: []string{"other", "build", "compiler", directory},
+		},
+		{
+			name: "missing invocation",
+			options: compilerEnvironmentOptions{
+				Compiler: "tinygo", WorkingDirectory: directory,
+				GoFlags: workspaceCompilerBaseGoFlags,
+			},
+			want: []string{"tinygo", "unknown", "invocation", directory},
+		},
+		{
+			name: "empty owned GOFLAGS",
+			options: compilerEnvironmentOptions{
+				Compiler: "tinygo", Invocation: compilerInvocationBuild,
+				WorkingDirectory: directory,
+			},
+			want: []string{"tinygo", "build", "GOFLAGS", directory},
+		},
 	}
-	for _, want := range []string{"tinygo", "build", "GOFLAGS", directory} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q does not contain %q", err, want)
-		}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := workspaceCompilerEnvironmentFrom(nil, test.options)
+			if err == nil {
+				t.Fatal("workspaceCompilerEnvironmentFrom() succeeded")
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q does not contain %q", err, want)
+				}
+			}
+		})
 	}
 }
 
