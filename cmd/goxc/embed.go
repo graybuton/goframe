@@ -306,8 +306,7 @@ func listGoEmbedPackages(entryPath, overlayPath string, tinyGoTags bool) ([]embe
 	}
 	args = append(args, ".")
 	command := exec.Command(compilerPath, args...)
-	environment := append(compilerEnvironment("go"), "GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0")
-	if err := configureEmbedListCommand(command, entryPath, environment); err != nil {
+	if err := configureEmbedListCommand(command, "go", entryPath, workspaceCompilerBaseGoFlags); err != nil {
 		return nil, err
 	}
 	return runEmbedListCommand(command, "go list")
@@ -319,23 +318,21 @@ func listTinyGoEmbedPackages(entryPath, overlayPath string) ([]embedListPackage,
 		return nil, errors.New("TinyGo compiler not found in PATH; install TinyGo or use --compiler=go")
 	}
 	command := exec.Command(compilerPath, "list", "-target=wasm", "-deps", "-json", ".")
-	flags := strings.TrimSpace(os.Getenv("GOFLAGS") + " -buildvcs=false " + strconv.Quote("-overlay="+overlayPath))
-	environment := setEnvironmentValue(compilerEnvironment("tinygo"), "GOFLAGS", flags)
-	if err := configureEmbedListCommand(command, entryPath, environment); err != nil {
+	flags := workspaceCompilerBaseGoFlags + " " + strconv.Quote("-overlay="+overlayPath)
+	if err := configureEmbedListCommand(command, "tinygo", entryPath, flags); err != nil {
 		return nil, err
 	}
 	return runEmbedListCommand(command, "tinygo list")
 }
 
-func configureEmbedListCommand(command *exec.Cmd, entryPath string, environment []string) error {
-	lexicalEntryPath, err := filepath.Abs(entryPath)
-	if err != nil {
-		return fmt.Errorf("resolve embed discovery entry %s: %w", entryPath, err)
-	}
-	lexicalEntryPath = filepath.Clean(lexicalEntryPath)
-	command.Dir = lexicalEntryPath
-	command.Env = setEnvironmentValue(environment, "PWD", lexicalEntryPath)
-	return nil
+func configureEmbedListCommand(command *exec.Cmd, compiler, entryPath, goFlags string) error {
+	return configureWorkspaceCompilerCommand(command, compilerEnvironmentOptions{
+		Compiler:         compiler,
+		Invocation:       compilerInvocationEmbedDiscovery,
+		WorkingDirectory: entryPath,
+		GoFlags:          goFlags,
+		StandardGoTarget: compiler == "go",
+	})
 }
 
 func runEmbedListCommand(command *exec.Cmd, description string) ([]embedListPackage, error) {
@@ -372,17 +369,6 @@ func decodeEmbedListPackages(reader io.Reader) ([]embedListPackage, error) {
 		}
 		packages = append(packages, packageInfo)
 	}
-}
-
-func setEnvironmentValue(environment []string, key, value string) []string {
-	prefix := key + "="
-	result := make([]string, 0, len(environment)+1)
-	for _, item := range environment {
-		if !strings.HasPrefix(item, prefix) {
-			result = append(result, item)
-		}
-	}
-	return append(result, prefix+value)
 }
 
 func resolveEmbedInputPlan(appDir, appWorkDir string, candidates map[embedInputKey]embedCandidate, packages []embedListPackage) ([]resolvedEmbedInput, embedInputPlan, error) {

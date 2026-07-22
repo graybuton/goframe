@@ -493,14 +493,9 @@ func TestEmbedListCommandPreservesLexicalWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	stalePWD := filepath.Join(root, "stale-pwd")
-	parentPWD := filepath.Join(root, "parent-pwd")
 	if err := os.MkdirAll(stalePWD, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(parentPWD, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PWD", parentPWD)
 	want, err := filepath.Abs(lexicalEntryPath)
 	if err != nil {
 		t.Fatal(err)
@@ -515,29 +510,28 @@ func TestEmbedListCommandPreservesLexicalWorkingDirectory(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name        string
-		environment func() []string
-		wantValues  []string
+		name       string
+		compiler   string
+		goFlags    string
+		wantValues []string
 	}{
 		{
-			name: "go",
-			environment: func() []string {
-				return append(compilerEnvironment("go"), "GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0", "PWD="+stalePWD)
-			},
+			name:       "go",
+			compiler:   "go",
+			goFlags:    workspaceCompilerBaseGoFlags,
 			wantValues: []string{"GOOS=js", "GOARCH=wasm", "CGO_ENABLED=0"},
 		},
 		{
-			name: "tinygo",
-			environment: func() []string {
-				environment := setEnvironmentValue(compilerEnvironment("tinygo"), "GOFLAGS", "-buildvcs=false -overlay=overlay.json")
-				return append(environment, "PWD="+stalePWD)
-			},
+			name:       "tinygo",
+			compiler:   "tinygo",
+			goFlags:    "-buildvcs=false -overlay=overlay.json",
 			wantValues: []string{"GOFLAGS=-buildvcs=false -overlay=overlay.json"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			command := &exec.Cmd{}
-			if err := configureEmbedListCommand(command, lexicalEntryPath, test.environment()); err != nil {
+			t.Setenv("PWD", stalePWD)
+			if err := configureEmbedListCommand(command, test.compiler, lexicalEntryPath, test.goFlags); err != nil {
 				t.Fatalf("configureEmbedListCommand() error: %v", err)
 			}
 			if command.Dir != want {
@@ -566,8 +560,8 @@ func TestEmbedListCommandPreservesLexicalWorkingDirectory(t *testing.T) {
 			if command.Dir == physical {
 				t.Fatalf("command directory was physically canonicalized to %q", physical)
 			}
-			if got := os.Getenv("PWD"); got != parentPWD {
-				t.Fatalf("parent PWD = %q, want unchanged %q", got, parentPWD)
+			if got := os.Getenv("PWD"); got != stalePWD {
+				t.Fatalf("parent PWD = %q, want unchanged %q", got, stalePWD)
 			}
 		})
 	}

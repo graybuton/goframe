@@ -199,10 +199,14 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 			entryArg,
 		)
 	}
-	command.Dir = commandDir
-	command.Env = compilerEnvironment(compiler)
-	if compiler == "go" {
-		command.Env = append(command.Env, "GOOS=js", "GOARCH=wasm")
+	if err := configureWorkspaceCompilerCommand(command, compilerEnvironmentOptions{
+		Compiler:         compiler,
+		Invocation:       compilerInvocationBuild,
+		WorkingDirectory: commandDir,
+		GoFlags:          workspaceCompilerBaseGoFlags,
+		StandardGoTarget: compiler == "go",
+	}); err != nil {
+		return err
 	}
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
@@ -213,20 +217,6 @@ func compileWASM(compiler, entryPath, outputPath string) error {
 		return err
 	}
 	return nil
-}
-
-func compilerEnvironment(compiler string) []string {
-	environment := os.Environ()
-	if compiler != "tinygo" || os.Getenv("XDG_CACHE_HOME") != "" {
-		return environment
-	}
-	if goCache := os.Getenv("GOCACHE"); goCache != "" {
-		cache := filepath.Join(filepath.Dir(goCache), "goxc-xdg-cache")
-		if err := os.MkdirAll(cache, 0o755); err == nil {
-			environment = append(environment, "XDG_CACHE_HOME="+cache)
-		}
-	}
-	return environment
 }
 
 func validateCompiler(compiler string) error {
