@@ -202,6 +202,39 @@ var tiny string
 	}
 }
 
+func TestEmbedEnvironmentIsolation(t *testing.T) {
+	compilers := []string{"go"}
+	if _, err := exec.LookPath("tinygo"); err == nil {
+		compilers = append(compilers, "tinygo")
+	}
+	for _, compiler := range compilers {
+		t.Run(compiler, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "root with spaces")
+			appDir := filepath.Join(root, "app")
+			writeTestFile(t, appDir, "go.mod", "module example.com/embed-environment\n\ngo 1.22\n")
+			writeTestFile(t, appDir, manifestName, `{"name":"embed-environment","compiler":"`+compiler+`"}`)
+			writeTestFile(t, appDir, "main.go", embedStringSource("message.txt"))
+			writeTestFile(t, appDir, "message.txt", "isolated embed payload")
+			workPath, workContent := writeHostileParentWorkspace(t, root)
+			setHostileCompilerWorkflowEnvironment(t, workPath, "-mod=vendor")
+
+			workspace := filepath.Join(t.TempDir(), "workspace with spaces")
+			output, err := buildApp(buildOptions{
+				appDir: appDir, compiler: compiler, workspace: workspace,
+			})
+			if err != nil {
+				t.Fatalf("buildApp() embed workflow with hostile environment using %s: %v", compiler, err)
+			}
+			assertNonEmptyCompilerOutput(t, output)
+
+			layout := newEmbedTestLayout(t, appDir, compiler, workspace)
+			appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(workspaceModuleConfigForApp(appDir).AppRel))
+			assertEmbedFileContent(t, filepath.Join(appWorkDir, "message.txt"), "isolated embed payload")
+			assertTestFileUnchanged(t, workPath, workContent)
+		})
+	}
+}
+
 func TestEmbedDiscoveryFiltersExternalDependencyInputs(t *testing.T) {
 	root := t.TempDir()
 	externalDir := filepath.Join(root, "external")

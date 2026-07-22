@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -330,5 +332,125 @@ func TestCompilerEnvironmentWindowsKeyIdentity(t *testing.T) {
 		if count := countCompilerEnvironmentKey(environment, key); count != 1 {
 			t.Fatalf("case-insensitive %s count = %d: %#v", key, count, environment)
 		}
+	}
+}
+
+func TestCompilerEnvironmentIgnoresPersistentGoFlags(t *testing.T) {
+	compilers := []string{"go"}
+	if _, err := exec.LookPath("tinygo"); err == nil {
+		compilers = append(compilers, "tinygo")
+	}
+	for _, compiler := range compilers {
+		t.Run(compiler, func(t *testing.T) {
+			root := t.TempDir()
+			appDir := filepath.Join(root, "app")
+			writeCompilerEnvironmentTestApp(t, appDir, "")
+			goEnvPath := filepath.Join(root, "go-env")
+			goEnvContent := "GOFLAGS=-mod=vendor\n"
+			if err := os.WriteFile(goEnvPath, []byte(goEnvContent), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			t.Setenv("GOENV", goEnvPath)
+			unsetCompilerEnvironmentForTest(t, "GOFLAGS")
+			t.Setenv("GOWORK", "off")
+			t.Setenv("GOPROXY", "off")
+			t.Setenv("GOSUMDB", "off")
+
+			output, err := buildApp(buildOptions{appDir: appDir, compiler: compiler})
+			if err != nil {
+				t.Fatalf("buildApp() with GOENV-persisted GOFLAGS using %s: %v", compiler, err)
+			}
+			assertNonEmptyCompilerOutput(t, output)
+			assertTestFileUnchanged(t, goEnvPath, goEnvContent)
+		})
+	}
+}
+
+func TestPackageEnvironmentIsolation(t *testing.T) {
+	compilers := []string{"go"}
+	if _, err := exec.LookPath("tinygo"); err == nil {
+		compilers = append(compilers, "tinygo")
+	}
+	for _, compiler := range compilers {
+		t.Run(compiler, func(t *testing.T) {
+			root := t.TempDir()
+			appDir := filepath.Join(root, "app")
+			writeCompilerEnvironmentTestApp(t, appDir, "")
+			workPath, workContent := writeHostileParentWorkspace(t, root)
+			setHostileCompilerWorkflowEnvironment(t, workPath, "-mod=vendor")
+
+			outDir := filepath.Join(t.TempDir(), "package")
+			err := packageApp(packageOptions{
+				appDir: appDir, compiler: compiler, outDir: outDir,
+				workspace: filepath.Join(t.TempDir(), "workspace"),
+				compress:  map[string]bool{},
+			})
+			if err != nil {
+				t.Fatalf("packageApp() with hostile environment using %s: %v", compiler, err)
+			}
+
+			metadataContent, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var metadata packageMetadata
+			if err := json.Unmarshal(metadataContent, &metadata); err != nil {
+				t.Fatalf("decode package metadata: %v", err)
+			}
+			if metadata.Compiler != compiler || metadata.Entrypoints.WASM == "" {
+				t.Fatalf("package metadata = %+v, want compiler %q and WASM entrypoint", metadata, compiler)
+			}
+			wasmPath := filepath.Join(outDir, filepath.FromSlash(metadata.Entrypoints.WASM))
+			assertNonEmptyCompilerOutput(t, wasmPath)
+			assertTestFileUnchanged(t, workPath, workContent)
+		})
+	}
+}
+
+func writeHostileParentWorkspace(t *testing.T, root string) (string, string) {
+	t.Helper()
+	writeTestFile(t, root, "host/go.mod", "module example.com/host\n\ngo 1.22\n")
+	content := "go 1.22\n\nuse ./host\n"
+	writeTestFile(t, root, "go.work", content)
+	return filepath.Join(root, "go.work"), content
+}
+
+func setHostileCompilerWorkflowEnvironment(t *testing.T, workPath, goFlags string) {
+	t.Helper()
+	t.Setenv("GOWORK", workPath)
+	t.Setenv("GOFLAGS", goFlags)
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOSUMDB", "off")
+}
+
+func unsetCompilerEnvironmentForTest(t *testing.T, key string) {
+	t.Helper()
+	value, present := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		var err error
+		if present {
+			err = os.Setenv(key, value)
+		} else {
+			err = os.Unsetenv(key)
+		}
+		if err != nil {
+			t.Errorf("restore %s: %v", key, err)
+		}
+	})
+}
+
+func assertTestFileUnchanged(t *testing.T, path, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != want {
+		t.Fatalf("%s changed:\ngot  %q\nwant %q", path, content, want)
 	}
 }

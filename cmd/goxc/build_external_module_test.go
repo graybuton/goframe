@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestBuildAppSupportsExternalModuleComponentPackage(t *testing.T) {
+func TestExternalModuleEnvironmentIsolation(t *testing.T) {
 	root := t.TempDir()
 	appDir := filepath.Join(root, "app")
 	uiDir := filepath.Join(root, "ui")
@@ -45,10 +45,8 @@ func App() gf.Node {
 }
 `)
 
-	t.Setenv("GOPROXY", "off")
-	t.Setenv("GOSUMDB", "off")
-	t.Setenv("GOWORK", "off")
-	t.Setenv("GOFLAGS", "-mod=mod")
+	workPath, workContent := writeHostileParentWorkspace(t, root)
+	setHostileCompilerWorkflowEnvironment(t, workPath, "-mod=vendor")
 
 	workspaceBase := filepath.Join(t.TempDir(), "workspace")
 	outputPath, err := buildApp(buildOptions{
@@ -103,6 +101,7 @@ func App() gf.Node {
 		t.Fatalf("external dependency GOX source was generated next to dependency source: %v", err)
 	}
 	assertWorkspaceDoesNotContainGeneratedExternalGOX(t, layout.WorkDir)
+	assertTestFileUnchanged(t, workPath, workContent)
 }
 
 func assertWorkspaceDoesNotContainGeneratedExternalGOX(t *testing.T, workDir string) {
