@@ -1067,6 +1067,135 @@ func View() gf.Node {
 	}
 }
 
+func TestGenerateAllocatesDistinctComponentIdentifiersForCollidingTags(t *testing.T) {
+	sources := []string{
+		`package demo
+
+import A_B "example.com/components/A_B"
+
+func View() any {
+	return <><A_B_C /><A_B.C /></>
+}
+`,
+		`package demo
+
+import A_B "example.com/components/A_B"
+
+func View() any {
+	return <><A_B.C /><A_B_C /></>
+}
+`,
+	}
+
+	var first map[string]string
+	for index, source := range sources {
+		generated := generateDeterministically(t, "view.gox", source)
+		identifiers := generatedComponentIdentifiers(t, generated)
+		if identifiers["A_B_C"] == identifiers["A_B.C"] {
+			t.Fatalf("colliding tags use the same generated identifier %q:\n%s", identifiers["A_B_C"], generated)
+		}
+		if index == 0 {
+			first = identifiers
+			continue
+		}
+		for tag, want := range first {
+			if got := identifiers[tag]; got != want {
+				t.Fatalf("identifier for %q changed with traversal order: got %q, want %q", tag, got, want)
+			}
+		}
+	}
+}
+
+func TestGenerateAvoidsSameFileAuthoredIdentifierCollisions(t *testing.T) {
+	const authoredName = "_goxComponent_view_Button"
+	tests := []struct {
+		name        string
+		declaration string
+	}{
+		{name: "variable", declaration: "var " + authoredName + " = 1"},
+		{name: "constant", declaration: "const " + authoredName + " = 1"},
+		{name: "type", declaration: "type " + authoredName + " struct{}"},
+		{name: "function", declaration: "func " + authoredName + "() {}"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "package app\n\n" + test.declaration + `
+
+func View() any {
+	return <Button />
+}
+`
+			generated := generateDeterministically(t, "view.gox", source)
+			if got := generatedComponentIdentifiers(t, generated)["Button"]; got == authoredName {
+				t.Fatalf("generated identifier collides with authored %s %q:\n%s", test.name, authoredName, generated)
+			}
+		})
+	}
+}
+
+func generateDeterministically(t *testing.T, filename, source string) []byte {
+	t.Helper()
+	options := GenerateOptions{
+		Filename:        filename,
+		PackageIdentity: "example.com/collision",
+	}
+	first, err := GenerateWithOptions([]byte(source), options)
+	if err != nil {
+		t.Fatalf("GenerateWithOptions(%s) error: %v", filename, err)
+	}
+	second, err := GenerateWithOptions([]byte(source), options)
+	if err != nil {
+		t.Fatalf("GenerateWithOptions(%s, second) error: %v", filename, err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("GenerateWithOptions(%s) is not deterministic:\nfirst:\n%s\nsecond:\n%s", filename, first, second)
+	}
+	if _, err := parser.ParseFile(gotoken.NewFileSet(), filename+".go", first, parser.AllErrors); err != nil {
+		t.Fatalf("generated Go for %s does not parse: %v\n%s", filename, err, first)
+	}
+	return first
+}
+
+func generatedComponentIdentifiers(t *testing.T, generated []byte) map[string]string {
+	t.Helper()
+	file, err := parser.ParseFile(gotoken.NewFileSet(), "generated.gox.go", generated, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("parse generated Go: %v\n%s", err, generated)
+	}
+	identifiers := make(map[string]string)
+	for _, declaration := range file.Decls {
+		gen, ok := declaration.(*ast.GenDecl)
+		if !ok || gen.Tok != gotoken.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok || len(value.Names) != 1 || len(value.Values) != 1 {
+				continue
+			}
+			call, ok := value.Values[0].(*ast.CallExpr)
+			if !ok || len(call.Args) != 2 {
+				continue
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel.Name != "NewComponentType" {
+				continue
+			}
+			debugName, ok := call.Args[1].(*ast.BasicLit)
+			if !ok || debugName.Kind != gotoken.STRING {
+				continue
+			}
+			name, err := strconv.Unquote(debugName.Value)
+			if err != nil {
+				t.Fatalf("unquote component debug name %q: %v", debugName.Value, err)
+			}
+			identifiers[name] = value.Names[0].Name
+		}
+	}
+	return identifiers
+}
+
 func TestGenerateWithOptionsDifferentPackageIdentities(t *testing.T) {
 	source := []byte(`package ui
 

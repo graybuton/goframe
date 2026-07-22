@@ -1,11 +1,19 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	gotoken "go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/graybuton/goframe/pkg/gox"
 )
 
 func TestWriteWorkspaceGoModFailsWithoutRepoRootOrVersion(t *testing.T) {
@@ -428,6 +436,227 @@ func View() gf.Node {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not contain %q", err, want)
 		}
+	}
+}
+
+func TestGenerateIntoDirectoryAvoidsCrossFileGeneratedIdentifierCollision(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "A_B"))
+	writeTestFile(t, root, "view_A.gox", packageIdentifierGOXSource("Other", "B"))
+
+	generatePackageIdentifierFixture(t, root)
+	view := generatedIdentifierForComponent(t, filepath.Join(root, "view.gox.go"), "A_B")
+	other := generatedIdentifierForComponent(t, filepath.Join(root, "view_A.gox.go"), "B")
+	if view == other {
+		t.Fatalf("cross-file components use duplicate generated identifier %q", view)
+	}
+	goTestPackageIdentifierFixture(t, root)
+}
+
+func TestGenerateIntoDirectoryAvoidsSanitizedFilenameCollision(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeTestFile(t, root, "view-a.gox", packageIdentifierGOXSource("ViewDash", "Button"))
+	writeTestFile(t, root, "view_a.gox", packageIdentifierGOXSource("ViewUnderscore", "Button"))
+
+	generatePackageIdentifierFixture(t, root)
+	dash := generatedIdentifierForComponent(t, filepath.Join(root, "view-a.gox.go"), "Button")
+	underscore := generatedIdentifierForComponent(t, filepath.Join(root, "view_a.gox.go"), "Button")
+	if dash == underscore {
+		t.Fatalf("sanitized filenames use duplicate generated identifier %q", dash)
+	}
+	goTestPackageIdentifierFixture(t, root)
+}
+
+func TestGenerateIntoDirectoryAvoidsCrossFileAuthoredIdentifierCollisions(t *testing.T) {
+	const authoredName = "_goxComponent_view_Button"
+	tests := []struct {
+		name        string
+		declaration string
+	}{
+		{name: "variable", declaration: "var " + authoredName + " = 1"},
+		{name: "function", declaration: "func " + authoredName + "() {}"},
+		{name: "type", declaration: "type " + authoredName + " struct{}"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := newPackageIdentifierFixture(t)
+			writeTestFile(t, root, "collision.go", "package app\n\n"+test.declaration+"\n")
+			writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+
+			generatePackageIdentifierFixture(t, root)
+			if got := generatedIdentifierForComponent(t, filepath.Join(root, "view.gox.go"), "Button"); got == authoredName {
+				t.Fatalf("generated identifier collides with authored %s %q", test.name, authoredName)
+			}
+			goTestPackageIdentifierFixture(t, root)
+		})
+	}
+}
+
+func TestGenerateIntoDirectoryAllowsSameComponentAcrossGOXFiles(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeTestFile(t, root, "first.gox", packageIdentifierGOXSource("First", "Button"))
+	writeTestFile(t, root, "second.gox", packageIdentifierGOXSource("Second", "Button"))
+
+	generatePackageIdentifierFixture(t, root)
+	first := generatedIdentifierForComponent(t, filepath.Join(root, "first.gox.go"), "Button")
+	second := generatedIdentifierForComponent(t, filepath.Join(root, "second.gox.go"), "Button")
+	if first == second {
+		t.Fatalf("separate GOX files use duplicate generated identifier %q", first)
+	}
+	goTestPackageIdentifierFixture(t, root)
+}
+
+func TestGenerateIntoDirectoryPackageIdentifiersAreDeterministic(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "A_B"))
+	writeTestFile(t, root, "view_A.gox", packageIdentifierGOXSource("Other", "B"))
+	files, err := findGOXFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := generatePackageIdentifierFilesInOrder(t, root, files)
+	for left, right := 0, len(files)-1; left < right; left, right = left+1, right-1 {
+		files[left], files[right] = files[right], files[left]
+	}
+	second := generatePackageIdentifierFilesInOrder(t, root, files)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("generated package changed with file order:\nfirst: %#v\nsecond: %#v", first, second)
+	}
+}
+
+func newPackageIdentifierFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repository root: %v", err)
+	}
+	writeTestFile(t, root, "go.mod", "module example.com/collision\n\ngo 1.22\n\n"+
+		"require github.com/graybuton/goframe v0.0.0\n\n"+
+		"replace github.com/graybuton/goframe => "+strconv.Quote(filepath.ToSlash(repositoryRoot))+"\n")
+	writeTestFile(t, root, "components.go", `package app
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type A_BProps struct{}
+type BProps struct{}
+type ButtonProps struct{}
+
+func A_B(A_BProps) gf.Node { return gf.Text("A_B") }
+func B(BProps) gf.Node { return gf.Text("B") }
+func Button(ButtonProps) gf.Node { return gf.Text("Button") }
+`)
+	return root
+}
+
+func packageIdentifierGOXSource(function, component string) string {
+	return "package app\n\n" +
+		"import gf \"github.com/graybuton/goframe/pkg/goframe\"\n\n" +
+		"func " + function + "() gf.Node {\n\treturn <" + component + " />\n}\n"
+}
+
+func generatePackageIdentifierFixture(t *testing.T, root string) {
+	t.Helper()
+	if err := generateIntoDirectory(root, root, true); err != nil {
+		t.Fatalf("generateIntoDirectory() error: %v", err)
+	}
+}
+
+func generatePackageIdentifierFilesInOrder(t *testing.T, sourceRoot string, files []string) map[string]string {
+	t.Helper()
+	destination := t.TempDir()
+	for _, file := range files {
+		relative, err := filepath.Rel(sourceRoot, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := generateFileSafely(file, filepath.Join(destination, relative+".go"), gox.GenerateOptions{
+			Filename:        file,
+			PackageIdentity: packageIdentityForFile(sourceRoot, file),
+		}); err != nil {
+			t.Fatalf("generate %s: %v", file, err)
+		}
+	}
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		relative, err := filepath.Rel(sourceRoot, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, filepath.ToSlash(relative)+".go")
+	}
+	sort.Strings(paths)
+	outputs := make(map[string]string, len(paths))
+	for _, relative := range paths {
+		content, err := os.ReadFile(filepath.Join(destination, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs[relative] = string(content)
+	}
+	return outputs
+}
+
+func generatedIdentifierForComponent(t *testing.T, path, component string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated file %s: %v", path, err)
+	}
+	file, err := parser.ParseFile(gotoken.NewFileSet(), path, content, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("parse generated file %s: %v", path, err)
+	}
+	for _, declaration := range file.Decls {
+		gen, ok := declaration.(*ast.GenDecl)
+		if !ok || gen.Tok != gotoken.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok || len(value.Names) != 1 || len(value.Values) != 1 {
+				continue
+			}
+			call, ok := value.Values[0].(*ast.CallExpr)
+			if !ok || len(call.Args) != 2 {
+				continue
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel.Name != "NewComponentType" {
+				continue
+			}
+			debugName, ok := call.Args[1].(*ast.BasicLit)
+			if !ok || debugName.Kind != gotoken.STRING {
+				continue
+			}
+			name, err := strconv.Unquote(debugName.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == component {
+				return value.Names[0].Name
+			}
+		}
+	}
+	t.Fatalf("generated file %s has no component declaration for %q", path, component)
+	return ""
+}
+
+func goTestPackageIdentifierFixture(t *testing.T, root string) {
+	t.Helper()
+	command := exec.Command("go", "test", "./...")
+	command.Dir = root
+	command.Env = append(os.Environ(),
+		"GOWORK=off",
+		"GOPROXY=off",
+		"GOSUMDB=off",
+		"GOFLAGS=-mod=mod -buildvcs=false",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go test package fixture: %v\n%s", err, output)
 	}
 }
 
