@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -156,6 +157,88 @@ func App() gf.Node {
 	writeTestFile(t, appDir, ".goframe/ignored.go", "package ignored\n")
 	assertNoDevEvent(t, builds, 3*devIntegrationDebounce)
 	writeTestFile(t, workspace, "tool-output.txt", "ignored\n")
+	assertNoDevEvent(t, builds, 3*devIntegrationDebounce)
+
+	cancel()
+	if err := waitDevRun(t, done); err != nil {
+		t.Fatalf("runDev() shutdown error: %v", err)
+	}
+	waitDevListenerClosed(t, serverURL)
+}
+
+func TestDevEmbedIntegrationRealWorkflow(t *testing.T) {
+	repositoryRoot, ok := findRepositoryRoot(".")
+	if !ok {
+		t.Fatal("repository root not found")
+	}
+	appDir := filepath.Join(t.TempDir(), "app")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	writeDevEmbedIntegrationApp(t, appDir, repositoryRoot)
+
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOSUMDB", "off")
+	t.Setenv("GOFLAGS", "-mod=mod")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	builds := make(chan devBuildEvent, 16)
+	serverURLs := make(chan string, 2)
+	generations := make(chan uint64, 8)
+	reloads := make(chan uint64, 8)
+	dependencies := devIntegrationDependencies(builds, serverURLs)
+	dependencies.hooks.GenerationActivated = func(generation uint64) { generations <- generation }
+	dependencies.hooks.ReloadPublished = func(generation uint64) { reloads <- generation }
+	done := make(chan error, 1)
+	go func() {
+		done <- runDev(ctx, devOptions{
+			appDir:    appDir,
+			compiler:  "go",
+			workspace: workspace,
+			port:      0,
+		}, dependencies)
+	}()
+
+	assertDevEvent(t, waitDevEvent(t, builds), 1, true, false)
+	assertDevGenerationEvent(t, generations, 1)
+	assertNoDevGenerationEvent(t, reloads)
+	serverURL := waitDevServerURL(t, serverURLs)
+	assertDevWASMContains(t, serverURL, "alpha")
+
+	writeTestFile(t, appDir, "unrelated/deep/value.txt", "unrelated")
+	assertNoDevEvent(t, builds, 3*devIntegrationDebounce)
+	assertNoDevGenerationEvent(t, generations)
+	assertNoDevGenerationEvent(t, reloads)
+
+	writeTestFile(t, appDir, "message.txt", "beta")
+	assertDevEvent(t, waitDevEvent(t, builds), 2, false, false)
+	assertDevGenerationEvent(t, generations, 2)
+	assertDevGenerationEvent(t, reloads, 2)
+	assertDevWASMContains(t, serverURL, "beta")
+
+	writeTestFile(t, appDir, "extras/second.txt", "second")
+	assertDevEvent(t, waitDevEvent(t, builds), 3, false, false)
+	assertDevGenerationEvent(t, generations, 3)
+	assertDevGenerationEvent(t, reloads, 3)
+
+	writeTestFile(t, appDir, "extras/ignored.bin", "ignored")
+	assertNoDevEvent(t, builds, 3*devIntegrationDebounce)
+	assertNoDevGenerationEvent(t, generations)
+	assertNoDevGenerationEvent(t, reloads)
+
+	if err := os.Remove(filepath.Join(appDir, "message.txt")); err != nil {
+		t.Fatal(err)
+	}
+	assertDevEvent(t, waitDevEvent(t, builds), 4, false, true)
+	assertNoDevGenerationEvent(t, generations)
+	assertNoDevGenerationEvent(t, reloads)
+	assertDevWASMContains(t, serverURL, "beta")
+
+	writeTestFile(t, appDir, "message.txt", "gamma")
+	assertDevEvent(t, waitDevEvent(t, builds), 5, false, false)
+	assertDevGenerationEvent(t, generations, 4)
+	assertDevGenerationEvent(t, reloads, 4)
+	assertDevWASMContains(t, serverURL, "gamma")
 	assertNoDevEvent(t, builds, 3*devIntegrationDebounce)
 
 	cancel()
@@ -578,6 +661,54 @@ func main() {
 	writeTestFile(t, appDir, "assets/message.txt", "initial asset")
 }
 
+func writeDevEmbedIntegrationApp(t *testing.T, appDir, repositoryRoot string) {
+	t.Helper()
+	writeTestFile(t, appDir, "go.mod", fmt.Sprintf(`module example.com/devembed
+
+go 1.22
+
+require %s v0.0.0
+
+replace %s => %s
+`, canonicalModulePath, canonicalModulePath, filepath.ToSlash(repositoryRoot)))
+	writeTestFile(t, appDir, manifestName, `{"name":"dev-embed","compiler":"go","assets":"assets"}`)
+	writeTestFile(t, appDir, "main.go", `//go:build js && wasm
+
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func main() {
+	done := make(chan struct{})
+	gf.Mount("root", App)
+	<-done
+}
+`)
+	writeTestFile(t, appDir, "embedded.go", `package main
+
+import "embed"
+
+//go:embed message.txt
+var embeddedMessage string
+
+//go:embed extras/*.txt
+var embeddedExtras embed.FS
+`)
+	writeTestFile(t, appDir, "app.gox", `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <main><span id="embedded-value">{embeddedMessage}</span></main>
+}
+`)
+	writeTestFile(t, appDir, "message.txt", "alpha")
+	writeTestFile(t, appDir, "extras/base.txt", "base")
+	writeTestFile(t, appDir, "assets/index.html", `<!doctype html>
+<html><body><div id="root"></div><script src="wasm_exec.js"></script><script>fetch("bundle.wasm")</script></body></html>
+`)
+}
+
 func writeDevIntegrationGOX(t *testing.T, appDir, label string) {
 	t.Helper()
 	writeTestFile(t, appDir, "app.gox", fmt.Sprintf(`package main
@@ -677,6 +808,14 @@ func assertDevHTTPBody(t *testing.T, url, want string) {
 	t.Helper()
 	if got := readDevHTTPBody(t, url); got != want {
 		t.Fatalf("GET %s body = %q, want %q", url, got, want)
+	}
+}
+
+func assertDevWASMContains(t *testing.T, serverURL, want string) {
+	t.Helper()
+	body := []byte(readDevHTTPBody(t, serverURL+"/assets/bundle.wasm"))
+	if !bytes.Contains(body, []byte(want)) {
+		t.Fatalf("served WASM does not contain embedded value %q", want)
 	}
 }
 

@@ -16,40 +16,56 @@ var (
 )
 
 func prepareBuildWorkspace(layout BuildLayout, manifest projectManifest) (string, error) {
+	result, err := prepareBuildWorkspaceResult(layout, manifest)
+	return result.EntryPath, err
+}
+
+type buildWorkspaceResult struct {
+	EntryPath string
+	EmbedPlan embedInputPlan
+}
+
+func prepareBuildWorkspaceResult(layout BuildLayout, manifest projectManifest) (buildWorkspaceResult, error) {
+	var result buildWorkspaceResult
 	if err := validateWorkspaceRoot(layout); err != nil {
-		return "", err
+		return result, err
 	}
 	entry, err := resolveEntryPackageDir(layout.AppDir, manifest.Entry)
 	if err != nil {
-		return "", err
+		return result, err
 	}
 	if err := validatePathBelowRoot(layout.WorkspaceRoot, layout.WorkDir, "workspace work directory", true); err != nil {
-		return "", err
+		return result, err
 	}
 	if err := refreshDirectory(layout.WorkDir); err != nil {
-		return "", err
+		return result, err
 	}
 	config := workspaceModuleConfigForApp(layout.AppDir)
 	appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
 	if err := copyAuthoredGoFiles(layout.AppDir, appWorkDir); err != nil {
-		return "", err
+		return result, err
 	}
 	if err := generateIntoDirectory(layout.AppDir, appWorkDir, false); err != nil {
-		return "", err
+		return result, err
 	}
 	if config.CopyGoframeRuntime {
 		if err := copyGoframeRuntimePackage(layout.WorkDir, config.ModuleRoot); err != nil {
-			return "", err
+			return result, err
 		}
 	}
 	if err := writeWorkspaceGoMod(layout.WorkDir, layout.AppDir); err != nil {
-		return "", err
+		return result, err
 	}
 	entryRelative, err := filepath.Rel(layout.AppDir, entry)
 	if err != nil {
-		return "", fmt.Errorf("resolve entry workspace path: %w", err)
+		return result, fmt.Errorf("resolve entry workspace path: %w", err)
 	}
-	return filepath.Join(appWorkDir, entryRelative), nil
+	result.EntryPath = filepath.Join(appWorkDir, entryRelative)
+	result.EmbedPlan, err = discoverAndMaterializeEmbedInputs(layout, appWorkDir, result.EntryPath)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func resolveEntryPackageDir(appDir, entry string) (string, error) {
@@ -129,7 +145,10 @@ func copyAuthoredGoFiles(sourceRoot, destinationRoot string) error {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("source path %s is a symlink; symlinked source files are not supported", sourcePath)
+			if filepath.Ext(sourcePath) == ".go" && !strings.HasSuffix(sourcePath, ".gox.go") {
+				return fmt.Errorf("source path %s is a symlink; symlinked source files are not supported", sourcePath)
+			}
+			return nil
 		}
 		if entry.IsDir() {
 			return nil
@@ -319,7 +338,10 @@ func findGOXFiles(path string) ([]string, error) {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("GOX source path %s is a symlink; symlinked source files are not supported", current)
+			if filepath.Ext(current) == ".gox" {
+				return fmt.Errorf("GOX source path %s is a symlink; symlinked source files are not supported", current)
+			}
+			return nil
 		}
 		if !entry.IsDir() && filepath.Ext(current) == ".gox" {
 			files = append(files, current)
