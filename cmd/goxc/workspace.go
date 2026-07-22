@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/graybuton/goframe/pkg/gox"
@@ -194,33 +196,143 @@ func generateIntoDirectory(sourceRoot, destinationRoot string, requireFiles bool
 		}
 		return nil
 	}
+	return generateFilesIntoDirectory(sourceRoot, destinationRoot, files)
+}
+
+type goxGenerationTarget struct {
+	source string
+	output string
+}
+
+type generatedGOXFile struct {
+	path    string
+	content []byte
+}
+
+func generateFilesIntoDirectory(sourceRoot, destinationRoot string, files []string) error {
+	targets := make([]goxGenerationTarget, 0, len(files))
 	for _, file := range files {
 		relative, err := filepath.Rel(sourceRoot, file)
 		if err != nil {
 			return fmt.Errorf("resolve GOX source %s: %w", file, err)
 		}
-		output := filepath.Join(destinationRoot, relative+".go")
-		if err := generateFileSafely(file, output, gox.GenerateOptions{
-			Filename:        file,
-			PackageIdentity: packageIdentityForFile(sourceRoot, file),
-		}); err != nil {
-			return fmt.Errorf("generate failed for %s: %w", file, err)
+		targets = append(targets, goxGenerationTarget{
+			source: file,
+			output: filepath.Join(destinationRoot, relative+".go"),
+		})
+	}
+	return generatePackageTargetsSafely(sourceRoot, targets)
+}
+
+func generatePackageTargetsSafely(sourceRoot string, targets []goxGenerationTarget) error {
+	packages := make(map[string][]goxGenerationTarget)
+	for _, target := range targets {
+		packageDir := filepath.Dir(target.source)
+		packages[packageDir] = append(packages[packageDir], target)
+	}
+	packageDirs := make([]string, 0, len(packages))
+	for packageDir := range packages {
+		packageDirs = append(packageDirs, packageDir)
+	}
+	sort.Strings(packageDirs)
+
+	generatedFiles := make([]generatedGOXFile, 0, len(targets))
+	for _, packageDir := range packageDirs {
+		packageTargets := packages[packageDir]
+		sort.Slice(packageTargets, func(left, right int) bool {
+			return packageTargets[left].source < packageTargets[right].source
+		})
+		sources := make([]gox.PackageSource, 0, len(packageTargets))
+		for _, target := range packageTargets {
+			content, err := readGenerationSource(target.source, "GOX source file")
+			if err != nil {
+				return err
+			}
+			sources = append(sources, gox.PackageSource{Filename: target.source, Source: content})
+		}
+		authored, err := authoredPackageSources(packageDir)
+		if err != nil {
+			return err
+		}
+		generated, err := gox.GeneratePackageWithOptions(sources, gox.PackageGenerateOptions{
+			PackageIdentity: packageIdentityForFile(sourceRoot, packageTargets[0].source),
+			AuthoredSources: authored,
+		})
+		if err != nil {
+			return fmt.Errorf("generate failed for %s: %w", generationFailureSource(packageTargets, err), err)
+		}
+		for _, target := range packageTargets {
+			generatedFiles = append(generatedFiles, generatedGOXFile{
+				path:    target.output,
+				content: generated[target.source],
+			})
+		}
+	}
+
+	for _, generated := range generatedFiles {
+		if err := os.MkdirAll(filepath.Dir(generated.path), 0o755); err != nil {
+			return fmt.Errorf("create generated directory for %s: %w", generated.path, err)
+		}
+		if err := writeFileAtomic(generated.path, generated.content, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", generated.path, err)
 		}
 	}
 	return nil
 }
 
+func readGenerationSource(path, label string) ([]byte, error) {
+	info, err := regularFileNoFollow(path, label)
+	if err != nil {
+		return nil, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if info.Size() < 0 {
+		return nil, fmt.Errorf("inspect %s: invalid source size", path)
+	}
+	return content, nil
+}
+
+func authoredPackageSources(packageDir string) ([]gox.PackageSource, error) {
+	entries, err := os.ReadDir(packageDir)
+	if err != nil {
+		return nil, fmt.Errorf("read Go package directory %s: %w", packageDir, err)
+	}
+	var sources []gox.PackageSource
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".go" || strings.HasSuffix(name, ".gox.go") {
+			continue
+		}
+		path := filepath.Join(packageDir, name)
+		content, err := readGenerationSource(path, "authored Go source file")
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, gox.PackageSource{Filename: path, Source: content})
+	}
+	return sources, nil
+}
+
+func generationFailureSource(targets []goxGenerationTarget, err error) string {
+	var diagnostic gox.DiagnosticError
+	if errors.As(err, &diagnostic) && diagnostic.Diagnostic.Filename != "" {
+		return diagnostic.Diagnostic.Filename
+	}
+	for _, target := range targets {
+		if strings.Contains(err.Error(), target.source) {
+			return target.source
+		}
+	}
+	return targets[0].source
+}
+
 func generateFileSafely(file, output string, options gox.GenerateOptions) error {
-	source, err := regularFileNoFollow(file, "GOX source file")
+	content, err := readGenerationSource(file, "GOX source file")
 	if err != nil {
 		return err
-	}
-	content, err := os.ReadFile(file)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", file, err)
-	}
-	if source.Size() < 0 {
-		return fmt.Errorf("inspect %s: invalid source size", file)
 	}
 	generated, err := gox.GenerateWithOptions(content, options)
 	if err != nil {

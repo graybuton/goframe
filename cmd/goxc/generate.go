@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/graybuton/goframe/pkg/gox"
 )
 
 type generateOptions struct {
@@ -89,12 +87,12 @@ func generatePath(options generateOptions, requireFiles bool) error {
 			if err := validatePathBelowRoot(appDir, output, "in-place generated file", true); err != nil {
 				return err
 			}
-			if err := generateFileSafely(file, output, gox.GenerateOptions{
-				Filename:        file,
-				PackageIdentity: packageIdentityForFile(appDir, file),
-			}); err != nil {
-				return fmt.Errorf("generate failed for %s: %w", file, err)
-			}
+		}
+		if err := generateFilesIntoDirectory(appDir, appDir, files); err != nil {
+			return err
+		}
+		for _, file := range files {
+			output := file + ".go"
 			fmt.Printf("generated %s -> %s\n", file, output)
 		}
 		return nil
@@ -135,12 +133,16 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		if err := validatePathBelowRoot(outputRoot, output, "generated file", true); err != nil {
 			return err
 		}
-		if err := generateFileSafely(file, output, gox.GenerateOptions{
-			Filename:        file,
-			PackageIdentity: packageIdentityForFile(appDir, file),
-		}); err != nil {
-			return fmt.Errorf("generate failed for %s: %w", file, err)
+	}
+	if err := generateFilesIntoDirectory(appDir, outputRoot, files); err != nil {
+		return err
+	}
+	for _, file := range files {
+		relative, err := filepath.Rel(appDir, file)
+		if err != nil {
+			return fmt.Errorf("resolve GOX source %s: %w", file, err)
 		}
+		output := filepath.Join(outputRoot, relative+".go")
 		fmt.Printf("generated %s -> %s\n", file, output)
 	}
 	return nil

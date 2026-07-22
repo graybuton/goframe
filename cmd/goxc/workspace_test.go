@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/graybuton/goframe/pkg/gox"
 )
 
 func TestWriteWorkspaceGoModFailsWithoutRepoRootOrVersion(t *testing.T) {
@@ -567,17 +565,8 @@ func generatePackageIdentifierFixture(t *testing.T, root string) {
 func generatePackageIdentifierFilesInOrder(t *testing.T, sourceRoot string, files []string) map[string]string {
 	t.Helper()
 	destination := t.TempDir()
-	for _, file := range files {
-		relative, err := filepath.Rel(sourceRoot, file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := generateFileSafely(file, filepath.Join(destination, relative+".go"), gox.GenerateOptions{
-			Filename:        file,
-			PackageIdentity: packageIdentityForFile(sourceRoot, file),
-		}); err != nil {
-			t.Fatalf("generate %s: %v", file, err)
-		}
+	if err := generateFilesIntoDirectory(sourceRoot, destination, files); err != nil {
+		t.Fatalf("generate files: %v", err)
 	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
