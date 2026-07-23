@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"go/build"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 )
 
 func TestAuthoredSourceConstraintsMatchBrowserTargets(t *testing.T) {
+	t.Setenv("GOWASM", "")
 	tests := []struct {
 		name       string
 		filename   string
@@ -37,6 +39,8 @@ func TestAuthoredSourceConstraintsMatchBrowserTargets(t *testing.T) {
 		{name: "tinygo wasm", filename: "source.go", constraint: "tinygo.wasm", tinyWant: true},
 		{name: "tinygo gc", filename: "source.go", constraint: "gc.precise", tinyWant: true},
 		{name: "tinygo scheduler", filename: "source.go", constraint: "scheduler.asyncify", tinyWant: true},
+		{name: "host architecture feature", filename: "source.go", constraint: "amd64.v1"},
+		{name: "inactive wasm feature", filename: "source.go", constraint: "wasm.satconv"},
 		{name: "legacy windows", filename: "source.go", constraint: "+build windows"},
 	}
 
@@ -107,7 +111,133 @@ func TestAuthoredSourceConstraintsMatchBrowserTargets(t *testing.T) {
 	}
 }
 
+func TestBrowserAuthoredSourceSelectionExcludesHostArchitectureFeature(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			selection, err := browserAuthoredSourceSelection(compiler)
+			if err != nil {
+				t.Fatal(err)
+			}
+			matched, err := selection.match(
+				filepath.Join(t.TempDir(), "package"),
+				"inactive.go",
+				[]byte("//go:build amd64.v1\n\npackage app\n"),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if matched {
+				t.Fatalf(
+					"amd64.v1 source matched the js/wasm browser target with ToolTags %v",
+					selection.buildContext.ToolTags,
+				)
+			}
+		})
+	}
+}
+
+func TestBrowserBuildContextNormalizesTargetToolTags(t *testing.T) {
+	firstBase := build.Context{
+		GOOS:        "linux",
+		GOARCH:      "amd64",
+		Compiler:    "gc",
+		CgoEnabled:  true,
+		BuildTags:   []string{"ambient.second", "ambient.first"},
+		ToolTags:    []string{"amd64.v1", "custom.tool", "goexperiment.coverageredesign", "wasm.signext", "custom.tool"},
+		ReleaseTags: []string{"go1.1", "go1.22"},
+	}
+	secondBase := firstBase
+	secondBase.BuildTags = []string{"ambient.first", "ambient.second", "ambient.first"}
+	secondBase.ToolTags = []string{"wasm.satconv", "goexperiment.coverageredesign", "amd64.v4", "custom.tool"}
+	firstBefore := cloneBuildContextTagSlices(firstBase)
+	secondBefore := cloneBuildContextTagSlices(secondBase)
+	firstEnvironment := []string{"SENTINEL=preserved", "GOWASM=signext,satconv"}
+	secondEnvironment := []string{"GOWASM=satconv,signext", "SENTINEL=preserved"}
+	firstEnvironmentBefore := append([]string(nil), firstEnvironment...)
+	secondEnvironmentBefore := append([]string(nil), secondEnvironment...)
+
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			first, err := browserBuildContext(compiler, firstBase, firstEnvironment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := browserBuildContext(compiler, secondBase, secondEnvironment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantToolTags := []string{
+				"custom.tool",
+				"goexperiment.coverageredesign",
+				"wasm.satconv",
+				"wasm.signext",
+			}
+			if !reflect.DeepEqual(first.ToolTags, wantToolTags) {
+				t.Fatalf("ToolTags = %v, want %v", first.ToolTags, wantToolTags)
+			}
+			if !reflect.DeepEqual(first.ToolTags, second.ToolTags) {
+				t.Fatalf("ToolTags depend on input order:\nfirst:  %v\nsecond: %v", first.ToolTags, second.ToolTags)
+			}
+			if first.GOOS != "js" || first.GOARCH != "wasm" {
+				t.Fatalf("target = %s/%s, want js/wasm", first.GOOS, first.GOARCH)
+			}
+			if first.Compiler != "gc" {
+				t.Fatalf("Compiler = %q, want gc", first.Compiler)
+			}
+			if compiler == "go" {
+				if first.CgoEnabled {
+					t.Fatal("standard Go browser context enables cgo")
+				}
+				if len(first.BuildTags) != 0 {
+					t.Fatalf("standard Go BuildTags = %v, want none", first.BuildTags)
+				}
+			} else {
+				if !first.CgoEnabled {
+					t.Fatal("TinyGo browser context disables cgo")
+				}
+				for _, tag := range []string{"tinygo", "tinygo.wasm", "gc.precise"} {
+					if !containsString(first.BuildTags, tag) {
+						t.Fatalf("TinyGo BuildTags %v do not contain %q", first.BuildTags, tag)
+					}
+				}
+			}
+			if !reflect.DeepEqual(first.ReleaseTags, firstBase.ReleaseTags) {
+				t.Fatalf("ReleaseTags = %v, want %v", first.ReleaseTags, firstBase.ReleaseTags)
+			}
+		})
+	}
+
+	if !reflect.DeepEqual(firstBase, firstBefore) {
+		t.Fatalf("first base context mutated:\nbefore: %#v\nafter:  %#v", firstBefore, firstBase)
+	}
+	if !reflect.DeepEqual(secondBase, secondBefore) {
+		t.Fatalf("second base context mutated:\nbefore: %#v\nafter:  %#v", secondBefore, secondBase)
+	}
+	if !reflect.DeepEqual(firstEnvironment, firstEnvironmentBefore) {
+		t.Fatalf("first environment mutated: %v", firstEnvironment)
+	}
+	if !reflect.DeepEqual(secondEnvironment, secondEnvironmentBefore) {
+		t.Fatalf("second environment mutated: %v", secondEnvironment)
+	}
+}
+
+func TestBrowserBuildContextRejectsInvalidGOWASM(t *testing.T) {
+	_, err := browserBuildContext(
+		"go",
+		build.Default,
+		[]string{"GOWASM=satconv,unknown"},
+	)
+	if err == nil {
+		t.Fatal("browserBuildContext() accepted invalid GOWASM")
+	}
+	if !strings.Contains(err.Error(), `invalid GOWASM feature "unknown"`) {
+		t.Fatalf("error %q does not identify invalid GOWASM feature", err)
+	}
+}
+
 func TestPackageSourceSelectionUsesObservedCompilerTargets(t *testing.T) {
+	t.Setenv("GOWASM", "")
 	goSelection, err := browserAuthoredSourceSelection("go")
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +301,7 @@ func TestPackageSourceSelectionUsesObservedCompilerTargets(t *testing.T) {
 }
 
 func TestPrepareBuildWorkspaceFiltersInactiveAuthoredConstraints(t *testing.T) {
+	t.Setenv("GOWASM", "")
 	tests := []struct {
 		name     string
 		filename string
@@ -207,6 +338,16 @@ func Broken( {
 `,
 		},
 		{
+			name:     "inactive host architecture feature",
+			filename: "inactive_amd64_feature.go",
+			source: `//go:build amd64.v1
+
+package app
+
+func Broken( {
+`,
+		},
+		{
 			name:     "test file",
 			filename: "collision_test.go",
 			source: `package app
@@ -218,6 +359,11 @@ func Broken( {
 
 	for _, compiler := range []string{"go", "tinygo"} {
 		t.Run(compiler, func(t *testing.T) {
+			if compiler == "tinygo" {
+				if _, err := exec.LookPath("tinygo"); err != nil {
+					t.Skip("tinygo is not installed")
+				}
+			}
 			for _, test := range tests {
 				t.Run(test.name, func(t *testing.T) {
 					appDir := newAuthoredConstraintFixture(t)
@@ -235,7 +381,31 @@ func Broken( {
 	}
 }
 
+func TestGenerateIntoDirectoryFiltersInactiveHostFeatureSource(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			appDir := newAuthoredConstraintFixture(t)
+			writeTestFile(t, appDir, "inactive_amd64_feature.go", `//go:build amd64.v1
+
+package app
+
+func Broken( {
+`)
+			if err := generateIntoDirectoryForCompiler(
+				appDir,
+				t.TempDir(),
+				true,
+				compiler,
+			); err != nil {
+				t.Fatalf("generateIntoDirectoryForCompiler() error: %v", err)
+			}
+		})
+	}
+}
+
 func TestPrepareBuildWorkspaceActiveAuthoredConstraintFails(t *testing.T) {
+	t.Setenv("GOWASM", "")
 	for _, compiler := range []string{"go", "tinygo"} {
 		t.Run(compiler, func(t *testing.T) {
 			appDir := newAuthoredConstraintFixture(t)
@@ -267,6 +437,7 @@ func Broken( {
 }
 
 func TestGenerateIntoDirectoryCompilerIdentifierConstraints(t *testing.T) {
+	t.Setenv("GOWASM", "")
 	const candidate = "_goxComponent_view_Button"
 	tests := []struct {
 		name         string
@@ -302,6 +473,11 @@ func TestGenerateIntoDirectoryCompilerIdentifierConstraints(t *testing.T) {
 			filename:     "collision.go",
 			constraint:   "tinygo",
 			tinyReserved: true,
+		},
+		{
+			name:       "inactive host architecture collision",
+			filename:   "collision.go",
+			constraint: "amd64.v1",
 		},
 	}
 
@@ -402,35 +578,46 @@ var _goxComponent_view_Button = 1
 
 func TestBrowserCompilerSourceSelectionParity(t *testing.T) {
 	root := newSourceSelectionFixture(t)
-	for _, compiler := range []string{"go", "tinygo"} {
-		t.Run(compiler, func(t *testing.T) {
-			if compiler == "tinygo" {
-				if _, err := exec.LookPath("tinygo"); err != nil {
-					t.Skip("tinygo is not installed")
-				}
-			}
-			selection, err := browserAuthoredSourceSelection(compiler)
-			if err != nil {
-				t.Fatal(err)
-			}
-			selected, err := authoredPackageSources(root, selection)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := make([]string, 0, len(selected))
-			for _, source := range selected {
-				got = append(got, filepath.Base(source.Filename))
-			}
-			sort.Strings(got)
+	for _, target := range []struct {
+		name   string
+		gowasm string
+	}{
+		{name: "default"},
+		{name: "wasm features", gowasm: "satconv,signext"},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			t.Setenv("GOWASM", target.gowasm)
+			for _, compiler := range []string{"go", "tinygo"} {
+				t.Run(compiler, func(t *testing.T) {
+					if compiler == "tinygo" {
+						if _, err := exec.LookPath("tinygo"); err != nil {
+							t.Skip("tinygo is not installed")
+						}
+					}
+					selection, err := browserAuthoredSourceSelection(compiler)
+					if err != nil {
+						t.Fatal(err)
+					}
+					selected, err := authoredPackageSources(root, selection)
+					if err != nil {
+						t.Fatal(err)
+					}
+					got := make([]string, 0, len(selected))
+					for _, source := range selected {
+						got = append(got, filepath.Base(source.Filename))
+					}
+					sort.Strings(got)
 
-			want := realToolchainSourceSelection(t, compiler, root)
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf(
-					"private selector differs from %s list:\nprivate: %v\ntoolchain: %v",
-					compiler,
-					got,
-					want,
-				)
+					want := realToolchainSourceSelection(t, compiler, root)
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf(
+							"private selector differs from %s list:\nprivate: %v\ntoolchain: %v",
+							compiler,
+							got,
+							want,
+						)
+					}
+				})
 			}
 		})
 	}
@@ -500,6 +687,9 @@ func newSourceSelectionFixture(t *testing.T) string {
 		{name: "tag_serial.go", constraint: "serial.none"},
 		{name: "tag_unicore.go", constraint: "tinygo.unicore"},
 		{name: "tag_goexperiment.go", constraint: "goexperiment.coverageredesign"},
+		{name: "tag_amd64_v1.go", constraint: "amd64.v1"},
+		{name: "tag_wasm_satconv.go", constraint: "wasm.satconv"},
+		{name: "tag_wasm_signext.go", constraint: "wasm.signext"},
 	}
 	for _, source := range constraints {
 		writeTestFile(
@@ -585,4 +775,11 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func cloneBuildContextTagSlices(context build.Context) build.Context {
+	context.BuildTags = append([]string(nil), context.BuildTags...)
+	context.ToolTags = append([]string(nil), context.ToolTags...)
+	context.ReleaseTags = append([]string(nil), context.ReleaseTags...)
+	return context
 }
