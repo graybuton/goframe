@@ -64,6 +64,10 @@ func parseGenerateOptions(args []string) (generateOptions, error) {
 }
 
 func generatePath(options generateOptions, requireFiles bool) error {
+	pathInfo, err := os.Lstat(options.path)
+	if err != nil {
+		return err
+	}
 	files, err := findGOXFiles(options.path)
 	if err != nil {
 		return err
@@ -76,12 +80,28 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		return nil
 	}
 	selection := defaultGenerationSourceSelection()
-
-	if options.inPlace {
-		appDir, err := generationAppDir(options.path)
+	appDir, err := generationAppDir(options.path)
+	if err != nil {
+		return err
+	}
+	request := goxGenerationRequest{
+		allocationFiles:  files,
+		publicationFiles: files,
+	}
+	if !pathInfo.IsDir() {
+		active, err := activeGenerationGOXFile(files[0], selection)
 		if err != nil {
 			return err
 		}
+		if active {
+			request.allocationFiles, err = findImmediatePackageGOXFiles(files[0])
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if options.inPlace {
 		fmt.Fprintln(os.Stderr, "warning: --in-place writes generated compiler output into the source tree; use only for debugging or legacy workflows")
 		for _, file := range files {
 			output := file + ".go"
@@ -89,10 +109,10 @@ func generatePath(options generateOptions, requireFiles bool) error {
 				return err
 			}
 		}
-		active, err := generateFilesIntoDirectoryWithSelectionResult(
+		active, err := generateFilesIntoDirectoryWithSelectionRequestResult(
 			appDir,
 			appDir,
-			files,
+			request,
 			selection,
 		)
 		if err != nil {
@@ -107,10 +127,6 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		return nil
 	}
 
-	appDir, err := generationAppDir(options.path)
-	if err != nil {
-		return err
-	}
 	outputRoot := options.outDir
 	if outputRoot == "" {
 		layout, err := newBuildLayout(layoutOptions{appDir: appDir, workspace: options.workspace})
@@ -143,10 +159,10 @@ func generatePath(options generateOptions, requireFiles bool) error {
 			return err
 		}
 	}
-	active, err := generateFilesIntoDirectoryWithSelectionResult(
+	active, err := generateFilesIntoDirectoryWithSelectionRequestResult(
 		appDir,
 		outputRoot,
-		files,
+		request,
 		selection,
 	)
 	if err != nil {

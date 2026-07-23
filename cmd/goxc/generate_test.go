@@ -1,0 +1,514 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/graybuton/goframe/pkg/gox"
+)
+
+func TestSingleFileGenerationCoordinatesPackageAllocation(t *testing.T) {
+	forward := generateSingleFileCollisionOrder(t, []string{"view.gox", "view_A.gox"})
+	reverse := generateSingleFileCollisionOrder(t, []string{"view_A.gox", "view.gox"})
+	directory := generateCollisionDirectory(t)
+
+	if !reflect.DeepEqual(forward.outputs, reverse.outputs) {
+		t.Fatalf("single-file generation changed with invocation order:\nforward: %#v\nreverse: %#v", forward.outputs, reverse.outputs)
+	}
+	if !reflect.DeepEqual(forward.outputs, directory.outputs) {
+		t.Fatalf("single-file generation differs from directory generation:\nsingle-file: %#v\ndirectory: %#v", forward.outputs, directory.outputs)
+	}
+	if forward.identifiers["view.gox"] == forward.identifiers["view_A.gox"] {
+		t.Fatalf("single-file outputs use duplicate generated identifier %q", forward.identifiers["view.gox"])
+	}
+}
+
+func TestGenerateSingleFileCollisionPackageCompiles(t *testing.T) {
+	tests := []struct {
+		name       string
+		generation func(*testing.T) collisionGenerationResult
+	}{
+		{
+			name: "forward",
+			generation: func(t *testing.T) collisionGenerationResult {
+				return generateSingleFileCollisionOrder(t, []string{"view.gox", "view_A.gox"})
+			},
+		},
+		{
+			name: "reverse",
+			generation: func(t *testing.T) collisionGenerationResult {
+				return generateSingleFileCollisionOrder(t, []string{"view_A.gox", "view.gox"})
+			},
+		},
+		{
+			name:       "directory",
+			generation: generateCollisionDirectory,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.generation(t)
+			t.Logf(
+				"view.gox identifier %s; view_A.gox identifier %s",
+				result.identifiers["view.gox"],
+				result.identifiers["view_A.gox"],
+			)
+			goTestPackageIdentifierFixture(t, result.root)
+		})
+	}
+}
+
+func TestSingleFileGenerationPublishesOnlyRequestedOutput(t *testing.T) {
+	tests := []struct {
+		name    string
+		options func(root, source string) (generateOptions, string)
+	}{
+		{
+			name: "default hidden",
+			options: func(root, source string) (generateOptions, string) {
+				layout, err := newBuildLayout(layoutOptions{appDir: root})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return generateOptions{path: source}, layout.GenDir
+			},
+		},
+		{
+			name: "explicit output",
+			options: func(_ string, source string) (generateOptions, string) {
+				outputRoot := t.TempDir()
+				return generateOptions{path: source, outDir: outputRoot}, outputRoot
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := newPackageIdentifierFixture(t)
+			writeCollisionGOXSources(t, root)
+			source := filepath.Join(root, "view_A.gox")
+			options, outputRoot := test.options(root, source)
+			if err := os.MkdirAll(outputRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			siblingOutput := filepath.Join(outputRoot, "view.gox.go")
+			siblingContent := []byte(generatedGOXFileHeader + "package app\n\nvar siblingOutput = true\n")
+			if err := os.WriteFile(siblingOutput, siblingContent, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			unrelated := filepath.Join(outputRoot, "keep.txt")
+			if err := os.WriteFile(unrelated, []byte("keep"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			stdout, err := runGeneratePathForTest(t, options)
+			if err != nil {
+				t.Fatalf("generatePath() error: %v", err)
+			}
+			assertOneGeneratedOutput(t, stdout, source, filepath.Join(outputRoot, "view_A.gox.go"))
+			assertFileBytes(t, siblingOutput, siblingContent)
+			assertFileBytes(t, unrelated, []byte("keep"))
+			if _, err := os.Stat(filepath.Join(outputRoot, "view_A.gox.go")); err != nil {
+				t.Fatalf("requested output missing: %v", err)
+			}
+		})
+	}
+}
+
+func TestSingleFileGenerationUsesImmediateSiblingsOnly(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeCollisionGOXSources(t, root)
+	writeTestFile(t, root, "child/other.gox", "package child\n\nfunc Broken( {\n")
+	outputRoot := t.TempDir()
+	source := filepath.Join(root, "view_A.gox")
+
+	if _, err := runGeneratePathForTest(t, generateOptions{path: source, outDir: outputRoot}); err != nil {
+		t.Fatalf("generatePath() error: %v", err)
+	}
+	identifier := generatedIdentifierForComponent(
+		t,
+		filepath.Join(outputRoot, "view_A.gox.go"),
+		"B",
+	)
+	if identifier == "_goxComponent_view_A_B" {
+		t.Fatalf("active immediate sibling did not participate in allocation: %q", identifier)
+	}
+	if _, err := os.Stat(filepath.Join(outputRoot, "child", "other.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("child GOX output exists: %v", err)
+	}
+}
+
+func TestSingleFileGenerationIgnoresInactiveSiblingForAllocation(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeTestFile(t, root, "view_A.gox", packageIdentifierGOXSource("Other", "B"))
+	writeTestFile(
+		t,
+		root,
+		"view.gox",
+		"//go:build windows && linux\n\npackage app\n\nfunc Broken( {\n",
+	)
+	outputRoot := t.TempDir()
+	source := filepath.Join(root, "view_A.gox")
+
+	if _, err := runGeneratePathForTest(t, generateOptions{path: source, outDir: outputRoot}); err != nil {
+		t.Fatalf("generatePath() error: %v", err)
+	}
+	if got := generatedIdentifierForComponent(
+		t,
+		filepath.Join(outputRoot, "view_A.gox.go"),
+		"B",
+	); got != "_goxComponent_view_A_B" {
+		t.Fatalf("inactive sibling changed generated identifier to %q", got)
+	}
+}
+
+func TestSingleFileGenerationRejectsActiveSiblingPackageMismatch(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+	writeTestFile(t, root, "z_other.gox", strings.Replace(
+		packageIdentifierGOXSource("Other", "Button"),
+		"package app",
+		"package other",
+		1,
+	))
+	outputRoot := t.TempDir()
+
+	_, err := runGeneratePathForTest(t, generateOptions{
+		path:   filepath.Join(root, "view.gox"),
+		outDir: outputRoot,
+	})
+	if err == nil {
+		t.Fatal("generatePath() accepted an active sibling with another package")
+	}
+	for _, want := range []string{filepath.Join(root, "z_other.gox"), "package other does not match package app"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(outputRoot, "view.gox.go")); !os.IsNotExist(statErr) {
+		t.Fatalf("requested output exists after package mismatch: %v", statErr)
+	}
+}
+
+func TestSingleFileGenerationRejectsActiveMalformedSibling(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+	malformed := filepath.Join(root, "broken.gox")
+	writeTestFile(t, root, "broken.gox", "package app\n\nfunc Broken() any { return <main> }\n")
+	outputRoot := t.TempDir()
+
+	_, err := runGeneratePathForTest(t, generateOptions{
+		path:   filepath.Join(root, "view.gox"),
+		outDir: outputRoot,
+	})
+	if err == nil {
+		t.Fatal("generatePath() accepted an active malformed sibling")
+	}
+	if !strings.Contains(err.Error(), malformed) {
+		t.Fatalf("error %q does not identify malformed sibling %s", err, malformed)
+	}
+	if _, statErr := os.Stat(filepath.Join(outputRoot, "view.gox.go")); !os.IsNotExist(statErr) {
+		t.Fatalf("requested output exists after malformed sibling: %v", statErr)
+	}
+}
+
+func TestSingleFileGenerationRemovesOnlyRequestedInactiveOutput(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	writeCollisionGOXSources(t, root)
+	requested := filepath.Join(root, "view_A.gox")
+	requestedOutput := requested + ".go"
+	siblingOutput := filepath.Join(root, "view.gox.go")
+	siblingContent := []byte(generatedGOXFileHeader + "package app\n\nvar siblingOutput = true\n")
+	if err := os.WriteFile(siblingOutput, siblingContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runGeneratePathForTest(t, generateOptions{path: requested, inPlace: true}); err != nil {
+		t.Fatalf("initial generatePath() error: %v", err)
+	}
+	writeTestFile(
+		t,
+		root,
+		"view_A.gox",
+		"//go:build windows && linux\n\n"+packageIdentifierGOXSource("Other", "B"),
+	)
+	if _, err := runGeneratePathForTest(t, generateOptions{path: requested, inPlace: true}); err == nil ||
+		!strings.Contains(err.Error(), "no active .gox files found below") {
+		t.Fatalf("inactive generatePath() error = %v", err)
+	}
+	if _, err := os.Stat(requestedOutput); !os.IsNotExist(err) {
+		t.Fatalf("requested inactive output remains: %v", err)
+	}
+	assertFileBytes(t, siblingOutput, siblingContent)
+
+	writeTestFile(t, root, "view_A.gox", packageIdentifierGOXSource("Other", "B"))
+	if _, err := runGeneratePathForTest(t, generateOptions{path: requested, inPlace: true}); err != nil {
+		t.Fatalf("regenerate active requested source: %v", err)
+	}
+	const authored = "package app\n\nvar userOwned = true\n"
+	if err := os.WriteFile(requestedOutput, []byte(authored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(
+		t,
+		root,
+		"view_A.gox",
+		"//go:build windows && linux\n\n"+packageIdentifierGOXSource("Other", "B"),
+	)
+	if _, err := runGeneratePathForTest(t, generateOptions{path: requested, inPlace: true}); err == nil ||
+		!strings.Contains(err.Error(), "file is not managed by goxc") {
+		t.Fatalf("unmanaged inactive output error = %v", err)
+	}
+	assertFileBytes(t, requestedOutput, []byte(authored))
+	assertFileBytes(t, siblingOutput, siblingContent)
+}
+
+func TestSingleFileGenerationRejectsUnsafeSibling(t *testing.T) {
+	t.Run("irregular", func(t *testing.T) {
+		root := newPackageIdentifierFixture(t)
+		writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+		if err := os.Mkdir(filepath.Join(root, "other.gox"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		outputRoot := t.TempDir()
+
+		_, err := runGeneratePathForTest(t, generateOptions{
+			path:   filepath.Join(root, "view.gox"),
+			outDir: outputRoot,
+		})
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("irregular sibling error = %v", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputRoot, "view.gox.go")); !os.IsNotExist(statErr) {
+			t.Fatalf("requested output exists after irregular sibling: %v", statErr)
+		}
+	})
+
+	t.Run("symlink", func(t *testing.T) {
+		requireSymlinkSupport(t)
+		root := newPackageIdentifierFixture(t)
+		writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+		external := filepath.Join(t.TempDir(), "external.gox")
+		if err := os.WriteFile(external, []byte("package outside\n\nfunc Broken( {\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(external, filepath.Join(root, "other.gox")); err != nil {
+			t.Fatal(err)
+		}
+		outputRoot := t.TempDir()
+
+		_, err := runGeneratePathForTest(t, generateOptions{
+			path:   filepath.Join(root, "view.gox"),
+			outDir: outputRoot,
+		})
+		if err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("symlink sibling error = %v", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputRoot, "view.gox.go")); !os.IsNotExist(statErr) {
+			t.Fatalf("requested output exists after symlink sibling: %v", statErr)
+		}
+	})
+}
+
+func TestSingleFileGenerationPreservesOrdinaryOutput(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	sourceText := packageIdentifierGOXSource("View", "Button")
+	source := filepath.Join(root, "view.gox")
+	writeTestFile(t, root, "view.gox", sourceText)
+	outputRoot := t.TempDir()
+
+	if _, err := runGeneratePathForTest(t, generateOptions{path: source, outDir: outputRoot}); err != nil {
+		t.Fatalf("generatePath() error: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(outputRoot, "view.gox.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := gox.GenerateWithOptions([]byte(sourceText), gox.GenerateOptions{
+		Filename:        source,
+		PackageIdentity: packageIdentityForFile(root, source),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("ordinary single-file output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestSingleFileGenerationDoesNotSuffixIndependentComponents(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	source := filepath.Join(root, "view.gox")
+	writeTestFile(t, root, "view.gox", `package app
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func View() gf.Node {
+	return <><A_B /><Button /></>
+}
+`)
+	outputRoot := t.TempDir()
+
+	if _, err := runGeneratePathForTest(t, generateOptions{path: source, outDir: outputRoot}); err != nil {
+		t.Fatalf("generatePath() error: %v", err)
+	}
+	output := filepath.Join(outputRoot, "view.gox.go")
+	if got := generatedIdentifierForComponent(t, output, "A_B"); got != "_goxComponent_view_A_B" {
+		t.Fatalf("A_B identifier = %q", got)
+	}
+	if got := generatedIdentifierForComponent(t, output, "Button"); got != "_goxComponent_view_Button" {
+		t.Fatalf("Button identifier = %q", got)
+	}
+}
+
+func TestSingleFileGenerationFailurePreservesPublishedOutput(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	source := filepath.Join(root, "view.gox")
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+	outputRoot := t.TempDir()
+	options := generateOptions{path: source, outDir: outputRoot}
+
+	if _, err := runGeneratePathForTest(t, options); err != nil {
+		t.Fatalf("initial generatePath() error: %v", err)
+	}
+	output := filepath.Join(outputRoot, "view.gox.go")
+	before, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "broken.gox", "package app\n\nfunc Broken() any { return <main> }\n")
+	if _, err := runGeneratePathForTest(t, options); err == nil {
+		t.Fatal("generatePath() accepted malformed sibling")
+	}
+	assertFileBytes(t, output, before)
+	if _, err := os.Stat(filepath.Join(outputRoot, "broken.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("sibling output exists after failed allocation: %v", err)
+	}
+}
+
+type collisionGenerationResult struct {
+	root        string
+	outputs     map[string][]byte
+	identifiers map[string]string
+}
+
+func generateSingleFileCollisionOrder(t *testing.T, order []string) collisionGenerationResult {
+	t.Helper()
+	root := newPackageIdentifierFixture(t)
+	writeCollisionGOXSources(t, root)
+	componentsBefore, err := os.ReadFile(filepath.Join(root, "components.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range order {
+		source := filepath.Join(root, name)
+		output := source + ".go"
+		otherName := "view.gox"
+		if name == otherName {
+			otherName = "view_A.gox"
+		}
+		otherOutput := filepath.Join(root, otherName+".go")
+		otherBefore, otherExists := readOptionalTestFile(t, otherOutput)
+
+		stdout, err := runGeneratePathForTest(t, generateOptions{path: source, inPlace: true})
+		if err != nil {
+			t.Fatalf("generatePath(%s) error: %v", name, err)
+		}
+		assertOneGeneratedOutput(t, stdout, source, output)
+		if otherExists {
+			assertFileBytes(t, otherOutput, otherBefore)
+		} else if _, err := os.Stat(otherOutput); !os.IsNotExist(err) {
+			t.Fatalf("single-file generation for %s wrote sibling output %s: %v", name, otherOutput, err)
+		}
+		assertFileBytes(t, filepath.Join(root, "components.go"), componentsBefore)
+	}
+
+	return readCollisionGenerationResult(t, root)
+}
+
+func generateCollisionDirectory(t *testing.T) collisionGenerationResult {
+	t.Helper()
+	root := newPackageIdentifierFixture(t)
+	writeCollisionGOXSources(t, root)
+	if _, err := runGeneratePathForTest(t, generateOptions{path: root, inPlace: true}); err != nil {
+		t.Fatalf("directory generatePath() error: %v", err)
+	}
+	return readCollisionGenerationResult(t, root)
+}
+
+func writeCollisionGOXSources(t *testing.T, root string) {
+	t.Helper()
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "A_B"))
+	writeTestFile(t, root, "view_A.gox", packageIdentifierGOXSource("Other", "B"))
+}
+
+func readCollisionGenerationResult(t *testing.T, root string) collisionGenerationResult {
+	t.Helper()
+	result := collisionGenerationResult{
+		root:        root,
+		outputs:     make(map[string][]byte),
+		identifiers: make(map[string]string),
+	}
+	for name, component := range map[string]string{
+		"view.gox":   "A_B",
+		"view_A.gox": "B",
+	} {
+		output := filepath.Join(root, name+".go")
+		content, err := os.ReadFile(output)
+		if err != nil {
+			t.Fatalf("read generated output %s: %v", output, err)
+		}
+		result.outputs[name] = content
+		result.identifiers[name] = generatedIdentifierForComponent(t, output, component)
+	}
+	return result
+}
+
+func runGeneratePathForTest(t *testing.T, options generateOptions) (string, error) {
+	t.Helper()
+	var generationErr error
+	var stdout string
+	captureStderr(t, func() {
+		stdout = captureStdout(t, func() {
+			generationErr = generatePath(options, true)
+		})
+	})
+	return stdout, generationErr
+}
+
+func assertOneGeneratedOutput(t *testing.T, stdout, source, output string) {
+	t.Helper()
+	want := "generated " + source + " -> " + output
+	if strings.Count(stdout, "generated ") != 1 || !strings.Contains(stdout, want) {
+		t.Fatalf("generation output = %q, want only %q", stdout, want)
+	}
+}
+
+func assertFileBytes(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s changed:\ngot:\n%s\nwant:\n%s", path, got, want)
+	}
+}
+
+func readOptionalTestFile(t *testing.T, path string) ([]byte, bool) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, false
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return content, true
+}

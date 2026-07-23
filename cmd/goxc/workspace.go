@@ -253,6 +253,12 @@ type goxGenerationTarget struct {
 	source  string
 	output  string
 	content []byte
+	publish bool
+}
+
+type goxGenerationRequest struct {
+	allocationFiles  []string
+	publicationFiles []string
 }
 
 type generatedGOXFile struct {
@@ -290,15 +296,53 @@ func generateFilesIntoDirectoryWithSelectionResult(
 	files []string,
 	selection generationSourceSelection,
 ) ([]goxGenerationTarget, error) {
-	targets := make([]goxGenerationTarget, 0, len(files))
-	for _, file := range files {
+	return generateFilesIntoDirectoryWithSelectionRequestResult(
+		sourceRoot,
+		destinationRoot,
+		goxGenerationRequest{
+			allocationFiles:  files,
+			publicationFiles: files,
+		},
+		selection,
+	)
+}
+
+func generateFilesIntoDirectoryWithSelectionRequestResult(
+	sourceRoot,
+	destinationRoot string,
+	request goxGenerationRequest,
+	selection generationSourceSelection,
+) ([]goxGenerationTarget, error) {
+	publicationPaths := make(map[string]struct{}, len(request.publicationFiles))
+	for _, file := range request.publicationFiles {
+		if _, err := regularFileNoFollow(file, "published GOX source file"); err != nil {
+			return nil, err
+		}
+		path, err := canonicalPathForComparison(file)
+		if err != nil {
+			return nil, fmt.Errorf("resolve published GOX source %s: %w", file, err)
+		}
+		publicationPaths[path] = struct{}{}
+	}
+
+	targets := make([]goxGenerationTarget, 0, len(request.allocationFiles))
+	for _, file := range request.allocationFiles {
+		if _, err := regularFileNoFollow(file, "GOX source file"); err != nil {
+			return nil, err
+		}
 		relative, err := filepath.Rel(sourceRoot, file)
 		if err != nil {
 			return nil, fmt.Errorf("resolve GOX source %s: %w", file, err)
 		}
+		path, err := canonicalPathForComparison(file)
+		if err != nil {
+			return nil, fmt.Errorf("resolve GOX source identity %s: %w", file, err)
+		}
+		_, publish := publicationPaths[path]
 		targets = append(targets, goxGenerationTarget{
-			source: file,
-			output: filepath.Join(destinationRoot, relative+".go"),
+			source:  file,
+			output:  filepath.Join(destinationRoot, relative+".go"),
+			publish: publish,
 		})
 	}
 	return generatePackageTargetsSafely(
@@ -316,6 +360,7 @@ func generatePackageTargetsSafely(
 	selection generationSourceSelection,
 ) ([]goxGenerationTarget, error) {
 	activeTargets := make([]goxGenerationTarget, 0, len(targets))
+	publishedActiveTargets := make([]goxGenerationTarget, 0, len(targets))
 	inactiveTargets := make([]goxGenerationTarget, 0, len(targets))
 	for _, target := range targets {
 		content, err := readGenerationSource(target.source, "GOX source file")
@@ -333,6 +378,9 @@ func generatePackageTargetsSafely(
 		target.content = content
 		if matched {
 			activeTargets = append(activeTargets, target)
+			if target.publish {
+				publishedActiveTargets = append(publishedActiveTargets, target)
+			}
 		} else {
 			inactiveTargets = append(inactiveTargets, target)
 		}
@@ -374,6 +422,9 @@ func generatePackageTargetsSafely(
 			return nil, fmt.Errorf("generate failed for %s: %w", generationFailureSource(packageTargets, err), err)
 		}
 		for _, target := range packageTargets {
+			if !target.publish {
+				continue
+			}
 			generatedFiles = append(generatedFiles, generatedGOXFile{
 				path:    target.output,
 				content: generated[target.source],
@@ -383,6 +434,9 @@ func generatePackageTargetsSafely(
 
 	removals := make([]string, 0, len(inactiveTargets))
 	for _, target := range inactiveTargets {
+		if !target.publish {
+			continue
+		}
 		remove, err := shouldRemoveInactiveGeneratedOutput(
 			destinationRoot,
 			target.output,
@@ -410,7 +464,22 @@ func generatePackageTargetsSafely(
 			return nil, fmt.Errorf("remove inactive generated output %s: %w", path, err)
 		}
 	}
-	return activeTargets, nil
+	return publishedActiveTargets, nil
+}
+
+func activeGenerationGOXFile(
+	path string,
+	selection generationSourceSelection,
+) (bool, error) {
+	content, err := readGenerationSource(path, "GOX source file")
+	if err != nil {
+		return false, err
+	}
+	return selection.matchGOX(
+		filepath.Dir(path),
+		filepath.Base(path),
+		content,
+	)
 }
 
 func readGenerationSource(path, label string) ([]byte, error) {
@@ -638,6 +707,28 @@ func findGOXFiles(path string) ([]string, error) {
 		return nil
 	})
 	return files, err
+}
+
+func findImmediatePackageGOXFiles(path string) ([]string, error) {
+	packageDir := filepath.Dir(path)
+	entries, err := os.ReadDir(packageDir)
+	if err != nil {
+		return nil, fmt.Errorf("read GOX package directory %s: %w", packageDir, err)
+	}
+
+	files := make([]string, 0)
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".gox" {
+			continue
+		}
+		candidate := filepath.Join(packageDir, entry.Name())
+		if _, err := regularFileNoFollow(candidate, "GOX source file"); err != nil {
+			return nil, err
+		}
+		files = append(files, candidate)
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 func packageIdentityForFile(appDir, file string) string {
