@@ -47,7 +47,12 @@ func prepareBuildWorkspaceResult(layout BuildLayout, manifest projectManifest) (
 	if err := copyAuthoredGoFiles(layout.AppDir, appWorkDir); err != nil {
 		return result, err
 	}
-	if err := generateIntoDirectory(layout.AppDir, appWorkDir, false); err != nil {
+	if err := generateIntoDirectoryForCompiler(
+		layout.AppDir,
+		appWorkDir,
+		false,
+		layout.Compiler,
+	); err != nil {
 		return result, err
 	}
 	if config.CopyGoframeRuntime {
@@ -186,6 +191,38 @@ func isToolOwnedDestinationBelowSource(sourceRoot, destinationRoot string) bool 
 }
 
 func generateIntoDirectory(sourceRoot, destinationRoot string, requireFiles bool) error {
+	return generateIntoDirectoryWithSelection(
+		sourceRoot,
+		destinationRoot,
+		requireFiles,
+		authoredSourceSelection{},
+	)
+}
+
+func generateIntoDirectoryForCompiler(
+	sourceRoot,
+	destinationRoot string,
+	requireFiles bool,
+	compiler string,
+) error {
+	selection, err := browserAuthoredSourceSelection(compiler)
+	if err != nil {
+		return err
+	}
+	return generateIntoDirectoryWithSelection(
+		sourceRoot,
+		destinationRoot,
+		requireFiles,
+		selection,
+	)
+}
+
+func generateIntoDirectoryWithSelection(
+	sourceRoot,
+	destinationRoot string,
+	requireFiles bool,
+	selection authoredSourceSelection,
+) error {
 	files, err := findGOXFiles(sourceRoot)
 	if err != nil {
 		return err
@@ -196,7 +233,12 @@ func generateIntoDirectory(sourceRoot, destinationRoot string, requireFiles bool
 		}
 		return nil
 	}
-	return generateFilesIntoDirectory(sourceRoot, destinationRoot, files)
+	return generateFilesIntoDirectoryWithSelection(
+		sourceRoot,
+		destinationRoot,
+		files,
+		selection,
+	)
 }
 
 type goxGenerationTarget struct {
@@ -210,6 +252,20 @@ type generatedGOXFile struct {
 }
 
 func generateFilesIntoDirectory(sourceRoot, destinationRoot string, files []string) error {
+	return generateFilesIntoDirectoryWithSelection(
+		sourceRoot,
+		destinationRoot,
+		files,
+		authoredSourceSelection{},
+	)
+}
+
+func generateFilesIntoDirectoryWithSelection(
+	sourceRoot,
+	destinationRoot string,
+	files []string,
+	selection authoredSourceSelection,
+) error {
 	targets := make([]goxGenerationTarget, 0, len(files))
 	for _, file := range files {
 		relative, err := filepath.Rel(sourceRoot, file)
@@ -221,10 +277,14 @@ func generateFilesIntoDirectory(sourceRoot, destinationRoot string, files []stri
 			output: filepath.Join(destinationRoot, relative+".go"),
 		})
 	}
-	return generatePackageTargetsSafely(sourceRoot, targets)
+	return generatePackageTargetsSafely(sourceRoot, targets, selection)
 }
 
-func generatePackageTargetsSafely(sourceRoot string, targets []goxGenerationTarget) error {
+func generatePackageTargetsSafely(
+	sourceRoot string,
+	targets []goxGenerationTarget,
+	selection authoredSourceSelection,
+) error {
 	packages := make(map[string][]goxGenerationTarget)
 	for _, target := range targets {
 		packageDir := filepath.Dir(target.source)
@@ -250,7 +310,7 @@ func generatePackageTargetsSafely(sourceRoot string, targets []goxGenerationTarg
 			}
 			sources = append(sources, gox.PackageSource{Filename: target.source, Source: content})
 		}
-		authored, err := authoredPackageSources(packageDir)
+		authored, err := authoredPackageSources(packageDir, selection)
 		if err != nil {
 			return err
 		}
@@ -295,7 +355,10 @@ func readGenerationSource(path, label string) ([]byte, error) {
 	return content, nil
 }
 
-func authoredPackageSources(packageDir string) ([]gox.PackageSource, error) {
+func authoredPackageSources(
+	packageDir string,
+	selection authoredSourceSelection,
+) ([]gox.PackageSource, error) {
 	entries, err := os.ReadDir(packageDir)
 	if err != nil {
 		return nil, fmt.Errorf("read Go package directory %s: %w", packageDir, err)
@@ -310,6 +373,13 @@ func authoredPackageSources(packageDir string) ([]gox.PackageSource, error) {
 		content, err := readGenerationSource(path, "authored Go source file")
 		if err != nil {
 			return nil, err
+		}
+		matched, err := selection.match(packageDir, name, content)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			continue
 		}
 		sources = append(sources, gox.PackageSource{Filename: path, Source: content})
 	}
