@@ -2,6 +2,7 @@ package main
 
 import (
 	"go/ast"
+	"go/build"
 	"go/parser"
 	gotoken "go/token"
 	"os"
@@ -521,6 +522,135 @@ func TestGenerateIntoDirectoryPackageIdentifiersAreDeterministic(t *testing.T) {
 	second := generatePackageIdentifierFilesInOrder(t, root, files)
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("generated package changed with file order:\nfirst: %#v\nsecond: %#v", first, second)
+	}
+}
+
+func TestGeneratePathRemovesManagedOutputWhenGOXBecomesInactive(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	sourcePath := filepath.Join(root, "view.gox")
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+
+	if err := generatePath(generateOptions{path: root}, true); err != nil {
+		t.Fatalf("initial generatePath() error: %v", err)
+	}
+	layout, err := newBuildLayout(layoutOptions{appDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(layout.GenDir, "view.gox.go")
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("managed output missing after active generation: %v", err)
+	}
+	unrelated := filepath.Join(layout.GenDir, "keep.txt")
+	if err := os.WriteFile(unrelated, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	inactive := "//go:build windows && linux\n\n" +
+		packageIdentifierGOXSource("View", "Button")
+	if err := os.WriteFile(sourcePath, []byte(inactive), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var generationErr error
+	outputText := captureStdout(t, func() {
+		generationErr = generatePath(generateOptions{path: root}, true)
+	})
+	err = generationErr
+	if err == nil {
+		t.Fatal("generatePath() succeeded with no active GOX files")
+	}
+	for _, want := range []string{
+		"no active .gox files found below",
+		build.Default.GOOS + "/" + build.Default.GOARCH,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+	if strings.Contains(outputText, "generated ") {
+		t.Fatalf("inactive generation printed a success line: %q", outputText)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("inactive managed output remains: %v", err)
+	}
+	content, err := os.ReadFile(unrelated)
+	if err != nil {
+		t.Fatalf("unrelated output missing: %v", err)
+	}
+	if string(content) != "keep" {
+		t.Fatalf("unrelated output = %q", content)
+	}
+}
+
+func TestGeneratePathDoesNotRemoveUnmanagedInactiveOutput(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	sourcePath := filepath.Join(root, "view.gox")
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+	outputRoot := t.TempDir()
+	options := generateOptions{path: root, outDir: outputRoot}
+	if err := generatePath(options, true); err != nil {
+		t.Fatalf("initial generatePath() error: %v", err)
+	}
+	output := filepath.Join(outputRoot, "view.gox.go")
+	const authored = "package app\n\nvar userOwned = true\n"
+	if err := os.WriteFile(output, []byte(authored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inactive := "//go:build windows && linux\n\n" +
+		packageIdentifierGOXSource("View", "Button")
+	if err := os.WriteFile(sourcePath, []byte(inactive), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := generatePath(options, true)
+	if err == nil {
+		t.Fatal("generatePath() removed an unmanaged inactive output")
+	}
+	if !strings.Contains(err.Error(), "file is not managed by goxc") {
+		t.Fatalf("error %q does not identify unmanaged output", err)
+	}
+	content, readErr := os.ReadFile(output)
+	if readErr != nil {
+		t.Fatalf("unmanaged output missing: %v", readErr)
+	}
+	if string(content) != authored {
+		t.Fatalf("unmanaged output changed:\n%s", content)
+	}
+}
+
+func TestGeneratePathRemovesManagedInactiveExplicitOutput(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	sourcePath := filepath.Join(root, "view.gox")
+	writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
+	outputRoot := t.TempDir()
+	options := generateOptions{path: root, outDir: outputRoot}
+	if err := generatePath(options, true); err != nil {
+		t.Fatalf("initial generatePath() error: %v", err)
+	}
+	output := filepath.Join(outputRoot, "view.gox.go")
+	unrelated := filepath.Join(outputRoot, "keep.txt")
+	if err := os.WriteFile(unrelated, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inactive := "//go:build windows && linux\n\n" +
+		packageIdentifierGOXSource("View", "Button")
+	if err := os.WriteFile(sourcePath, []byte(inactive), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := generatePath(options, true)
+	if err == nil || !strings.Contains(err.Error(), "no active .gox files found below") {
+		t.Fatalf("generatePath() error = %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("inactive managed explicit output remains: %v", err)
+	}
+	content, err := os.ReadFile(unrelated)
+	if err != nil {
+		t.Fatalf("unrelated explicit output missing: %v", err)
+	}
+	if string(content) != "keep" {
+		t.Fatalf("unrelated explicit output = %q", content)
 	}
 }
 

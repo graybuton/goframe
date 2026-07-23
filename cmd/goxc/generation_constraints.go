@@ -11,21 +11,36 @@ import (
 	"strings"
 )
 
-type authoredSourceSelection struct {
-	buildContext *build.Context
-	excludeTests bool
+type generationSourceSelection struct {
+	buildContext   *build.Context
+	excludeGoTests bool
 }
 
-func browserAuthoredSourceSelection(compiler string) (authoredSourceSelection, error) {
+func defaultGenerationSourceSelection() generationSourceSelection {
+	context := cloneBuildContext(build.Default)
+	return generationSourceSelection{
+		buildContext:   &context,
+		excludeGoTests: true,
+	}
+}
+
+func browserGenerationSourceSelection(compiler string) (generationSourceSelection, error) {
 	context, err := browserBuildContext(compiler, build.Default, os.Environ())
 	if err != nil {
-		return authoredSourceSelection{}, err
+		return generationSourceSelection{}, err
 	}
 
-	return authoredSourceSelection{
-		buildContext: &context,
-		excludeTests: true,
+	return generationSourceSelection{
+		buildContext:   &context,
+		excludeGoTests: true,
 	}, nil
+}
+
+func cloneBuildContext(context build.Context) build.Context {
+	context.BuildTags = append([]string(nil), context.BuildTags...)
+	context.ToolTags = append([]string(nil), context.ToolTags...)
+	context.ReleaseTags = append([]string(nil), context.ReleaseTags...)
+	return context
 }
 
 func browserBuildContext(
@@ -127,14 +142,58 @@ func sortedUniqueStrings(values []string) []string {
 	return result
 }
 
-func (selection authoredSourceSelection) match(
+func (selection generationSourceSelection) matchAuthoredGo(
 	packageDir,
 	filename string,
 	content []byte,
 ) (bool, error) {
-	if selection.excludeTests && strings.HasSuffix(filename, "_test.go") {
+	if selection.excludeGoTests && strings.HasSuffix(filename, "_test.go") {
 		return false, nil
 	}
+	matched, err := selection.matchBuildConstraints(packageDir, filename, content)
+	if err != nil {
+		return false, fmt.Errorf(
+			"match authored Go source %s against %s target: %w",
+			filepath.Join(packageDir, filename),
+			selection.targetName(),
+			err,
+		)
+	}
+	return matched, nil
+}
+
+func (selection generationSourceSelection) matchGOX(
+	packageDir,
+	filename string,
+	content []byte,
+) (bool, error) {
+	syntheticName := generatedGOXSourceFilename(filename)
+	matched, err := selection.matchBuildConstraints(
+		packageDir,
+		syntheticName,
+		content,
+	)
+	if err != nil {
+		return false, fmt.Errorf(
+			"match GOX source %s as %s against %s target: %w",
+			filepath.Join(packageDir, filename),
+			syntheticName,
+			selection.targetName(),
+			err,
+		)
+	}
+	return matched, nil
+}
+
+func generatedGOXSourceFilename(filename string) string {
+	return filepath.Base(filename) + ".go"
+}
+
+func (selection generationSourceSelection) matchBuildConstraints(
+	packageDir,
+	filename string,
+	content []byte,
+) (bool, error) {
 	if selection.buildContext == nil {
 		return true, nil
 	}
@@ -152,11 +211,14 @@ func (selection authoredSourceSelection) match(
 	}
 	matched, err := context.MatchFile(packageDir, filename)
 	if err != nil {
-		return false, fmt.Errorf(
-			"match authored Go source %s against browser target: %w",
-			expectedPath,
-			err,
-		)
+		return false, err
 	}
 	return matched, nil
+}
+
+func (selection generationSourceSelection) targetName() string {
+	if selection.buildContext == nil {
+		return "unfiltered"
+	}
+	return selection.buildContext.GOOS + "/" + selection.buildContext.GOARCH
 }

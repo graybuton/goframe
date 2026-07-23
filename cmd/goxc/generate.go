@@ -75,6 +75,7 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		fmt.Printf("no .gox files found below %s; building Go sources\n", options.path)
 		return nil
 	}
+	selection := defaultGenerationSourceSelection()
 
 	if options.inPlace {
 		appDir, err := generationAppDir(options.path)
@@ -88,12 +89,20 @@ func generatePath(options generateOptions, requireFiles bool) error {
 				return err
 			}
 		}
-		if err := generateFilesIntoDirectory(appDir, appDir, files); err != nil {
+		active, err := generateFilesIntoDirectoryWithSelectionResult(
+			appDir,
+			appDir,
+			files,
+			selection,
+		)
+		if err != nil {
 			return err
 		}
-		for _, file := range files {
-			output := file + ".go"
-			fmt.Printf("generated %s -> %s\n", file, output)
+		if len(active) == 0 && requireFiles {
+			return noActiveGOXFilesError(options.path, selection)
+		}
+		for _, target := range active {
+			fmt.Printf("generated %s -> %s\n", target.source, target.output)
 		}
 		return nil
 	}
@@ -134,16 +143,20 @@ func generatePath(options generateOptions, requireFiles bool) error {
 			return err
 		}
 	}
-	if err := generateFilesIntoDirectory(appDir, outputRoot, files); err != nil {
+	active, err := generateFilesIntoDirectoryWithSelectionResult(
+		appDir,
+		outputRoot,
+		files,
+		selection,
+	)
+	if err != nil {
 		return err
 	}
-	for _, file := range files {
-		relative, err := filepath.Rel(appDir, file)
-		if err != nil {
-			return fmt.Errorf("resolve GOX source %s: %w", file, err)
-		}
-		output := filepath.Join(outputRoot, relative+".go")
-		fmt.Printf("generated %s -> %s\n", file, output)
+	if len(active) == 0 && requireFiles {
+		return noActiveGOXFilesError(options.path, selection)
+	}
+	for _, target := range active {
+		fmt.Printf("generated %s -> %s\n", target.source, target.output)
 	}
 	return nil
 }

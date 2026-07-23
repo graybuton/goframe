@@ -74,7 +74,7 @@ func TestAuthoredSourceConstraintsMatchBrowserTargets(t *testing.T) {
 		}},
 	} {
 		t.Run(compiler.name, func(t *testing.T) {
-			selection, err := browserAuthoredSourceSelection(compiler.name)
+			selection, err := browserGenerationSourceSelection(compiler.name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +88,7 @@ func TestAuthoredSourceConstraintsMatchBrowserTargets(t *testing.T) {
 						}
 						source = prefix + test.constraint + "\n\n" + source
 					}
-					got, err := selection.match(
+					got, err := selection.matchAuthoredGo(
 						filepath.Join(t.TempDir(), "package"),
 						test.filename,
 						[]byte(source),
@@ -115,11 +115,11 @@ func TestBrowserAuthoredSourceSelectionExcludesHostArchitectureFeature(t *testin
 	t.Setenv("GOWASM", "")
 	for _, compiler := range []string{"go", "tinygo"} {
 		t.Run(compiler, func(t *testing.T) {
-			selection, err := browserAuthoredSourceSelection(compiler)
+			selection, err := browserGenerationSourceSelection(compiler)
 			if err != nil {
 				t.Fatal(err)
 			}
-			matched, err := selection.match(
+			matched, err := selection.matchAuthoredGo(
 				filepath.Join(t.TempDir(), "package"),
 				"inactive.go",
 				[]byte("//go:build amd64.v1\n\npackage app\n"),
@@ -238,17 +238,17 @@ func TestBrowserBuildContextRejectsInvalidGOWASM(t *testing.T) {
 
 func TestPackageSourceSelectionUsesObservedCompilerTargets(t *testing.T) {
 	t.Setenv("GOWASM", "")
-	goSelection, err := browserAuthoredSourceSelection("go")
+	goSelection, err := browserGenerationSourceSelection("go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tinySelection, err := browserAuthoredSourceSelection("tinygo")
+	tinySelection, err := browserGenerationSourceSelection("tinygo")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for name, test := range map[string]struct {
-		selection authoredSourceSelection
+		selection generationSourceSelection
 		cgo       bool
 		tags      []string
 	}{
@@ -285,7 +285,7 @@ func TestPackageSourceSelectionUsesObservedCompilerTargets(t *testing.T) {
 			if context.CgoEnabled != test.cgo {
 				t.Fatalf("CgoEnabled = %t, want %t", context.CgoEnabled, test.cgo)
 			}
-			if !test.selection.excludeTests {
+			if !test.selection.excludeGoTests {
 				t.Fatal("browser selection does not exclude test files")
 			}
 			for _, tag := range test.tags {
@@ -297,6 +297,158 @@ func TestPackageSourceSelectionUsesObservedCompilerTargets(t *testing.T) {
 				t.Fatalf("ReleaseTags %v do not contain go1.22", context.ReleaseTags)
 			}
 		})
+	}
+}
+
+func TestDefaultGenerationSourceSelectionUsesCurrentBuildContext(t *testing.T) {
+	before := cloneBuildContextTagSlices(build.Default)
+	selection := defaultGenerationSourceSelection()
+	if selection.buildContext == nil {
+		t.Fatal("default generation selection has no build context")
+	}
+	if !selection.excludeGoTests {
+		t.Fatal("default generation selection includes authored test files")
+	}
+	context := selection.buildContext
+	if context.GOOS != build.Default.GOOS ||
+		context.GOARCH != build.Default.GOARCH ||
+		context.Compiler != build.Default.Compiler ||
+		context.CgoEnabled != build.Default.CgoEnabled {
+		t.Fatalf(
+			"default target = %s/%s compiler=%s cgo=%t, want %s/%s compiler=%s cgo=%t",
+			context.GOOS,
+			context.GOARCH,
+			context.Compiler,
+			context.CgoEnabled,
+			build.Default.GOOS,
+			build.Default.GOARCH,
+			build.Default.Compiler,
+			build.Default.CgoEnabled,
+		)
+	}
+	for name, values := range map[string]struct {
+		got  []string
+		want []string
+	}{
+		"BuildTags":   {got: context.BuildTags, want: build.Default.BuildTags},
+		"ToolTags":    {got: context.ToolTags, want: build.Default.ToolTags},
+		"ReleaseTags": {got: context.ReleaseTags, want: build.Default.ReleaseTags},
+	} {
+		if !reflect.DeepEqual(values.got, values.want) {
+			t.Fatalf("%s = %v, want %v", name, values.got, values.want)
+		}
+	}
+	context.BuildTags = append(context.BuildTags, "test-only")
+	context.ToolTags = append(context.ToolTags, "test-only")
+	context.ReleaseTags = append(context.ReleaseTags, "test-only")
+	if !reflect.DeepEqual(build.Default.BuildTags, before.BuildTags) ||
+		!reflect.DeepEqual(build.Default.ToolTags, before.ToolTags) ||
+		!reflect.DeepEqual(build.Default.ReleaseTags, before.ReleaseTags) {
+		t.Fatalf(
+			"default build tags mutated:\nbefore: %#v\nafter:  %#v",
+			before,
+			build.Default,
+		)
+	}
+}
+
+func TestGenerationSourceSelectionUsesProvidedTargetContext(t *testing.T) {
+	tests := []struct {
+		name     string
+		context  build.Context
+		active   string
+		inactive string
+	}{
+		{
+			name: "linux",
+			context: build.Context{
+				GOOS:        "linux",
+				GOARCH:      "amd64",
+				Compiler:    "gc",
+				ToolTags:    []string{"amd64.v1"},
+				ReleaseTags: []string{"go1.22"},
+			},
+			active:   "source_linux.go",
+			inactive: "source_windows.go",
+		},
+		{
+			name: "windows",
+			context: build.Context{
+				GOOS:        "windows",
+				GOARCH:      "amd64",
+				Compiler:    "gc",
+				ToolTags:    []string{"amd64.v1"},
+				ReleaseTags: []string{"go1.22"},
+			},
+			active:   "source_windows.go",
+			inactive: "source_linux.go",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			selection := generationSourceSelection{
+				buildContext:   &test.context,
+				excludeGoTests: true,
+			}
+			for _, source := range []struct {
+				name string
+				want bool
+			}{
+				{name: test.active, want: true},
+				{name: test.inactive},
+				{name: "source_test.go"},
+			} {
+				got, err := selection.matchAuthoredGo(
+					t.TempDir(),
+					source.name,
+					[]byte("package app\n"),
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got != source.want {
+					t.Fatalf("matchAuthoredGo(%q) = %t, want %t", source.name, got, source.want)
+				}
+			}
+		})
+	}
+}
+
+func TestGOXConstraintSelectionUsesGeneratedFilename(t *testing.T) {
+	if got := generatedGOXSourceFilename("view_windows.gox"); got != "view_windows.gox.go" {
+		t.Fatalf("generated GOX source filename = %q", got)
+	}
+	context := build.Context{
+		GOOS:        "linux",
+		GOARCH:      "amd64",
+		Compiler:    "gc",
+		ToolTags:    []string{"amd64.v1"},
+		ReleaseTags: []string{"go1.22"},
+	}
+	selection := generationSourceSelection{buildContext: &context}
+	packageDir := t.TempDir()
+	content := []byte("package app\n")
+	writeTestFile(
+		t,
+		packageDir,
+		"view_windows.gox.go",
+		string(content),
+	)
+	matched, err := selection.matchGOX(
+		packageDir,
+		"view_windows.gox",
+		content,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := context.MatchFile(packageDir, "view_windows.gox.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched != want {
+		t.Fatalf("GOX match = %t, actual generated filename match = %t", matched, want)
 	}
 }
 
@@ -523,21 +675,258 @@ func TestGenerateIntoDirectoryCompilerIdentifierConstraints(t *testing.T) {
 	}
 }
 
-func TestGeneratePathPreservesTargetNeutralAuthoredConstraintPolicy(t *testing.T) {
-	appDir := newAuthoredConstraintFixture(t)
-	inactivePath := filepath.Join(appDir, "inactive_windows.go")
-	writeTestFile(t, appDir, "inactive_windows.go", `//go:build windows
-
-package app
-
-func Broken( {
-`)
-	err := generateIntoDirectory(appDir, t.TempDir(), true)
-	if err == nil {
-		t.Fatal("target-neutral generation succeeded")
+func TestGeneratePathUsesCurrentAuthoredConstraintPolicy(t *testing.T) {
+	inactiveOS := "windows"
+	if build.Default.GOOS == "windows" {
+		inactiveOS = "linux"
 	}
-	if !strings.Contains(err.Error(), inactivePath) {
-		t.Fatalf("target-neutral error %q does not identify %s", err, inactivePath)
+	tests := []struct {
+		name       string
+		filename   string
+		constraint string
+	}{
+		{
+			name:       "inactive OS source",
+			filename:   "inactive_" + inactiveOS + ".go",
+			constraint: inactiveOS,
+		},
+		{
+			name:     "test source",
+			filename: "collision_test.go",
+		},
+		{
+			name:       "future release source",
+			filename:   "future.go",
+			constraint: "go1.999",
+		},
+		{
+			name:       "false build expression",
+			filename:   "inactive.go",
+			constraint: "windows && linux",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := newAuthoredConstraintFixture(t)
+			source := "package app\n\nfunc Broken( {\n"
+			if test.constraint != "" {
+				source = "//go:build " + test.constraint + "\n\n" + source
+			}
+			writeTestFile(t, appDir, test.filename, source)
+			if err := generateIntoDirectory(appDir, t.TempDir(), true); err != nil {
+				t.Fatalf("generateIntoDirectory() error: %v", err)
+			}
+		})
+	}
+
+	t.Run("active authored collision", func(t *testing.T) {
+		const candidate = "_goxComponent_view_Button"
+		appDir := newAuthoredConstraintFixture(t)
+		writeTestFile(
+			t,
+			appDir,
+			"collision.go",
+			"package app\n\nvar "+candidate+" = 1\n",
+		)
+		destination := t.TempDir()
+		if err := generateIntoDirectory(appDir, destination, true); err != nil {
+			t.Fatalf("generateIntoDirectory() error: %v", err)
+		}
+		if got := generatedIdentifierForComponent(
+			t,
+			filepath.Join(destination, "view.gox.go"),
+			"Button",
+		); got == candidate {
+			t.Fatalf("active authored identifier %q was not reserved", candidate)
+		}
+	})
+}
+
+func TestPrepareBuildWorkspaceFiltersInactiveGOXBeforePackageGeneration(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			if compiler == "tinygo" {
+				if _, err := exec.LookPath("tinygo"); err != nil {
+					t.Skip("tinygo is not installed")
+				}
+			}
+
+			appDir := newAuthoredConstraintFixture(t)
+			writeTestFile(t, appDir, "inactive.gox", `//go:build windows
+
+package app_windows
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Inactive() gf.Node {
+	return <main>inactive</main>
+}
+`)
+			writeTestFile(t, appDir, "malformed.gox", `//go:build windows
+
+this is not valid GOX
+`)
+			writeTestFile(t, appDir, "future.gox", `//go:build go1.999
+
+this is not valid GOX
+`)
+			layout := newAuthoredConstraintLayout(t, appDir, compiler)
+			if _, err := prepareBuildWorkspaceResult(
+				layout,
+				defaultEmbedManifest(compiler, "."),
+			); err != nil {
+				t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+			}
+
+			config := workspaceModuleConfigForApp(appDir)
+			appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
+			if _, err := os.Stat(filepath.Join(appWorkDir, "view.gox.go")); err != nil {
+				t.Fatalf("active generated output missing: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(appWorkDir, "inactive.gox.go")); !os.IsNotExist(err) {
+				t.Fatalf("inactive generated output exists: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(appWorkDir, "malformed.gox.go")); !os.IsNotExist(err) {
+				t.Fatalf("malformed inactive generated output exists: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(appWorkDir, "future.gox.go")); !os.IsNotExist(err) {
+				t.Fatalf("future inactive generated output exists: %v", err)
+			}
+		})
+	}
+}
+
+func TestGOXConstraintActivePackageMismatchStillFails(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			appDir := newAuthoredConstraintFixture(t)
+			writeTestFile(t, appDir, "other.gox", `//go:build js && wasm
+
+package other
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Other() gf.Node {
+	return <main>other</main>
+}
+`)
+			err := generateIntoDirectoryForCompiler(
+				appDir,
+				t.TempDir(),
+				true,
+				compiler,
+			)
+			if err == nil {
+				t.Fatal("active package mismatch succeeded")
+			}
+			if !strings.Contains(err.Error(), "package app does not match package other") &&
+				!strings.Contains(err.Error(), "package other does not match package app") {
+				t.Fatalf("error %q does not identify active package mismatch", err)
+			}
+		})
+	}
+}
+
+func TestInactiveGOXCollisionDoesNotPerturbActiveIdentifier(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			root := newPackageIdentifierFixture(t)
+			writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "A_B"))
+			writeTestFile(t, root, "view_A.gox", `//go:build windows
+
+`+packageIdentifierGOXSource("Other", "B"))
+
+			destination := t.TempDir()
+			if err := generateIntoDirectoryForCompiler(
+				root,
+				destination,
+				true,
+				compiler,
+			); err != nil {
+				t.Fatalf("generateIntoDirectoryForCompiler() error: %v", err)
+			}
+			const candidate = "_goxComponent_view_A_B"
+			if got := generatedIdentifierForComponent(
+				t,
+				filepath.Join(destination, "view.gox.go"),
+				"A_B",
+			); got != candidate {
+				t.Fatalf("inactive GOX collision changed active identifier to %q", got)
+			}
+			if _, err := os.Stat(filepath.Join(destination, "view_A.gox.go")); !os.IsNotExist(err) {
+				t.Fatalf("inactive collision output exists: %v", err)
+			}
+		})
+	}
+}
+
+func TestPackageBrowserActiveGOXCollisionRemainsCoordinated(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			root := newPackageIdentifierFixture(t)
+			writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "A_B"))
+			writeTestFile(t, root, "view_A.gox", packageIdentifierGOXSource("Other", "B"))
+
+			destination := t.TempDir()
+			if err := generateIntoDirectoryForCompiler(
+				root,
+				destination,
+				true,
+				compiler,
+			); err != nil {
+				t.Fatalf("generateIntoDirectoryForCompiler() error: %v", err)
+			}
+			view := generatedIdentifierForComponent(
+				t,
+				filepath.Join(destination, "view.gox.go"),
+				"A_B",
+			)
+			other := generatedIdentifierForComponent(
+				t,
+				filepath.Join(destination, "view_A.gox.go"),
+				"B",
+			)
+			if view == other {
+				t.Fatalf("active GOX components use duplicate identifier %q", view)
+			}
+		})
+	}
+}
+
+func TestPrepareBuildWorkspaceAllowsNoActiveGOX(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	for _, compiler := range []string{"go", "tinygo"} {
+		t.Run(compiler, func(t *testing.T) {
+			if compiler == "tinygo" {
+				if _, err := exec.LookPath("tinygo"); err != nil {
+					t.Skip("tinygo is not installed")
+				}
+			}
+			appDir := t.TempDir()
+			writeTestFile(t, appDir, "go.mod", "module example.com/app\n\ngo 1.22\n")
+			writeTestFile(t, appDir, "main.go", "package app\n")
+			writeTestFile(t, appDir, "inactive.gox", `//go:build windows
+
+package other
+`)
+			layout := newAuthoredConstraintLayout(t, appDir, compiler)
+			if _, err := prepareBuildWorkspaceResult(
+				layout,
+				defaultEmbedManifest(compiler, "."),
+			); err != nil {
+				t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+			}
+			config := workspaceModuleConfigForApp(appDir)
+			appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
+			if _, err := os.Stat(filepath.Join(appWorkDir, "inactive.gox.go")); !os.IsNotExist(err) {
+				t.Fatalf("inactive generated output exists: %v", err)
+			}
+		})
 	}
 }
 
@@ -576,6 +965,31 @@ var _goxComponent_view_Button = 1
 	}
 }
 
+func TestStandaloneGenerationSourceSelectionParity(t *testing.T) {
+	root := newSourceSelectionFixture(t)
+	selected, err := authoredPackageSources(
+		root,
+		defaultGenerationSourceSelection(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(selected))
+	for _, source := range selected {
+		got = append(got, filepath.Base(source.Filename))
+	}
+	sort.Strings(got)
+
+	want := realCurrentGoSourceSelection(t, root)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf(
+			"default selector differs from current go list:\nprivate: %v\ntoolchain: %v",
+			got,
+			want,
+		)
+	}
+}
+
 func TestBrowserCompilerSourceSelectionParity(t *testing.T) {
 	root := newSourceSelectionFixture(t)
 	for _, target := range []struct {
@@ -594,7 +1008,7 @@ func TestBrowserCompilerSourceSelectionParity(t *testing.T) {
 							t.Skip("tinygo is not installed")
 						}
 					}
-					selection, err := browserAuthoredSourceSelection(compiler)
+					selection, err := browserGenerationSourceSelection(compiler)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -612,6 +1026,71 @@ func TestBrowserCompilerSourceSelectionParity(t *testing.T) {
 					if !reflect.DeepEqual(got, want) {
 						t.Fatalf(
 							"private selector differs from %s list:\nprivate: %v\ntoolchain: %v",
+							compiler,
+							got,
+							want,
+						)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestBrowserGOXSourceSelectionParity(t *testing.T) {
+	root, sources := newGOXSourceSelectionFixture(t)
+	for _, target := range []struct {
+		name   string
+		gowasm string
+	}{
+		{name: "default"},
+		{name: "wasm features", gowasm: "satconv,signext"},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			t.Setenv("GOWASM", target.gowasm)
+			for _, compiler := range []string{"go", "tinygo"} {
+				t.Run(compiler, func(t *testing.T) {
+					if compiler == "tinygo" {
+						if _, err := exec.LookPath("tinygo"); err != nil {
+							t.Skip("tinygo is not installed")
+						}
+					}
+					selection, err := browserGenerationSourceSelection(compiler)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var got []string
+					for _, source := range sources {
+						content, err := readGenerationSource(source, "GOX source file")
+						if err != nil {
+							t.Fatal(err)
+						}
+						matched, err := selection.matchGOX(
+							root,
+							filepath.Base(source),
+							content,
+						)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if matched {
+							got = append(
+								got,
+								generatedGOXSourceFilename(source),
+							)
+						}
+					}
+					sort.Strings(got)
+
+					var want []string
+					for _, name := range realToolchainSourceSelection(t, compiler, root) {
+						if strings.HasSuffix(name, ".gox.go") {
+							want = append(want, name)
+						}
+					}
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf(
+							"private GOX selector differs from %s list:\nprivate: %v\ntoolchain: %v",
 							compiler,
 							got,
 							want,
@@ -712,6 +1191,48 @@ func newSourceSelectionFixture(t *testing.T) string {
 	return root
 }
 
+func newGOXSourceSelectionFixture(t *testing.T) (string, []string) {
+	t.Helper()
+	root := t.TempDir()
+	writeTestFile(t, root, "go.mod", "module example.com/gox-selection\n\ngo 1.22\n")
+	writeTestFile(t, root, "base.go", "package selection\n")
+	tests := []struct {
+		filename   string
+		constraint string
+	}{
+		{filename: "plain.gox"},
+		{filename: "tag_windows.gox", constraint: "windows"},
+		{filename: "tag_js.gox", constraint: "js"},
+		{filename: "tag_wasm.gox", constraint: "wasm"},
+		{filename: "tag_browser.gox", constraint: "js && wasm"},
+		{filename: "tag_gc.gox", constraint: "gc"},
+		{filename: "tag_tinygo.gox", constraint: "tinygo"},
+		{filename: "tag_cgo.gox", constraint: "cgo"},
+		{filename: "tag_future.gox", constraint: "go1.999"},
+		{filename: "tag_amd64.gox", constraint: "amd64.v1"},
+		{filename: "tag_satconv.gox", constraint: "wasm.satconv"},
+		{filename: "tag_signext.gox", constraint: "wasm.signext"},
+		{filename: "suffix_windows.gox"},
+		{filename: "suffix_js.gox"},
+	}
+	sources := make([]string, 0, len(tests))
+	for _, test := range tests {
+		content := "package selection\n"
+		if test.constraint != "" {
+			content = "//go:build " + test.constraint + "\n\n" + content
+		}
+		writeTestFile(t, root, test.filename, content)
+		writeTestFile(
+			t,
+			root,
+			generatedGOXSourceFilename(test.filename),
+			generatedGOXFileHeader+content,
+		)
+		sources = append(sources, filepath.Join(root, test.filename))
+	}
+	return root, sources
+}
+
 func realToolchainSourceSelection(
 	t *testing.T,
 	compiler,
@@ -755,6 +1276,43 @@ func realToolchainSourceSelection(
 	output, err := command.Output()
 	if err != nil {
 		t.Fatalf("%s list: %v", compiler, err)
+	}
+	var packageInfo struct {
+		GoFiles  []string
+		CgoFiles []string
+	}
+	if err := json.Unmarshal(output, &packageInfo); err != nil {
+		t.Fatal(err)
+	}
+	files := append(packageInfo.GoFiles, packageInfo.CgoFiles...)
+	sort.Strings(files)
+	return files
+}
+
+func realCurrentGoSourceSelection(t *testing.T, root string) []string {
+	t.Helper()
+	command := exec.Command("go", "list", "-e", "-json", ".")
+	command.Dir = root
+	command.Env = setEnvironmentValue(os.Environ(), "GOWORK", "off")
+	command.Env = setEnvironmentValue(command.Env, "GOOS", build.Default.GOOS)
+	command.Env = setEnvironmentValue(command.Env, "GOARCH", build.Default.GOARCH)
+	cgoEnabled := "0"
+	if build.Default.CgoEnabled {
+		cgoEnabled = "1"
+	}
+	command.Env = setEnvironmentValue(command.Env, "CGO_ENABLED", cgoEnabled)
+	goFlags := "-mod=mod -buildvcs=false"
+	if len(build.Default.BuildTags) > 0 {
+		goFlags += " -tags=" + strings.Join(build.Default.BuildTags, ",")
+	}
+	command.Env = setEnvironmentValue(
+		command.Env,
+		"GOFLAGS",
+		goFlags,
+	)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("go list: %v", err)
 	}
 	var packageInfo struct {
 		GoFiles  []string
