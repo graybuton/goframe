@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"go/build"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -159,6 +162,21 @@ func (selection generationSourceSelection) matchAuthoredGo(
 			err,
 		)
 	}
+	if !matched {
+		return false, nil
+	}
+	matched, err = selection.matchCgoSource(
+		filepath.Join(packageDir, filename),
+		content,
+	)
+	if err != nil {
+		return false, fmt.Errorf(
+			"classify authored Go source %s for cgo under %s target: %w",
+			filepath.Join(packageDir, filename),
+			selection.targetName(),
+			err,
+		)
+	}
 	return matched, nil
 }
 
@@ -182,11 +200,67 @@ func (selection generationSourceSelection) matchGOX(
 			err,
 		)
 	}
+	if !matched {
+		return false, nil
+	}
+	matched, err = selection.matchCgoSource(
+		filepath.Join(packageDir, filename),
+		content,
+	)
+	if err != nil {
+		return false, fmt.Errorf(
+			"classify GOX source %s as %s for cgo under %s target: %w",
+			filepath.Join(packageDir, filename),
+			syntheticName,
+			selection.targetName(),
+			err,
+		)
+	}
 	return matched, nil
 }
 
 func generatedGOXSourceFilename(filename string) string {
 	return filepath.Base(filename) + ".go"
+}
+
+func (selection generationSourceSelection) matchCgoSource(
+	filename string,
+	content []byte,
+) (bool, error) {
+	if selection.buildContext == nil || selection.buildContext.CgoEnabled {
+		return true, nil
+	}
+	importsC, err := sourceImportsC(filename, content)
+	if err != nil {
+		return false, err
+	}
+	return !importsC, nil
+}
+
+func sourceImportsC(filename string, content []byte) (bool, error) {
+	file, err := parser.ParseFile(
+		token.NewFileSet(),
+		filename,
+		content,
+		parser.ImportsOnly|parser.SkipObjectResolution,
+	)
+	if err != nil {
+		return false, err
+	}
+	for _, specification := range file.Imports {
+		importPath, err := strconv.Unquote(specification.Path.Value)
+		if err != nil {
+			return false, fmt.Errorf(
+				"decode import path %s: %w",
+				specification.Path.Value,
+				err,
+			)
+		}
+		if importPath == "C" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (selection generationSourceSelection) matchBuildConstraints(

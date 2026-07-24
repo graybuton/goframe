@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/graybuton/goframe/pkg/gox"
 )
 
 func TestAuthoredSourceConstraintsMatchBrowserTargets(t *testing.T) {
@@ -415,6 +417,237 @@ func TestGenerationSourceSelectionUsesProvidedTargetContext(t *testing.T) {
 	}
 }
 
+func TestCgoSourceSelectionUsesParsedImports(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		wantCgo bool
+	}{
+		{
+			name:    "direct import",
+			source:  "package app\n\nimport \"C\"\n",
+			wantCgo: true,
+		},
+		{
+			name: "grouped import",
+			source: `package app
+
+import (
+	"C"
+)
+`,
+			wantCgo: true,
+		},
+		{
+			name:    "raw import literal",
+			source:  "package app\n\nimport `C`\n",
+			wantCgo: true,
+		},
+		{
+			name: "string decoy",
+			source: `package app
+
+const decoy = "\"C\" import \"C\""
+`,
+		},
+		{
+			name: "comment decoy",
+			source: `package app
+
+// import "C"
+const ordinary = true
+`,
+		},
+	}
+
+	for _, cgoEnabled := range []bool{false, true} {
+		name := "disabled"
+		if cgoEnabled {
+			name = "enabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			context := build.Context{
+				GOOS:        "js",
+				GOARCH:      "wasm",
+				Compiler:    "gc",
+				CgoEnabled:  cgoEnabled,
+				ReleaseTags: []string{"go1.22"},
+			}
+			selection := generationSourceSelection{
+				buildContext:   &context,
+				excludeGoTests: true,
+			}
+			for _, test := range tests {
+				t.Run(test.name, func(t *testing.T) {
+					matched, err := selection.matchAuthoredGo(
+						t.TempDir(),
+						"source.go",
+						[]byte(test.source),
+					)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := !test.wantCgo || cgoEnabled
+					if matched != want {
+						t.Fatalf(
+							"matchAuthoredGo() = %t, want %t with CgoEnabled=%t",
+							matched,
+							want,
+							cgoEnabled,
+						)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestCgoDisabledSourceSelectionIgnoresMalformedBody(t *testing.T) {
+	context := build.Context{
+		GOOS:        "js",
+		GOARCH:      "wasm",
+		Compiler:    "gc",
+		CgoEnabled:  false,
+		ReleaseTags: []string{"go1.22"},
+	}
+	selection := generationSourceSelection{
+		buildContext:   &context,
+		excludeGoTests: true,
+	}
+	matched, err := selection.matchAuthoredGo(
+		t.TempDir(),
+		"broken.go",
+		[]byte(`package app
+
+import "C"
+
+func Broken( {
+`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched {
+		t.Fatal("cgo-disabled selection included a source importing C")
+	}
+}
+
+func TestCgoSourceSelectionReportsMalformedImportSection(t *testing.T) {
+	context := build.Context{
+		GOOS:        "js",
+		GOARCH:      "wasm",
+		Compiler:    "gc",
+		CgoEnabled:  false,
+		ReleaseTags: []string{"go1.22"},
+	}
+	selection := generationSourceSelection{
+		buildContext:   &context,
+		excludeGoTests: true,
+	}
+	packageDir := t.TempDir()
+	sourcePath := filepath.Join(packageDir, "broken.go")
+	matched, err := selection.matchAuthoredGo(
+		packageDir,
+		filepath.Base(sourcePath),
+		[]byte("package app\n\nimport (\n"),
+	)
+	if err == nil {
+		t.Fatalf("matchAuthoredGo() = %t, nil error for malformed import section", matched)
+	}
+	for _, want := range []string{
+		sourcePath,
+		"js/wasm",
+		"classify authored Go source",
+		"cgo",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
+func TestCgoSourceSelectionChecksBuildConstraintsBeforeImports(t *testing.T) {
+	context := build.Context{
+		GOOS:        "js",
+		GOARCH:      "wasm",
+		Compiler:    "gc",
+		CgoEnabled:  false,
+		ReleaseTags: []string{"go1.22"},
+	}
+	selection := generationSourceSelection{
+		buildContext:   &context,
+		excludeGoTests: true,
+	}
+	matched, err := selection.matchAuthoredGo(
+		t.TempDir(),
+		"inactive.go",
+		[]byte(`//go:build windows && linux
+
+package app
+
+import (
+`),
+	)
+	if err != nil {
+		t.Fatalf("build-excluded cgo source reached import classification: %v", err)
+	}
+	if matched {
+		t.Fatal("build-excluded cgo source matched")
+	}
+}
+
+func TestGOXCgoSourceSelectionMatchesGeneratedImport(t *testing.T) {
+	source := []byte(`package app
+
+import (
+	"C"
+	gf "github.com/graybuton/goframe/pkg/goframe"
+)
+
+func View() gf.Node {
+	return <main>cgo</main>
+}
+`)
+	generated, err := gox.GenerateNamed("view.gox", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(generated), "\n\t\"C\"\n") {
+		t.Fatalf("generated GOX output did not preserve import C:\n%s", generated)
+	}
+
+	for _, test := range []struct {
+		compiler string
+		want     bool
+	}{
+		{compiler: "go"},
+		{compiler: "tinygo", want: true},
+	} {
+		t.Run(test.compiler, func(t *testing.T) {
+			selection, err := browserGenerationSourceSelection(test.compiler)
+			if err != nil {
+				t.Fatal(err)
+			}
+			matched, err := selection.matchGOX(
+				t.TempDir(),
+				"view.gox",
+				source,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if matched != test.want {
+				t.Fatalf(
+					"matchGOX() = %t, want %t for %s",
+					matched,
+					test.want,
+					test.compiler,
+				)
+			}
+		})
+	}
+}
+
 func TestGOXConstraintSelectionUsesGeneratedFilename(t *testing.T) {
 	if got := generatedGOXSourceFilename("view_windows.gox"); got != "view_windows.gox.go" {
 		t.Fatalf("generated GOX source filename = %q", got)
@@ -530,6 +763,50 @@ func Broken( {
 				})
 			}
 		})
+	}
+}
+
+func TestPrepareBuildWorkspaceExcludesCgoSourceWithMalformedBody(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	appDir := newAuthoredConstraintFixture(t)
+	writeTestFile(t, appDir, "cgo_broken.go", `package app
+
+import "C"
+
+func Broken( {
+`)
+	layout := newAuthoredConstraintLayout(t, appDir, "go")
+	if _, err := prepareBuildWorkspaceResult(
+		layout,
+		defaultEmbedManifest("go", "."),
+	); err != nil {
+		t.Fatalf("prepareBuildWorkspaceResult() error: %v", err)
+	}
+}
+
+func TestPrepareBuildWorkspaceRejectsOrdinaryMalformedSource(t *testing.T) {
+	t.Setenv("GOWASM", "")
+	appDir := newAuthoredConstraintFixture(t)
+	sourcePath := filepath.Join(appDir, "broken.go")
+	writeTestFile(t, appDir, "broken.go", `package app
+
+func Broken( {
+`)
+	layout := newAuthoredConstraintLayout(t, appDir, "go")
+	_, err := prepareBuildWorkspaceResult(
+		layout,
+		defaultEmbedManifest("go", "."),
+	)
+	if err == nil {
+		t.Fatal("prepareBuildWorkspaceResult() accepted an ordinary malformed source")
+	}
+	for _, want := range []string{
+		sourcePath,
+		"parse transformed Go source before generated declarations",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
 	}
 }
 
@@ -1022,13 +1299,27 @@ func TestBrowserCompilerSourceSelectionParity(t *testing.T) {
 					}
 					sort.Strings(got)
 
-					want := realToolchainSourceSelection(t, compiler, root)
+					metadata := realToolchainSourceMetadata(t, compiler, root)
+					want := metadata.activeFiles()
 					if !reflect.DeepEqual(got, want) {
 						t.Fatalf(
 							"private selector differs from %s list:\nprivate: %v\ntoolchain: %v",
 							compiler,
 							got,
 							want,
+						)
+					}
+					if compiler == "go" {
+						if !containsString(metadata.IgnoredGoFiles, "cgo_source.go") {
+							t.Fatalf(
+								"go list IgnoredGoFiles = %v, want cgo_source.go",
+								metadata.IgnoredGoFiles,
+							)
+						}
+					} else if !containsString(metadata.CgoFiles, "cgo_source.go") {
+						t.Fatalf(
+							"tinygo list CgoFiles = %v, want cgo_source.go",
+							metadata.CgoFiles,
 						)
 					}
 				})
@@ -1082,8 +1373,9 @@ func TestBrowserGOXSourceSelectionParity(t *testing.T) {
 					}
 					sort.Strings(got)
 
+					metadata := realToolchainSourceMetadata(t, compiler, root)
 					var want []string
-					for _, name := range realToolchainSourceSelection(t, compiler, root) {
+					for _, name := range metadata.activeFiles() {
 						if strings.HasSuffix(name, ".gox.go") {
 							want = append(want, name)
 						}
@@ -1094,6 +1386,19 @@ func TestBrowserGOXSourceSelectionParity(t *testing.T) {
 							compiler,
 							got,
 							want,
+						)
+					}
+					if compiler == "go" {
+						if !containsString(metadata.IgnoredGoFiles, "cgo.gox.go") {
+							t.Fatalf(
+								"go list IgnoredGoFiles = %v, want cgo.gox.go",
+								metadata.IgnoredGoFiles,
+							)
+						}
+					} else if !containsString(metadata.CgoFiles, "cgo.gox.go") {
+						t.Fatalf(
+							"tinygo list CgoFiles = %v, want cgo.gox.go",
+							metadata.CgoFiles,
 						)
 					}
 				})
@@ -1143,6 +1448,7 @@ func newSourceSelectionFixture(t *testing.T) string {
 	root := t.TempDir()
 	writeTestFile(t, root, "go.mod", "module example.com/selection\n\ngo 1.22\n")
 	writeTestFile(t, root, "base.go", "package selection\n")
+	writeTestFile(t, root, "cgo_source.go", "package selection\n\nimport \"C\"\n")
 
 	constraints := []struct {
 		name       string
@@ -1230,14 +1536,36 @@ func newGOXSourceSelectionFixture(t *testing.T) (string, []string) {
 		)
 		sources = append(sources, filepath.Join(root, test.filename))
 	}
+	cgoContent := "package selection\n\nimport \"C\"\n"
+	writeTestFile(t, root, "cgo.gox", cgoContent)
+	writeTestFile(
+		t,
+		root,
+		generatedGOXSourceFilename("cgo.gox"),
+		generatedGOXFileHeader+cgoContent,
+	)
+	sources = append(sources, filepath.Join(root, "cgo.gox"))
 	return root, sources
 }
 
-func realToolchainSourceSelection(
+type toolchainSourceMetadata struct {
+	GoFiles        []string
+	CgoFiles       []string
+	IgnoredGoFiles []string
+}
+
+func (metadata toolchainSourceMetadata) activeFiles() []string {
+	files := append([]string(nil), metadata.GoFiles...)
+	files = append(files, metadata.CgoFiles...)
+	sort.Strings(files)
+	return files
+}
+
+func realToolchainSourceMetadata(
 	t *testing.T,
 	compiler,
 	root string,
-) []string {
+) toolchainSourceMetadata {
 	t.Helper()
 	var command *exec.Cmd
 	switch compiler {
@@ -1277,16 +1605,11 @@ func realToolchainSourceSelection(
 	if err != nil {
 		t.Fatalf("%s list: %v", compiler, err)
 	}
-	var packageInfo struct {
-		GoFiles  []string
-		CgoFiles []string
-	}
-	if err := json.Unmarshal(output, &packageInfo); err != nil {
+	var metadata toolchainSourceMetadata
+	if err := json.Unmarshal(output, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	files := append(packageInfo.GoFiles, packageInfo.CgoFiles...)
-	sort.Strings(files)
-	return files
+	return metadata
 }
 
 func realCurrentGoSourceSelection(t *testing.T, root string) []string {

@@ -813,6 +813,9 @@ func findImmediatePackageGOXFiles(path string) ([]string, error) {
 
 	files := make([]string, 0)
 	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
 		if filepath.Ext(entry.Name()) != ".gox" {
 			continue
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -721,6 +722,47 @@ func TestSingleFileGenerationUsesImmediateSiblingsOnly(t *testing.T) {
 	}
 }
 
+func TestFindImmediatePackageGOXFilesIgnoresDirectoryNamedGOX(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	page := filepath.Join(root, "page.gox")
+	sibling := filepath.Join(root, "sibling.gox")
+	writeTestFile(t, root, "page.gox", packageIdentifierGOXSource("Page", "Button"))
+	writeTestFile(t, root, "sibling.gox", packageIdentifierGOXSource("Sibling", "Button"))
+	writeTestFile(t, root, "ordinary.txt", "ignored")
+	writeTestFile(t, root, "fixtures.gox/child.gox", "must not be read")
+	writeTestFile(t, root, "ordinary/child.gox", "must not be read")
+
+	files, err := findImmediatePackageGOXFiles(page)
+	if err != nil {
+		t.Fatalf("findImmediatePackageGOXFiles() error: %v", err)
+	}
+	want := []string{page, sibling}
+	if !reflect.DeepEqual(files, want) {
+		t.Fatalf("immediate package GOX files = %v, want %v", files, want)
+	}
+}
+
+func TestSingleFileGenerationIgnoresDirectoryNamedGOX(t *testing.T) {
+	root := newPackageIdentifierFixture(t)
+	source := filepath.Join(root, "page.gox")
+	writeTestFile(t, root, "page.gox", packageIdentifierGOXSource("Page", "Button"))
+	writeTestFile(t, root, "fixtures.gox/child.gox", "package other\n\nfunc Broken( {\n")
+	outputRoot := t.TempDir()
+
+	if _, err := runGeneratePathForTest(t, generateOptions{
+		path:   source,
+		outDir: outputRoot,
+	}); err != nil {
+		t.Fatalf("generatePath() error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outputRoot, "page.gox.go")); err != nil {
+		t.Fatalf("requested output missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outputRoot, "fixtures.gox", "child.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("child below .gox directory was generated: %v", err)
+	}
+}
+
 func TestSingleFileGenerationIgnoresInactiveSiblingForAllocation(t *testing.T) {
 	root := newPackageIdentifierFixture(t)
 	writeTestFile(t, root, "view_A.gox", packageIdentifierGOXSource("Other", "B"))
@@ -850,12 +892,18 @@ func TestSingleFileGenerationRejectsUnsafeSibling(t *testing.T) {
 	t.Run("irregular", func(t *testing.T) {
 		root := newPackageIdentifierFixture(t)
 		writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
-		if err := os.Mkdir(filepath.Join(root, "other.gox"), 0o755); err != nil {
-			t.Fatal(err)
+		socketPath := filepath.Join(root, "other.gox")
+		listener, err := net.Listen("unix", socketPath)
+		if err != nil {
+			t.Skipf("Unix-domain socket fixture is unavailable: %v", err)
 		}
+		t.Cleanup(func() {
+			_ = listener.Close()
+			_ = os.Remove(socketPath)
+		})
 		outputRoot := t.TempDir()
 
-		_, err := runGeneratePathForTest(t, generateOptions{
+		_, err = runGeneratePathForTest(t, generateOptions{
 			path:   filepath.Join(root, "view.gox"),
 			outDir: outputRoot,
 		})
@@ -872,7 +920,8 @@ func TestSingleFileGenerationRejectsUnsafeSibling(t *testing.T) {
 		root := newPackageIdentifierFixture(t)
 		writeTestFile(t, root, "view.gox", packageIdentifierGOXSource("View", "Button"))
 		external := filepath.Join(t.TempDir(), "external.gox")
-		if err := os.WriteFile(external, []byte("package outside\n\nfunc Broken( {\n"), 0o644); err != nil {
+		externalContent := []byte("package outside\n\nfunc Broken( {\n")
+		if err := os.WriteFile(external, externalContent, 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(external, filepath.Join(root, "other.gox")); err != nil {
@@ -887,6 +936,7 @@ func TestSingleFileGenerationRejectsUnsafeSibling(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "symlink") {
 			t.Fatalf("symlink sibling error = %v", err)
 		}
+		assertFileBytes(t, external, externalContent)
 		if _, statErr := os.Stat(filepath.Join(outputRoot, "view.gox.go")); !os.IsNotExist(statErr) {
 			t.Fatalf("requested output exists after symlink sibling: %v", statErr)
 		}
