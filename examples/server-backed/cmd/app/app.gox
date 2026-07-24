@@ -20,6 +20,11 @@ type GreetingRouteProps struct {
 	Target string
 }
 
+type TransitionGreetingRouteProps struct {
+	Name   string
+	Target string
+}
+
 type SavedGreetingRouteProps struct {
 	Target string
 }
@@ -82,6 +87,7 @@ func (owner *savedGreetingMutationOwner) cancel() {
 var router = gf.NewHashRouter([]gf.Route{
 	gf.RoutePath("/", homeRoute),
 	gf.RoutePath("/greeting", greetingRoute),
+	gf.RoutePath("/transition-greeting", transitionGreetingRoute),
 	gf.RoutePath("/saved-greeting", savedGreetingRoute),
 	gf.NotFoundRoute(notFoundRoute),
 })
@@ -113,6 +119,13 @@ func ServerBackedShell(props ServerBackedShellProps) gf.Node {
 					<gf.RouterLink To="/saved-greeting" Class="home-link" TestID="server-backed-saved-link">
 						Saved greeting
 					</gf.RouterLink>
+					<gf.RouterLink
+						To="/transition-greeting?name=Ada"
+						Class="home-link"
+						TestID="server-backed-transition-link"
+					>
+						Retained transition
+					</gf.RouterLink>
 				</nav>
 			</section>
 
@@ -129,6 +142,13 @@ func homeRoute(ctx gf.RouteContext) gf.Node {
 
 func greetingRoute(ctx gf.RouteContext) gf.Node {
 	return <GreetingRoute
+		Name={normalizedGreetingName(ctx.Query().Get("name"))}
+		Target={routeTarget(ctx)}
+	/>
+}
+
+func transitionGreetingRoute(ctx gf.RouteContext) gf.Node {
+	return <TransitionGreetingRoute
 		Name={normalizedGreetingName(ctx.Query().Get("name"))}
 		Target={routeTarget(ctx)}
 	/>
@@ -298,6 +318,116 @@ func GreetingRoute(props GreetingRouteProps) gf.Node {
 			)}
 			{resource.Ready() && (
 				<p class="status message" data-testid="greeting-message">{resource.Value}</p>
+			)}
+		</div>
+	)
+}
+
+func TransitionGreetingRoute(props TransitionGreetingRouteProps) gf.Node {
+	draft, setDraft := gf.UseState(props.Name)
+	committed, setCommitted := gf.UseState(committedGreeting{})
+	gf.UseEffect(func() gf.Cleanup {
+		if draft != props.Name {
+			setDraft(props.Name)
+		}
+		return nil
+	}, gf.Deps(props.Name))
+
+	resource, reload := gf.UseResource(greetingPath(props.Name), gf.FetchText)
+	gf.UseEffect(func() gf.Cleanup {
+		next, changed := nextCommittedGreeting(
+			committed,
+			props.Name,
+			props.Target,
+			resource,
+		)
+		if changed {
+			setCommitted(next)
+		}
+		return nil
+	}, gf.Deps(
+		props.Name,
+		props.Target,
+		int(resource.Status),
+		resource.Value,
+	))
+
+	submitGreeting := func(event gf.Event) {
+		event.PreventDefault()
+		next := normalizedGreetingName(draft)
+		if next != draft {
+			setDraft(next)
+		}
+		if next == props.Name {
+			reload()
+			return
+		}
+		gf.Navigate(gf.WithQuery("/transition-greeting", gf.QueryValues{
+			"name": {next},
+		}))
+	}
+
+	status := "loading"
+	if resource.Failed() {
+		status = "failed"
+	} else if committed.Ready &&
+		resource.Ready() &&
+		committed.Target == props.Target {
+		status = "ready"
+	} else if committed.Ready {
+		status = "pending"
+	}
+
+	return (
+		<div data-testid="server-backed-transition-route">
+			<p class="eyebrow" data-testid="server-backed-route-name">Retained transition route</p>
+			<h2>Prepared backend response</h2>
+			<p class="muted">Requested target</p>
+			<p class="route-target" data-testid="transition-requested-target">{props.Target}</p>
+			<p class="muted" data-testid="transition-status">{status}</p>
+
+			<form class="greeting-form" data-testid="transition-form" OnSubmit={submitGreeting}>
+				<label class="field">
+					<span>Name</span>
+					<input
+						data-testid="transition-name"
+						Type="text"
+						Value={draft}
+						OnInput={func(event gf.InputEvent) {
+							setDraft(event.Value())
+						}}
+					/>
+				</label>
+				<button data-testid="transition-submit" Type="submit">Prepare greeting</button>
+			</form>
+
+			{committed.Ready && (
+				<section class="transition-committed" data-testid="transition-committed-screen">
+					<p class="muted">Committed target</p>
+					<p class="route-target" data-testid="transition-committed-target">{committed.Target}</p>
+					<p class="status message" data-testid="transition-message">{committed.Message}</p>
+				</section>
+			)}
+
+			{status == "loading" && (
+				<p class="status loading" data-testid="transition-pending">
+					Preparing the initial greeting for {props.Name}...
+				</p>
+			)}
+			{status == "pending" && (
+				<p class="status loading" data-testid="transition-pending">
+					Preparing {props.Name} while the committed screen remains visible...
+				</p>
+			)}
+			{resource.Failed() && (
+				<div class="transition-failure">
+					<div class="status failed" data-testid="transition-error">{greetingErrorText(resource)}</div>
+					<button data-testid="transition-retry" Type="button" OnClick={func(gf.Event) {
+						reload()
+					}}>
+						Retry requested target
+					</button>
+				</div>
 			)}
 		</div>
 	)
