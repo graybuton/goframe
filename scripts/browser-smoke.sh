@@ -393,6 +393,11 @@ export GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT="${GOFRAME_SERVER_BACKED_CHROME_D
 node --experimental-websocket scripts/server-backed-browser-smoke.mjs
 
 echo
+echo "== History routing deployment pressure =="
+export GOFRAME_HISTORY_ROUTING_CHROME_DEBUG_PORT="${GOFRAME_HISTORY_ROUTING_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+GOXC="$GOXC" CHROME="$CHROME_BIN" node --experimental-websocket scripts/history-routing-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
