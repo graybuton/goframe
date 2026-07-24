@@ -18,6 +18,8 @@ This example shows a narrow integration pattern:
 - a controlled backend failure and recovery path through later navigation;
 - direct hash and browser back/forward navigation through the same router,
   resource, and route-to-form synchronization lifecycle;
+- a separate same-pattern transition route that retains its last committed
+  target and message while the requested target prepares;
 - a route-owned mutation form with client validation, pending and failure
   states, duplicate-submit suppression, and server-confirmed recovery;
 - committed-state confirmation through the existing `UseResource.reload`
@@ -65,6 +67,9 @@ Open <http://127.0.0.1:8080>.
   backend error and recovers after later valid navigation.
 - A delayed backend response is aborted when superseded or unmounted, and it
   cannot replace the current route result.
+- The `/transition-greeting` route keeps its requested target separate from one
+  committed target/message snapshot, so the previous screen can remain visible
+  while the next same-pattern query target prepares.
 - `gf.FetchText` is a low-level text loader, not a server framework or data
   framework.
 - The `/saved-greeting` route keeps the committed value in a read resource and
@@ -108,6 +113,11 @@ Routes exercised by the browser evidence are:
 #/greeting?name=Lin
 #/greeting?name=slow
 #/greeting?name=fail
+#/transition-greeting?name=Ada
+#/transition-greeting?name=Lin
+#/transition-greeting?name=Mia
+#/transition-greeting?name=slow
+#/transition-greeting?name=fail
 #/saved-greeting
 ```
 
@@ -116,6 +126,83 @@ key supersedes the previous generation and the route effect synchronizes the
 controlled draft. Navigating to `/` unmounts the greeting route, form, and
 resource owner. Both cancellation paths run the cleanup returned by
 `gf.FetchText` through `gf.UseResource` ownership.
+
+## Async Navigation Transition Pressure Test
+
+The separate `/transition-greeting?name=...` route measures whether current
+primitives can retain a committed screen while a same-pattern query target
+prepares. The current hash and requested target drive one `gf.UseResource`
+instance. One example-owned `committedGreeting` value holds the displayed name,
+route target, message, and ready marker. An effect copies the requested target
+and ready resource value into that snapshot through one state setter.
+
+### Proven
+
+Two browser runs demonstrated that:
+
+- a slow same-pattern transition keeps the previous committed target and
+  message visible while the hash and requested target already identify `slow`;
+- superseding slow work aborts its request, and `gf.UseResource` prevents the
+  stale result from committing;
+- displayed target and displayed data commit as one observed snapshot, with no
+  mixed target/message pair;
+- controlled failure and retry remain separate from the committed screen;
+- recovery, browser Back, and browser Forward use the same retained-screen and
+  paired-commit path;
+- unmounting the route aborts active slow work and produces no late route
+  activity or commit.
+
+The two runs produced identical behavioral counters:
+
+| Counter | Run 1 | Run 2 |
+|---|---:|---:|
+| transition requests started | 10 | 10 |
+| successful completions | 6 | 6 |
+| failed completions | 2 | 2 |
+| aborted requests | 2 | 2 |
+| transition commits | 6 | 6 |
+| retry attempts | 1 | 1 |
+| stale-result appearances | 0 | 0 |
+| invalid committed pairs | 0 | 0 |
+| old-screen losses after initial commit | 0 | 0 |
+
+### Measured Coordination
+
+| Application-owned concern | Count |
+|---|---:|
+| state slots | 2 |
+| effects | 2 |
+| `UseResource` instances | 1 |
+| reload handoff points | 1 |
+| manual generation counters | 0 |
+| manual attempt IDs | 0 |
+| manual stale-result guards | 0 |
+| manual cleanup callbacks | 0 |
+| app-owned `AbortController` instances | 0 |
+| example-local helper types/functions | 2 |
+| route/data commit handoff points | 1 |
+
+The transition production change adds 161 Go/GOX lines. The browser harness
+adds 907 lines and removes 14, a net increase of 893 lines. These are source
+measurements, not API or size-budget thresholds.
+
+### Remaining Limitation
+
+`location.hash` changes before data readiness. The displayed target and data
+commit together, but the example does not provide an atomic URL + screen + data
+transaction.
+
+The retained-screen evidence covers same-pattern query transitions. The
+cross-pattern scenario proves unmount cancellation only; it does not prove
+cross-pattern old-screen retention. The evidence does not cover redirects,
+blockers, route loaders, a global cache, or prefetch. The existing `/greeting`
+route remains the baseline where pending navigation removes the previous ready
+message.
+
+### Decision
+
+Result A: Current primitives are sufficient for the demonstrated same-pattern
+retained transition flow; no public transition or loader API is selected.
 
 ## Mutation Flow
 
@@ -174,10 +261,14 @@ request context before commit. Unsupported methods return HTTP 405 with
 | cancellation | `gf.UseResource` cleanup invoking `gf.FetchText` cleanup |
 | stale completion suppression | `gf.UseResource` generation checks and `gf.FetchText` active state |
 | loading/failed/ready UI | explicit branches in `GreetingRoute` |
+| transition requested target | current `/transition-greeting` route props and resource key |
+| transition committed screen | one `TransitionGreetingRoute` state slot containing target and message |
+| transition commit handoff | one effect commits a ready resource for the current requested target |
+| transition retry | the active resource's returned `reload` function |
 | global shell retention | `App`, `ServerBackedShell`, and the route-content container outside the matched route subtree |
 | same-pattern form/input retention | pattern-keyed `RouterView` reconciliation retains the greeting form and input across query changes and reloads |
-| old-screen retention during pending | not provided; the route shows loading and removes the previous ready result |
-| atomic route + data commit | not provided; the hash target commits before the resource is ready |
+| baseline greeting old-screen retention during pending | not provided; `GreetingRoute` shows loading and removes the previous ready result |
+| atomic URL + screen + data commit | not provided; the hash target commits before the resource is ready |
 | controlled mutation draft | `SavedGreetingRoute` and its dedicated `gf.UseState` slot |
 | client validation | `SavedGreetingRoute` submit handler trims the draft and rejects an empty name |
 | mutation pending state | route-owned mutation status plus the active request owner |
@@ -253,6 +344,13 @@ behavioral outcomes, balanced scheduling, attributable component work, and no
 input update leaking into the next scenario rather than fixing incidental DOM
 totals as product contracts.
 
+Each run then performs ten isolated transition-route fetches: six successful
+completions, two controlled failures, and two aborts. Six valid committed
+target/message pairs were observed, including Back and Forward. One failed
+target was retried. No stale result, invalid pair, or old-screen loss after the
+initial commit was observed. The transition route mounted once and unmounted
+once, while app, shell, and route-content-container identity remained stable.
+
 Direct, Back, and Forward navigation each prove that route target, resource key,
 controlled input, and result refer to the same normalized name. Same-target
 success and failure submissions keep the hash unchanged while starting a new
@@ -313,6 +411,21 @@ cost covers the saved route, mutation state and owner, browser POST transport,
 and visible lifecycle branches. It does not authorize a budget increase or a
 shared runtime abstraction.
 
+The transition pressure-test branch was also compared with its frozen base
+using Go `1.22.12` and TinyGo `0.41.1`. The raw WASM was resolved through
+`asset-manifest.json`; compressed measurements use `gzip -n -9`, Brotli quality
+11, and Zstandard level 19.
+
+| Artifact | Frozen base | Transition branch | Delta |
+|---|---:|---:|---:|
+| raw WASM | 180,336 B | 194,393 B | +14,057 B |
+| gzip | 76,325 B | 80,475 B | +4,150 B |
+| Brotli | 63,513 B | 66,896 B | +3,383 B |
+| Zstandard | 67,426 B | 71,131 B | +3,705 B |
+
+These values are informational. No server-backed threshold or repository size
+budget changed.
+
 ## Evidence Verdict
 
 Verdict: **SUFFICIENT**.
@@ -343,8 +456,10 @@ examples/server-backed/
 │   └── styles.css
 └── cmd/
     ├── app/
-    │   ├── app.gox             # routes, read resources, and mutation owner
-    │   └── mutation_js.go      # example-local browser POST transport
+    │   ├── app.gox             # routes, resources, transition UI, and mutation owner
+    │   ├── mutation_js.go      # example-local browser POST transport
+    │   ├── transition.go       # committed transition snapshot helper
+    │   └── transition_test.go  # pure snapshot handoff coverage
     └── server/
         ├── main.go             # plain Go net/http server
         ├── saved_greeting.go   # synchronized store and endpoint
@@ -368,10 +483,12 @@ localhost port, opens the app through Chrome/CDP, and verifies route-driven
 loading, same-target reload/retry, direct and history-driven input
 synchronization, exact request aborts, stale-result suppression, controlled
 failure and recovery, global shell retention, same-pattern form/input retention,
-expected cross-pattern remounts, saved-state loading, validation without a POST,
-duplicate-write suppression, failure preservation, successful reload
-confirmation, mutation unmount cancellation, route-load versus reload
-attribution, final backend/UI consistency, and update/DOM bridge evidence.
+expected cross-pattern remounts, retained transition screens, paired committed
+target/data observations, transition failure/retry/recovery, saved-state
+loading, validation without a POST, duplicate-write suppression, failure
+preservation, successful reload confirmation, mutation unmount cancellation,
+route-load versus reload attribution, final backend/UI consistency, and
+update/DOM bridge evidence.
 
 ## Non-goals
 
@@ -387,6 +504,7 @@ This example intentionally does not provide:
 - RPC or a data transport framework;
 - SSR or hydration;
 - route loaders;
+- atomic URL + screen + data transitions;
 - auth/session helpers;
 - a global resource cache;
 - JSON/data framework behavior.
