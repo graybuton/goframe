@@ -139,3 +139,16 @@ h2 {
   color: #166534;
   font-weight: 700;
 }
+
+.transition-committed {
+  border: 1px solid #bbf7d0;
+  border-radius: 18px;
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.transition-failure {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
