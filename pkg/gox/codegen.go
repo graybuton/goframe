@@ -2,10 +2,12 @@ package gox
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	gotoken "go/token"
 	"html"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -21,10 +23,12 @@ func Codegen(node Node) (string, error) {
 
 type codegenContext struct {
 	componentIdentity     string
+	sourceIdentity        string
 	sourceName            string
 	declareComponentTypes bool
 	componentTypes        map[string]componentTypeDeclaration
 	componentOrder        []string
+	componentIdentifiers  map[string]string
 	importAliases         map[string]string
 	invalidImportAliases  map[string]string
 	diagnosticFilename    string
@@ -44,10 +48,15 @@ func newCodegenContext(componentIdentity string, sourceName string, declareCompo
 	}
 	return &codegenContext{
 		componentIdentity:     componentIdentity,
+		sourceIdentity:        sourceName,
 		sourceName:            sanitizeIdentifierPart(sourceName),
 		declareComponentTypes: declareComponentTypes,
 		componentTypes:        make(map[string]componentTypeDeclaration),
 	}
+}
+
+func (ctx *codegenContext) withComponentIdentifiers(identifiers map[string]string) {
+	ctx.componentIdentifiers = identifiers
 }
 
 type componentTypeDeclaration struct {
@@ -141,6 +150,9 @@ func (ctx *codegenContext) componentTypeExpression(component componentTag) strin
 		return declaration.name
 	}
 	name := "_goxComponent_" + ctx.sourceName + "_" + sanitizeIdentifierPart(component.varPart)
+	if allocated, ok := ctx.componentIdentifiers[component.raw]; ok {
+		name = allocated
+	}
 	ctx.componentTypes[component.raw] = componentTypeDeclaration{
 		name:      name,
 		id:        component.id,
@@ -148,6 +160,108 @@ func (ctx *codegenContext) componentTypeExpression(component componentTag) strin
 	}
 	ctx.componentOrder = append(ctx.componentOrder, component.raw)
 	return name
+}
+
+type identifierOwner struct {
+	sourceName   string
+	componentTag string
+	componentID  string
+}
+
+func (owner identifierOwner) stableKey() string {
+	return owner.sourceName + "\x00" + owner.componentTag + "\x00" + owner.componentID
+}
+
+type identifierAllocator struct {
+	used map[string]struct{}
+}
+
+func newIdentifierAllocator(reserved map[string]struct{}) *identifierAllocator {
+	used := make(map[string]struct{}, len(reserved))
+	for name := range reserved {
+		used[name] = struct{}{}
+	}
+	return &identifierAllocator{used: used}
+}
+
+func (allocator *identifierAllocator) reserve(name string) bool {
+	if _, exists := allocator.used[name]; exists {
+		return false
+	}
+	allocator.used[name] = struct{}{}
+	return true
+}
+
+func (allocator *identifierAllocator) allocate(candidate string, owner identifierOwner) string {
+	digest := sha256.Sum256([]byte(owner.stableKey()))
+	base := fmt.Sprintf("%s_%x", candidate, digest[:6])
+	name := base
+	for sequence := 2; !allocator.reserve(name); sequence++ {
+		name = fmt.Sprintf("%s_%d", base, sequence)
+	}
+	return name
+}
+
+type componentIdentifierOwner struct {
+	identifierOwner
+	context   int
+	raw       string
+	candidate string
+}
+
+func allocateComponentIdentifiers(contexts []*codegenContext, reserved map[string]struct{}) []map[string]string {
+	groups := make(map[string][]componentIdentifierOwner)
+	for contextIndex, ctx := range contexts {
+		for raw, declaration := range ctx.componentTypes {
+			owner := componentIdentifierOwner{
+				identifierOwner: identifierOwner{
+					sourceName:   ctx.sourceIdentity,
+					componentTag: raw,
+					componentID:  declaration.id,
+				},
+				context:   contextIndex,
+				raw:       raw,
+				candidate: declaration.name,
+			}
+			groups[owner.candidate] = append(groups[owner.candidate], owner)
+		}
+	}
+
+	candidates := make([]string, 0, len(groups))
+	for candidate := range groups {
+		candidates = append(candidates, candidate)
+	}
+	sort.Strings(candidates)
+
+	allocator := newIdentifierAllocator(reserved)
+	identifiers := make([]map[string]string, len(contexts))
+	for index, ctx := range contexts {
+		identifiers[index] = make(map[string]string, len(ctx.componentTypes))
+	}
+	pending := make([]componentIdentifierOwner, 0)
+	for _, candidate := range candidates {
+		owners := groups[candidate]
+		sort.Slice(owners, func(left, right int) bool {
+			return owners[left].stableKey() < owners[right].stableKey()
+		})
+		if allocator.reserve(candidate) {
+			owner := owners[0]
+			identifiers[owner.context][owner.raw] = candidate
+			owners = owners[1:]
+		}
+		pending = append(pending, owners...)
+	}
+
+	sort.Slice(pending, func(left, right int) bool {
+		if pending[left].candidate != pending[right].candidate {
+			return pending[left].candidate < pending[right].candidate
+		}
+		return pending[left].stableKey() < pending[right].stableKey()
+	})
+	for _, owner := range pending {
+		identifiers[owner.context][owner.raw] = allocator.allocate(owner.candidate, owner.identifierOwner)
+	}
+	return identifiers
 }
 
 func (ctx *codegenContext) declarations() string {

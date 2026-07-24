@@ -10,6 +10,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -27,6 +28,18 @@ type GenerateOptions struct {
 	PackageIdentity string
 }
 
+// PackageSource is one source file participating in package generation.
+type PackageSource struct {
+	Filename string
+	Source   []byte
+}
+
+// PackageGenerateOptions configures coordinated generation for one Go package.
+type PackageGenerateOptions struct {
+	PackageIdentity string
+	AuthoredSources []PackageSource
+}
+
 // Generate transpiles all GOX element roots in a Go-like source file.
 func Generate(source []byte) ([]byte, error) {
 	return GenerateNamed("gox", source)
@@ -42,14 +55,169 @@ func GenerateWithOptions(source []byte, options GenerateOptions) ([]byte, error)
 	if options.Filename == "" {
 		options.Filename = "gox"
 	}
-	input := string(source)
-	componentIdentity := options.PackageIdentity
+	generated, err := generatePackageSources([]generationSource{{
+		PackageSource: PackageSource{Filename: options.Filename, Source: source},
+		options:       options,
+	}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return generated[options.Filename], nil
+}
+
+// GeneratePackageWithOptions transpiles all GOX sources in one Go package
+// using one package-level generated-identifier allocation.
+func GeneratePackageWithOptions(sources []PackageSource, options PackageGenerateOptions) (map[string][]byte, error) {
+	packageSources := make([]generationSource, 0, len(sources))
+	for _, source := range sources {
+		if source.Filename == "" {
+			return nil, fmt.Errorf("gox: package source filename is required")
+		}
+		packageSources = append(packageSources, generationSource{
+			PackageSource: source,
+			options: GenerateOptions{
+				Filename:        source.Filename,
+				PackageIdentity: options.PackageIdentity,
+			},
+		})
+	}
+	return generatePackageSources(packageSources, options.AuthoredSources)
+}
+
+type generationSource struct {
+	PackageSource
+	options GenerateOptions
+}
+
+type generationPlan struct {
+	filename          string
+	input             string
+	componentIdentity string
+	aliases           map[string]string
+	invalidAliases    map[string]string
+	discovery         *codegenContext
+	packageName       string
+}
+
+func generatePackageSources(sources []generationSource, authoredSources []PackageSource) (map[string][]byte, error) {
+	ordered := append([]generationSource(nil), sources...)
+	sort.Slice(ordered, func(left, right int) bool {
+		return ordered[left].Filename < ordered[right].Filename
+	})
+	for index := 1; index < len(ordered); index++ {
+		if ordered[index-1].Filename == ordered[index].Filename {
+			return nil, fmt.Errorf("gox: duplicate package source filename %q", ordered[index].Filename)
+		}
+	}
+
+	plans := make([]generationPlan, 0, len(ordered))
+	contexts := make([]*codegenContext, 0, len(ordered))
+	reserved := make(map[string]struct{})
+	packageName := ""
+	for _, source := range ordered {
+		plan, identifiers, err := prepareGenerationPlan(source)
+		if err != nil {
+			return nil, err
+		}
+		if packageName == "" {
+			packageName = plan.packageName
+		} else if plan.packageName != packageName {
+			return nil, fmt.Errorf("%s: package %s does not match package %s", plan.filename, plan.packageName, packageName)
+		}
+		for identifier := range identifiers {
+			reserved[identifier] = struct{}{}
+		}
+		plans = append(plans, plan)
+		contexts = append(contexts, plan.discovery)
+	}
+
+	authored := append([]PackageSource(nil), authoredSources...)
+	sort.Slice(authored, func(left, right int) bool {
+		return authored[left].Filename < authored[right].Filename
+	})
+	for _, source := range authored {
+		authoredPackage, identifiers, err := packageLevelIdentifiers(source.Filename, string(source.Source))
+		if err != nil {
+			return nil, err
+		}
+		if authoredPackage != packageName {
+			continue
+		}
+		for identifier := range identifiers {
+			reserved[identifier] = struct{}{}
+		}
+	}
+
+	allocated := allocateComponentIdentifiers(contexts, reserved)
+	generated := make(map[string][]byte, len(plans))
+	for index, plan := range plans {
+		output, err := renderGenerationPlan(plan, allocated[index])
+		if err != nil {
+			return nil, err
+		}
+		generated[plan.filename] = output
+	}
+	return generated, nil
+}
+
+func prepareGenerationPlan(source generationSource) (generationPlan, map[string]struct{}, error) {
+	input := string(source.Source)
+	componentIdentity := source.options.PackageIdentity
 	if componentIdentity == "" {
 		componentIdentity = packageNameFromSource(input)
 	}
-	ctx := newCodegenContext(componentIdentity, options.Filename, true)
-	aliases, invalidAliases := importAliasesFromSource(options.Filename, input)
-	ctx.withImportAliases(aliases, invalidAliases)
+	aliases, invalidAliases := importAliasesFromSource(source.Filename, input)
+	discovery := newCodegenContext(componentIdentity, source.Filename, true)
+	discovery.withImportAliases(aliases, invalidAliases)
+	generatedSource, generated, err := lowerGOXSource(input, source.Filename, discovery)
+	if err != nil {
+		return generationPlan{}, nil, err
+	}
+	if generated == 0 {
+		return generationPlan{}, nil, fmt.Errorf("%s: no GOX markup elements found", source.Filename)
+	}
+	packageName, identifiers, err := packageLevelIdentifiers(source.Filename, generatedSource)
+	if err != nil {
+		return generationPlan{}, nil, err
+	}
+	return generationPlan{
+		filename:          source.Filename,
+		input:             input,
+		componentIdentity: componentIdentity,
+		aliases:           aliases,
+		invalidAliases:    invalidAliases,
+		discovery:         discovery,
+		packageName:       packageName,
+	}, identifiers, nil
+}
+
+func renderGenerationPlan(plan generationPlan, identifiers map[string]string) ([]byte, error) {
+	ctx := newCodegenContext(plan.componentIdentity, plan.filename, true)
+	ctx.withImportAliases(plan.aliases, plan.invalidAliases)
+	ctx.withComponentIdentifiers(identifiers)
+	generatedSource, generated, err := lowerGOXSource(plan.input, plan.filename, ctx)
+	if err != nil {
+		return nil, err
+	}
+	if generated == 0 {
+		return nil, fmt.Errorf("%s: no GOX markup elements found", plan.filename)
+	}
+	if declarations := ctx.declarations(); declarations != "" {
+		inserted, err := insertGeneratedDeclarations(plan.filename, generatedSource, declarations)
+		if err != nil {
+			return nil, err
+		}
+		generatedSource = inserted
+	}
+
+	formatted, err := format.Source(append([]byte(generatedHeader), []byte(generatedSource)...))
+	if err != nil {
+		return nil, fmt.Errorf("%s: generated Go source is invalid: %w", plan.filename, err)
+	}
+	return formatted, nil
+}
+
+func lowerGOXSource(input, filename string, ctx *codegenContext) (string, int, error) {
 	var output bytes.Buffer
 	cursor := 0
 	searchFrom := 0
@@ -62,17 +230,17 @@ func GenerateWithOptions(source []byte, options GenerateOptions) ([]byte, error)
 		}
 
 		line, column := lineColumn(input, start)
-		element, consumed, positions, err := parseElementAtWithPositions(input[start:], options.Filename, line, column)
+		element, consumed, positions, err := parseElementAtWithPositions(input[start:], filename, line, column)
 		if err != nil {
-			return nil, err
+			return "", 0, err
 		}
-		ctx.withDiagnostics(options.Filename, input[start:], line, column, positions)
+		ctx.withDiagnostics(filename, input[start:], line, column, positions)
 		code, err := ctx.codegen(element)
 		if err != nil {
 			if _, ok := asDiagnosticError(err); ok {
-				return nil, err
+				return "", 0, err
 			}
-			return nil, diagnosticError(options.Filename, line, column, err.Error(), sourceLine(input, start))
+			return "", 0, diagnosticError(filename, line, column, err.Error(), sourceLine(input, start))
 		}
 
 		replaceStart, replaceEnd := unwrapReturnParentheses(input, start, start+consumed)
@@ -83,24 +251,7 @@ func GenerateWithOptions(source []byte, options GenerateOptions) ([]byte, error)
 		generated++
 	}
 	output.WriteString(input[cursor:])
-	generatedSource := output.String()
-	if declarations := ctx.declarations(); declarations != "" {
-		inserted, err := insertGeneratedDeclarations(options.Filename, generatedSource, declarations)
-		if err != nil {
-			return nil, err
-		}
-		generatedSource = inserted
-	}
-
-	if generated == 0 {
-		return nil, fmt.Errorf("%s: no GOX markup elements found", options.Filename)
-	}
-
-	formatted, err := format.Source(append([]byte(generatedHeader), []byte(generatedSource)...))
-	if err != nil {
-		return nil, fmt.Errorf("%s: generated Go source is invalid: %w", options.Filename, err)
-	}
-	return formatted, nil
+	return output.String(), generated, nil
 }
 
 // GenerateFile writes a .gox.go file next to the source .gox file.
@@ -302,6 +453,40 @@ func importAliasesFromSource(filename, input string) (map[string]string, map[str
 		}
 	}
 	return aliases, invalid
+}
+
+func packageLevelIdentifiers(filename, input string) (string, map[string]struct{}, error) {
+	file, err := parser.ParseFile(
+		gotoken.NewFileSet(),
+		filename,
+		input,
+		parser.ParseComments|parser.AllErrors|parser.SkipObjectResolution,
+	)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: parse transformed Go source before generated declarations: %w", filename, err)
+	}
+
+	identifiers := make(map[string]struct{})
+	for _, declaration := range file.Decls {
+		switch declaration := declaration.(type) {
+		case *ast.FuncDecl:
+			if declaration.Recv == nil {
+				identifiers[declaration.Name.Name] = struct{}{}
+			}
+		case *ast.GenDecl:
+			for _, spec := range declaration.Specs {
+				switch spec := spec.(type) {
+				case *ast.ValueSpec:
+					for _, name := range spec.Names {
+						identifiers[name.Name] = struct{}{}
+					}
+				case *ast.TypeSpec:
+					identifiers[spec.Name.Name] = struct{}{}
+				}
+			}
+		}
+	}
+	return file.Name.Name, identifiers, nil
 }
 
 func insertGeneratedDeclarations(filename, input, declarations string) (string, error) {

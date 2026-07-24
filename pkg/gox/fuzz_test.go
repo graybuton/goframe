@@ -105,6 +105,28 @@ func View() any {
 	return <Button />
 }
 `,
+		`package main
+
+import A_B "example.com/components/A_B"
+
+func View() any {
+	return <><A_B_C /><A_B.C /></>
+}
+`,
+		`package main
+
+func View() any {
+	return <><A_B /><A-B /><A.B /><A/B /></>
+}
+`,
+		`package main
+
+var _goxComponent_input_Button = 1
+
+func View() any {
+	return <Button />
+}
+`,
 	} {
 		f.Add(seed)
 	}

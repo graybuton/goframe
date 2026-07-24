@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/graybuton/goframe/pkg/gox"
 )
 
 type generateOptions struct {
@@ -66,6 +64,10 @@ func parseGenerateOptions(args []string) (generateOptions, error) {
 }
 
 func generatePath(options generateOptions, requireFiles bool) error {
+	pathInfo, err := os.Lstat(options.path)
+	if err != nil {
+		return err
+	}
 	files, err := findGOXFiles(options.path)
 	if err != nil {
 		return err
@@ -77,33 +79,50 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		fmt.Printf("no .gox files found below %s; building Go sources\n", options.path)
 		return nil
 	}
-
-	if options.inPlace {
-		appDir, err := generationAppDir(options.path)
+	selection := defaultGenerationSourceSelection()
+	appDir, err := generationAppDir(options.path)
+	if err != nil {
+		return err
+	}
+	request := goxGenerationRequest{
+		allocationFiles:  files,
+		publicationFiles: files,
+	}
+	if !pathInfo.IsDir() {
+		request.allocationFiles, err = findImmediatePackageGOXFiles(files[0])
 		if err != nil {
 			return err
 		}
+		request.verifyUnpublishedOutputs = true
+		request.requestedSource = files[0]
+	}
+
+	if options.inPlace {
 		fmt.Fprintln(os.Stderr, "warning: --in-place writes generated compiler output into the source tree; use only for debugging or legacy workflows")
 		for _, file := range files {
 			output := file + ".go"
 			if err := validatePathBelowRoot(appDir, output, "in-place generated file", true); err != nil {
 				return err
 			}
-			if err := generateFileSafely(file, output, gox.GenerateOptions{
-				Filename:        file,
-				PackageIdentity: packageIdentityForFile(appDir, file),
-			}); err != nil {
-				return fmt.Errorf("generate failed for %s: %w", file, err)
-			}
-			fmt.Printf("generated %s -> %s\n", file, output)
+		}
+		active, err := generateFilesIntoDirectoryWithSelectionRequestResult(
+			appDir,
+			appDir,
+			request,
+			selection,
+		)
+		if err != nil {
+			return err
+		}
+		if len(active) == 0 && requireFiles {
+			return noActiveGOXFilesError(options.path, selection)
+		}
+		for _, target := range active {
+			fmt.Printf("generated %s -> %s\n", target.source, target.output)
 		}
 		return nil
 	}
 
-	appDir, err := generationAppDir(options.path)
-	if err != nil {
-		return err
-	}
 	outputRoot := options.outDir
 	if outputRoot == "" {
 		layout, err := newBuildLayout(layoutOptions{appDir: appDir, workspace: options.workspace})
@@ -135,13 +154,21 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		if err := validatePathBelowRoot(outputRoot, output, "generated file", true); err != nil {
 			return err
 		}
-		if err := generateFileSafely(file, output, gox.GenerateOptions{
-			Filename:        file,
-			PackageIdentity: packageIdentityForFile(appDir, file),
-		}); err != nil {
-			return fmt.Errorf("generate failed for %s: %w", file, err)
-		}
-		fmt.Printf("generated %s -> %s\n", file, output)
+	}
+	active, err := generateFilesIntoDirectoryWithSelectionRequestResult(
+		appDir,
+		outputRoot,
+		request,
+		selection,
+	)
+	if err != nil {
+		return err
+	}
+	if len(active) == 0 && requireFiles {
+		return noActiveGOXFilesError(options.path, selection)
+	}
+	for _, target := range active {
+		fmt.Printf("generated %s -> %s\n", target.source, target.output)
 	}
 	return nil
 }
