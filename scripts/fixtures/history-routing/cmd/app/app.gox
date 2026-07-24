@@ -1,0 +1,229 @@
+package main
+
+import (
+	gf "github.com/graybuton/goframe/pkg/goframe"
+	"github.com/graybuton/goframe/scripts/fixtures/history-routing/internal/historyroute"
+)
+
+type evidenceEvent int
+
+const (
+	evidencePush evidenceEvent = iota
+	evidenceReplace
+	evidencePopstate
+	evidenceRouterMount
+	evidenceRouterUnmount
+	evidenceListenerAdd
+	evidenceListenerRemove
+)
+
+type evidenceState struct {
+	Pushes           int
+	Replaces         int
+	Popstates        int
+	RouterMounts     int
+	RouterUnmounts   int
+	ListenerAdds     int
+	ListenerRemovals int
+}
+
+type historyRouterProps struct {
+	Record func(evidenceEvent)
+}
+
+var historyRouterType = gf.NewComponentType(
+	"fixture.history-routing.Router",
+	"HistoryRoutingFixtureRouter",
+)
+
+func App() gf.Node {
+	routerActive, setRouterActive := gf.UseState(true)
+	evidence, record := gf.UseReducer(evidenceState{}, reduceEvidence)
+	router := historyRouterNode(routerActive, record)
+
+	return (
+		<main class="history-app" data-testid="history-app">
+			<header>
+				<p>History API deployment pressure fixture</p>
+				<button
+					Type="button"
+					data-testid="history-router-unmount"
+					OnClick={func() {
+						setRouterActive(false)
+					}}
+				>
+					Unmount router owner
+				</button>
+			</header>
+
+			{router}
+
+			<section class="history-evidence" data-testid="history-evidence">
+				<span data-testid="history-navigation-count">
+					{gf.ToString(evidence.Pushes + evidence.Replaces)}
+				</span>
+				<span data-testid="history-push-count">{gf.ToString(evidence.Pushes)}</span>
+				<span data-testid="history-replace-count">{gf.ToString(evidence.Replaces)}</span>
+				<span data-testid="history-popstate-count">{gf.ToString(evidence.Popstates)}</span>
+				<span data-testid="history-router-mount-count">{gf.ToString(evidence.RouterMounts)}</span>
+				<span data-testid="history-router-unmount-count">{gf.ToString(evidence.RouterUnmounts)}</span>
+				<span data-testid="history-listener-add-count">{gf.ToString(evidence.ListenerAdds)}</span>
+				<span data-testid="history-listener-remove-count">{gf.ToString(evidence.ListenerRemovals)}</span>
+			</section>
+		</main>
+	)
+}
+
+func historyRouterNode(active bool, record func(evidenceEvent)) gf.Node {
+	if active {
+		return gf.ComponentT(
+			historyRouterType,
+			historyRouterProps{Record: record},
+			renderHistoryRouter,
+		)
+	}
+	return gf.El(
+		"section",
+		gf.Props{
+			"class":       "history-card",
+			"data-testid": "history-router-inactive",
+		},
+		gf.El("p", nil, gf.Text("The router owner is unmounted.")),
+	)
+}
+
+func reduceEvidence(state evidenceState, event evidenceEvent) evidenceState {
+	switch event {
+	case evidencePush:
+		state.Pushes++
+	case evidenceReplace:
+		state.Replaces++
+	case evidencePopstate:
+		state.Popstates++
+	case evidenceRouterMount:
+		state.RouterMounts++
+	case evidenceRouterUnmount:
+		state.RouterUnmounts++
+	case evidenceListenerAdd:
+		state.ListenerAdds++
+	case evidenceListenerRemove:
+		state.ListenerRemovals++
+	}
+	return state
+}
+
+func renderHistoryRouter(props historyRouterProps) gf.Node {
+	base := browserHistoryBasePath()
+	current, setCurrent := gf.UseState(browserHistoryCurrentTarget(base))
+
+	gf.UseEffect(func() gf.Cleanup {
+		props.Record(evidenceRouterMount)
+		props.Record(evidenceListenerAdd)
+		cleanup := browserHistorySubscribe(base, func(target string) {
+			props.Record(evidencePopstate)
+			setCurrent(target)
+		})
+		return func() {
+			cleanup()
+			props.Record(evidenceListenerRemove)
+			props.Record(evidenceRouterUnmount)
+		}
+	})
+
+	push := func(target string) {
+		setCurrent(browserHistoryPush(base, target))
+		props.Record(evidencePush)
+	}
+	replace := func(target string) {
+		setCurrent(browserHistoryReplace(base, target))
+		props.Record(evidenceReplace)
+	}
+
+	homeHref, _ := historyroute.LocationForTarget(base, "/")
+	userHref, _ := historyroute.LocationForTarget(base, "/users/42")
+	searchHref, _ := historyroute.LocationForTarget(base, "/search?q=goframe")
+	match := historyroute.MatchTarget(current)
+	goHome := func(event gf.Event) {
+		event.PreventDefault()
+		push("/")
+	}
+	goUser := func(event gf.Event) {
+		event.PreventDefault()
+		push("/users/42")
+	}
+	goSearch := func(event gf.Event) {
+		event.PreventDefault()
+		push("/search?q=goframe")
+	}
+	replaceSettings := func() {
+		replace("/settings/")
+	}
+	goNotFound := func() {
+		push("/does-not-exist")
+	}
+
+	notFound := historyNotFoundNode(match.NotFound)
+
+	return (
+		<section class="history-card" data-testid="history-router-owner">
+			<nav class="history-nav">
+				<a
+					href={homeHref}
+					data-testid="history-home-link"
+					OnClick={goHome}
+				>
+					Home
+				</a>
+				<a
+					href={userHref}
+					data-testid="history-user-link"
+					OnClick={goUser}
+				>
+					User 42
+				</a>
+				<a
+					href={searchHref}
+					data-testid="history-search-link"
+					OnClick={goSearch}
+				>
+					Search
+				</a>
+				<button
+					Type="button"
+					data-testid="history-settings-replace"
+					OnClick={replaceSettings}
+				>
+					Replace with settings
+				</button>
+				<button
+					Type="button"
+					data-testid="history-not-found-link"
+					OnClick={goNotFound}
+				>
+					Unknown route
+				</button>
+			</nav>
+
+			<div data-testid="history-route-view">
+				<p data-testid="history-route-name">{match.Name}</p>
+				<p data-testid="history-route-target">{match.Target}</p>
+				<p data-testid="history-route-query">{match.RawQuery}</p>
+				<p data-testid="history-route-param">{match.Param}</p>
+				<p data-testid="history-route-query-value">{match.QueryValue}</p>
+				<p data-testid="history-base-path">{base}</p>
+				{notFound}
+			</div>
+		</section>
+	)
+}
+
+func historyNotFoundNode(notFound bool) gf.Node {
+	if !notFound {
+		return gf.Empty()
+	}
+	return gf.El(
+		"p",
+		gf.Props{"data-testid": "history-not-found"},
+		gf.Text("No application route matches this target."),
+	)
+}
