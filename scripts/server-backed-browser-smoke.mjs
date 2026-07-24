@@ -32,6 +32,12 @@ const staleSettleMS = slowDelayMS + 300;
 const failureName = "fail";
 const failureStatus = "failed";
 const failureMessage = "goframe: fetch returned HTTP 500";
+const transitionInitialName = "Ada";
+const transitionInitialMessage = "Hello, Ada, from Go backend!";
+const transitionFastName = "Lin";
+const transitionFastMessage = "Hello, Lin, from Go backend!";
+const transitionHistoryName = "Mia";
+const transitionHistoryMessage = "Hello, Mia, from Go backend!";
 const savedGreetingTarget = "/saved-greeting";
 const savedGreetingHash = `#${savedGreetingTarget}`;
 const savedInitialName = "GoFrame";
@@ -46,6 +52,7 @@ const componentNames = [
     "RouterRoute",
     "HomeRoute",
     "GreetingRoute",
+    "TransitionGreetingRoute",
     "SavedGreetingRoute",
     "NotFoundRoute",
 ];
@@ -456,6 +463,346 @@ try {
     ], "route targets visited");
     console.log(`server-backed async navigation evidence: ${JSON.stringify(routeEvidence)}`);
 
+    await startScenario(client, "transition-initial-commit");
+    await navigateTransitionHash(client, transitionInitialName);
+    await waitForTransitionInitialLoading(client, transitionInitialName, "transition initial Ada loading");
+    await waitForTransitionCommitted(
+        client,
+        transitionInitialName,
+        transitionInitialMessage,
+        "transition initial Ada commit",
+    );
+    const transitionInitialReport = await finishScenario(client, "transition-initial-commit");
+    assertTransitionRouteReport(transitionInitialReport, "transition initial commit", {
+        outcome: "success",
+        commits: 1,
+        routeChanges: 1,
+        samePattern: false,
+    });
+    assertState(await appState(client), {
+        route: "transitionGreeting",
+        hash: transitionGreetingHash(transitionInitialName),
+        transitionRequestedTarget: transitionGreetingTarget(transitionInitialName),
+        transitionCommittedTarget: transitionGreetingTarget(transitionInitialName),
+        transitionStatus: "ready",
+        transitionMessage: transitionInitialMessage,
+        transitionInput: transitionInitialName,
+        transitionPending: false,
+        transitionFailed: false,
+        transitionCommittedScreen: true,
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+    }, "server-backed transition initial commit");
+
+    await prepareTransitionName(client, slowName);
+    await startScenario(client, "transition-slow-start");
+    await dispatchTransitionSubmit(client);
+    const transitionSlowRequest = await waitForTransitionSlowActive(
+        client,
+        transitionInitialName,
+        transitionInitialMessage,
+        "transition slow request active",
+    );
+    const transitionSlowReport = await finishScenario(client, "transition-slow-start");
+    assertTransitionRouteReport(transitionSlowReport, "transition slow start", {
+        outcome: "pending",
+        commits: 0,
+        routeChanges: 1,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+    assertState(await appState(client), {
+        route: "transitionGreeting",
+        hash: transitionGreetingHash(slowName),
+        transitionRequestedTarget: transitionGreetingTarget(slowName),
+        transitionCommittedTarget: transitionGreetingTarget(transitionInitialName),
+        transitionStatus: "pending",
+        transitionMessage: transitionInitialMessage,
+        transitionPending: true,
+        transitionFailed: false,
+        transitionCommittedScreen: true,
+    }, "server-backed transition URL advanced while Ada remained committed");
+
+    await prepareTransitionName(client, transitionFastName);
+    await startScenario(client, "transition-slow-supersede");
+    await dispatchTransitionSubmit(client);
+    await waitForTransitionPending(
+        client,
+        transitionFastName,
+        transitionInitialName,
+        transitionInitialMessage,
+        "transition Lin pending with Ada committed",
+    );
+    await waitForTransitionRequestAbort(client, transitionSlowRequest.id, "transition slow request abort");
+    await waitForTransitionCommitted(
+        client,
+        transitionFastName,
+        transitionFastMessage,
+        "transition Lin paired commit",
+    );
+    await wait(staleSettleMS);
+    const transitionSupersedeReport = await finishScenario(client, "transition-slow-supersede");
+    assertTransitionRouteReport(transitionSupersedeReport, "transition slow supersede", {
+        outcome: "success",
+        aborted: 1,
+        commits: 1,
+        routeChanges: 1,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+    assertRequest(await transitionRequestEvidence(client, transitionSlowRequest.id), {
+        name: slowName,
+        outcome: "aborted",
+        aborted: true,
+    }, "transition superseded slow request");
+    assertState(await appState(client), {
+        transitionRequestedTarget: transitionGreetingTarget(transitionFastName),
+        transitionCommittedTarget: transitionGreetingTarget(transitionFastName),
+        transitionStatus: "ready",
+        transitionMessage: transitionFastMessage,
+        transitionPending: false,
+        transitionFailed: false,
+    }, "server-backed transition stale slow result ignored");
+
+    await prepareTransitionName(client, failureName);
+    await startScenario(client, "transition-controlled-failure");
+    await dispatchTransitionSubmit(client);
+    await waitForTransitionPending(
+        client,
+        failureName,
+        transitionFastName,
+        transitionFastMessage,
+        "transition failure pending with Lin committed",
+    );
+    await waitForTransitionFailure(
+        client,
+        failureName,
+        transitionFastName,
+        transitionFastMessage,
+        "transition controlled failure",
+    );
+    const transitionFailureReport = await finishScenario(client, "transition-controlled-failure");
+    assertTransitionRouteReport(transitionFailureReport, "transition controlled failure", {
+        outcome: "failed",
+        failures: 1,
+        commits: 0,
+        routeChanges: 1,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+
+    const transitionRetryBaseline = await evidenceState(client);
+    await startScenario(client, "transition-failure-retry");
+    await dispatchTransitionRetry(client);
+    await waitForTransitionRequestCount(
+        client,
+        transitionRetryBaseline.transitionRequestsStarted + 1,
+        "transition retry request",
+    );
+    await waitForTransitionPending(
+        client,
+        failureName,
+        transitionFastName,
+        transitionFastMessage,
+        "transition retry pending with Lin committed",
+    );
+    await waitForTransitionFailure(
+        client,
+        failureName,
+        transitionFastName,
+        transitionFastMessage,
+        "transition retry failure",
+    );
+    const transitionRetryReport = await finishScenario(client, "transition-failure-retry");
+    assertTransitionRouteReport(transitionRetryReport, "transition failure retry", {
+        outcome: "failed",
+        failures: 1,
+        retries: 1,
+        commits: 0,
+        routeChanges: 0,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+
+    await prepareTransitionName(client, transitionInitialName);
+    await startScenario(client, "transition-failure-recovery");
+    await dispatchTransitionSubmit(client);
+    await waitForTransitionPending(
+        client,
+        transitionInitialName,
+        transitionFastName,
+        transitionFastMessage,
+        "transition recovery pending with Lin committed",
+    );
+    await waitForTransitionCommitted(
+        client,
+        transitionInitialName,
+        transitionInitialMessage,
+        "transition failure recovery commit",
+    );
+    const transitionRecoveryReport = await finishScenario(client, "transition-failure-recovery");
+    assertTransitionRouteReport(transitionRecoveryReport, "transition failure recovery", {
+        outcome: "success",
+        commits: 1,
+        routeChanges: 1,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+
+    await prepareTransitionName(client, transitionHistoryName);
+    await startScenario(client, "transition-history-anchor");
+    await dispatchTransitionSubmit(client);
+    await waitForTransitionPending(
+        client,
+        transitionHistoryName,
+        transitionInitialName,
+        transitionInitialMessage,
+        "transition history target pending with Ada committed",
+    );
+    await waitForTransitionCommitted(
+        client,
+        transitionHistoryName,
+        transitionHistoryMessage,
+        "transition history target commit",
+    );
+    const transitionHistoryReport = await finishScenario(client, "transition-history-anchor");
+    assertTransitionRouteReport(transitionHistoryReport, "transition history anchor", {
+        outcome: "success",
+        commits: 1,
+        routeChanges: 1,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+
+    await startScenario(client, "transition-browser-back");
+    await client.evaluate("history.back()");
+    await waitForTransitionPending(
+        client,
+        transitionInitialName,
+        transitionHistoryName,
+        transitionHistoryMessage,
+        "transition browser Back pending",
+    );
+    await waitForTransitionCommitted(
+        client,
+        transitionInitialName,
+        transitionInitialMessage,
+        "transition browser Back commit",
+    );
+    const transitionBackReport = await finishScenario(client, "transition-browser-back");
+    assertTransitionRouteReport(transitionBackReport, "transition browser Back", {
+        outcome: "success",
+        commits: 1,
+        routeChanges: 1,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+
+    await startScenario(client, "transition-browser-forward");
+    await client.evaluate("history.forward()");
+    await waitForTransitionPending(
+        client,
+        transitionHistoryName,
+        transitionInitialName,
+        transitionInitialMessage,
+        "transition browser Forward pending",
+    );
+    await waitForTransitionCommitted(
+        client,
+        transitionHistoryName,
+        transitionHistoryMessage,
+        "transition browser Forward commit",
+    );
+    const transitionForwardReport = await finishScenario(client, "transition-browser-forward");
+    assertTransitionRouteReport(transitionForwardReport, "transition browser Forward", {
+        outcome: "success",
+        commits: 1,
+        routeChanges: 1,
+        samePattern: true,
+        committedScreenSame: true,
+    });
+
+    await prepareTransitionName(client, slowName);
+    await startScenario(client, "transition-unmount-cancellation");
+    await dispatchTransitionSubmit(client);
+    const transitionUnmountRequest = await waitForTransitionSlowActive(
+        client,
+        transitionHistoryName,
+        transitionHistoryMessage,
+        "transition unmount slow request active",
+    );
+    await navigateHome(client);
+    await waitForRoute(client, "home", "/");
+    await waitForTransitionRequestAbort(
+        client,
+        transitionUnmountRequest.id,
+        "transition route unmount slow request abort",
+    );
+    const transitionRouteCountsAfterUnmount = await componentActivity(client, "TransitionGreetingRoute");
+    await wait(staleSettleMS);
+    const transitionRouteCountsAfterSettle = await componentActivity(client, "TransitionGreetingRoute");
+    assertState(
+        transitionRouteCountsAfterSettle,
+        transitionRouteCountsAfterUnmount,
+        "transition route stayed inactive after unmount",
+    );
+    const transitionUnmountReport = await finishScenario(client, "transition-unmount-cancellation");
+    assertTransitionUnmountReport(transitionUnmountReport, "transition unmount cancellation");
+    assertRequest(await transitionRequestEvidence(client, transitionUnmountRequest.id), {
+        name: slowName,
+        outcome: "aborted",
+        aborted: true,
+    }, "transition route-unmounted slow request");
+    assertState(await appState(client), {
+        route: "home",
+        hash: "#/",
+        routeTarget: "/",
+        transitionRoute: false,
+        transitionMessage: "",
+        transitionStatus: "",
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+    }, "server-backed transition route unmounted");
+
+    const transitionEvidence = await evidenceState(client);
+    assertEvidence(transitionEvidence, {
+        transitionRequestsStarted: 10,
+        transitionSuccessfulCompletions: 6,
+        transitionFailedCompletions: 2,
+        transitionAborts: 2,
+        activeTransitionRequests: 0,
+        transitionCommits: 6,
+        transitionFailures: 2,
+        transitionRetryAttempts: 1,
+        transitionStaleResultAppearances: 0,
+        transitionInvalidCommittedPairs: 0,
+        transitionOldScreenLosses: 0,
+        transitionRouteMounts: 1,
+        transitionRouteUnmounts: 1,
+    }, "final retained transition evidence");
+    assertStringArray(transitionEvidence.transitionRequestedTargetsObserved, [
+        transitionGreetingTarget(transitionInitialName),
+        transitionGreetingTarget(slowName),
+        transitionGreetingTarget(transitionFastName),
+        transitionGreetingTarget(failureName),
+        transitionGreetingTarget(transitionInitialName),
+        transitionGreetingTarget(transitionHistoryName),
+        transitionGreetingTarget(transitionInitialName),
+        transitionGreetingTarget(transitionHistoryName),
+        transitionGreetingTarget(slowName),
+    ], "transition requested targets observed");
+    assertCommittedPairArray(transitionEvidence.transitionCommittedPairsObserved, [
+        transitionPair(transitionInitialName, transitionInitialMessage),
+        transitionPair(transitionFastName, transitionFastMessage),
+        transitionPair(transitionInitialName, transitionInitialMessage),
+        transitionPair(transitionHistoryName, transitionHistoryMessage),
+        transitionPair(transitionInitialName, transitionInitialMessage),
+        transitionPair(transitionHistoryName, transitionHistoryMessage),
+    ], "transition committed pairs observed");
+    console.log(`server-backed retained transition evidence: ${JSON.stringify(transitionEvidence)}`);
+
     await startScenario(client, "saved-initial-state");
     await navigateSavedGreeting(client);
     await waitForSavedReadLoading(client, "saved greeting initial read loading");
@@ -711,6 +1058,16 @@ try {
         activeMutationRequests: 0,
         duplicateSubmitAttempts: 1,
         staleCommittedValueAppearances: 0,
+        transitionRequestsStarted: 10,
+        transitionSuccessfulCompletions: 6,
+        transitionFailedCompletions: 2,
+        transitionAborts: 2,
+        activeTransitionRequests: 0,
+        transitionCommits: 6,
+        transitionRetryAttempts: 1,
+        transitionStaleResultAppearances: 0,
+        transitionInvalidCommittedPairs: 0,
+        transitionOldScreenLosses: 0,
         appIdentityChanges: 0,
         shellIdentityChanges: 0,
         routeContentIdentityChanges: 0,
@@ -732,6 +1089,16 @@ try {
         greetingHash(updatedName),
         greetingHash(failureName),
         greetingHash(updatedName),
+        transitionGreetingHash(transitionInitialName),
+        transitionGreetingHash(slowName),
+        transitionGreetingHash(transitionFastName),
+        transitionGreetingHash(failureName),
+        transitionGreetingHash(transitionInitialName),
+        transitionGreetingHash(transitionHistoryName),
+        transitionGreetingHash(transitionInitialName),
+        transitionGreetingHash(transitionHistoryName),
+        transitionGreetingHash(slowName),
+        "#/",
         savedGreetingHash,
         "#/",
         savedGreetingHash,
@@ -825,6 +1192,22 @@ function greetingHash(name) {
     return `#${greetingTarget(name)}`;
 }
 
+function transitionGreetingTarget(name) {
+    return `/transition-greeting?name=${encodeURIComponent(name)}`;
+}
+
+function transitionGreetingHash(name) {
+    return `#${transitionGreetingTarget(name)}`;
+}
+
+function transitionPair(name, message) {
+    return {
+        name,
+        target: transitionGreetingTarget(name),
+        message,
+    };
+}
+
 async function initializeBrowserEvidence(client) {
     const initialized = await client.evaluate("window.__serverBackedEvidence?.initialize() ?? null");
     if (!initialized?.ready) {
@@ -913,6 +1296,43 @@ async function prepareSavedGreetingName(client, name) {
     return report;
 }
 
+async function prepareTransitionName(client, name) {
+    const baseline = await client.callFunction(`function(name) {
+        const input = document.querySelector("[data-testid='transition-name']");
+        if (!input) {
+            return { ok: false, reason: "missing transition input" };
+        }
+        const owner = "TransitionGreetingRoute";
+        const renders = window.goframeComponentRenderCounts?.[owner] || 0;
+        const patches = window.goframeComponentPatchCounts?.[owner] || 0;
+        input.value = name;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return { ok: true, owner, renders, patches, value: input.value };
+    }`, name);
+    if (!baseline?.ok) {
+        throw new Error(`APP FAILURE: could not prepare transition input: ${JSON.stringify(baseline)}`);
+    }
+
+    let updated = null;
+    await waitForCondition(async () => {
+        updated = await transitionInputPreparationState(client);
+        return updated.value === name &&
+            updated.renders > baseline.renders &&
+            updated.patches > baseline.patches;
+    }, `controlled transition input ${name} framework update`);
+
+    await waitForBrowserFrames(client, 2);
+    const settled = await transitionInputPreparationState(client);
+    if (settled.value !== name ||
+        settled.renders !== updated.renders ||
+        settled.patches !== updated.patches) {
+        throw new Error(`APP FAILURE: controlled transition input ${name} did not settle: ${JSON.stringify({ baseline, updated, settled })}`);
+    }
+    const report = { name, owner: baseline.owner, baseline, updated, settled };
+    console.log(`server-backed transition input preparation: ${JSON.stringify(report)}`);
+    return report;
+}
+
 async function savedInputPreparationState(client) {
     return await client.callFunction(`function() {
         const owner = "SavedGreetingRoute";
@@ -921,6 +1341,18 @@ async function savedInputPreparationState(client) {
             renders: window.goframeComponentRenderCounts?.[owner] || 0,
             patches: window.goframeComponentPatchCounts?.[owner] || 0,
             value: document.querySelector("[data-testid='saved-greeting-input']")?.value ?? "",
+        };
+    }`);
+}
+
+async function transitionInputPreparationState(client) {
+    return await client.callFunction(`function() {
+        const owner = "TransitionGreetingRoute";
+        return {
+            owner,
+            renders: window.goframeComponentRenderCounts?.[owner] || 0,
+            patches: window.goframeComponentPatchCounts?.[owner] || 0,
+            value: document.querySelector("[data-testid='transition-name']")?.value ?? "",
         };
     }`);
 }
@@ -967,6 +1399,38 @@ async function dispatchGreetingSubmit(client) {
         }
         return { ok: true };
     }`);
+}
+
+async function dispatchTransitionSubmit(client) {
+    const result = await client.evaluate(`(() => {
+        const form = document.querySelector("[data-testid='transition-form']");
+        if (!form) {
+            return { ok: false, reason: "missing transition form" };
+        }
+        if (typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+        } else {
+            form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        }
+        return { ok: true };
+    })()`);
+    if (!result?.ok) {
+        throw new Error(`APP FAILURE: could not submit transition form: ${JSON.stringify(result)}`);
+    }
+}
+
+async function dispatchTransitionRetry(client) {
+    const result = await client.evaluate(`(() => {
+        const retry = document.querySelector("[data-testid='transition-retry']");
+        if (!retry) {
+            return { ok: false, reason: "missing transition retry" };
+        }
+        retry.click();
+        return { ok: true };
+    })()`);
+    if (!result?.ok) {
+        throw new Error(`APP FAILURE: could not retry transition: ${JSON.stringify(result)}`);
+    }
 }
 
 async function dispatchSavedGreetingSubmit(client) {
@@ -1036,6 +1500,104 @@ async function waitForFailure(client, expectedError, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
         return state.failed && state.status === failureStatus && state.error === expectedError;
+    }, label);
+}
+
+async function waitForTransitionInitialLoading(client, name, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.route === "transitionGreeting" &&
+            state.hash === transitionGreetingHash(name) &&
+            state.transitionRequestedTarget === transitionGreetingTarget(name) &&
+            state.transitionStatus === "loading" &&
+            state.transitionInput === name &&
+            state.transitionPending &&
+            !state.transitionFailed &&
+            !state.transitionCommittedScreen;
+    }, label);
+}
+
+async function waitForTransitionPending(client, requestedName, committedName, committedMessage, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.route === "transitionGreeting" &&
+            state.hash === transitionGreetingHash(requestedName) &&
+            state.transitionRequestedTarget === transitionGreetingTarget(requestedName) &&
+            state.transitionCommittedTarget === transitionGreetingTarget(committedName) &&
+            state.transitionStatus === "pending" &&
+            state.transitionMessage === committedMessage &&
+            state.transitionInput === requestedName &&
+            state.transitionPending &&
+            !state.transitionFailed &&
+            state.transitionCommittedScreen;
+    }, label);
+}
+
+async function waitForTransitionCommitted(client, name, message, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.route === "transitionGreeting" &&
+            state.hash === transitionGreetingHash(name) &&
+            state.transitionRequestedTarget === transitionGreetingTarget(name) &&
+            state.transitionCommittedTarget === transitionGreetingTarget(name) &&
+            state.transitionStatus === "ready" &&
+            state.transitionMessage === message &&
+            state.transitionInput === name &&
+            !state.transitionPending &&
+            !state.transitionFailed &&
+            state.transitionCommittedScreen;
+    }, label);
+}
+
+async function waitForTransitionFailure(client, requestedName, committedName, committedMessage, label) {
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        return state.route === "transitionGreeting" &&
+            state.hash === transitionGreetingHash(requestedName) &&
+            state.transitionRequestedTarget === transitionGreetingTarget(requestedName) &&
+            state.transitionCommittedTarget === transitionGreetingTarget(committedName) &&
+            state.transitionStatus === "failed" &&
+            state.transitionMessage === committedMessage &&
+            state.transitionInput === requestedName &&
+            !state.transitionPending &&
+            state.transitionFailed &&
+            state.transitionError === failureMessage &&
+            state.transitionCommittedScreen;
+    }, label);
+}
+
+async function waitForTransitionSlowActive(client, committedName, committedMessage, label) {
+    let request = null;
+    await waitForCondition(async () => {
+        const state = await appState(client);
+        const evidence = await evidenceState(client);
+        request = [...evidence.transitionRequests].reverse().find((entry) =>
+            entry.name === slowName &&
+            entry.outcome === "pending",
+        ) ?? null;
+        return state.hash === transitionGreetingHash(slowName) &&
+            state.transitionStatus === "pending" &&
+            state.transitionCommittedTarget === transitionGreetingTarget(committedName) &&
+            state.transitionMessage === committedMessage &&
+            evidence.activeTransitionRequests === 1 &&
+            request !== null;
+    }, label);
+    return request;
+}
+
+async function waitForTransitionRequestAbort(client, requestID, label) {
+    await waitForCondition(async () => {
+        const evidence = await evidenceState(client);
+        const request = await transitionRequestEvidence(client, requestID);
+        return request?.aborted === true &&
+            request.outcome === "aborted" &&
+            evidence.activeTransitionRequests === 0;
+    }, label);
+}
+
+async function waitForTransitionRequestCount(client, expected, label) {
+    await waitForCondition(async () => {
+        return (await evidenceState(client)).transitionRequestsStarted === expected;
     }, label);
 }
 
@@ -1161,6 +1723,13 @@ async function navigateGreetingHash(client, name) {
     }`, greetingTarget(name));
 }
 
+async function navigateTransitionHash(client, name) {
+    await client.callFunction(`function(target) {
+        window.location.hash = target;
+        return window.location.hash;
+    }`, transitionGreetingTarget(name));
+}
+
 async function appState(client) {
     return await client.callFunction(`function() {
         const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() ?? "";
@@ -1168,8 +1737,10 @@ async function appState(client) {
         const key = document.querySelector("[data-testid='greeting-resource-key']")?.textContent.trim() ?? "";
         const home = document.querySelector("[data-testid='server-backed-home']");
         const greeting = document.querySelector("[data-testid='server-backed-greeting-route']");
+        const transitionGreeting = document.querySelector("[data-testid='server-backed-transition-route']");
         const savedGreeting = document.querySelector("[data-testid='server-backed-saved-route']");
         const notFound = document.querySelector("[data-testid='server-backed-not-found']");
+        const transitionError = document.querySelector("[data-testid='transition-error']")?.textContent.trim() ?? "";
         const mutationError = document.querySelector("[data-testid='saved-greeting-mutation-error']")?.textContent.trim() ?? "";
         const mutationStatus = document.querySelector("[data-testid='saved-greeting-mutation-status']")?.textContent.trim() ?? "";
         const identity = window.__serverBackedEvidence?.checkIdentity() ?? {};
@@ -1178,7 +1749,17 @@ async function appState(client) {
             shell: Boolean(document.querySelector("[data-testid='server-backed-shell']")),
             form: Boolean(document.querySelector("[data-testid='greeting-form']")),
             routeContent: Boolean(document.querySelector("[data-testid='server-backed-route-content']")),
-            route: home ? "home" : greeting ? "greeting" : savedGreeting ? "savedGreeting" : notFound ? "notFound" : "missing",
+            route: home
+                ? "home"
+                : greeting
+                    ? "greeting"
+                    : transitionGreeting
+                        ? "transitionGreeting"
+                        : savedGreeting
+                            ? "savedGreeting"
+                            : notFound
+                                ? "notFound"
+                                : "missing",
             hash: window.location.hash,
             routeTarget: document.querySelector("[data-testid='server-backed-route-target']")?.textContent.trim() ?? "",
             loading: Boolean(document.querySelector("[data-testid='greeting-loading']")),
@@ -1190,6 +1771,16 @@ async function appState(client) {
             message,
             error,
             errorNonEmpty: error.length > 0,
+            transitionRoute: Boolean(transitionGreeting),
+            transitionRequestedTarget: document.querySelector("[data-testid='transition-requested-target']")?.textContent.trim() ?? "",
+            transitionCommittedTarget: document.querySelector("[data-testid='transition-committed-target']")?.textContent.trim() ?? "",
+            transitionStatus: document.querySelector("[data-testid='transition-status']")?.textContent.trim() ?? "",
+            transitionMessage: document.querySelector("[data-testid='transition-message']")?.textContent.trim() ?? "",
+            transitionInput: document.querySelector("[data-testid='transition-name']")?.value ?? "",
+            transitionPending: Boolean(document.querySelector("[data-testid='transition-pending']")),
+            transitionFailed: Boolean(document.querySelector("[data-testid='transition-error']")),
+            transitionError,
+            transitionCommittedScreen: Boolean(document.querySelector("[data-testid='transition-committed-screen']")),
             savedForm: Boolean(document.querySelector("[data-testid='saved-greeting-form']")),
             savedInput: document.querySelector("[data-testid='saved-greeting-input']")?.value ?? "",
             savedResourceKey: document.querySelector("[data-testid='saved-greeting-resource-key']")?.textContent.trim() ?? "",
@@ -1218,6 +1809,12 @@ async function evidenceState(client) {
 async function requestEvidence(client, requestID) {
     return await client.callFunction(`function(requestID) {
         return window.__serverBackedEvidence?.request(requestID) ?? null;
+    }`, requestID);
+}
+
+async function transitionRequestEvidence(client, requestID) {
+    return await client.callFunction(`function(requestID) {
+        return window.__serverBackedEvidence?.transitionRequest(requestID) ?? null;
     }`, requestID);
 }
 
@@ -1257,6 +1854,7 @@ function assertGreetingRouteReport(report, label, options) {
         failed: options.outcome === "failed" ? 1 : 0,
     };
     assertState(report.requests, expectedRequests, `${label} request delta`);
+    assertNoTransitionRequests(report, label);
     if (report.routeTargets.length !== options.routeChanges || report.routeContentMutations < 1) {
         throw new Error(`APP FAILURE: ${label} route evidence changed: ${JSON.stringify(report)}`);
     }
@@ -1271,10 +1869,88 @@ function assertHomeNavigationReport(report, label) {
         succeeded: 0,
         failed: 0,
     }, `${label} request delta`);
+    assertNoTransitionRequests(report, label);
     if (report.routeTargets.length !== 1 || report.routeContentMutations < 1) {
         throw new Error(`APP FAILURE: ${label} home evidence changed: ${JSON.stringify(report)}`);
     }
     assertReportIdentity(report, label, false);
+}
+
+function assertTransitionRouteReport(report, label, options) {
+    assertSchedulingReport(report, label, "TransitionGreetingRoute");
+    assertState(report.requests, {
+        started: 0,
+        aborted: 0,
+        succeeded: 0,
+        failed: 0,
+    }, `${label} baseline greeting request delta`);
+    assertState(report.transitionRequests, {
+        started: 1,
+        aborted: options.aborted ?? 0,
+        succeeded: options.outcome === "success" ? 1 : 0,
+        failed: options.outcome === "failed" ? 1 : 0,
+        active: options.outcome === "pending" ? 1 : 0,
+    }, `${label} transition request delta`);
+    assertState(report.transition, {
+        commits: options.commits ?? 0,
+        failures: options.failures ?? 0,
+        retries: options.retries ?? 0,
+        staleResultAppearances: 0,
+        invalidCommittedPairs: 0,
+        oldScreenLosses: 0,
+        routeMounts: options.samePattern ? 0 : 1,
+        routeUnmounts: 0,
+    }, `${label} transition state delta`);
+    if (report.routeTargets.length !== options.routeChanges || report.routeContentMutations < 1) {
+        throw new Error(`APP FAILURE: ${label} route evidence changed: ${JSON.stringify(report)}`);
+    }
+    assertState(report.identity, {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        transitionFormSame: options.samePattern,
+        transitionInputSame: options.samePattern,
+        transitionCommittedScreenSame: options.committedScreenSame ?? options.samePattern,
+    }, `${label} identity`);
+}
+
+function assertTransitionUnmountReport(report, label) {
+    assertSchedulingReport(report, label, "HomeRoute");
+    assertState(report.requests, {
+        started: 0,
+        aborted: 0,
+        succeeded: 0,
+        failed: 0,
+    }, `${label} baseline greeting request delta`);
+    assertState(report.transitionRequests, {
+        started: 1,
+        aborted: 1,
+        succeeded: 0,
+        failed: 0,
+        active: 0,
+    }, `${label} transition request delta`);
+    assertState(report.transition, {
+        commits: 0,
+        failures: 0,
+        retries: 0,
+        staleResultAppearances: 0,
+        invalidCommittedPairs: 0,
+        oldScreenLosses: 0,
+        routeMounts: 0,
+        routeUnmounts: 1,
+    }, `${label} transition state delta`);
+    assertStringArray(report.routeTargets, [
+        transitionGreetingHash(slowName),
+        "#/",
+    ], `${label} route targets`);
+    assertState(report.identity, {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        transitionFormSame: false,
+        transitionInputSame: false,
+        transitionCommittedScreenSame: false,
+    }, `${label} identity`);
 }
 
 function assertSavedGreetingReport(report, label, options) {
@@ -1285,6 +1961,7 @@ function assertSavedGreetingReport(report, label, options) {
         succeeded: 0,
         failed: 0,
     }, `${label} greeting request delta`);
+    assertNoTransitionRequests(report, label);
     assertState(report.savedRequests, {
         getsStarted: options.getsStarted ?? 0,
         getsCompleted: options.getsCompleted ?? 0,
@@ -1322,6 +1999,7 @@ function assertSavedMutationUnmountReport(report, label) {
         succeeded: 0,
         failed: 0,
     }, `${label} greeting request delta`);
+    assertNoTransitionRequests(report, label);
     assertState(report.savedRequests, {
         getsStarted: 0,
         getsCompleted: 0,
@@ -1348,6 +2026,16 @@ function assertSavedMutationUnmountReport(report, label) {
         savedFormSame: false,
         savedInputSame: false,
     }, `${label} identity`);
+}
+
+function assertNoTransitionRequests(report, label) {
+    assertState(report.transitionRequests, {
+        started: 0,
+        aborted: 0,
+        succeeded: 0,
+        failed: 0,
+        active: 0,
+    }, `${label} transition request delta`);
 }
 
 function assertSchedulingReport(report, label, component) {
@@ -1378,6 +2066,8 @@ function assertFiniteReport(report, label) {
         scheduling: report.scheduling,
         componentRenders: report.componentRenders,
         componentPatches: report.componentPatches,
+        transitionRequests: report.transitionRequests,
+        transition: report.transition,
     })) {
         for (const [name, value] of Object.entries(group)) {
             if (!Number.isFinite(value) || value < 0) {
@@ -1402,6 +2092,13 @@ function assertEvidence(actual, expected, label) {
 }
 
 function assertStringArray(actual, expected, label) {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(`APP FAILURE: ${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+    }
+    console.log(`${label}: ok`);
+}
+
+function assertCommittedPairArray(actual, expected, label) {
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
         throw new Error(`APP FAILURE: ${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
     }
@@ -1434,9 +2131,12 @@ function installServerBackedEvidenceExpression() {
     const componentNames = ${JSON.stringify(componentNames)};
     const slowMessage = ${JSON.stringify(slowMessage)};
     const requests = [];
+    const transitionRequests = [];
     const savedRequests = [];
     const committedValuesObserved = [];
     const routeTargetsVisited = [];
+    const transitionRequestedTargetsObserved = [];
+    const transitionCommittedPairsObserved = [];
     const operations = ${JSON.stringify(emptyOperations())};
     const scheduling = {
         requestAnimationFrame: 0,
@@ -1446,11 +2146,28 @@ function installServerBackedEvidenceExpression() {
     };
     const renderReports = [];
     let nextRequestID = 1;
+    let nextTransitionRequestID = 1;
     let nextSavedRequestID = 1;
     let aborts = 0;
     let successfulCompletions = 0;
     let failedCompletions = 0;
     let staleResultAppearances = 0;
+    let transitionSuccessfulCompletions = 0;
+    let transitionFailedCompletions = 0;
+    let transitionAborts = 0;
+    let activeTransitionRequests = 0;
+    let transitionCommits = 0;
+    let transitionFailures = 0;
+    let transitionRetryAttempts = 0;
+    let transitionStaleResultAppearances = 0;
+    let transitionInvalidCommittedPairs = 0;
+    let transitionOldScreenLosses = 0;
+    let transitionRouteMounts = 0;
+    let transitionRouteUnmounts = 0;
+    let lastTransitionRequestedTarget = "";
+    let lastTransitionCommittedKey = "";
+    let lastTransitionFailure = "";
+    let transitionRouteMounted = false;
     let routeContentMutations = 0;
     let lastMessage = "";
     let lastCommittedValue = "";
@@ -1499,6 +2216,10 @@ function installServerBackedEvidenceExpression() {
                 return { ready: false };
             }
             routeTargetsVisited.push(window.location.hash);
+            transitionRouteMounted = Boolean(
+                document.querySelector("[data-testid='server-backed-transition-route']"),
+            );
+            captureTransitionState();
             new MutationObserver((records) => {
                 routeContentMutations += records.length;
                 const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() || "";
@@ -1515,6 +2236,7 @@ function installServerBackedEvidenceExpression() {
                     committedValuesObserved.push(committed);
                     lastCommittedValue = committed;
                 }
+                captureTransitionState();
             }).observe(this.stable.routeContent, {
                 childList: true,
                 subtree: true,
@@ -1542,6 +2264,10 @@ function installServerBackedEvidenceExpression() {
             const request = requests.find((entry) => entry.id === id);
             return request ? { ...request } : null;
         },
+        transitionRequest(id) {
+            const request = transitionRequests.find((entry) => entry.id === id);
+            return request ? { ...request } : null;
+        },
         savedRequest(id) {
             const request = savedRequests.find((entry) => entry.id === id);
             return request ? { ...request } : null;
@@ -1554,6 +2280,21 @@ function installServerBackedEvidenceExpression() {
                 successfulCompletions,
                 failedCompletions,
                 staleResultAppearances,
+                transitionRequestsStarted: transitionRequests.length,
+                transitionSuccessfulCompletions,
+                transitionFailedCompletions,
+                transitionAborts,
+                activeTransitionRequests,
+                transitionCommits,
+                transitionFailures,
+                transitionRetryAttempts,
+                transitionStaleResultAppearances,
+                transitionInvalidCommittedPairs,
+                transitionOldScreenLosses,
+                transitionRouteMounts,
+                transitionRouteUnmounts,
+                transitionRequestedTargetsObserved: [...transitionRequestedTargetsObserved],
+                transitionCommittedPairsObserved: transitionCommittedPairsObserved.map((pair) => ({ ...pair })),
                 savedGetsStarted,
                 savedGetsCompleted,
                 savedGetsFailed,
@@ -1573,6 +2314,7 @@ function installServerBackedEvidenceExpression() {
                 routeContentIdentityChanges: this.identityChanged.routeContent ? 1 : 0,
                 routeContentMutations,
                 requests: requests.map((request) => ({ ...request })),
+                transitionRequests: transitionRequests.map((request) => ({ ...request })),
                 savedRequests: savedRequests.map((request) => ({ ...request })),
             };
         },
@@ -1589,47 +2331,69 @@ function installServerBackedEvidenceExpression() {
             duplicateSubmitAttempts++;
         }
     }, true);
+    document.addEventListener("click", (event) => {
+        if (event.target?.closest?.("[data-testid='transition-retry']")) {
+            transitionRetryAttempts++;
+        }
+    }, true);
 
     const originalFetch = window.fetch.bind(window);
     window.fetch = function(input, init) {
         const requestURL = new URL(typeof input === "string" ? input : input.url, window.location.href);
         if (requestURL.pathname === "/api/greeting") {
             const signal = init?.signal;
+            const transition = Boolean(
+                document.querySelector("[data-testid='server-backed-transition-route']"),
+            );
             const request = {
-                id: nextRequestID++,
+                id: transition ? nextTransitionRequestID++ : nextRequestID++,
                 name: requestURL.searchParams.get("name") || "",
                 target: requestURL.pathname + requestURL.search,
                 outcome: "pending",
                 aborted: false,
+                flow: transition ? "transition" : "greeting",
             };
-            requests.push(request);
+            if (transition) {
+                transitionRequests.push(request);
+                activeTransitionRequests++;
+            } else {
+                requests.push(request);
+            }
+            const finish = (outcome) => {
+                if (request.outcome !== "pending") return;
+                request.outcome = outcome;
+                if (transition) {
+                    activeTransitionRequests--;
+                    if (outcome === "success") transitionSuccessfulCompletions++;
+                    else if (outcome === "aborted") transitionAborts++;
+                    else transitionFailedCompletions++;
+                    return;
+                }
+                if (outcome === "success") successfulCompletions++;
+                else if (outcome === "aborted") aborts++;
+                else failedCompletions++;
+            };
             if (signal) {
                 signal.addEventListener("abort", () => {
-                    if (request.aborted) return;
+                    if (request.aborted || request.outcome !== "pending") return;
                     request.aborted = true;
-                    request.outcome = "aborted";
-                    aborts++;
+                    finish("aborted");
                 }, { once: true });
             }
             return originalFetch(input, init).then((response) => {
                 // Keep loading observable without changing the backend or runtime.
                 return new Promise((resolve) => {
                     window.setTimeout(() => {
-                        if (!request.aborted) {
-                            request.outcome = response.ok ? "success" : "failed";
-                            if (response.ok) successfulCompletions++;
-                            else failedCompletions++;
-                        }
+                        if (!request.aborted) finish(response.ok ? "success" : "failed");
                         resolve(response);
                     }, request.name === ${JSON.stringify(slowName)} ? 0 : 140);
                 });
             }, (error) => {
                 if (signal?.aborted) {
                     request.aborted = true;
-                    request.outcome = "aborted";
+                    finish("aborted");
                 } else {
-                    request.outcome = "failed";
-                    failedCompletions++;
+                    finish("failed");
                 }
                 throw error;
             });
@@ -1717,6 +2481,9 @@ function installServerBackedEvidenceExpression() {
         routeMutationBaseline: 0,
         formBaseline: null,
         inputBaseline: null,
+        transitionFormBaseline: null,
+        transitionInputBaseline: null,
+        transitionCommittedScreenBaseline: null,
         savedFormBaseline: null,
         savedInputBaseline: null,
         committedValueBaseline: 0,
@@ -1730,6 +2497,18 @@ function installServerBackedEvidenceExpression() {
                 aborts,
                 successfulCompletions,
                 failedCompletions,
+                transitionRequestsStarted: transitionRequests.length,
+                transitionSuccessfulCompletions,
+                transitionFailedCompletions,
+                transitionAborts,
+                transitionCommits,
+                transitionFailures,
+                transitionRetryAttempts,
+                transitionStaleResultAppearances,
+                transitionInvalidCommittedPairs,
+                transitionOldScreenLosses,
+                transitionRouteMounts,
+                transitionRouteUnmounts,
                 savedGetsStarted,
                 savedGetsCompleted,
                 savedGetsFailed,
@@ -1747,6 +2526,10 @@ function installServerBackedEvidenceExpression() {
             this.routeMutationBaseline = routeContentMutations;
             this.formBaseline = document.querySelector("[data-testid='greeting-form']");
             this.inputBaseline = document.querySelector("[data-testid='greeting-name']");
+            this.transitionFormBaseline = document.querySelector("[data-testid='transition-form']");
+            this.transitionInputBaseline = document.querySelector("[data-testid='transition-name']");
+            this.transitionCommittedScreenBaseline =
+                document.querySelector("[data-testid='transition-committed-screen']");
             this.savedFormBaseline = document.querySelector("[data-testid='saved-greeting-form']");
             this.savedInputBaseline = document.querySelector("[data-testid='saved-greeting-input']");
             this.committedValueBaseline = committedValuesObserved.length;
@@ -1777,6 +2560,13 @@ function installServerBackedEvidenceExpression() {
                     ...evidence.checkIdentity(),
                     formSame: document.querySelector("[data-testid='greeting-form']") === this.formBaseline,
                     inputSame: document.querySelector("[data-testid='greeting-name']") === this.inputBaseline,
+                    transitionFormSame:
+                        document.querySelector("[data-testid='transition-form']") === this.transitionFormBaseline,
+                    transitionInputSame:
+                        document.querySelector("[data-testid='transition-name']") === this.transitionInputBaseline,
+                    transitionCommittedScreenSame:
+                        document.querySelector("[data-testid='transition-committed-screen']") ===
+                            this.transitionCommittedScreenBaseline,
                     savedFormSame: document.querySelector("[data-testid='saved-greeting-form']") === this.savedFormBaseline,
                     savedInputSame: document.querySelector("[data-testid='saved-greeting-input']") === this.savedInputBaseline,
                 },
@@ -1785,6 +2575,35 @@ function installServerBackedEvidenceExpression() {
                     aborted: aborts - this.requestBaseline.aborts,
                     succeeded: successfulCompletions - this.requestBaseline.successfulCompletions,
                     failed: failedCompletions - this.requestBaseline.failedCompletions,
+                },
+                transitionRequests: {
+                    started: transitionRequests.length - this.requestBaseline.transitionRequestsStarted,
+                    aborted: transitionAborts - this.requestBaseline.transitionAborts,
+                    succeeded:
+                        transitionSuccessfulCompletions -
+                        this.requestBaseline.transitionSuccessfulCompletions,
+                    failed:
+                        transitionFailedCompletions -
+                        this.requestBaseline.transitionFailedCompletions,
+                    active: activeTransitionRequests,
+                },
+                transition: {
+                    commits: transitionCommits - this.requestBaseline.transitionCommits,
+                    failures: transitionFailures - this.requestBaseline.transitionFailures,
+                    retries: transitionRetryAttempts - this.requestBaseline.transitionRetryAttempts,
+                    staleResultAppearances:
+                        transitionStaleResultAppearances -
+                        this.requestBaseline.transitionStaleResultAppearances,
+                    invalidCommittedPairs:
+                        transitionInvalidCommittedPairs -
+                        this.requestBaseline.transitionInvalidCommittedPairs,
+                    oldScreenLosses:
+                        transitionOldScreenLosses -
+                        this.requestBaseline.transitionOldScreenLosses,
+                    routeMounts: transitionRouteMounts - this.requestBaseline.transitionRouteMounts,
+                    routeUnmounts:
+                        transitionRouteUnmounts -
+                        this.requestBaseline.transitionRouteUnmounts,
                 },
                 savedRequests: {
                     getsStarted: savedGetsStarted - this.requestBaseline.savedGetsStarted,
@@ -1870,6 +2689,80 @@ function installServerBackedEvidenceExpression() {
                 return callback();
             });
         };
+    }
+
+    function captureTransitionState() {
+        const route = document.querySelector("[data-testid='server-backed-transition-route']");
+        const mounted = Boolean(route);
+        if (mounted !== transitionRouteMounted) {
+            if (mounted) transitionRouteMounts++;
+            else transitionRouteUnmounts++;
+            transitionRouteMounted = mounted;
+            if (!mounted) {
+                lastTransitionRequestedTarget = "";
+                lastTransitionFailure = "";
+            }
+        }
+        if (!mounted) return;
+
+        const requestedTarget =
+            document.querySelector("[data-testid='transition-requested-target']")?.textContent.trim() || "";
+        if (requestedTarget && requestedTarget !== lastTransitionRequestedTarget) {
+            transitionRequestedTargetsObserved.push(requestedTarget);
+            lastTransitionRequestedTarget = requestedTarget;
+        }
+
+        const committedScreen =
+            document.querySelector("[data-testid='transition-committed-screen']");
+        const committedTarget =
+            document.querySelector("[data-testid='transition-committed-target']")?.textContent.trim() || "";
+        const committedMessage =
+            document.querySelector("[data-testid='transition-message']")?.textContent.trim() || "";
+        if (committedScreen && committedTarget && committedMessage) {
+            const name = transitionNameFromTarget(committedTarget);
+            const valid = name !== "" &&
+                committedMessage === "Hello, " + name + ", from Go backend!";
+            if (!valid) {
+                transitionInvalidCommittedPairs++;
+            }
+            const committedKey = committedTarget + "\\u0000" + committedMessage;
+            if (committedKey !== lastTransitionCommittedKey) {
+                transitionCommittedPairsObserved.push({
+                    name,
+                    target: committedTarget,
+                    message: committedMessage,
+                });
+                transitionCommits++;
+                if (committedMessage === slowMessage) {
+                    transitionStaleResultAppearances++;
+                }
+                lastTransitionCommittedKey = committedKey;
+            }
+        } else if (transitionCommits > 0) {
+            transitionOldScreenLosses++;
+        }
+
+        const failure =
+            document.querySelector("[data-testid='transition-error']")?.textContent.trim() || "";
+        if (!failure) {
+            lastTransitionFailure = "";
+        } else {
+            const failureKey = requestedTarget + "\\u0000" + failure;
+            if (failureKey !== lastTransitionFailure) {
+                transitionFailures++;
+                lastTransitionFailure = failureKey;
+            }
+        }
+    }
+
+    function transitionNameFromTarget(target) {
+        try {
+            const parsed = new URL(target, "http://goframe.invalid");
+            if (parsed.pathname !== "/transition-greeting") return "";
+            return parsed.searchParams.get("name") || "GoFrame";
+        } catch {
+            return "";
+        }
     }
 
     return true;
