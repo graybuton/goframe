@@ -89,16 +89,12 @@ func generatePath(options generateOptions, requireFiles bool) error {
 		publicationFiles: files,
 	}
 	if !pathInfo.IsDir() {
-		active, err := activeGenerationGOXFile(files[0], selection)
+		request.allocationFiles, err = findImmediatePackageGOXFiles(files[0])
 		if err != nil {
 			return err
 		}
-		if active {
-			request.allocationFiles, err = findImmediatePackageGOXFiles(files[0])
-			if err != nil {
-				return err
-			}
-		}
+		request.verifyUnpublishedOutputs = true
+		request.requestedSource = files[0]
 	}
 
 	if options.inPlace {

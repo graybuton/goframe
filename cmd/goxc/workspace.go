@@ -257,8 +257,10 @@ type goxGenerationTarget struct {
 }
 
 type goxGenerationRequest struct {
-	allocationFiles  []string
-	publicationFiles []string
+	allocationFiles          []string
+	publicationFiles         []string
+	verifyUnpublishedOutputs bool
+	requestedSource          string
 }
 
 type generatedGOXFile struct {
@@ -350,6 +352,7 @@ func generateFilesIntoDirectoryWithSelectionRequestResult(
 		destinationRoot,
 		targets,
 		selection,
+		request,
 	)
 }
 
@@ -358,6 +361,7 @@ func generatePackageTargetsSafely(
 	destinationRoot string,
 	targets []goxGenerationTarget,
 	selection generationSourceSelection,
+	request goxGenerationRequest,
 ) ([]goxGenerationTarget, error) {
 	activeTargets := make([]goxGenerationTarget, 0, len(targets))
 	publishedActiveTargets := make([]goxGenerationTarget, 0, len(targets))
@@ -398,6 +402,7 @@ func generatePackageTargetsSafely(
 	sort.Strings(packageDirs)
 
 	generatedFiles := make([]generatedGOXFile, 0, len(activeTargets))
+	expectedBySource := make(map[string][]byte, len(activeTargets))
 	for _, packageDir := range packageDirs {
 		packageTargets := packages[packageDir]
 		sort.Slice(packageTargets, func(left, right int) bool {
@@ -422,6 +427,7 @@ func generatePackageTargetsSafely(
 			return nil, fmt.Errorf("generate failed for %s: %w", generationFailureSource(packageTargets, err), err)
 		}
 		for _, target := range packageTargets {
+			expectedBySource[target.source] = generated[target.source]
 			if !target.publish {
 				continue
 			}
@@ -429,6 +435,17 @@ func generatePackageTargetsSafely(
 				path:    target.output,
 				content: generated[target.source],
 			})
+		}
+	}
+
+	if request.verifyUnpublishedOutputs {
+		if err := verifyUnpublishedGeneratedOutputs(
+			destinationRoot,
+			request.requestedSource,
+			targets,
+			expectedBySource,
+		); err != nil {
+			return nil, err
 		}
 	}
 
@@ -467,18 +484,96 @@ func generatePackageTargetsSafely(
 	return publishedActiveTargets, nil
 }
 
-func activeGenerationGOXFile(
-	path string,
-	selection generationSourceSelection,
-) (bool, error) {
-	content, err := readGenerationSource(path, "GOX source file")
-	if err != nil {
-		return false, err
+func verifyUnpublishedGeneratedOutputs(
+	destinationRoot,
+	requestedSource string,
+	targets []goxGenerationTarget,
+	expectedBySource map[string][]byte,
+) error {
+	for _, target := range targets {
+		if target.publish {
+			continue
+		}
+		if err := validatePathBelowRoot(
+			destinationRoot,
+			target.output,
+			"sibling generated output",
+			true,
+		); err != nil {
+			return unverifiablePartialPackageOutputError(
+				requestedSource,
+				target,
+				err,
+			)
+		}
+		info, err := os.Lstat(target.output)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return unverifiablePartialPackageOutputError(
+				requestedSource,
+				target,
+				fmt.Errorf("inspect sibling generated output %s: %w", target.output, err),
+			)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return unverifiablePartialPackageOutputError(
+				requestedSource,
+				target,
+				fmt.Errorf("sibling generated output %s is a symlink; symlink paths are not supported", target.output),
+			)
+		}
+		if !info.Mode().IsRegular() {
+			return unverifiablePartialPackageOutputError(
+				requestedSource,
+				target,
+				fmt.Errorf("sibling generated output %s is not a regular file", target.output),
+			)
+		}
+		content, err := os.ReadFile(target.output)
+		if err != nil {
+			return unverifiablePartialPackageOutputError(
+				requestedSource,
+				target,
+				fmt.Errorf("read sibling generated output %s: %w", target.output, err),
+			)
+		}
+		if !bytes.HasPrefix(content, []byte(generatedGOXFileHeader)) {
+			return fmt.Errorf(
+				"cannot partially generate %s: sibling source %s output %s is not managed by goxc, so package allocation cannot be verified",
+				requestedSource,
+				target.source,
+				target.output,
+			)
+		}
+		expected, active := expectedBySource[target.source]
+		if !active || !bytes.Equal(content, expected) {
+			packageDir := filepath.Dir(requestedSource)
+			return fmt.Errorf(
+				"cannot partially generate %s: sibling source %s output %s is stale for the current package allocation in %s; run goxc generate %s to refresh all coordinated outputs",
+				requestedSource,
+				target.source,
+				target.output,
+				packageDir,
+				packageDir,
+			)
+		}
 	}
-	return selection.matchGOX(
-		filepath.Dir(path),
-		filepath.Base(path),
-		content,
+	return nil
+}
+
+func unverifiablePartialPackageOutputError(
+	requestedSource string,
+	target goxGenerationTarget,
+	err error,
+) error {
+	return fmt.Errorf(
+		"cannot partially generate %s: sibling source %s output %s cannot be verified: %w",
+		requestedSource,
+		target.source,
+		target.output,
+		err,
 	)
 }
 
