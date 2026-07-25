@@ -1,0 +1,43 @@
+:root {
+    color-scheme: light dark;
+    font-family: system-ui, sans-serif;
+}
+
+body {
+    margin: 0;
+}
+
+.document-state-app {
+    box-sizing: border-box;
+    margin: 0 auto;
+    max-width: 58rem;
+    padding: 2rem;
+}
+
+.document-state-nav,
+.document-state-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.document-state-card,
+.document-state-evidence {
+    border: 1px solid currentColor;
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.document-state-evidence {
+    display: grid;
+    gap: 0.25rem;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    margin-bottom: 1rem;
+}
+
+.document-state-editor {
+    border-inline-start: 0.25rem solid currentColor;
+    margin-top: 1rem;
+    padding-inline-start: 1rem;
+}
