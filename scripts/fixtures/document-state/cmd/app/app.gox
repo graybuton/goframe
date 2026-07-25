@@ -1,0 +1,465 @@
+package main
+
+import (
+	gf "github.com/graybuton/goframe/pkg/goframe"
+	"github.com/graybuton/goframe/scripts/fixtures/document-state/internal/documentstate"
+)
+
+type AppProps struct {
+	Adapter     *browserDocumentAdapter
+	Coordinator *documentstate.Coordinator
+}
+
+type DocumentCommitterProps struct {
+	Adapter  *browserDocumentAdapter
+	Snapshot documentstate.Snapshot
+}
+
+type DocumentScopeProps struct {
+	Coordinator *documentstate.Coordinator
+	OnSnapshot  func(documentstate.Snapshot)
+}
+
+type DocumentOwnerProps struct {
+	Coordinator *documentstate.Coordinator
+	OnSnapshot  func(documentstate.Snapshot)
+	Owner       string
+	State       documentstate.State
+	Children    []gf.Node
+}
+
+type RoutePageProps struct {
+	Coordinator *documentstate.Coordinator
+	OnSnapshot  func(documentstate.Snapshot)
+	Name        string
+	Target      string
+	State       documentstate.State
+	Summary     string
+}
+
+type UserPageProps struct {
+	Coordinator *documentstate.Coordinator
+	OnSnapshot  func(documentstate.Snapshot)
+	ID          string
+	Target      string
+}
+
+type SpeculativeDocumentOwnerProps struct {
+	Coordinator *documentstate.Coordinator
+	OnSnapshot  func(documentstate.Snapshot)
+}
+
+var (
+	documentRoutePageType = gf.NewComponentType(
+		"fixture.document-state.RoutePage",
+		"DocumentStateRoutePage",
+	)
+	documentUserPageType = gf.NewComponentType(
+		"fixture.document-state.UserPage",
+		"DocumentStateUserPage",
+	)
+)
+
+func App(props AppProps) gf.Node {
+	scopeActive, setScopeActive := gf.UseState(true)
+	snapshot, setSnapshot := gf.UseState(props.Coordinator.Snapshot())
+	onSnapshot := func(next documentstate.Snapshot) {
+		setSnapshot(next)
+	}
+
+	scope := documentScopeNode(scopeActive, DocumentScopeProps{
+		Coordinator: props.Coordinator,
+		OnSnapshot:  onSnapshot,
+	})
+	scopeControl := documentScopeControl(scopeActive, setScopeActive)
+
+	return (
+		<main class="document-state-app" data-testid="document-state-app">
+			<header>
+				<h1>Document state ownership pressure</h1>
+				<p>
+					Independent component owners coordinate one authored title and
+					description pair.
+				</p>
+			</header>
+
+			<DocumentCommitter Adapter={props.Adapter} Snapshot={snapshot} />
+
+			<section class="document-state-evidence" data-testid="document-state-evidence">
+				<span data-testid="document-active-owner">{activeOwnerLabel(snapshot)}</span>
+				<span data-testid="document-expected-title">{snapshot.State.Title}</span>
+				<span data-testid="document-expected-description">{snapshot.State.Description}</span>
+			</section>
+
+			<div class="document-state-controls">
+				{scopeControl}
+			</div>
+
+			{scope}
+		</main>
+	)
+}
+
+func DocumentCommitter(props DocumentCommitterProps) gf.Node {
+	title := props.Snapshot.State.Title
+	description := props.Snapshot.State.Description
+	gf.UseEffect(func() gf.Cleanup {
+		if err := props.Adapter.Apply(documentstate.State{
+			Title:       title,
+			Description: description,
+		}); err != nil {
+			panic("document-state fixture: apply document state: " + err.Error())
+		}
+		return nil
+	}, gf.Deps(title, description))
+	return gf.Empty()
+}
+
+func DocumentScope(props DocumentScopeProps) gf.Node {
+	failureActive, setFailureActive := gf.UseState(false)
+	gf.UseEffect(func() gf.Cleanup {
+		recordDocumentScopeMount()
+		return nil
+	})
+	gf.UseUnmount(func() {
+		recordDocumentScopeUnmount()
+	})
+
+	router := newDocumentRouter(props)
+	failureNode := speculativeFailureNode(failureActive, props)
+	return (
+		<section class="document-state-card" data-testid="document-state-scope">
+			<nav class="document-state-nav" aria-label="Document state routes">
+				<gf.RouterLink To="/" TestID="document-home-link">Home</gf.RouterLink>
+				<gf.RouterLink To="/users/42" TestID="document-user-42-link">User 42</gf.RouterLink>
+				<gf.RouterLink To="/users/7" TestID="document-user-7-link">User 7</gf.RouterLink>
+				<gf.RouterLink
+					To={gf.WithQuery("/search", gf.QueryValues{"q": {"runtime"}})}
+					TestID="document-search-link"
+				>
+					Search
+				</gf.RouterLink>
+				<gf.RouterLink To="/does-not-exist" TestID="document-not-found-link">
+					Unknown
+				</gf.RouterLink>
+				<button
+					Type="button"
+					data-testid="document-rapid-update"
+					OnClick={func() {
+						gf.Navigate("/users/A")
+						gf.Navigate("/users/B")
+						gf.Navigate("/users/C")
+					}}
+				>
+					Rapid A, B, C
+				</button>
+				<button
+					Type="button"
+					data-testid="document-failure-trigger"
+					OnClick={func() {
+						setFailureActive(true)
+					}}
+				>
+					Trigger speculative failure
+				</button>
+			</nav>
+
+			<gf.ErrorBoundary
+				Fallback={func(ctx gf.ErrorBoundaryContext) gf.Node {
+					return documentFailureFallback(ctx, setFailureActive)
+				}}
+			>
+				{failureNode}
+			</gf.ErrorBoundary>
+
+			{gf.RouterView(router)}
+		</section>
+	)
+}
+
+func DocumentOwner(props DocumentOwnerProps) gf.Node {
+	useDocumentState(
+		props.Coordinator,
+		props.OnSnapshot,
+		props.Owner,
+		props.State,
+	)
+	return gf.Fragment(props.Children...)
+}
+
+func RoutePage(props RoutePageProps) gf.Node {
+	return (
+		<DocumentOwner
+			Coordinator={props.Coordinator}
+			OnSnapshot={props.OnSnapshot}
+			Owner="route"
+			State={props.State}
+		>
+			<section data-testid="document-route-view">
+				<h2>{props.Summary}</h2>
+				<p data-testid="document-route-name">{props.Name}</p>
+				<p data-testid="document-route-target">{props.Target}</p>
+			</section>
+		</DocumentOwner>
+	)
+}
+
+func UserPage(props UserPageProps) gf.Node {
+	editorOpen, setEditorOpen := gf.UseState(false)
+	editor := documentEditorNode(editorOpen, props, setEditorOpen)
+	state := userDocumentState(props.ID)
+
+	return (
+		<DocumentOwner
+			Coordinator={props.Coordinator}
+			OnSnapshot={props.OnSnapshot}
+			Owner="route"
+			State={state}
+		>
+			<section data-testid="document-route-view">
+				<h2>User {props.ID}</h2>
+				<p data-testid="document-route-name">user</p>
+				<p data-testid="document-route-target">{props.Target}</p>
+				<button
+					Type="button"
+					data-testid="document-editor-open"
+					OnClick={func() {
+						setEditorOpen(true)
+					}}
+				>
+					Open editor
+				</button>
+				{editor}
+			</section>
+		</DocumentOwner>
+	)
+}
+
+func SpeculativeDocumentOwner(props SpeculativeDocumentOwnerProps) gf.Node {
+	useDocumentState(
+		props.Coordinator,
+		props.OnSnapshot,
+		"speculative",
+		documentstate.State{
+			Title:       "Speculative failure · GoFrame",
+			Description: "This description must never commit.",
+		},
+	)
+	panic("document-state speculative render failure")
+}
+
+func useDocumentState(
+	coordinator *documentstate.Coordinator,
+	onSnapshot func(documentstate.Snapshot),
+	owner string,
+	state documentstate.State,
+) {
+	gf.UseEffect(func() gf.Cleanup {
+		transition, err := coordinator.Set(owner, state)
+		if err != nil {
+			panic("document-state fixture: set owner: " + err.Error())
+		}
+		if transition.Change != documentstate.ChangeNone {
+			recordDocumentStateTransition(transition)
+			onSnapshot(transition.Snapshot)
+		}
+		return nil
+	}, gf.Deps(owner, state.Title, state.Description))
+	gf.UseUnmount(func() {
+		transition, err := coordinator.Remove(owner)
+		if err != nil {
+			panic("document-state fixture: remove owner: " + err.Error())
+		}
+		if transition.Change != documentstate.ChangeNone {
+			recordDocumentStateTransition(transition)
+			onSnapshot(transition.Snapshot)
+		}
+	})
+}
+
+func newDocumentRouter(props DocumentScopeProps) *gf.Router {
+	return gf.NewHashRouter([]gf.Route{
+		gf.RoutePath("/", func(ctx gf.RouteContext) gf.Node {
+			return documentRoutePage(props, RoutePageProps{
+				Name:    "home",
+				Target:  routeTarget(ctx),
+				State:   documentstate.State{Title: "Home · GoFrame", Description: "Document-state home route."},
+				Summary: "Home",
+			})
+		}),
+		gf.RoutePath("/users/:id", func(ctx gf.RouteContext) gf.Node {
+			return gf.ComponentT(
+				documentUserPageType,
+				UserPageProps{
+					Coordinator: props.Coordinator,
+					OnSnapshot:  props.OnSnapshot,
+					ID:          ctx.Param("id"),
+					Target:      routeTarget(ctx),
+				},
+				UserPage,
+			)
+		}),
+		gf.RoutePath("/search", func(ctx gf.RouteContext) gf.Node {
+			query := ctx.Query().Get("q")
+			return documentRoutePage(props, RoutePageProps{
+				Name:    "search",
+				Target:  routeTarget(ctx),
+				State:   documentstate.State{Title: "Search: " + query + " · GoFrame", Description: "Search results for " + query + "."},
+				Summary: "Search results",
+			})
+		}),
+		gf.NotFoundRoute(func(ctx gf.RouteContext) gf.Node {
+			return documentRoutePage(props, RoutePageProps{
+				Name:    "not-found",
+				Target:  routeTarget(ctx),
+				State:   documentstate.State{Title: "Not found · GoFrame", Description: "No document-state route matched."},
+				Summary: "Not found",
+			})
+		}),
+	})
+}
+
+func documentRoutePage(scope DocumentScopeProps, props RoutePageProps) gf.Node {
+	props.Coordinator = scope.Coordinator
+	props.OnSnapshot = scope.OnSnapshot
+	return gf.ComponentT(documentRoutePageType, props, RoutePage)
+}
+
+func documentEditorNode(
+	active bool,
+	props UserPageProps,
+	setActive func(bool),
+) gf.Node {
+	if !active {
+		return gf.Empty()
+	}
+	return (
+		<DocumentOwner
+			Coordinator={props.Coordinator}
+			OnSnapshot={props.OnSnapshot}
+			Owner="editor"
+			State={documentstate.State{
+				Title:       "Editing User " + props.ID + " · GoFrame",
+				Description: "Editing profile for user " + props.ID + ".",
+			}}
+		>
+			<aside class="document-state-editor" data-testid="document-editor">
+				<p>Editing user {props.ID}</p>
+				<button
+					Type="button"
+					data-testid="document-editor-close"
+					OnClick={func() {
+						setActive(false)
+					}}
+				>
+					Close editor
+				</button>
+			</aside>
+		</DocumentOwner>
+	)
+}
+
+func speculativeFailureNode(
+	active bool,
+	props DocumentScopeProps,
+) gf.Node {
+	if !active {
+		return gf.Empty()
+	}
+	return (
+		<SpeculativeDocumentOwner
+			Coordinator={props.Coordinator}
+			OnSnapshot={props.OnSnapshot}
+		/>
+	)
+}
+
+func documentFailureFallback(
+	ctx gf.ErrorBoundaryContext,
+	setFailureActive func(bool),
+) gf.Node {
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "document-failure-fallback"},
+		gf.El("p", nil, gf.Text("Speculative document owner failed during render.")),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "document-failure-reset",
+				"OnClick": func() {
+					setFailureActive(false)
+					ctx.Reset()
+				},
+			},
+			gf.Text("Remove failed owner"),
+		),
+	)
+}
+
+func documentScopeNode(
+	active bool,
+	props DocumentScopeProps,
+) gf.Node {
+	if active {
+		return (
+			<DocumentScope
+				Coordinator={props.Coordinator}
+				OnSnapshot={props.OnSnapshot}
+			/>
+		)
+	}
+	return (
+		<section data-testid="document-state-scope-inactive">
+			Document-state owners are unmounted.
+		</section>
+	)
+}
+
+func documentScopeControl(
+	active bool,
+	setActive func(bool),
+) gf.Node {
+	if active {
+		return gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "document-scope-unmount",
+				"OnClick": func() {
+					setActive(false)
+				},
+			},
+			gf.Text("Unmount document owners"),
+		)
+	}
+	return gf.El(
+		"button",
+		gf.Props{
+			"data-testid": "document-scope-remount",
+			"OnClick": func() {
+				setActive(true)
+			},
+		},
+		gf.Text("Remount document owners"),
+	)
+}
+
+func userDocumentState(id string) documentstate.State {
+	return documentstate.State{
+		Title:       "User " + id + " · GoFrame",
+		Description: "Profile for user " + id + ".",
+	}
+}
+
+func routeTarget(ctx gf.RouteContext) string {
+	if ctx.RawQuery == "" {
+		return ctx.Path
+	}
+	return ctx.Path + "?" + ctx.RawQuery
+}
+
+func activeOwnerLabel(snapshot documentstate.Snapshot) string {
+	if !snapshot.HasOwner {
+		return "authored-baseline"
+	}
+	return snapshot.ActiveOwner
+}

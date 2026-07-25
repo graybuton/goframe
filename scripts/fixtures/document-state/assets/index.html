@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GoFrame document-state fixture</title>
+    <meta
+        name="description"
+        content="Authored document-state baseline"
+    />
+    <meta name="fixture-unrelated" content="preserve-me" />
+    <link rel="stylesheet" href="styles.css" />
+    <!-- goframe:preload -->
+    <!-- /goframe:preload -->
+</head>
+<body>
+    <div id="root">Loading...</div>
+
+    <!-- goframe:runtime -->
+    <script src="wasm_exec.js"></script>
+    <!-- /goframe:runtime -->
+    <!-- goframe:bootstrap -->
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+            .then((result) => go.run(result.instance));
+    </script>
+    <!-- /goframe:bootstrap -->
+</body>
+</html>

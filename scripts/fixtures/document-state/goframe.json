@@ -1,0 +1,6 @@
+{
+  "name": "document-state",
+  "entry": "./cmd/app",
+  "compiler": "tinygo",
+  "assets": "./assets"
+}
