@@ -41,6 +41,27 @@ input {
   padding: 2rem;
 }
 
+.document-state-summary {
+  background: #eaf1ff;
+  border: 1px solid #c8d8f6;
+  border-radius: 18px;
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
+.document-state-values {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.document-state-values span {
+  overflow-wrap: anywhere;
+}
+
+.reference-controls {
+  margin-top: 0.8rem;
+}
+
 .hero,
 .panel {
   background: #fff;
@@ -151,4 +172,18 @@ h2 {
   display: grid;
   gap: 0.75rem;
   justify-items: start;
+}
+
+.saved-editor-state {
+  border: 1px dashed #7c91b2;
+  border-radius: 16px;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+  margin-top: 1rem;
+  padding: 0.9rem;
+}
+
+.saved-editor-state .muted {
+  margin: 0;
 }

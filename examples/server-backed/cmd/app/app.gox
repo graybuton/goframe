@@ -7,6 +7,22 @@ import (
 	gf "github.com/graybuton/goframe/pkg/goframe"
 )
 
+type AppProps struct {
+	Adapter     *browserDocumentAdapter
+	Coordinator *serverBackedDocumentCoordinator
+}
+
+type DocumentCommitterProps struct {
+	Adapter  *browserDocumentAdapter
+	Snapshot serverBackedDocumentSnapshot
+}
+
+type DocumentOwnerProps struct {
+	Owner    string
+	State    serverBackedDocumentState
+	Children []gf.Node
+}
+
 type ServerBackedShellProps struct {
 	Children []gf.Node
 }
@@ -39,7 +55,20 @@ type savedGreetingMutationOwner struct {
 	cleanup gf.Cleanup
 }
 
-const savedGreetingAPIPath = "/api/saved-greeting"
+type serverBackedDocumentBindings struct {
+	Coordinator *serverBackedDocumentCoordinator
+	OnSnapshot  func(serverBackedDocumentSnapshot)
+}
+
+const (
+	savedGreetingAPIPath         = "/api/saved-greeting"
+	serverBackedRouteOwner       = "route"
+	serverBackedSavedEditorOwner = "saved-editor"
+)
+
+var serverBackedDocumentContext = gf.CreateContext(
+	serverBackedDocumentBindings{},
+)
 
 func newSavedGreetingMutationOwner() *savedGreetingMutationOwner {
 	return &savedGreetingMutationOwner{mounted: true}
@@ -92,14 +121,93 @@ var router = gf.NewHashRouter([]gf.Route{
 	gf.NotFoundRoute(notFoundRoute),
 })
 
-func App() gf.Node {
+func App(props AppProps) gf.Node {
+	scopeActive, setScopeActive := gf.UseState(true)
+	snapshot, setSnapshot := gf.UseState(props.Coordinator.Snapshot())
+	gf.ProvideContext(serverBackedDocumentContext, serverBackedDocumentBindings{
+		Coordinator: props.Coordinator,
+		OnSnapshot:  setSnapshot,
+	})
+
 	return (
 		<main class="server-backed-app" data-testid="server-backed-app">
+			<DocumentCommitter Adapter={props.Adapter} Snapshot={snapshot} />
+
+			<section class="document-state-summary" data-testid="server-backed-document-state">
+				<p class="eyebrow">Selected document state</p>
+				<div class="document-state-values">
+					<span data-testid="server-backed-document-owner">{activeDocumentOwnerLabel(snapshot)}</span>
+					<span data-testid="server-backed-document-owner-count">{snapshot.OwnerCount}</span>
+					<span data-testid="server-backed-document-title">{snapshot.State.Title}</span>
+					<span data-testid="server-backed-document-description">{snapshot.State.Description}</span>
+				</div>
+				<div class="reference-controls">
+					{documentScopeControl(scopeActive, setScopeActive)}
+				</div>
+			</section>
+
 			<ServerBackedShell>
-				{gf.RouterView(router)}
+				{documentRouteScope(scopeActive)}
 			</ServerBackedShell>
 		</main>
 	)
+}
+
+func DocumentCommitter(props DocumentCommitterProps) gf.Node {
+	title := props.Snapshot.State.Title
+	description := props.Snapshot.State.Description
+	gf.UseEffect(func() gf.Cleanup {
+		if err := props.Adapter.Apply(serverBackedDocumentState{
+			Title:       title,
+			Description: description,
+		}); err != nil {
+			panic("server-backed document state: apply selected state: " + err.Error())
+		}
+		return nil
+	}, gf.Deps(title, description))
+	return gf.Empty()
+}
+
+func DocumentOwner(props DocumentOwnerProps) gf.Node {
+	bindings := gf.UseContext(serverBackedDocumentContext)
+	useServerBackedDocumentState(
+		bindings,
+		props.Owner,
+		props.State,
+	)
+	return gf.Fragment(props.Children...)
+}
+
+func useServerBackedDocumentState(
+	bindings serverBackedDocumentBindings,
+	owner string,
+	state serverBackedDocumentState,
+) {
+	gf.UseEffect(func() gf.Cleanup {
+		if bindings.Coordinator == nil || bindings.OnSnapshot == nil {
+			panic("server-backed document state: missing application bindings")
+		}
+		snapshot, changed, err := bindings.Coordinator.Set(owner, state)
+		if err != nil {
+			panic("server-backed document state: set owner: " + err.Error())
+		}
+		if changed {
+			bindings.OnSnapshot(snapshot)
+		}
+		return nil
+	}, gf.Deps(owner, state.Title, state.Description))
+	gf.UseUnmount(func() {
+		if bindings.Coordinator == nil || bindings.OnSnapshot == nil {
+			panic("server-backed document state: missing application bindings")
+		}
+		snapshot, changed, err := bindings.Coordinator.Remove(owner)
+		if err != nil {
+			panic("server-backed document state: remove owner: " + err.Error())
+		}
+		if changed {
+			bindings.OnSnapshot(snapshot)
+		}
+	})
 }
 
 func ServerBackedShell(props ServerBackedShellProps) gf.Node {
@@ -167,6 +275,7 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 	mutationStatus, setMutationStatus := gf.UseState("idle")
 	mutationError, setMutationError := gf.UseState("")
 	mutationOwner, _ := gf.UseState(newSavedGreetingMutationOwner())
+	editorActive, setEditorActive := gf.UseState(false)
 	resource, reload := gf.UseResource(savedGreetingAPIPath, gf.FetchText)
 	gf.UseUnmount(func() {
 		mutationOwner.cancel()
@@ -209,50 +318,68 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 		mutationOwner.setCleanup(cleanup)
 	}
 
+	editor := savedGreetingEditorNode(
+		editorActive,
+		draft,
+		mutationStatus,
+		setEditorActive,
+	)
+
 	return (
-		<div data-testid="server-backed-saved-route">
-			<p class="eyebrow" data-testid="server-backed-route-name">Saved greeting route</p>
-			<h2>Committed server state</h2>
-			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
-			<p class="muted" data-testid="saved-greeting-resource-key">{savedGreetingAPIPath}</p>
-			<p class="muted" data-testid="saved-greeting-read-status">{greetingStatus(resource)}</p>
+		<DocumentOwner
+			Owner={serverBackedRouteOwner}
+			State={savedGreetingDocumentMetadata(greetingStatus(resource), resource.Value)}
+		>
+			<div data-testid="server-backed-saved-route">
+				<p class="eyebrow" data-testid="server-backed-route-name">Saved greeting route</p>
+				<h2>Committed server state</h2>
+				<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+				<p class="muted" data-testid="saved-greeting-resource-key">{savedGreetingAPIPath}</p>
+				<p class="muted" data-testid="saved-greeting-read-status">{greetingStatus(resource)}</p>
 
-			{resource.Loading() && (
-				<p class="status loading" data-testid="saved-greeting-read-loading">Loading committed greeting...</p>
-			)}
-			{resource.Failed() && (
-				<div class="status failed" data-testid="saved-greeting-read-error">{greetingErrorText(resource)}</div>
-			)}
-			{resource.Ready() && (
-				<p class="status message" data-testid="saved-greeting-committed">{resource.Value}</p>
-			)}
+				{resource.Loading() && (
+					<p class="status loading" data-testid="saved-greeting-read-loading">Loading committed greeting...</p>
+				)}
+				{resource.Failed() && (
+					<div class="status failed" data-testid="saved-greeting-read-error">{greetingErrorText(resource)}</div>
+				)}
+				{resource.Ready() && (
+					<p class="status message" data-testid="saved-greeting-committed">{resource.Value}</p>
+				)}
 
-			<form class="greeting-form" data-testid="saved-greeting-form" OnSubmit={submitSavedGreeting}>
-				<label class="field">
-					<span>New committed name</span>
-					<input
-						data-testid="saved-greeting-input"
-						Type="text"
-						Value={draft}
-						OnInput={func(event gf.InputEvent) {
-							setDraft(event.Value())
-						}}
-					/>
-				</label>
-				<button
-					data-testid="saved-greeting-submit"
-					Type="submit"
-					Disabled={mutationStatus == "pending"}
-				>
-					Save greeting
-				</button>
-			</form>
+				<form class="greeting-form" data-testid="saved-greeting-form" OnSubmit={submitSavedGreeting}>
+					<label class="field">
+						<span>New committed name</span>
+						<input
+							data-testid="saved-greeting-input"
+							Type="text"
+							Value={draft}
+							OnInput={func(event gf.InputEvent) {
+								setEditorActive(true)
+								setDraft(event.Value())
+								if mutationStatus != "idle" {
+									setMutationStatus("idle")
+									setMutationError("")
+								}
+							}}
+						/>
+					</label>
+					<button
+						data-testid="saved-greeting-submit"
+						Type="submit"
+						Disabled={mutationStatus == "pending"}
+					>
+						Save greeting
+					</button>
+				</form>
 
-			<p class="muted" data-testid="saved-greeting-mutation-status">{mutationStatus}</p>
-			{mutationError != "" && (
-				<div class="status failed" data-testid="saved-greeting-mutation-error">{mutationError}</div>
-			)}
-		</div>
+				<p class="muted" data-testid="saved-greeting-mutation-status">{mutationStatus}</p>
+				{mutationError != "" && (
+					<div class="status failed" data-testid="saved-greeting-mutation-error">{mutationError}</div>
+				)}
+				{editor}
+			</div>
+		</DocumentOwner>
 	)
 }
 
@@ -268,13 +395,15 @@ func HomeRoute(props HomeRouteProps) gf.Node {
 	}
 
 	return (
-		<div data-testid="server-backed-home">
-			<p class="eyebrow" data-testid="server-backed-route-name">Home route</p>
-			<h2>Choose a greeting</h2>
-			<p class="muted">The initial route starts no greeting resource.</p>
-			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
-			{greetingForm(draft, setDraft, submitGreeting)}
-		</div>
+		<DocumentOwner Owner={serverBackedRouteOwner} State={homeDocumentMetadata()}>
+			<div data-testid="server-backed-home">
+				<p class="eyebrow" data-testid="server-backed-route-name">Home route</p>
+				<h2>Choose a greeting</h2>
+				<p class="muted">The initial route starts no greeting resource.</p>
+				<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+				{greetingForm(draft, setDraft, submitGreeting)}
+			</div>
+		</DocumentOwner>
 	)
 }
 
@@ -302,24 +431,29 @@ func GreetingRoute(props GreetingRouteProps) gf.Node {
 	}
 
 	return (
-		<div data-testid="server-backed-greeting-route">
-			<p class="eyebrow" data-testid="server-backed-route-name">Greeting route</p>
-			<h2>Backend response</h2>
-			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
-			<p class="muted" data-testid="greeting-resource-key">{greetingPath(props.Name)}</p>
-			<p class="muted" data-testid="greeting-status">{greetingStatus(resource)}</p>
-			{greetingForm(draft, setDraft, submitGreeting)}
+		<DocumentOwner
+			Owner={serverBackedRouteOwner}
+			State={greetingDocumentMetadata(props.Name)}
+		>
+			<div data-testid="server-backed-greeting-route">
+				<p class="eyebrow" data-testid="server-backed-route-name">Greeting route</p>
+				<h2>Backend response</h2>
+				<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+				<p class="muted" data-testid="greeting-resource-key">{greetingPath(props.Name)}</p>
+				<p class="muted" data-testid="greeting-status">{greetingStatus(resource)}</p>
+				{greetingForm(draft, setDraft, submitGreeting)}
 
-			{resource.Loading() && (
-				<p class="status loading" data-testid="greeting-loading">Loading backend greeting...</p>
-			)}
-			{resource.Failed() && (
-				<div class="status failed" data-testid="greeting-error">{greetingErrorText(resource)}</div>
-			)}
-			{resource.Ready() && (
-				<p class="status message" data-testid="greeting-message">{resource.Value}</p>
-			)}
-		</div>
+				{resource.Loading() && (
+					<p class="status loading" data-testid="greeting-loading">Loading backend greeting...</p>
+				)}
+				{resource.Failed() && (
+					<div class="status failed" data-testid="greeting-error">{greetingErrorText(resource)}</div>
+				)}
+				{resource.Ready() && (
+					<p class="status message" data-testid="greeting-message">{resource.Value}</p>
+				)}
+			</div>
+		</DocumentOwner>
 	)
 }
 
@@ -379,57 +513,62 @@ func TransitionGreetingRoute(props TransitionGreetingRouteProps) gf.Node {
 	}
 
 	return (
-		<div data-testid="server-backed-transition-route">
-			<p class="eyebrow" data-testid="server-backed-route-name">Retained transition route</p>
-			<h2>Prepared backend response</h2>
-			<p class="muted">Requested target</p>
-			<p class="route-target" data-testid="transition-requested-target">{props.Target}</p>
-			<p class="muted" data-testid="transition-status">{status}</p>
+		<DocumentOwner
+			Owner={serverBackedRouteOwner}
+			State={transitionDocumentMetadata(props.Name, committed)}
+		>
+			<div data-testid="server-backed-transition-route">
+				<p class="eyebrow" data-testid="server-backed-route-name">Retained transition route</p>
+				<h2>Prepared backend response</h2>
+				<p class="muted">Requested target</p>
+				<p class="route-target" data-testid="transition-requested-target">{props.Target}</p>
+				<p class="muted" data-testid="transition-status">{status}</p>
 
-			<form class="greeting-form" data-testid="transition-form" OnSubmit={submitGreeting}>
-				<label class="field">
-					<span>Name</span>
-					<input
-						data-testid="transition-name"
-						Type="text"
-						Value={draft}
-						OnInput={func(event gf.InputEvent) {
-							setDraft(event.Value())
-						}}
-					/>
-				</label>
-				<button data-testid="transition-submit" Type="submit">Prepare greeting</button>
-			</form>
+				<form class="greeting-form" data-testid="transition-form" OnSubmit={submitGreeting}>
+					<label class="field">
+						<span>Name</span>
+						<input
+							data-testid="transition-name"
+							Type="text"
+							Value={draft}
+							OnInput={func(event gf.InputEvent) {
+								setDraft(event.Value())
+							}}
+						/>
+					</label>
+					<button data-testid="transition-submit" Type="submit">Prepare greeting</button>
+				</form>
 
-			{committed.Ready && (
-				<section class="transition-committed" data-testid="transition-committed-screen">
-					<p class="muted">Committed target</p>
-					<p class="route-target" data-testid="transition-committed-target">{committed.Target}</p>
-					<p class="status message" data-testid="transition-message">{committed.Message}</p>
-				</section>
-			)}
+				{committed.Ready && (
+					<section class="transition-committed" data-testid="transition-committed-screen">
+						<p class="muted">Committed target</p>
+						<p class="route-target" data-testid="transition-committed-target">{committed.Target}</p>
+						<p class="status message" data-testid="transition-message">{committed.Message}</p>
+					</section>
+				)}
 
-			{status == "loading" && (
-				<p class="status loading" data-testid="transition-pending">
-					Preparing the initial greeting for {props.Name}...
-				</p>
-			)}
-			{status == "pending" && (
-				<p class="status loading" data-testid="transition-pending">
-					Preparing {props.Name} while the committed screen remains visible...
-				</p>
-			)}
-			{resource.Failed() && (
-				<div class="transition-failure">
-					<div class="status failed" data-testid="transition-error">{greetingErrorText(resource)}</div>
-					<button data-testid="transition-retry" Type="button" OnClick={func(gf.Event) {
-						reload()
-					}}>
-						Retry requested target
-					</button>
-				</div>
-			)}
-		</div>
+				{status == "loading" && (
+					<p class="status loading" data-testid="transition-pending">
+						Preparing the initial greeting for {props.Name}...
+					</p>
+				)}
+				{status == "pending" && (
+					<p class="status loading" data-testid="transition-pending">
+						Preparing {props.Name} while the committed screen remains visible...
+					</p>
+				)}
+				{resource.Failed() && (
+					<div class="transition-failure">
+						<div class="status failed" data-testid="transition-error">{greetingErrorText(resource)}</div>
+						<button data-testid="transition-retry" Type="button" OnClick={func(gf.Event) {
+							reload()
+						}}>
+							Retry requested target
+						</button>
+					</div>
+				)}
+			</div>
+		</DocumentOwner>
 	)
 }
 
@@ -454,12 +593,90 @@ func greetingForm(name string, setName func(string), submitGreeting func(gf.Even
 
 func NotFoundRoute(props NotFoundRouteProps) gf.Node {
 	return (
-		<div data-testid="server-backed-not-found">
-			<p class="eyebrow" data-testid="server-backed-route-name">Not found</p>
-			<h2>Unknown route</h2>
-			<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
-		</div>
+		<DocumentOwner Owner={serverBackedRouteOwner} State={notFoundDocumentMetadata()}>
+			<div data-testid="server-backed-not-found">
+				<p class="eyebrow" data-testid="server-backed-route-name">Not found</p>
+				<h2>Unknown route</h2>
+				<p class="route-target" data-testid="server-backed-route-target">{props.Target}</p>
+			</div>
+		</DocumentOwner>
 	)
+}
+
+func savedGreetingEditorNode(
+	active bool,
+	draft string,
+	status string,
+	setActive func(bool),
+) gf.Node {
+	if !active {
+		return gf.Empty()
+	}
+	return (
+		<DocumentOwner
+			Owner={serverBackedSavedEditorOwner}
+			State={savedGreetingEditorDocumentMetadata(draft, status)}
+		>
+			<aside class="saved-editor-state" data-testid="saved-greeting-editor-state">
+				<p class="muted">The editor temporarily owns document metadata.</p>
+				<button
+					data-testid="saved-greeting-finish-editing"
+					Type="button"
+					OnClick={func(gf.Event) {
+						setActive(false)
+					}}
+				>
+					Finish editing
+				</button>
+			</aside>
+		</DocumentOwner>
+	)
+}
+
+func documentRouteScope(active bool) gf.Node {
+	if active {
+		return gf.RouterView(router)
+	}
+	return (
+		<section data-testid="server-backed-document-scope-inactive">
+			Route document owners are unmounted.
+		</section>
+	)
+}
+
+func documentScopeControl(
+	active bool,
+	setActive func(bool),
+) gf.Node {
+	if active {
+		return gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "server-backed-document-scope-unmount",
+				"OnClick": func() {
+					setActive(false)
+				},
+			},
+			gf.Text("Unmount route document scope"),
+		)
+	}
+	return gf.El(
+		"button",
+		gf.Props{
+			"data-testid": "server-backed-document-scope-remount",
+			"OnClick": func() {
+				setActive(true)
+			},
+		},
+		gf.Text("Remount route document scope"),
+	)
+}
+
+func activeDocumentOwnerLabel(snapshot serverBackedDocumentSnapshot) string {
+	if snapshot.ActiveOwner == "" {
+		return "authored-baseline"
+	}
+	return snapshot.ActiveOwner
 }
 
 func normalizedGreetingName(name string) string {
