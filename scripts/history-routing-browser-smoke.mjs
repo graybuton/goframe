@@ -588,7 +588,12 @@ async function startServer(command, args, readyURL, label) {
     child.stderr.on("data", (chunk) => {
         output += chunk;
     });
-    await waitForHTTP(readyURL, child, label, () => output);
+    try {
+        await waitForHTTP(readyURL, child, label, () => output);
+    } catch (error) {
+        await stopProcess(child, true);
+        throw error;
+    }
     return { child, output: () => output };
 }
 
