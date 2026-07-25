@@ -1,0 +1,6 @@
+{
+  "name": "history-routing",
+  "entry": "./cmd/app",
+  "compiler": "tinygo",
+  "assets": "./assets"
+}
