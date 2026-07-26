@@ -131,7 +131,15 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 	end := document.Call("createComment", "/goframe-component")
 	fragment := document.Call("createDocumentFragment")
 	fragment.Call("appendChild", start)
-	child := mountNode(document, renderComponentInstance(instance), instance)
+	rendered := renderComponentInstance(instance)
+	var child *mountedNode
+	if componentHasProtectedErrorBoundary(instance) {
+		runProtectedSubtreeLifecycleTransaction(instance, func() {
+			child = mountNode(document, rendered, instance)
+		})
+	} else {
+		child = mountNode(document, rendered, instance)
+	}
 	placeMountedBefore(fragment, child, js.Null())
 	fragment.Call("appendChild", end)
 	mounted.componentChild = child
@@ -147,7 +155,9 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 		if parent.IsUndefined() || parent.IsNull() {
 			return
 		}
-		patchComponent(document, parent, mounted, instance.node, instance.parent)
+		runProtectedDescendantLifecycleTransaction(instance, func() {
+			patchComponent(document, parent, mounted, instance.node, instance.parent)
+		})
 	}
 }
 
@@ -162,7 +172,15 @@ func patchComponent(document, parent js.Value, mounted *mountedNode, newNode Com
 		return
 	}
 	instance.node = newNode
-	child := patchMounted(document, parent, mounted.componentChild, renderComponentInstance(instance), instance)
+	rendered := renderComponentInstance(instance)
+	var child *mountedNode
+	if componentHasProtectedErrorBoundary(instance) {
+		runProtectedSubtreeLifecycleTransaction(instance, func() {
+			child = patchMounted(document, parent, mounted.componentChild, rendered, instance)
+		})
+	} else {
+		child = patchMounted(document, parent, mounted.componentChild, rendered, instance)
+	}
 	mounted.componentChild = child
 }
 

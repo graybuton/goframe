@@ -324,6 +324,15 @@ func commitLifecycleRenderAttempt(instance *componentInstance) {
 	finishLifecycleRenderAttempt(attempt)
 }
 
+func completeLifecycleRenderAttempt(instance *componentInstance) {
+	attempt := requireLifecycleRenderAttempt(instance)
+	if (attempt.commitHooks != nil || len(attempt.participants) != 0) &&
+		stageProtectedSubtreeLifecycleAttempt(instance) {
+		return
+	}
+	commitLifecycleRenderAttempt(instance)
+}
+
 func commitLifecycleHooks(instance *componentInstance) {
 	attempt := &instance.lifecycleAttempt
 	for index := range attempt.effects {

@@ -211,7 +211,7 @@ func renderComponentLifecycle(instance *componentInstance, contextFinalizationSt
 	*contextFinalizationStarted = true
 	finishComponentContextRender(instance)
 	rendered := Child(node)
-	commitLifecycleRenderAttempt(instance)
+	completeLifecycleRenderAttempt(instance)
 	return rendered
 }
 

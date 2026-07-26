@@ -27,6 +27,7 @@ type errorBoundaryState struct {
 	generation  int
 	resetKey    string
 	hasResetKey bool
+	transaction protectedSubtreeTransaction
 }
 
 var errorBoundaryComponentType = NewComponentType("goframe.ErrorBoundary", "ErrorBoundary")
@@ -100,6 +101,7 @@ func captureRenderErrorBoundary(failing *componentInstance, info ErrorInfo) {
 	if boundary == nil || boundary.errorBoundary == nil {
 		return
 	}
+	failProtectedSubtreeLifecycleTransaction(boundary)
 	cancelPendingEffectsUnderBoundary(boundary)
 	state := boundary.errorBoundary
 	if state.phase == errorBoundaryProtected {
