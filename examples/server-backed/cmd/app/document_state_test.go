@@ -46,7 +46,14 @@ func TestDocumentStateCoordinatorRetainsLatestRemainingOwner(t *testing.T) {
 		t.Fatalf("owner order after route update = %v", got)
 	}
 
-	editorUpdated := savedGreetingEditorDocumentMetadata("Grace", "success")
+	editorUpdated := savedGreetingEditorDocumentMetadata(
+		"Grace",
+		"success",
+		savedGreetingMutationTarget{
+			Submitted: "Grace",
+			Confirmed: "Grace",
+		},
+	)
 	mustSetDocumentOwner(t, coordinator, "saved-editor", editorUpdated)
 	snapshot = mustRemoveDocumentOwner(t, coordinator, "saved-editor")
 	assertDocumentSnapshot(t, snapshot, serverBackedDocumentSnapshot{
@@ -217,7 +224,11 @@ func TestDocumentMetadataMapping(t *testing.T) {
 		},
 		{
 			name: "saved editor",
-			got:  savedGreetingEditorDocumentMetadata("slow", "idle"),
+			got: savedGreetingEditorDocumentMetadata(
+				"slow",
+				"idle",
+				savedGreetingMutationTarget{},
+			),
 			want: serverBackedDocumentState{
 				Title:       "Editing saved greeting: slow · GoFrame",
 				Description: "Unsaved saved-greeting draft: slow.",
@@ -225,7 +236,11 @@ func TestDocumentMetadataMapping(t *testing.T) {
 		},
 		{
 			name: "saved editor pending",
-			got:  savedGreetingEditorDocumentMetadata("slow", "pending"),
+			got: savedGreetingEditorDocumentMetadata(
+				"slow",
+				"pending",
+				savedGreetingMutationTarget{Submitted: "slow"},
+			),
 			want: serverBackedDocumentState{
 				Title:       "Saving greeting: slow · GoFrame",
 				Description: "Saving the greeting slow.",
@@ -233,7 +248,11 @@ func TestDocumentMetadataMapping(t *testing.T) {
 		},
 		{
 			name: "saved editor validation failure",
-			got:  savedGreetingEditorDocumentMetadata("   ", "validation failed"),
+			got: savedGreetingEditorDocumentMetadata(
+				"   ",
+				"validation failed",
+				savedGreetingMutationTarget{},
+			),
 			want: serverBackedDocumentState{
 				Title:       "Saved greeting needs attention · GoFrame",
 				Description: "The draft empty has not been committed.",
@@ -241,7 +260,11 @@ func TestDocumentMetadataMapping(t *testing.T) {
 		},
 		{
 			name: "saved editor server failure",
-			got:  savedGreetingEditorDocumentMetadata("fail", "server failed"),
+			got: savedGreetingEditorDocumentMetadata(
+				"fail",
+				"server failed",
+				savedGreetingMutationTarget{Submitted: "fail"},
+			),
 			want: serverBackedDocumentState{
 				Title:       "Saved greeting needs attention · GoFrame",
 				Description: "The draft fail has not been committed.",
@@ -249,7 +272,14 @@ func TestDocumentMetadataMapping(t *testing.T) {
 		},
 		{
 			name: "saved editor confirmed",
-			got:  savedGreetingEditorDocumentMetadata("Grace", "success"),
+			got: savedGreetingEditorDocumentMetadata(
+				"Grace",
+				"success",
+				savedGreetingMutationTarget{
+					Submitted: "Grace",
+					Confirmed: "Grace",
+				},
+			),
 			want: serverBackedDocumentState{
 				Title:       "Saved greeting confirmed: Grace · GoFrame",
 				Description: "The server confirmed Grace; finish editing to reveal committed metadata.",
@@ -274,6 +304,174 @@ func TestDocumentMetadataMapping(t *testing.T) {
 	}
 }
 
+func TestSavedMutationDocumentMetadataAttribution(t *testing.T) {
+	tests := []struct {
+		name   string
+		draft  string
+		status string
+		target savedGreetingMutationTarget
+		want   serverBackedDocumentState
+	}{
+		{
+			name:   "pending keeps submitted target after draft edit",
+			draft:  "Mia",
+			status: "pending",
+			target: savedGreetingMutationTarget{Submitted: "slow"},
+			want: serverBackedDocumentState{
+				Title:       "Saving greeting: slow · GoFrame",
+				Description: "Saving the greeting slow.",
+			},
+		},
+		{
+			name:   "success uses confirmed response after draft edit",
+			draft:  "Mia",
+			status: "success",
+			target: savedGreetingMutationTarget{
+				Submitted: "slow",
+				Confirmed: "slow",
+			},
+			want: serverBackedDocumentState{
+				Title:       "Saved greeting confirmed: slow · GoFrame",
+				Description: "The server confirmed slow; finish editing to reveal committed metadata.",
+			},
+		},
+		{
+			name:   "success prefers normalized server response to submitted target",
+			draft:  "Mia",
+			status: "success",
+			target: savedGreetingMutationTarget{
+				Submitted: "submitted",
+				Confirmed: "confirmed",
+			},
+			want: serverBackedDocumentState{
+				Title:       "Saved greeting confirmed: confirmed · GoFrame",
+				Description: "The server confirmed confirmed; finish editing to reveal committed metadata.",
+			},
+		},
+		{
+			name:   "server failure keeps submitted target after draft edit",
+			draft:  "Mia",
+			status: "server failed",
+			target: savedGreetingMutationTarget{Submitted: "fail"},
+			want: serverBackedDocumentState{
+				Title:       "Saved greeting needs attention · GoFrame",
+				Description: "The draft fail has not been committed.",
+			},
+		},
+		{
+			name:   "validation failure follows current invalid draft",
+			draft:  "   ",
+			status: "validation failed",
+			target: savedGreetingMutationTarget{},
+			want: serverBackedDocumentState{
+				Title:       "Saved greeting needs attention · GoFrame",
+				Description: "The draft empty has not been committed.",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := savedGreetingEditorDocumentMetadata(
+				test.draft,
+				test.status,
+				test.target,
+			)
+			if got != test.want {
+				t.Fatalf("metadata = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSavedMutationConfirmationNormalizesResponse(t *testing.T) {
+	target, ok := confirmedSavedGreetingMutationTarget(
+		savedGreetingMutationTarget{Submitted: "submitted"},
+		"  confirmed  ",
+	)
+	if !ok {
+		t.Fatal("non-empty server response was rejected")
+	}
+	if target != (savedGreetingMutationTarget{
+		Submitted: "submitted",
+		Confirmed: "confirmed",
+	}) {
+		t.Fatalf("confirmed target = %#v", target)
+	}
+
+	target, ok = confirmedSavedGreetingMutationTarget(target, " \t ")
+	if ok {
+		t.Fatal("empty server response was accepted")
+	}
+	if target.Confirmed != "" {
+		t.Fatalf("empty response retained confirmation %q", target.Confirmed)
+	}
+}
+
+func TestSavedMutationInputState(t *testing.T) {
+	activeTarget := savedGreetingMutationTarget{Submitted: "slow"}
+	status, mutationError, target, changed := savedGreetingMutationAfterInput(
+		true,
+		"pending",
+		"",
+		activeTarget,
+	)
+	if changed ||
+		status != "pending" ||
+		mutationError != "" ||
+		target != activeTarget {
+		t.Fatalf(
+			"active mutation changed after input: status=%q error=%q target=%#v changed=%v",
+			status,
+			mutationError,
+			target,
+			changed,
+		)
+	}
+
+	completedTarget := savedGreetingMutationTarget{
+		Submitted: "slow",
+		Confirmed: "slow",
+	}
+	status, mutationError, target, changed = savedGreetingMutationAfterInput(
+		false,
+		"success",
+		"obsolete",
+		completedTarget,
+	)
+	if !changed ||
+		status != "idle" ||
+		mutationError != "" ||
+		target != (savedGreetingMutationTarget{}) {
+		t.Fatalf(
+			"completed mutation was not cleared after input: status=%q error=%q target=%#v changed=%v",
+			status,
+			mutationError,
+			target,
+			changed,
+		)
+	}
+
+	status, mutationError, target, changed = savedGreetingMutationAfterInput(
+		false,
+		"idle",
+		"",
+		savedGreetingMutationTarget{},
+	)
+	if changed ||
+		status != "idle" ||
+		mutationError != "" ||
+		target != (savedGreetingMutationTarget{}) {
+		t.Fatalf(
+			"idle mutation changed after input: status=%q error=%q target=%#v changed=%v",
+			status,
+			mutationError,
+			target,
+			changed,
+		)
+	}
+}
+
 func TestDocumentStateIntegratedSavedEditorReveal(t *testing.T) {
 	coordinator := newServerBackedDocumentCoordinator(serverBackedDocumentState{
 		Title:       "authored",
@@ -289,7 +487,11 @@ func TestDocumentStateIntegratedSavedEditorReveal(t *testing.T) {
 		t,
 		coordinator,
 		"saved-editor",
-		savedGreetingEditorDocumentMetadata("Grace", "pending"),
+		savedGreetingEditorDocumentMetadata(
+			"Grace",
+			"pending",
+			savedGreetingMutationTarget{Submitted: "Grace"},
+		),
 	)
 	mustSetDocumentOwner(
 		t,

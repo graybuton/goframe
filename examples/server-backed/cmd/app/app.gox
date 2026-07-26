@@ -274,6 +274,7 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 	draft, setDraft := gf.UseState("GoFrame")
 	mutationStatus, setMutationStatus := gf.UseState("idle")
 	mutationError, setMutationError := gf.UseState("")
+	mutationTarget, setMutationTarget := gf.UseState(savedGreetingMutationTarget{})
 	mutationOwner, _ := gf.UseState(newSavedGreetingMutationOwner())
 	editorActive, setEditorActive := gf.UseState(false)
 	resource, reload := gf.UseResource(savedGreetingAPIPath, gf.FetchText)
@@ -288,6 +289,7 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 		}
 		name := strings.TrimSpace(draft)
 		if name == "" {
+			setMutationTarget(savedGreetingMutationTarget{})
 			setMutationStatus("validation failed")
 			setMutationError("Name is required.")
 			return
@@ -295,10 +297,22 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 		if !mutationOwner.begin() {
 			return
 		}
+		target := savedGreetingMutationTarget{Submitted: name}
+		setMutationTarget(target)
 		setMutationStatus("pending")
 		setMutationError("")
-		cleanup := postSavedGreeting(name, func(_ string) {
+		cleanup := postSavedGreeting(name, func(confirmed string) {
 			if !mutationOwner.complete() {
+				return
+			}
+			target, ok := confirmedSavedGreetingMutationTarget(
+				target,
+				confirmed,
+			)
+			setMutationTarget(target)
+			if !ok {
+				setMutationStatus("server failed")
+				setMutationError("Saved greeting response was empty.")
 				return
 			}
 			setMutationStatus("success")
@@ -308,6 +322,7 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 			if !mutationOwner.complete() {
 				return
 			}
+			setMutationTarget(target)
 			setMutationStatus("server failed")
 			if err == nil {
 				setMutationError("Saved greeting request failed.")
@@ -322,6 +337,7 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 		editorActive,
 		draft,
 		mutationStatus,
+		mutationTarget,
 		setEditorActive,
 	)
 
@@ -357,9 +373,17 @@ func SavedGreetingRoute(props SavedGreetingRouteProps) gf.Node {
 							OnInput={func(event gf.InputEvent) {
 								setEditorActive(true)
 								setDraft(event.Value())
-								if mutationStatus != "idle" {
-									setMutationStatus("idle")
-									setMutationError("")
+								nextStatus, nextError, nextTarget, changed :=
+									savedGreetingMutationAfterInput(
+										mutationOwner.active,
+										mutationStatus,
+										mutationError,
+										mutationTarget,
+									)
+								if changed {
+									setMutationStatus(nextStatus)
+									setMutationError(nextError)
+									setMutationTarget(nextTarget)
 								}
 							}}
 						/>
@@ -607,6 +631,7 @@ func savedGreetingEditorNode(
 	active bool,
 	draft string,
 	status string,
+	target savedGreetingMutationTarget,
 	setActive func(bool),
 ) gf.Node {
 	if !active {
@@ -615,7 +640,7 @@ func savedGreetingEditorNode(
 	return (
 		<DocumentOwner
 			Owner={serverBackedSavedEditorOwner}
-			State={savedGreetingEditorDocumentMetadata(draft, status)}
+			State={savedGreetingEditorDocumentMetadata(draft, status, target)}
 		>
 			<aside class="saved-editor-state" data-testid="saved-greeting-editor-state">
 				<p class="muted">The editor temporarily owns document metadata.</p>

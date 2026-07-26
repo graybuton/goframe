@@ -10,6 +10,11 @@ type serverBackedDocumentState struct {
 	Description string
 }
 
+type savedGreetingMutationTarget struct {
+	Submitted string
+	Confirmed string
+}
+
 type serverBackedDocumentSnapshot struct {
 	State       serverBackedDocumentState
 	ActiveOwner string
@@ -177,33 +182,77 @@ func savedGreetingDocumentMetadata(
 func savedGreetingEditorDocumentMetadata(
 	draft string,
 	status string,
+	target savedGreetingMutationTarget,
 ) serverBackedDocumentState {
-	name := strings.TrimSpace(draft)
-	if name == "" {
-		name = "empty"
-	}
 	switch status {
 	case "pending":
+		name := savedGreetingMetadataName(target.Submitted)
 		return serverBackedDocumentState{
 			Title:       "Saving greeting: " + name + " · GoFrame",
 			Description: "Saving the greeting " + name + ".",
 		}
-	case "validation failed", "server failed":
+	case "validation failed":
+		name := savedGreetingMetadataName(draft)
+		return serverBackedDocumentState{
+			Title:       "Saved greeting needs attention · GoFrame",
+			Description: "The draft " + name + " has not been committed.",
+		}
+	case "server failed":
+		name := savedGreetingMetadataName(target.Submitted)
 		return serverBackedDocumentState{
 			Title:       "Saved greeting needs attention · GoFrame",
 			Description: "The draft " + name + " has not been committed.",
 		}
 	case "success":
+		name := savedGreetingMetadataName(target.Confirmed)
+		if name == "empty" {
+			return serverBackedDocumentState{
+				Title:       "Saved greeting needs attention · GoFrame",
+				Description: "The server did not confirm a saved greeting.",
+			}
+		}
 		return serverBackedDocumentState{
 			Title:       "Saved greeting confirmed: " + name + " · GoFrame",
 			Description: "The server confirmed " + name + "; finish editing to reveal committed metadata.",
 		}
 	default:
+		name := savedGreetingMetadataName(draft)
 		return serverBackedDocumentState{
 			Title:       "Editing saved greeting: " + name + " · GoFrame",
 			Description: "Unsaved saved-greeting draft: " + name + ".",
 		}
 	}
+}
+
+func confirmedSavedGreetingMutationTarget(
+	target savedGreetingMutationTarget,
+	response string,
+) (savedGreetingMutationTarget, bool) {
+	target.Confirmed = strings.TrimSpace(response)
+	return target, target.Confirmed != ""
+}
+
+func savedGreetingMutationAfterInput(
+	active bool,
+	status string,
+	mutationError string,
+	target savedGreetingMutationTarget,
+) (string, string, savedGreetingMutationTarget, bool) {
+	if active ||
+		(status == "idle" &&
+			mutationError == "" &&
+			target == (savedGreetingMutationTarget{})) {
+		return status, mutationError, target, false
+	}
+	return "idle", "", savedGreetingMutationTarget{}, true
+}
+
+func savedGreetingMetadataName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "empty"
+	}
+	return value
 }
 
 func notFoundDocumentMetadata() serverBackedDocumentState {
