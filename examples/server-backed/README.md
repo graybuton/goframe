@@ -22,6 +22,8 @@ This example shows a narrow integration pattern:
   target and message while the requested target prepares;
 - a route-owned mutation form with client validation, pending and failure
   states, duplicate-submit suppression, and server-confirmed recovery;
+- immutable submitted-target and confirmed-response metadata attribution while
+  the controlled mutation draft remains editable;
 - committed-state confirmation through the existing `UseResource.reload`
   contract after each successful write.
 
@@ -73,11 +75,163 @@ Open <http://127.0.0.1:8080>.
 - `gf.FetchText` is a low-level text loader, not a server framework or data
   framework.
 - The `/saved-greeting` route keeps the committed value in a read resource and
-  keeps draft, pending, and mutation-error state local to the route.
+  keeps draft, submitted/confirmed mutation target, pending, and mutation-error
+  state local to the route.
 - A successful form-encoded `POST` triggers the read resource's existing
   `reload` closure. The UI does not update the committed value optimistically.
+- Editing the controlled draft during an active POST does not change the
+  submitted target, pending metadata, request count, or eventual
+  server-confirmed metadata.
+- An accepted saved-greeting submit activates the nested editor metadata owner
+  after the duplicate-submit guard and before validation or request state,
+  including when no input event occurred after `Finish editing`.
 - Client validation and server failure leave the previous committed value
   visible, and a later valid submit clears the mutation error.
+
+## Integrated Route Data And Document State
+
+The example also coordinates route-driven title and description metadata with
+its existing reads, retained transitions, failures, history navigation, and
+server-confirmed mutation flow.
+
+### Proven
+
+Two local focused browser runs demonstrated that:
+
+- Home, ordinary greeting, retained greeting, and saved greeting routes select
+  deterministic title/description pairs;
+- the pure metadata mapping test covers the not-found title/description pair;
+- the retained transition keeps the committed screen metadata while a newer
+  requested hash target is pending, failed, or retrying, then updates screen
+  and metadata to the same committed target;
+- Back and Forward use that same requested-versus-committed distinction;
+- the saved editor temporarily overrides route metadata during editing,
+  validation, pending mutation, failure, and server confirmation;
+- whitespace validation and the existing slow mutation both reactivate the
+  saved editor after `Finish editing` without another input event; validation
+  starts no request, while the slow flow starts its existing single POST;
+- duplicate submissions remain rejected before editor activation or request
+  state changes;
+- changing the editable draft from `slow` to `Mia` during the active `slow`
+  POST leaves pending metadata attributed to `slow`, starts no additional
+  request, and preserves the duplicate-submit guard;
+- the successful POST records the trimmed server response `slow`; confirmed
+  metadata remains attributed to that value while the controlled draft is
+  still `Mia`, with no false `Mia` confirmation;
+- the saved route owner updates underneath the active editor, and releasing
+  the editor reveals the latest server-confirmed route metadata rather than an
+  older captured value;
+- mutation failure retains committed route data and metadata, while later
+  recovery reveals the newly confirmed value;
+- cross-pattern navigation removes saved owners, aborts active work, and does
+  not restore stale saved metadata;
+- unmounting the route-owner scope restores the authored title and description,
+  and remounting reapplies the current Home pair without replacing the
+  application, shell, or route-panel nodes;
+- exactly one authored description element remains present, and the authored
+  title, description, and viewport nodes retain identity.
+
+The selected application pair remained consistent at MutationObserver delivery
+and settled application boundaries. Title and description are still separate
+DOM writes; this evidence does not claim an atomic browser head mutation.
+
+The focused runs produced identical document-state counters:
+
+| Counter | Run 1 | Run 2 |
+|---|---:|---:|
+| title mutation batches | 43 | 43 |
+| description mutation batches | 43 | 43 |
+| relevant head snapshots | 139 | 139 |
+| invalid title/description pairs | 0 | 0 |
+| duplicate-description observations | 0 | 0 |
+| viewport mutations | 0 | 0 |
+| title-node replacements | 0 | 0 |
+| description-node replacements | 0 | 0 |
+| requested transition metadata appearances | 0 | 0 |
+| stale document-state appearances | 0 | 0 |
+| submitted-target metadata mismatches | 0 | 0 |
+| false server-confirmation appearances | 0 | 0 |
+| authored-baseline restorations | 1 | 1 |
+| route-owner scope unmounts | 1 | 1 |
+| route-owner scope remounts | 1 | 1 |
+| saved-editor activations | 5 | 5 |
+| saved-editor releases | 5 | 5 |
+
+The existing request evidence also remained unchanged: 11 ordinary greeting
+requests (6 successful, 3 failed, and 2 aborted), 10 retained-transition
+requests (6 successful, 2 failed, and 2 aborted), 4 saved-greeting GETs, and 4
+saved-greeting POSTs (2 completed, 1 failed, and 1 aborted). Editing `Mia`
+during the active `slow` POST added zero POSTs, GET reloads, or mutation
+attempts. Activating ownership from accepted submissions added zero GETs,
+POSTs, reloads, or mutation attempts to these totals.
+
+### Ownership Model
+
+The application repeats the ordered-owner contract from the isolated document
+state fixture. New owners receive top priority; updating an existing owner
+preserves priority; removing the active owner reveals the latest state of the
+next owner; and removing the final owner restores the authored baseline.
+
+Route and saved-editor metadata are independent component owners. Their
+committed effects update one application-local coordinator, which returns one
+selected snapshot through a callback to the retained `App`. A separate
+committed effect applies that pair through the browser adapter. There is no
+global mutable ownership registry. The saved route keeps one request-attribution
+value: its submitted target remains immutable for the active request, and its
+confirmed field records the successful response. Document metadata does not
+read request attribution from later draft edits.
+
+### Measured Coordination
+
+| Application-local concern | Measurement |
+|---|---:|
+| state slots added | 4 call sites |
+| effects added | 2 call sites; at most 3 committed slots |
+| `UseUnmount` registrations added | 1 call site; at most 2 registrations |
+| owner records at peak | 2 (`route`, `saved-editor`) |
+| ownership handoff points | 1 selected-snapshot callback |
+| document-state context/prop boundaries | 4 |
+| browser DOM query sites | 6 |
+| browser DOM write sites | 2 |
+| head elements created | 0 |
+| head elements removed | 0 |
+| global mutable ownership variables | 0 |
+| document-state and mutation-attribution helper lines | 263 |
+| pure document/mutation test lines | 574 |
+| browser adapter lines | 137 (115 browser, 22 host stub) |
+| document-state helper declarations | 11 types, 28 helper functions |
+| existing app/GOX file delta | +371 / -128 (net +243) |
+| total production Go/GOX delta | +782 / -129 (net +653) |
+| browser harness delta | +1262 / -16 (net +1246) |
+
+The helper declaration count treats the browser and host adapter variants as
+separate source declarations and excludes the retained `App` entry point.
+The four context/prop boundaries are `main` to `App`, `App` to the committer,
+`App` to owners through context, and route/editor metadata to `DocumentOwner`.
+
+The server-backed reference was packaged with Go 1.22.12 and TinyGo 0.41.1 on
+Linux amd64. These sizes are informational and introduce no threshold:
+
+| Encoding | Frozen base | Integrated reference | Delta |
+|---|---:|---:|---:|
+| raw | 194393 | 372505 | +178112 |
+| gzip (`-n -9`) | 80475 | 152675 | +72200 |
+| Brotli (`-q 11`) | 66896 | 123042 | +56146 |
+| Zstandard (`-19`) | 71131 | 131031 | +59900 |
+
+### Decision
+
+**Result B:** The same ordered ownership contract appears in both the isolated
+fixture and this integrated route/resource/mutation reference. The measured
+coordination supports a separate narrow API design stage, but this example does
+not add or select a public document-state API.
+
+### Limits
+
+This example does not establish arbitrary head-element management, canonical
+links, Open Graph or other social metadata, JSON-LD, scripts, styles, SSR,
+hydration, production SEO, broad browser compatibility, or full
+URL/screen/data atomicity.
 
 ## Route Flow
 
@@ -213,10 +367,14 @@ browser transport helper, and the existing read-resource reload contract:
 GET /api/saved-greeting through UseResource and FetchText
 -> committed value is ready
 -> edit the controlled route-owned draft
+-> reject a duplicate submit while an existing POST is active
+-> activate saved-editor metadata ownership
 -> trim and validate on submit
+-> capture one immutable submitted target
 -> POST form data through the example-local fetch helper
--> keep the previous committed value visible while pending
+-> keep the previous committed value visible and the draft editable while pending
 -> reject a duplicate submit while the POST is active
+-> bind successful metadata to the trimmed server response
 -> on success, call the read resource's reload closure
 -> GET confirms and renders the committed server value
 ```
@@ -231,6 +389,24 @@ reloads the read resource, and clears the prior error.
 The route reports `idle`, `pending`, `validation failed`, `server failed`, and
 `success` mutation states independently from the read resource's loading,
 failed, and ready states.
+
+Every accepted non-duplicate submit activates the `saved-editor` owner before
+validation or request state changes. This keeps validation, pending, failure,
+and success metadata nested under the editor even after `Finish editing` and
+without another input event. The duplicate guard runs first and therefore
+changes neither owner nor request state.
+
+The controlled draft, submitted mutation target, and confirmed response are
+separate values. Input remains editable while the existing POST owner is
+active. Pending and server-failure metadata use the submitted target; success
+metadata uses the trimmed non-empty response body. A later draft edit therefore
+cannot rename an active request or its confirmation.
+
+A trimmed zero-length POST response is not confirmation. The literal non-empty
+value `"empty"` remains a valid confirmed greeting. A pure metadata and
+confirmation regression test keeps these cases distinct; the browser evidence
+continues to exercise the `slow` submitted target, editable `Mia` draft, and
+confirmed `slow` response.
 
 ## Backend Contract
 
@@ -270,25 +446,30 @@ request context before commit. Unsupported methods return HTTP 405 with
 | baseline greeting old-screen retention during pending | not provided; `GreetingRoute` shows loading and removes the previous ready result |
 | atomic URL + screen + data commit | not provided; the hash target commits before the resource is ready |
 | controlled mutation draft | `SavedGreetingRoute` and its dedicated `gf.UseState` slot |
+| submitted mutation target | immutable trimmed value captured by `SavedGreetingRoute` when the existing request owner begins |
+| confirmed mutation value | trimmed non-empty POST response stored beside the submitted target |
 | client validation | `SavedGreetingRoute` submit handler trims the draft and rejects an empty name |
+| saved-editor activation | accepted non-duplicate submit after the duplicate guard and before validation or request state |
 | mutation pending state | route-owned mutation status plus the active request owner |
 | duplicate-submit suppression | the request owner's synchronous `active` guard; the button also reflects pending state |
 | POST transport | example-local `postSavedGreeting` browser helper |
 | server validation | the saved-greeting HTTP handler |
 | committed server state | mutex-protected server store, observed by the route's read resource |
 | mutation error | `SavedGreetingRoute` mutation-error state |
-| successful commit confirmation | POST success callback followed by a fresh resource GET |
+| successful metadata confirmation | the actual trimmed POST response, never the later mutable draft |
+| successful committed-state confirmation | POST success callback followed by a fresh resource GET |
 | read-resource reload | `SavedGreetingRoute` calls the closure returned by `gf.UseResource` |
 | stale mutation completion protection | the route request owner's mounted/active guard and the transport helper's active guard |
 | route/component lifetime | `RouterView` mounts the route; `gf.UseUnmount` cancels its active POST helper |
 
 Example-local coordination now consists of one Home draft slot, one Greeting
-draft slot, and four SavedGreetingRoute slots for draft, mutation status,
-mutation error, and a stable request-owner pointer. The three routes have one
-submit handler each. Greeting keeps one query-to-draft effect and one read
-resource; SavedGreetingRoute keeps one read resource and one unmount callback.
-Four route functions feed one route table. The write path adds one browser POST
-helper and one success-to-reload coordination point.
+draft slot, and six `SavedGreetingRoute` slots for draft, mutation status,
+mutation error, submitted/confirmed target, a stable request-owner pointer, and
+editor ownership. The three routes have one submit handler each. Greeting
+keeps one query-to-draft effect and one read resource; `SavedGreetingRoute`
+keeps one read resource and one unmount callback. Four route functions feed one
+route table. The write path adds one browser POST helper and one
+success-to-reload coordination point.
 
 The application contains:
 
@@ -303,6 +484,8 @@ The application contains:
   route owner and one `gf.UseUnmount` callback that invokes it;
 - mutation lifecycle state: one status slot and one error slot, separate from
   the read resource's loading/error state;
+- mutation attribution state: one submitted/confirmed target slot, separate
+  from the editable draft;
 - resource lifecycle effects outside `gf.UseResource`: `0`;
 - route/form synchronization effects: `1`;
 - successful-mutation reload coordination points: `1`.
@@ -312,7 +495,8 @@ The application contains:
 `scripts/server-backed-browser-smoke.mjs` installs browser-only instrumentation
 before loading the app. It records greeting GETs and their exact abort signals,
 saved-state GET causes, completed, failed, and aborted mutation POSTs, active
-writes, duplicate submit attempts, committed values, debug-tag render/update
+writes, duplicate submit attempts, submitted POST targets, successful response
+values, current editor drafts, committed values, debug-tag render/update
 flushes, structural DOM operations, route targets, global shell identity, and
 per-scenario form/input identity.
 Before a form scenario starts, the harness waits for the state-owning route's
@@ -363,12 +547,21 @@ simulated with extra application state.
 
 The same two final runs produced identical mutation request evidence:
 
+- whitespace validation and the existing slow submit each released the editor
+  first and submitted without another input event; the owner changed from
+  `route` to `saved-editor` in both cases;
 - four saved-state GETs started and completed, with zero GET failures: two
   ordinary route loads and two successful-mutation reloads;
 - four mutation POSTs: two completed, one controlled failure, and one aborted
   when the saved-greeting route unmounted;
 - one duplicate submit attempt during the slow write and exactly one POST in
   that scenario;
+- the input changed from `slow` to `Mia` while the one `slow` POST remained
+  active; pending metadata stayed on `slow`, and the edit added no request,
+  reload, or mutation attempt;
+- the successful response and committed route value were both `slow` while the
+  input remained `Mia`; confirmed metadata stayed on `slow`, with zero target
+  mismatches and zero false-confirmation appearances;
 - two read-resource reloads, one after each successful mutation;
 - zero read-resource reloads after the canceled mutation;
 - committed values observed in order: `GoFrame`, `slow`, `Grace`;
@@ -486,9 +679,10 @@ failure and recovery, global shell retention, same-pattern form/input retention,
 expected cross-pattern remounts, retained transition screens, paired committed
 target/data observations, transition failure/retry/recovery, saved-state
 loading, validation without a POST, duplicate-write suppression, failure
-preservation, successful reload confirmation, mutation unmount cancellation,
-route-load versus reload attribution, final backend/UI consistency, and
-update/DOM bridge evidence.
+preservation, pending-draft mutation attribution, server-response confirmation,
+successful reload confirmation, mutation unmount cancellation, route-load
+versus reload attribution, final backend/UI consistency, and update/DOM bridge
+evidence.
 
 ## Non-goals
 

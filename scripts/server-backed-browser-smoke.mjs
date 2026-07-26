@@ -42,9 +42,15 @@ const savedGreetingTarget = "/saved-greeting";
 const savedGreetingHash = `#${savedGreetingTarget}`;
 const savedInitialName = "GoFrame";
 const savedSlowName = "slow";
+const savedEditedDraftName = "Mia";
 const savedFailureName = "fail";
 const savedRecoveryName = "Grace";
 const savedFailureMessage = "controlled saved greeting failure";
+const authoredDocumentState = {
+    title: "GoFrame Server-Backed Example",
+    description: "GoFrame server-backed application reference.",
+};
+const authoredViewportContent = "width=device-width, initial-scale=1";
 const componentNames = [
     "App",
     "ServerBackedShell",
@@ -121,6 +127,7 @@ try {
     await navigateToApp(client, appURL);
     await waitForAppPage(client, expectedApp);
     await initializeBrowserEvidence(client);
+    await assertPreBootDocumentEvidence(client);
 
     assertState(await appState(client), {
         app: true,
@@ -141,6 +148,12 @@ try {
         shellSame: true,
         routeContentSame: true,
     }, "server-backed initial route");
+    await assertDocumentState(
+        client,
+        "route",
+        homeDocumentState(),
+        "server-backed initial Home document state",
+    );
     assertEvidence(await evidenceState(client), {
         fetchesStarted: 0,
         aborts: 0,
@@ -149,6 +162,39 @@ try {
         shellIdentityChanges: 0,
         routeContentIdentityChanges: 0,
     }, "initial route evidence");
+
+    const documentScopeIdentity = await documentScopeIdentityState(client);
+    await clickDocumentScopeControl(client, "server-backed-document-scope-unmount");
+    await assertDocumentState(
+        client,
+        "authored-baseline",
+        authoredDocumentState,
+        "server-backed authored document baseline after scope unmount",
+    );
+    assertState(await documentScopeIdentityState(client), {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        scopeInactive: true,
+    }, "server-backed document scope unmount identity");
+    await clickDocumentScopeControl(client, "server-backed-document-scope-remount");
+    await assertDocumentState(
+        client,
+        "route",
+        homeDocumentState(),
+        "server-backed Home document state after scope remount",
+    );
+    assertState(await documentScopeIdentityState(client), {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        scopeInactive: false,
+    }, "server-backed document scope remount identity");
+    if (!documentScopeIdentity.app ||
+        !documentScopeIdentity.shell ||
+        !documentScopeIdentity.routeContent) {
+        throw new Error(`APP FAILURE: document scope identity baseline is incomplete: ${JSON.stringify(documentScopeIdentity)}`);
+    }
 
     await startScenario(client, "direct-hash-navigation");
     await navigateGreetingHash(client, directName);
@@ -833,9 +879,55 @@ try {
     }, "server-backed saved greeting initial state");
 
     await prepareSavedGreetingName(client, "   ");
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedInitialName),
+        "saved greeting validation owner released before submit",
+    );
+    const validationOwnershipBeforeSubmit = await captureSavedSubmitOwnership(
+        client,
+        "validation-before-submit",
+    );
+    const initialSavedDocument = savedReadyDocumentState(savedInitialName);
+    assertState(validationOwnershipBeforeSubmit, {
+        draft: "   ",
+        mutationStatus: "idle",
+        activeOwner: "route",
+        expectedTitle: initialSavedDocument.title,
+        actualTitle: initialSavedDocument.title,
+        expectedDescription: initialSavedDocument.description,
+        actualDescription: initialSavedDocument.description,
+        submittedRequestTarget: "",
+        activeRequestCount: 0,
+    }, "saved greeting validation ownership before submit");
     await startScenario(client, "saved-client-validation");
     await dispatchSavedGreetingSubmit(client);
     await waitForSavedValidationFailure(client, savedInitialName, "saved greeting client validation");
+    const validationOwnershipAfterSubmit = await captureSavedSubmitOwnership(
+        client,
+        "validation-after-submit",
+        validationOwnershipBeforeSubmit,
+    );
+    const validationDocument = savedEditorDocumentState(
+        "   ",
+        "validation failed",
+    );
+    assertState(validationOwnershipAfterSubmit, {
+        draft: "   ",
+        mutationStatus: "validation failed",
+        activeOwner: "saved-editor",
+        expectedTitle: validationDocument.title,
+        actualTitle: validationDocument.title,
+        expectedDescription: validationDocument.description,
+        actualDescription: validationDocument.description,
+        submittedRequestTarget: "",
+        activeRequestCount: 0,
+        postDelta: 0,
+        getDelta: 0,
+        inputEventDelta: 0,
+    }, "saved greeting validation ownership after submit");
     const validationReport = await finishScenario(client, "saved-client-validation");
     assertSavedGreetingReport(validationReport, "saved greeting client validation", {
         routeChanges: 0,
@@ -852,11 +944,97 @@ try {
     }, "server-backed saved greeting validation state");
 
     await prepareSavedGreetingName(client, savedSlowName);
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedInitialName),
+        "saved greeting slow owner released before submit",
+    );
+    const slowOwnershipBeforeSubmit = await captureSavedSubmitOwnership(
+        client,
+        "slow-before-submit",
+    );
+    assertState(slowOwnershipBeforeSubmit, {
+        draft: savedSlowName,
+        mutationStatus: "idle",
+        activeOwner: "route",
+        expectedTitle: initialSavedDocument.title,
+        actualTitle: initialSavedDocument.title,
+        expectedDescription: initialSavedDocument.description,
+        actualDescription: initialSavedDocument.description,
+        submittedRequestTarget: "",
+        activeRequestCount: 0,
+    }, "saved greeting slow ownership before submit");
     const slowMutationBaseline = await evidenceState(client);
     await startScenario(client, "saved-slow-duplicate");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedInitialName, "saved greeting slow mutation pending");
+    await waitForSavedMutationPending(
+        client,
+        savedInitialName,
+        savedSlowName,
+        "saved greeting slow mutation pending",
+    );
+    const slowOwnershipDuringPending = await captureSavedSubmitOwnership(
+        client,
+        "slow-during-pending",
+        slowOwnershipBeforeSubmit,
+    );
+    const slowPendingDocument = savedEditorDocumentState(
+        savedSlowName,
+        "pending",
+        { submitted: savedSlowName },
+    );
+    assertState(slowOwnershipDuringPending, {
+        draft: savedSlowName,
+        mutationStatus: "pending",
+        activeOwner: "saved-editor",
+        expectedTitle: slowPendingDocument.title,
+        actualTitle: slowPendingDocument.title,
+        expectedDescription: slowPendingDocument.description,
+        actualDescription: slowPendingDocument.description,
+        submittedRequestTarget: savedSlowName,
+        activeRequestCount: 1,
+        postDelta: 1,
+        getDelta: 0,
+        inputEventDelta: 0,
+    }, "saved greeting slow ownership during pending");
     await waitForMutationPostCount(client, slowMutationBaseline.mutationPostsStarted + 1, "saved greeting slow POST start");
+    const slowMutationRequest = await waitForActiveSavedMutationRequest(
+        client,
+        slowMutationBaseline.mutationPostsStarted + 1,
+        "saved greeting slow POST remains active",
+    );
+    await changeSavedGreetingDraftDuringMutation(
+        client,
+        savedEditedDraftName,
+        savedSlowName,
+    );
+    const pendingAttribution = await captureSavedMutationAttribution(
+        client,
+        "slow-pending-after-draft-change",
+        slowMutationRequest.id,
+    );
+    assertState(pendingAttribution, {
+        draft: savedEditedDraftName,
+        submitted: savedSlowName,
+        confirmed: "",
+        mutationStatus: "pending",
+        committedValue: savedInitialName,
+        activeMutationRequests: 1,
+        title: savedEditorDocumentState(
+            savedEditedDraftName,
+            "pending",
+            { submitted: savedSlowName },
+        ).title,
+        description: savedEditorDocumentState(
+            savedEditedDraftName,
+            "pending",
+            { submitted: savedSlowName },
+        ).description,
+        targetMismatch: false,
+        falseConfirmation: false,
+    }, "saved greeting pending mutation attribution");
     await dispatchSavedGreetingSubmit(client);
     await waitForDuplicateSubmitCount(client, slowMutationBaseline.duplicateSubmitAttempts + 1, "saved greeting duplicate submit attempt");
     await wait(100);
@@ -865,6 +1043,37 @@ try {
         activeMutationRequests: 1,
     }, "saved greeting duplicate POST suppression");
     await waitForSavedCommitted(client, savedSlowName, "saved greeting slow committed state");
+    const confirmedAttribution = await captureSavedMutationAttribution(
+        client,
+        "slow-success-after-draft-change",
+        slowMutationRequest.id,
+    );
+    assertState(confirmedAttribution, {
+        draft: savedEditedDraftName,
+        submitted: savedSlowName,
+        confirmed: savedSlowName,
+        mutationStatus: "success",
+        committedValue: savedSlowName,
+        activeMutationRequests: 0,
+        title: savedEditorDocumentState(
+            savedEditedDraftName,
+            "success",
+            {
+                submitted: savedSlowName,
+                confirmed: savedSlowName,
+            },
+        ).title,
+        description: savedEditorDocumentState(
+            savedEditedDraftName,
+            "success",
+            {
+                submitted: savedSlowName,
+                confirmed: savedSlowName,
+            },
+        ).description,
+        targetMismatch: false,
+        falseConfirmation: false,
+    }, "saved greeting confirmed mutation attribution");
     const slowMutationReport = await finishScenario(client, "saved-slow-duplicate");
     assertSavedGreetingReport(slowMutationReport, "saved greeting slow mutation", {
         routeChanges: 0,
@@ -880,18 +1089,43 @@ try {
     assertState(await appState(client), {
         savedReadStatus: "ready",
         savedCommitted: savedSlowName,
+        savedInput: savedEditedDraftName,
         mutationStatus: "success",
         mutationError: "",
         mutationErrorNonEmpty: false,
         mutationPending: false,
         mutationSubmitDisabled: false,
     }, "server-backed saved greeting slow success");
+    assertRequest(await savedRequestEvidence(client, slowMutationRequest.id), {
+        method: "POST",
+        name: savedSlowName,
+        confirmed: savedSlowName,
+        outcome: "success",
+        aborted: false,
+    }, "saved greeting slow mutation request attribution");
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedSlowName),
+        "server-backed saved greeting slow route revealed after editor release",
+    );
 
     await prepareSavedGreetingName(client, savedFailureName);
     await startScenario(client, "saved-controlled-failure");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedSlowName, "saved greeting controlled failure pending");
-    await waitForSavedMutationFailure(client, savedSlowName, "saved greeting controlled server failure");
+    await waitForSavedMutationPending(
+        client,
+        savedSlowName,
+        savedFailureName,
+        "saved greeting controlled failure pending",
+    );
+    await waitForSavedMutationFailure(
+        client,
+        savedSlowName,
+        savedFailureName,
+        "saved greeting controlled server failure",
+    );
     const savedFailureReport = await finishScenario(client, "saved-controlled-failure");
     assertSavedGreetingReport(savedFailureReport, "saved greeting controlled failure", {
         routeChanges: 0,
@@ -912,7 +1146,12 @@ try {
     await prepareSavedGreetingName(client, savedRecoveryName);
     await startScenario(client, "saved-recovery");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedSlowName, "saved greeting recovery pending");
+    await waitForSavedMutationPending(
+        client,
+        savedSlowName,
+        savedRecoveryName,
+        "saved greeting recovery pending",
+    );
     await waitForSavedCommitted(client, savedRecoveryName, "saved greeting recovery committed state");
     const savedRecoveryReport = await finishScenario(client, "saved-recovery");
     assertSavedGreetingReport(savedRecoveryReport, "saved greeting recovery", {
@@ -934,13 +1173,25 @@ try {
         mutationPending: false,
         mutationSubmitDisabled: false,
     }, "server-backed saved greeting recovery state");
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedRecoveryName),
+        "server-backed saved greeting recovery route revealed after editor release",
+    );
     await assertSavedGreetingAPI(savedRecoveryName);
 
     await prepareSavedGreetingName(client, savedSlowName);
     const savedUnmountBaseline = await evidenceState(client);
     await startScenario(client, "saved-unmount-cancellation");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedRecoveryName, "saved greeting unmount mutation pending");
+    await waitForSavedMutationPending(
+        client,
+        savedRecoveryName,
+        savedSlowName,
+        "saved greeting unmount mutation pending",
+    );
     const unmountedMutationRequest = await waitForActiveSavedMutationRequest(
         client,
         savedUnmountBaseline.mutationPostsStarted + 1,
@@ -1058,6 +1309,9 @@ try {
         activeMutationRequests: 0,
         duplicateSubmitAttempts: 1,
         staleCommittedValueAppearances: 0,
+        savedMutationTargetMismatches: 0,
+        savedFalseConfirmationAppearances: 0,
+        savedInputEvents: 6,
         transitionRequestsStarted: 10,
         transitionSuccessfulCompletions: 6,
         transitionFailedCompletions: 2,
@@ -1119,7 +1373,60 @@ try {
         "success",
         "aborted",
     ], "saved greeting POST outcomes");
+    assertSavedMutationAttributionArray(
+        finalEvidence.savedMutationAttributionObserved,
+        [
+            pendingAttribution,
+            confirmedAttribution,
+        ],
+        "saved greeting mutation attribution observations",
+    );
+    assertState(finalEvidence.document, {
+        invalidPairs: 0,
+        duplicateDescriptionObservations: 0,
+        viewportMutations: 0,
+        titleNodeReplacements: 0,
+        descriptionNodeReplacements: 0,
+        transitionRequestedMetadataAppearances: 0,
+        staleMetadataAppearances: 0,
+        baselineRestorations: 1,
+        scopeUnmounts: 1,
+        scopeRemounts: 1,
+        savedEditorActivations: 5,
+        savedEditorReleases: 5,
+        titleIdentityStable: true,
+        descriptionIdentityStable: true,
+        viewportIdentityStable: true,
+    }, "final document state evidence");
+    if (finalEvidence.document.titleMutationBatches < 1 ||
+        finalEvidence.document.descriptionMutationBatches < 1 ||
+        finalEvidence.document.headSnapshots < 1) {
+        throw new Error(
+            `APP FAILURE: document mutation evidence is incomplete: ${JSON.stringify(finalEvidence.document)}`,
+        );
+    }
     console.log(`server-backed mutation evidence: ${JSON.stringify(finalEvidence)}`);
+    console.log(`server-backed document evidence: ${JSON.stringify({
+        titleMutationBatches: finalEvidence.document.titleMutationBatches,
+        descriptionMutationBatches: finalEvidence.document.descriptionMutationBatches,
+        headSnapshots: finalEvidence.document.headSnapshots,
+        invalidPairs: finalEvidence.document.invalidPairs,
+        duplicateDescriptionObservations:
+            finalEvidence.document.duplicateDescriptionObservations,
+        viewportMutations: finalEvidence.document.viewportMutations,
+        titleNodeReplacements: finalEvidence.document.titleNodeReplacements,
+        descriptionNodeReplacements:
+            finalEvidence.document.descriptionNodeReplacements,
+        transitionRequestedMetadataAppearances:
+            finalEvidence.document.transitionRequestedMetadataAppearances,
+        staleMetadataAppearances:
+            finalEvidence.document.staleMetadataAppearances,
+        baselineRestorations: finalEvidence.document.baselineRestorations,
+        scopeUnmounts: finalEvidence.document.scopeUnmounts,
+        scopeRemounts: finalEvidence.document.scopeRemounts,
+        savedEditorActivations: finalEvidence.document.savedEditorActivations,
+        savedEditorReleases: finalEvidence.document.savedEditorReleases,
+    })}`);
 
     client.close();
     console.log("Server-backed browser smoke: ok");
@@ -1208,10 +1515,186 @@ function transitionPair(name, message) {
     };
 }
 
+function homeDocumentState() {
+    return {
+        title: "Server-backed Home · GoFrame",
+        description: "Choose a route-driven server-backed flow.",
+    };
+}
+
+function greetingDocumentState(name) {
+    return {
+        title: `Greeting ${name} · GoFrame`,
+        description: `Backend greeting route for ${name}.`,
+    };
+}
+
+function transitionPreparingDocumentState(name) {
+    return {
+        title: `Preparing retained greeting for ${name} · GoFrame`,
+        description: `Preparing the first retained greeting for ${name}.`,
+    };
+}
+
+function transitionCommittedDocumentState(name) {
+    return {
+        title: `Retained greeting: ${name} · GoFrame`,
+        description: `Committed retained greeting for ${name}.`,
+    };
+}
+
+function savedLoadingDocumentState() {
+    return {
+        title: "Saved greeting · GoFrame",
+        description: "Loading the committed saved greeting.",
+    };
+}
+
+function savedReadyDocumentState(value) {
+    return {
+        title: `Saved greeting: ${value} · GoFrame`,
+        description: `Committed saved greeting: ${value}.`,
+    };
+}
+
+function savedEditorDocumentState(draft, status, target = {}) {
+    let name = draft.trim() || "empty";
+    if (status === "pending") {
+        name = target.submitted?.trim() || "empty";
+        return {
+            title: `Saving greeting: ${name} · GoFrame`,
+            description: `Saving the greeting ${name}.`,
+        };
+    }
+    if (status === "validation failed") {
+        return {
+            title: "Saved greeting needs attention · GoFrame",
+            description: `The draft ${name} has not been committed.`,
+        };
+    }
+    if (status === "server failed") {
+        name = target.submitted?.trim() || "empty";
+        return {
+            title: "Saved greeting needs attention · GoFrame",
+            description: `The draft ${name} has not been committed.`,
+        };
+    }
+    if (status === "success") {
+        const confirmed = target.confirmed?.trim() ?? "";
+        if (confirmed === "") {
+            return {
+                title: "Saved greeting needs attention · GoFrame",
+                description: "The server did not confirm a saved greeting.",
+            };
+        }
+        return {
+            title: `Saved greeting confirmed: ${confirmed} · GoFrame`,
+            description: `The server confirmed ${confirmed}; finish editing to reveal committed metadata.`,
+        };
+    }
+    return {
+        title: `Editing saved greeting: ${name} · GoFrame`,
+        description: `Unsaved saved-greeting draft: ${name}.`,
+    };
+}
+
 async function initializeBrowserEvidence(client) {
     const initialized = await client.evaluate("window.__serverBackedEvidence?.initialize() ?? null");
     if (!initialized?.ready) {
         throw new Error(`APP FAILURE: server-backed evidence did not initialize: ${JSON.stringify(initialized)}`);
+    }
+}
+
+async function assertPreBootDocumentEvidence(client) {
+    const document = (await evidenceState(client)).document;
+    assertState(document, {
+        preBootCaptured: true,
+        authoredTitle: authoredDocumentState.title,
+        authoredDescription: authoredDocumentState.description,
+        authoredDescriptionCount: 1,
+        authoredViewportContent,
+        titleIdentityStable: true,
+        descriptionIdentityStable: true,
+        viewportIdentityStable: true,
+    }, "server-backed pre-boot authored head");
+}
+
+async function assertDocumentState(client, owner, expected, label) {
+    let state = null;
+    await waitForCondition(async () => {
+        state = await appState(client);
+        return state.documentOwner === owner &&
+            state.documentExpectedTitle === expected.title &&
+            state.documentExpectedDescription === expected.description &&
+            state.documentTitle === expected.title &&
+            state.documentDescription === expected.description &&
+            state.documentDescriptionCount === 1 &&
+            state.documentTitleIdentityStable &&
+            state.documentDescriptionIdentityStable &&
+            state.documentViewportIdentityStable &&
+            state.documentViewportContent === authoredViewportContent;
+    }, label);
+    const snapshot = await client.callFunction(`function(phase) {
+        return window.__serverBackedEvidence?.captureDocumentSnapshot(phase) ?? null;
+    }`, `settled:${label}`);
+    if (!snapshot?.valid) {
+        throw new Error(`APP FAILURE: ${label} document snapshot is invalid: ${JSON.stringify(snapshot)}`);
+    }
+    return state;
+}
+
+async function waitForDocumentStateToSettle(client, label) {
+    let state = null;
+    await waitForCondition(async () => {
+        state = await appState(client);
+        const schedulingSettled = await client.evaluate(
+            "window.__serverBackedAudit?.schedulingSettled() ?? false",
+        );
+        return schedulingSettled &&
+            state.documentExpectedTitle !== "" &&
+            state.documentExpectedDescription !== "" &&
+            state.documentTitle === state.documentExpectedTitle &&
+            state.documentDescription === state.documentExpectedDescription &&
+            state.documentDescriptionCount === 1 &&
+            state.documentTitleIdentityStable &&
+            state.documentDescriptionIdentityStable &&
+            state.documentViewportIdentityStable &&
+            state.documentViewportContent === authoredViewportContent;
+    }, `${label} document state settled`);
+    const snapshot = await client.callFunction(`function(phase) {
+        return window.__serverBackedEvidence?.captureDocumentSnapshot(phase) ?? null;
+    }`, `settled:${label}`);
+    if (!snapshot?.valid) {
+        throw new Error(`APP FAILURE: ${label} settled document snapshot is invalid: ${JSON.stringify(snapshot)}`);
+    }
+}
+
+async function documentScopeIdentityState(client) {
+    return await client.callFunction(`function() {
+        const identity = window.__serverBackedEvidence?.checkIdentity() ?? {};
+        return {
+            app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
+            shell: Boolean(document.querySelector("[data-testid='server-backed-shell']")),
+            routeContent: Boolean(document.querySelector("[data-testid='server-backed-route-content']")),
+            appSame: identity.appSame ?? false,
+            shellSame: identity.shellSame ?? false,
+            routeContentSame: identity.routeContentSame ?? false,
+            scopeInactive: Boolean(
+                document.querySelector("[data-testid='server-backed-document-scope-inactive']"),
+            ),
+        };
+    }`);
+}
+
+async function clickDocumentScopeControl(client, testID) {
+    const result = await client.callFunction(`function(testID) {
+        const control = document.querySelector("[data-testid='" + testID + "']");
+        if (!control) return { ok: false, reason: "missing control" };
+        control.click();
+        return { ok: true };
+    }`, testID);
+    if (!result?.ok) {
+        throw new Error(`APP FAILURE: could not use document scope control ${testID}: ${JSON.stringify(result)}`);
     }
 }
 
@@ -1276,14 +1759,24 @@ async function prepareSavedGreetingName(client, name) {
         throw new Error(`APP FAILURE: could not prepare saved greeting input: ${JSON.stringify(baseline)}`);
     }
 
-    let updated = null;
     await waitForCondition(async () => {
-        updated = await savedInputPreparationState(client);
+        const updated = await savedInputPreparationState(client);
         return updated.value === name &&
             updated.renders > baseline.renders &&
             updated.patches > baseline.patches;
     }, `controlled saved greeting input ${name} framework update`);
 
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(name, "idle"),
+        `controlled saved greeting input ${name} document state`,
+    );
+    await waitForDocumentStateToSettle(
+        client,
+        `controlled saved greeting input ${name}`,
+    );
+    const updated = await savedInputPreparationState(client);
     await waitForBrowserFrames(client, 2);
     const settled = await savedInputPreparationState(client);
     if (settled.value !== name ||
@@ -1293,6 +1786,78 @@ async function prepareSavedGreetingName(client, name) {
     }
     const report = { name, owner: baseline.owner, baseline, updated, settled };
     console.log(`server-backed saved input preparation: ${JSON.stringify(report)}`);
+    return report;
+}
+
+async function changeSavedGreetingDraftDuringMutation(client, draft, submitted) {
+    const evidenceBefore = await evidenceState(client);
+    const baseline = await client.callFunction(`function(draft) {
+        const input = document.querySelector("[data-testid='saved-greeting-input']");
+        if (!input) {
+            return { ok: false, reason: "missing saved greeting input" };
+        }
+        const owner = "SavedGreetingRoute";
+        const renders = window.goframeComponentRenderCounts?.[owner] || 0;
+        const patches = window.goframeComponentPatchCounts?.[owner] || 0;
+        input.value = draft;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return { ok: true, owner, renders, patches, value: input.value };
+    }`, draft);
+    if (!baseline?.ok) {
+        throw new Error(
+            `APP FAILURE: could not change pending saved greeting draft: ${JSON.stringify(baseline)}`,
+        );
+    }
+
+    let updated = null;
+    await waitForCondition(async () => {
+        updated = await appState(client);
+        const activity = await savedInputPreparationState(client);
+        const evidence = await evidenceState(client);
+        return updated.savedInput === draft &&
+            updated.mutationStatus === "pending" &&
+            updated.mutationPending &&
+            updated.mutationSubmitDisabled &&
+            activity.renders > baseline.renders &&
+            activity.patches > baseline.patches &&
+            evidence.mutationPostsStarted === evidenceBefore.mutationPostsStarted &&
+            evidence.activeMutationRequests === 1;
+    }, `pending saved greeting draft ${draft} framework update`);
+
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(
+            draft,
+            "pending",
+            { submitted },
+        ),
+        `pending saved greeting draft ${draft} document state`,
+    );
+    await waitForDocumentStateToSettle(
+        client,
+        `pending saved greeting draft ${draft}`,
+    );
+
+    const evidenceAfter = await evidenceState(client);
+    assertEvidence(evidenceAfter, {
+        mutationPostsStarted: evidenceBefore.mutationPostsStarted,
+        activeMutationRequests: 1,
+        savedGetsStarted: evidenceBefore.savedGetsStarted,
+        successfulMutationReloadGets:
+            evidenceBefore.successfulMutationReloadGets,
+        duplicateSubmitAttempts: evidenceBefore.duplicateSubmitAttempts,
+    }, "pending saved greeting draft request ownership");
+
+    const report = {
+        draft,
+        submitted,
+        baseline,
+        updated,
+        mutationPostsStarted: evidenceAfter.mutationPostsStarted,
+        activeMutationRequests: evidenceAfter.activeMutationRequests,
+    };
+    console.log(`server-backed pending saved draft change: ${JSON.stringify(report)}`);
     return report;
 }
 
@@ -1447,6 +2012,22 @@ async function dispatchSavedGreetingSubmit(client) {
     }
 }
 
+async function dispatchSavedGreetingFinishEditing(client) {
+    const result = await client.evaluate(`(() => {
+        const control = document.querySelector(
+            "[data-testid='saved-greeting-finish-editing']",
+        );
+        if (!control) {
+            return { ok: false, reason: "missing finish editing control" };
+        }
+        control.click();
+        return { ok: true };
+    })()`);
+    if (!result?.ok) {
+        throw new Error(`APP FAILURE: could not finish saved greeting editing: ${JSON.stringify(result)}`);
+    }
+}
+
 async function waitForGreeting(client, expected, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
@@ -1463,7 +2044,7 @@ async function waitForFetchCount(client, expected, label) {
 async function waitForLoading(client, name, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
-        return state.route === "greeting" &&
+        const liveLoading = state.route === "greeting" &&
             state.hash === greetingHash(name) &&
             state.routeTarget === greetingTarget(name) &&
             state.key === `/api/greeting?name=${encodeURIComponent(name)}` &&
@@ -1472,7 +2053,19 @@ async function waitForLoading(client, name, label) {
             state.loading &&
             !state.ready &&
             !state.failed;
+        if (liveLoading) {
+            return true;
+        }
+        return await client.callFunction(`function(target) {
+            return window.__serverBackedEvidence?.greetingLoadingObserved(target) ?? false;
+        }`, greetingTarget(name));
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        greetingDocumentState(name),
+        `${label} document state`,
+    );
 }
 
 async function waitForSlowActive(client, label) {
@@ -1486,6 +2079,12 @@ async function waitForSlowActive(client, label) {
             state.loading &&
             request !== null;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        greetingDocumentState(slowName),
+        `${label} document state`,
+    );
     return request;
 }
 
@@ -1515,6 +2114,12 @@ async function waitForTransitionInitialLoading(client, name, label) {
             !state.transitionFailed &&
             !state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionPreparingDocumentState(name),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionPending(client, requestedName, committedName, committedMessage, label) {
@@ -1531,6 +2136,12 @@ async function waitForTransitionPending(client, requestedName, committedName, co
             !state.transitionFailed &&
             state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(committedName),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionCommitted(client, name, message, label) {
@@ -1547,6 +2158,12 @@ async function waitForTransitionCommitted(client, name, message, label) {
             !state.transitionFailed &&
             state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(name),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionFailure(client, requestedName, committedName, committedMessage, label) {
@@ -1564,6 +2181,12 @@ async function waitForTransitionFailure(client, requestedName, committedName, co
             state.transitionError === failureMessage &&
             state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(committedName),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionSlowActive(client, committedName, committedMessage, label) {
@@ -1582,6 +2205,12 @@ async function waitForTransitionSlowActive(client, committedName, committedMessa
             evidence.activeTransitionRequests === 1 &&
             request !== null;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(committedName),
+        `${label} document state`,
+    );
     return request;
 }
 
@@ -1606,6 +2235,14 @@ async function waitForRoute(client, route, target) {
         const state = await appState(client);
         return state.route === route && state.routeTarget === target;
     }, `route ${route} at ${target}`);
+    if (route === "home") {
+        await assertDocumentState(
+            client,
+            "route",
+            homeDocumentState(),
+            `route ${route} at ${target} document state`,
+        );
+    }
 }
 
 async function waitForSavedReadLoading(client, label) {
@@ -1620,11 +2257,18 @@ async function waitForSavedReadLoading(client, label) {
             !state.savedReadReady &&
             !state.savedReadFailed;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        savedLoadingDocumentState(),
+        `${label} document state`,
+    );
 }
 
 async function waitForSavedCommitted(client, expected, label) {
+    let state = null;
     await waitForCondition(async () => {
-        const state = await appState(client);
+        state = await appState(client);
         return state.route === "savedGreeting" &&
             state.savedReadStatus === "ready" &&
             state.savedReadReady &&
@@ -1633,6 +2277,28 @@ async function waitForSavedCommitted(client, expected, label) {
             state.savedCommitted === expected &&
             state.mutationStatus !== "pending";
     }, label);
+    if (state.savedEditorActive) {
+        await assertDocumentState(
+            client,
+            "saved-editor",
+            savedEditorDocumentState(
+                state.savedInput,
+                state.mutationStatus,
+                {
+                    submitted: expected,
+                    confirmed: expected,
+                },
+            ),
+            `${label} editor document state`,
+        );
+        return;
+    }
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(expected),
+        `${label} route document state`,
+    );
 }
 
 async function waitForSavedValidationFailure(client, committed, label) {
@@ -1644,9 +2310,15 @@ async function waitForSavedValidationFailure(client, committed, label) {
             state.mutationError === "Name is required." &&
             !state.mutationPending;
     }, label);
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState("   ", "validation failed"),
+        `${label} document state`,
+    );
 }
 
-async function waitForSavedMutationPending(client, committed, label) {
+async function waitForSavedMutationPending(client, committed, submitted, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
         return state.savedCommitted === committed &&
@@ -1656,9 +2328,20 @@ async function waitForSavedMutationPending(client, committed, label) {
             state.mutationSubmitDisabled &&
             !state.mutationErrorNonEmpty;
     }, label);
+    const state = await appState(client);
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(
+            state.savedInput,
+            "pending",
+            { submitted },
+        ),
+        `${label} document state`,
+    );
 }
 
-async function waitForSavedMutationFailure(client, committed, label) {
+async function waitForSavedMutationFailure(client, committed, submitted, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
         return state.savedCommitted === committed &&
@@ -1668,6 +2351,17 @@ async function waitForSavedMutationFailure(client, committed, label) {
             state.mutationErrorNonEmpty &&
             !state.mutationPending;
     }, label);
+    const state = await appState(client);
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(
+            state.savedInput,
+            "server failed",
+            { submitted },
+        ),
+        `${label} document state`,
+    );
 }
 
 async function waitForMutationPostCount(client, expected, label) {
@@ -1744,6 +2438,7 @@ async function appState(client) {
         const mutationError = document.querySelector("[data-testid='saved-greeting-mutation-error']")?.textContent.trim() ?? "";
         const mutationStatus = document.querySelector("[data-testid='saved-greeting-mutation-status']")?.textContent.trim() ?? "";
         const identity = window.__serverBackedEvidence?.checkIdentity() ?? {};
+        const documentEvidence = window.__serverBackedEvidence?.documentState() ?? {};
         return {
             app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
             shell: Boolean(document.querySelector("[data-testid='server-backed-shell']")),
@@ -1794,6 +2489,24 @@ async function appState(client) {
             mutationError,
             mutationErrorNonEmpty: mutationError.length > 0,
             mutationSubmitDisabled: document.querySelector("[data-testid='saved-greeting-submit']")?.disabled ?? false,
+            savedEditorActive: Boolean(document.querySelector("[data-testid='saved-greeting-editor-state']")),
+            documentOwner: document.querySelector("[data-testid='server-backed-document-owner']")?.textContent.trim() ?? "",
+            documentOwnerCount:
+                Number(document.querySelector("[data-testid='server-backed-document-owner-count']")?.textContent.trim() ?? 0),
+            documentExpectedTitle:
+                document.querySelector("[data-testid='server-backed-document-title']")?.textContent.trim() ?? "",
+            documentExpectedDescription:
+                document.querySelector("[data-testid='server-backed-document-description']")?.textContent.trim() ?? "",
+            documentTitle: document.title,
+            documentDescription:
+                document.querySelector("head meta[name='description']")?.getAttribute("content") ?? "",
+            documentDescriptionCount:
+                document.querySelectorAll("head meta[name='description']").length,
+            documentViewportContent:
+                document.querySelector("head meta[name='viewport']")?.getAttribute("content") ?? "",
+            documentTitleIdentityStable: documentEvidence.titleIdentityStable ?? false,
+            documentDescriptionIdentityStable: documentEvidence.descriptionIdentityStable ?? false,
+            documentViewportIdentityStable: documentEvidence.viewportIdentityStable ?? false,
             origin: window.location.origin,
             appSame: identity.appSame ?? false,
             shellSame: identity.shellSame ?? false,
@@ -1824,6 +2537,66 @@ async function savedRequestEvidence(client, requestID) {
     }`, requestID);
 }
 
+async function captureSavedMutationAttribution(client, phase, requestID) {
+    const observation = await client.callFunction(
+        `function(phase, requestID) {
+            return window.__serverBackedEvidence?.captureSavedMutationAttribution(
+                phase,
+                requestID,
+            ) ?? null;
+        }`,
+        phase,
+        requestID,
+    );
+    if (!observation) {
+        throw new Error(
+            `APP FAILURE: could not capture saved mutation attribution for ${phase}`,
+        );
+    }
+    return observation;
+}
+
+async function captureSavedSubmitOwnership(client, phase, baseline = null) {
+    const state = await appState(client);
+    const evidence = await evidenceState(client);
+    const savedRequestCount = evidence.savedRequests.length;
+    const newRequests = baseline
+        ? evidence.savedRequests.slice(baseline.savedRequestCount)
+        : [];
+    const submittedRequest = [...newRequests].reverse().find(
+        (request) => request.method === "POST",
+    );
+    const observation = {
+        phase,
+        draft: state.savedInput,
+        mutationStatus: state.mutationStatus,
+        activeOwner: state.documentOwner,
+        expectedTitle: state.documentExpectedTitle,
+        actualTitle: state.documentTitle,
+        expectedDescription: state.documentExpectedDescription,
+        actualDescription: state.documentDescription,
+        submittedRequestTarget: submittedRequest?.name ?? "",
+        activeRequestCount: evidence.activeMutationRequests,
+        savedRequestCount,
+        mutationPostsStarted: evidence.mutationPostsStarted,
+        savedGetsStarted: evidence.savedGetsStarted,
+        savedInputEvents: evidence.savedInputEvents,
+        postDelta: baseline
+            ? evidence.mutationPostsStarted - baseline.mutationPostsStarted
+            : 0,
+        getDelta: baseline
+            ? evidence.savedGetsStarted - baseline.savedGetsStarted
+            : 0,
+        inputEventDelta: baseline
+            ? evidence.savedInputEvents - baseline.savedInputEvents
+            : 0,
+    };
+    console.log(
+        `server-backed saved submit ownership: ${JSON.stringify(observation)}`,
+    );
+    return observation;
+}
+
 async function startScenario(client, label) {
     const started = await client.callFunction(`function(label) {
         return window.__serverBackedAudit?.start(label) ?? false;
@@ -1834,6 +2607,7 @@ async function startScenario(client, label) {
 }
 
 async function finishScenario(client, label) {
+    await waitForDocumentStateToSettle(client, label);
     const report = await client.callFunction(`function(label) {
         return window.__serverBackedAudit?.finish(label) ?? null;
     }`, label);
@@ -2105,6 +2879,15 @@ function assertCommittedPairArray(actual, expected, label) {
     console.log(`${label}: ok`);
 }
 
+function assertSavedMutationAttributionArray(actual, expected, label) {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(
+            `APP FAILURE: ${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`,
+        );
+    }
+    console.log(`${label}: ok`);
+}
+
 function emptyOperations() {
     return {
         createElement: 0,
@@ -2137,6 +2920,7 @@ function installServerBackedEvidenceExpression() {
     const routeTargetsVisited = [];
     const transitionRequestedTargetsObserved = [];
     const transitionCommittedPairsObserved = [];
+    const greetingLoadingTargetsObserved = new Set();
     const operations = ${JSON.stringify(emptyOperations())};
     const scheduling = {
         requestAnimationFrame: 0,
@@ -2184,6 +2968,87 @@ function installServerBackedEvidenceExpression() {
     let activeMutationRequests = 0;
     let duplicateSubmitAttempts = 0;
     let staleCommittedValueAppearances = 0;
+    let savedMutationTargetMismatches = 0;
+    let savedFalseConfirmationAppearances = 0;
+    let savedInputEvents = 0;
+    const savedMutationAttributionObserved = [];
+    const documentSnapshots = [];
+    const selectedDocumentPairs = new Set();
+    let authoredHead = null;
+    let documentTitleMutationBatches = 0;
+    let documentDescriptionMutationBatches = 0;
+    let documentInvalidPairs = 0;
+    let documentDuplicateDescriptionObservations = 0;
+    let documentViewportMutations = 0;
+    let documentTitleNodeReplacements = 0;
+    let documentDescriptionNodeReplacements = 0;
+    let documentTransitionRequestedMetadataAppearances = 0;
+    let documentStaleMetadataAppearances = 0;
+    let documentBaselineRestorations = 0;
+    let documentScopeUnmounts = 0;
+    let documentScopeRemounts = 0;
+    let savedEditorActivations = 0;
+    let savedEditorReleases = 0;
+    let lastDocumentOwner = "";
+    let titleIdentityBroken = false;
+    let descriptionIdentityBroken = false;
+    let viewportIdentityBroken = false;
+
+    const documentObserver = new MutationObserver((records) => {
+        const hadAuthoredHead = Boolean(authoredHead);
+        captureAuthoredHead();
+        if (!hadAuthoredHead) {
+            if (authoredHead) captureDocumentSnapshot("pre-boot");
+            return;
+        }
+
+        let titleChanged = false;
+        let descriptionChanged = false;
+        let viewportChanged = false;
+        let expectedChanged = false;
+        let headStructureChanged = false;
+        const evidenceRoot = document.querySelector(
+            "[data-testid='server-backed-document-state']",
+        );
+        for (const record of records) {
+            const target = record.target;
+            if (target === authoredHead.title ||
+                authoredHead.title.contains?.(target)) {
+                titleChanged = true;
+            }
+            if (target === authoredHead.description) {
+                descriptionChanged = true;
+            }
+            if (target === authoredHead.viewport) {
+                viewportChanged = true;
+            }
+            if (target === document.head && record.type === "childList") {
+                headStructureChanged = true;
+            }
+            if (evidenceRoot &&
+                (target === evidenceRoot || evidenceRoot.contains(target))) {
+                expectedChanged = true;
+            }
+        }
+        if (titleChanged) documentTitleMutationBatches++;
+        if (descriptionChanged) documentDescriptionMutationBatches++;
+        if (viewportChanged) documentViewportMutations++;
+        if (titleChanged ||
+            descriptionChanged ||
+            viewportChanged ||
+            expectedChanged ||
+            headStructureChanged) {
+            captureDocumentSnapshot("mutation");
+        }
+    });
+    documentObserver.observe(document, {
+        attributes: true,
+        attributeFilter: ["content"],
+        characterData: true,
+        childList: true,
+        subtree: true,
+    });
+    captureAuthoredHead();
 
     window.goframeComponentRenderCounts = {};
     window.goframeComponentPatchCounts = {};
@@ -2207,6 +3072,9 @@ function installServerBackedEvidenceExpression() {
             routeContent: false,
         },
         initialize() {
+            if (!captureAuthoredHead()) {
+                return { ready: false, reason: "authored head was not captured before application boot" };
+            }
             this.stable = {
                 app: document.querySelector("[data-testid='server-backed-app']"),
                 shell: document.querySelector("[data-testid='server-backed-shell']"),
@@ -2222,6 +3090,7 @@ function installServerBackedEvidenceExpression() {
             captureTransitionState();
             new MutationObserver((records) => {
                 routeContentMutations += records.length;
+                captureGreetingLoadingState();
                 const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() || "";
                 if (message === slowMessage && lastMessage !== slowMessage) {
                     staleResultAppearances++;
@@ -2242,6 +3111,8 @@ function installServerBackedEvidenceExpression() {
                 subtree: true,
                 characterData: true,
             });
+            captureDocumentSnapshot("initialize");
+            captureGreetingLoadingState();
             return { ready: true };
         },
         checkIdentity() {
@@ -2271,6 +3142,18 @@ function installServerBackedEvidenceExpression() {
         savedRequest(id) {
             const request = savedRequests.find((entry) => entry.id === id);
             return request ? { ...request } : null;
+        },
+        captureSavedMutationAttribution(phase, requestID) {
+            return captureSavedMutationAttribution(phase, requestID);
+        },
+        documentState() {
+            return documentEvidenceState();
+        },
+        greetingLoadingObserved(target) {
+            return greetingLoadingTargetsObserved.has(target);
+        },
+        captureDocumentSnapshot(phase) {
+            return captureDocumentSnapshot(phase);
         },
         snapshot() {
             return {
@@ -2308,6 +3191,11 @@ function installServerBackedEvidenceExpression() {
                 activeMutationRequests,
                 duplicateSubmitAttempts,
                 staleCommittedValueAppearances,
+                savedMutationTargetMismatches,
+                savedFalseConfirmationAppearances,
+                savedInputEvents,
+                savedMutationAttributionObserved:
+                    savedMutationAttributionObserved.map((entry) => ({ ...entry })),
                 committedValuesObserved: [...committedValuesObserved],
                 appIdentityChanges: this.identityChanged.app ? 1 : 0,
                 shellIdentityChanges: this.identityChanged.shell ? 1 : 0,
@@ -2316,6 +3204,7 @@ function installServerBackedEvidenceExpression() {
                 requests: requests.map((request) => ({ ...request })),
                 transitionRequests: transitionRequests.map((request) => ({ ...request })),
                 savedRequests: savedRequests.map((request) => ({ ...request })),
+                document: documentEvidenceState(),
             };
         },
     };
@@ -2331,9 +3220,20 @@ function installServerBackedEvidenceExpression() {
             duplicateSubmitAttempts++;
         }
     }, true);
+    document.addEventListener("input", (event) => {
+        if (event.target?.matches?.("[data-testid='saved-greeting-input']")) {
+            savedInputEvents++;
+        }
+    }, true);
     document.addEventListener("click", (event) => {
         if (event.target?.closest?.("[data-testid='transition-retry']")) {
             transitionRetryAttempts++;
+        }
+        if (event.target?.closest?.("[data-testid='server-backed-document-scope-unmount']")) {
+            documentScopeUnmounts++;
+        }
+        if (event.target?.closest?.("[data-testid='server-backed-document-scope-remount']")) {
+            documentScopeRemounts++;
         }
     }, true);
 
@@ -2414,6 +3314,7 @@ function installServerBackedEvidenceExpression() {
             target: requestURL.pathname + requestURL.search,
             outcome: "pending",
             aborted: false,
+            confirmed: "",
         };
         savedRequests.push(request);
         if (method === "GET") {
@@ -2456,11 +3357,17 @@ function installServerBackedEvidenceExpression() {
             }, { once: true });
         }
         return originalFetch(input, init).then((response) => {
-            return new Promise((resolve) => {
-                window.setTimeout(() => {
-                    if (!request.aborted) finish(response.ok ? "success" : "failed");
-                    resolve(response);
-                }, method === "POST" && name === ${JSON.stringify(savedSlowName)} ? 0 : 140);
+            const confirmed = method === "POST" && response.ok
+                ? response.clone().text()
+                : Promise.resolve("");
+            return confirmed.then((text) => {
+                request.confirmed = text.trim();
+                return new Promise((resolve) => {
+                    window.setTimeout(() => {
+                        if (!request.aborted) finish(response.ok ? "success" : "failed");
+                        resolve(response);
+                    }, method === "POST" && name === ${JSON.stringify(savedSlowName)} ? 0 : 140);
+                });
             });
         }, (error) => {
             if (signal?.aborted) {
@@ -2622,6 +3529,12 @@ function installServerBackedEvidenceExpression() {
                 committedValues: committedValuesObserved.slice(this.committedValueBaseline),
             };
         },
+        schedulingSettled() {
+            return scheduling.requestAnimationFrame ===
+                scheduling.requestAnimationFrameCallbacks &&
+                scheduling.queueMicrotask ===
+                scheduling.queueMicrotaskCallbacks;
+        },
     };
     window.__serverBackedAudit = audit;
 
@@ -2762,6 +3675,339 @@ function installServerBackedEvidenceExpression() {
             return parsed.searchParams.get("name") || "GoFrame";
         } catch {
             return "";
+        }
+    }
+
+    function captureAuthoredHead() {
+        if (authoredHead) return true;
+        const titles = document.querySelectorAll("head title");
+        const descriptions = document.querySelectorAll(
+            "head meta[name='description']",
+        );
+        const viewports = document.querySelectorAll(
+            "head meta[name='viewport']",
+        );
+        if (titles.length !== 1 ||
+            descriptions.length !== 1 ||
+            viewports.length !== 1) {
+            return false;
+        }
+        const title = titles[0];
+        const description = descriptions[0];
+        const viewport = viewports[0];
+        const titleText = title.textContent;
+        const descriptionText = description.getAttribute("content") || "";
+        const viewportContent = viewport.getAttribute("content") || "";
+        if (titleText !== ${JSON.stringify(authoredDocumentState.title)} ||
+            descriptionText !== ${JSON.stringify(authoredDocumentState.description)} ||
+            viewportContent !== ${JSON.stringify(authoredViewportContent)}) {
+            return false;
+        }
+        authoredHead = {
+            title,
+            description,
+            viewport,
+            titleText,
+            descriptionText,
+            viewportContent,
+            descriptionCount: descriptions.length,
+        };
+        return true;
+    }
+
+    function captureSavedMutationAttribution(phase, requestID) {
+        const request = savedRequests.find((entry) =>
+            entry.id === requestID &&
+            entry.method === "POST",
+        );
+        if (!request) return null;
+
+        const draft = document.querySelector(
+            "[data-testid='saved-greeting-input']",
+        )?.value || "";
+        const mutationStatus = document.querySelector(
+            "[data-testid='saved-greeting-mutation-status']",
+        )?.textContent.trim() || "";
+        const committedValue = document.querySelector(
+            "[data-testid='saved-greeting-committed']",
+        )?.textContent.trim() || "";
+        const owner = document.querySelector(
+            "[data-testid='server-backed-document-owner']",
+        )?.textContent.trim() || "";
+        const title = document.title;
+        const description = document.querySelector(
+            "head meta[name='description']",
+        )?.getAttribute("content") || "";
+
+        let expectedTitle = "";
+        let expectedDescription = "";
+        if (mutationStatus === "pending") {
+            expectedTitle =
+                "Saving greeting: " + request.name + " · GoFrame";
+            expectedDescription =
+                "Saving the greeting " + request.name + ".";
+        } else if (mutationStatus === "success") {
+            expectedTitle =
+                "Saved greeting confirmed: " + request.confirmed + " · GoFrame";
+            expectedDescription =
+                "The server confirmed " + request.confirmed +
+                "; finish editing to reveal committed metadata.";
+        }
+
+        const pairMatches = owner === "saved-editor" &&
+            expectedTitle !== "" &&
+            title === expectedTitle &&
+            description === expectedDescription;
+        const targetMismatch = mutationStatus === "pending" &&
+            (request.outcome !== "pending" || !pairMatches);
+        const falseConfirmation = mutationStatus === "success" &&
+            (request.outcome !== "success" ||
+                request.confirmed === "" ||
+                !pairMatches);
+        if (targetMismatch) savedMutationTargetMismatches++;
+        if (falseConfirmation) savedFalseConfirmationAppearances++;
+
+        const observation = {
+            phase,
+            requestID,
+            draft,
+            submitted: request.name,
+            confirmed: request.confirmed,
+            requestOutcome: request.outcome,
+            mutationStatus,
+            committedValue,
+            activeMutationRequests,
+            owner,
+            title,
+            description,
+            targetMismatch,
+            falseConfirmation,
+        };
+        savedMutationAttributionObserved.push(observation);
+        return { ...observation };
+    }
+
+    function captureDocumentSnapshot(phase) {
+        const title = document.querySelector("head title");
+        const description = document.querySelector(
+            "head meta[name='description']",
+        );
+        const viewport = document.querySelector(
+            "head meta[name='viewport']",
+        );
+        const descriptionCount = document.querySelectorAll(
+            "head meta[name='description']",
+        ).length;
+        const owner = document.querySelector(
+            "[data-testid='server-backed-document-owner']",
+        )?.textContent.trim() || "";
+        const expectedTitle = document.querySelector(
+            "[data-testid='server-backed-document-title']",
+        )?.textContent.trim() || "";
+        const expectedDescription = document.querySelector(
+            "[data-testid='server-backed-document-description']",
+        )?.textContent.trim() || "";
+        const actualTitle = title?.textContent || "";
+        const actualDescription = description?.getAttribute("content") || "";
+        const viewportContent = viewport?.getAttribute("content") || "";
+        const titleIdentityStable = Boolean(
+            authoredHead && title === authoredHead.title && title?.isConnected,
+        );
+        const descriptionIdentityStable = Boolean(
+            authoredHead &&
+            description === authoredHead.description &&
+            description?.isConnected,
+        );
+        const viewportIdentityStable = Boolean(
+            authoredHead &&
+            viewport === authoredHead.viewport &&
+            viewport?.isConnected,
+        );
+
+        if (!titleIdentityStable && !titleIdentityBroken) {
+            titleIdentityBroken = true;
+            documentTitleNodeReplacements++;
+        }
+        if (!descriptionIdentityStable && !descriptionIdentityBroken) {
+            descriptionIdentityBroken = true;
+            documentDescriptionNodeReplacements++;
+        }
+        if (!viewportIdentityStable && !viewportIdentityBroken) {
+            viewportIdentityBroken = true;
+            documentViewportMutations++;
+        }
+        if (descriptionCount !== 1) {
+            documentDuplicateDescriptionObservations++;
+        }
+        if (authoredHead && viewportContent !== authoredHead.viewportContent) {
+            documentViewportMutations++;
+        }
+
+        if (owner && owner !== lastDocumentOwner) {
+            if (owner === "saved-editor") savedEditorActivations++;
+            if (lastDocumentOwner === "saved-editor") savedEditorReleases++;
+            if (owner === "authored-baseline" &&
+                lastDocumentOwner &&
+                lastDocumentOwner !== "authored-baseline") {
+                documentBaselineRestorations++;
+            }
+            lastDocumentOwner = owner;
+        }
+
+        const expectedReady = expectedTitle !== "" && expectedDescription !== "";
+        const pairValid = !expectedReady ||
+            (actualTitle === expectedTitle &&
+                actualDescription === expectedDescription);
+        const valid = Boolean(
+            authoredHead &&
+            titleIdentityStable &&
+            descriptionIdentityStable &&
+            viewportIdentityStable &&
+            descriptionCount === 1 &&
+            viewportContent === authoredHead.viewportContent &&
+            pairValid,
+        );
+        if (!valid && expectedReady) {
+            documentInvalidPairs++;
+        }
+
+        const actualPairKey = actualTitle + "\\u0000" + actualDescription;
+        const expectedPairKey = expectedTitle + "\\u0000" + expectedDescription;
+        if (expectedReady && pairValid) {
+            selectedDocumentPairs.add(expectedPairKey);
+        } else if (expectedReady && selectedDocumentPairs.has(actualPairKey)) {
+            documentStaleMetadataAppearances++;
+        }
+
+        const transitionRequestedTarget = document.querySelector(
+            "[data-testid='transition-requested-target']",
+        )?.textContent.trim() || "";
+        const transitionCommittedTarget = document.querySelector(
+            "[data-testid='transition-committed-target']",
+        )?.textContent.trim() || "";
+        const requestedName = transitionNameFromTarget(
+            transitionRequestedTarget,
+        );
+        const committedName = transitionNameFromTarget(
+            transitionCommittedTarget,
+        );
+        if (requestedName &&
+            committedName &&
+            requestedName !== committedName &&
+            (actualTitle.includes(requestedName) ||
+                actualDescription.includes(requestedName))) {
+            documentTransitionRequestedMetadataAppearances++;
+        }
+
+        const snapshot = {
+            phase,
+            hash: window.location.hash,
+            renderedRoute: renderedRouteName(),
+            transitionRequestedTarget,
+            transitionCommittedTarget,
+            transitionCommittedMessage: document.querySelector(
+                "[data-testid='transition-message']",
+            )?.textContent.trim() || "",
+            savedCommittedValue: document.querySelector(
+                "[data-testid='saved-greeting-committed']",
+            )?.textContent.trim() || "",
+            savedMutationStatus: document.querySelector(
+                "[data-testid='saved-greeting-mutation-status']",
+            )?.textContent.trim() || "",
+            activeOwner: owner,
+            expectedTitle,
+            expectedDescription,
+            actualTitle,
+            actualDescription,
+            descriptionCount,
+            viewportContent,
+            titleIdentityStable,
+            descriptionIdentityStable,
+            viewportIdentityStable,
+            valid,
+        };
+        documentSnapshots.push(snapshot);
+        return { ...snapshot };
+    }
+
+    function documentEvidenceState() {
+        const title = document.querySelector("head title");
+        const description = document.querySelector(
+            "head meta[name='description']",
+        );
+        const viewport = document.querySelector(
+            "head meta[name='viewport']",
+        );
+        return {
+            preBootCaptured: Boolean(authoredHead),
+            authoredTitle: authoredHead?.titleText || "",
+            authoredDescription: authoredHead?.descriptionText || "",
+            authoredDescriptionCount: authoredHead?.descriptionCount || 0,
+            authoredViewportContent: authoredHead?.viewportContent || "",
+            titleIdentityStable: Boolean(
+                authoredHead &&
+                title === authoredHead.title &&
+                title?.isConnected,
+            ),
+            descriptionIdentityStable: Boolean(
+                authoredHead &&
+                description === authoredHead.description &&
+                description?.isConnected,
+            ),
+            viewportIdentityStable: Boolean(
+                authoredHead &&
+                viewport === authoredHead.viewport &&
+                viewport?.isConnected,
+            ),
+            titleMutationBatches: documentTitleMutationBatches,
+            descriptionMutationBatches: documentDescriptionMutationBatches,
+            headSnapshots: documentSnapshots.length,
+            invalidPairs: documentInvalidPairs,
+            duplicateDescriptionObservations:
+                documentDuplicateDescriptionObservations,
+            viewportMutations: documentViewportMutations,
+            titleNodeReplacements: documentTitleNodeReplacements,
+            descriptionNodeReplacements:
+                documentDescriptionNodeReplacements,
+            transitionRequestedMetadataAppearances:
+                documentTransitionRequestedMetadataAppearances,
+            staleMetadataAppearances: documentStaleMetadataAppearances,
+            baselineRestorations: documentBaselineRestorations,
+            scopeUnmounts: documentScopeUnmounts,
+            scopeRemounts: documentScopeRemounts,
+            savedEditorActivations,
+            savedEditorReleases,
+        };
+    }
+
+    function renderedRouteName() {
+        if (document.querySelector("[data-testid='server-backed-home']")) {
+            return "home";
+        }
+        if (document.querySelector("[data-testid='server-backed-greeting-route']")) {
+            return "greeting";
+        }
+        if (document.querySelector("[data-testid='server-backed-transition-route']")) {
+            return "transitionGreeting";
+        }
+        if (document.querySelector("[data-testid='server-backed-saved-route']")) {
+            return "savedGreeting";
+        }
+        if (document.querySelector("[data-testid='server-backed-not-found']")) {
+            return "notFound";
+        }
+        return "missing";
+    }
+
+    function captureGreetingLoadingState() {
+        if (!document.querySelector("[data-testid='greeting-loading']")) {
+            return;
+        }
+        const target = document.querySelector(
+            "[data-testid='server-backed-route-target']",
+        )?.textContent.trim() || "";
+        if (target) {
+            greetingLoadingTargetsObserved.add(target);
         }
     }
 
