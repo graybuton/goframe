@@ -79,6 +79,131 @@ Open <http://127.0.0.1:8080>.
 - Client validation and server failure leave the previous committed value
   visible, and a later valid submit clears the mutation error.
 
+## Integrated Route Data And Document State
+
+The example also coordinates route-driven title and description metadata with
+its existing reads, retained transitions, failures, history navigation, and
+server-confirmed mutation flow.
+
+### Proven
+
+Two focused browser runs demonstrated that:
+
+- Home, ordinary greeting, retained greeting, saved greeting, and not-found
+  routes select deterministic title/description pairs;
+- the retained transition keeps the committed screen metadata while a newer
+  requested hash target is pending, failed, or retrying, then updates screen
+  and metadata to the same committed target;
+- Back and Forward use that same requested-versus-committed distinction;
+- the saved editor temporarily overrides route metadata during editing,
+  validation, pending mutation, failure, and server confirmation;
+- the saved route owner updates underneath the active editor, and releasing
+  the editor reveals the latest server-confirmed route metadata rather than an
+  older captured value;
+- mutation failure retains committed route data and metadata, while later
+  recovery reveals the newly confirmed value;
+- cross-pattern navigation removes saved owners, aborts active work, and does
+  not restore stale saved metadata;
+- unmounting the route-owner scope restores the authored title and description,
+  and remounting reapplies the current Home pair without replacing the
+  application, shell, or route-panel nodes;
+- exactly one authored description element remains present, and the authored
+  title, description, and viewport nodes retain identity.
+
+The selected application pair remained consistent at MutationObserver delivery
+and settled application boundaries. Title and description are still separate
+DOM writes; this evidence does not claim an atomic browser head mutation.
+
+The focused runs produced identical document-state counters:
+
+| Counter | Run 1 | Run 2 |
+|---|---:|---:|
+| title mutation batches | 41 | 41 |
+| description mutation batches | 41 | 41 |
+| relevant head snapshots | 133 | 133 |
+| invalid title/description pairs | 0 | 0 |
+| duplicate-description observations | 0 | 0 |
+| viewport mutations | 0 | 0 |
+| title-node replacements | 0 | 0 |
+| description-node replacements | 0 | 0 |
+| requested transition metadata appearances | 0 | 0 |
+| stale document-state appearances | 0 | 0 |
+| authored-baseline restorations | 1 | 1 |
+| route-owner scope unmounts | 1 | 1 |
+| route-owner scope remounts | 1 | 1 |
+| saved-editor activations | 3 | 3 |
+| saved-editor releases | 3 | 3 |
+
+The existing request evidence also remained unchanged: 11 ordinary greeting
+requests (6 successful, 3 failed, and 2 aborted), 10 retained-transition
+requests (6 successful, 2 failed, and 2 aborted), 4 saved-greeting GETs, and 4
+saved-greeting POSTs (2 completed, 1 failed, and 1 aborted).
+
+### Ownership Model
+
+The application repeats the ordered-owner contract from the isolated document
+state fixture. New owners receive top priority; updating an existing owner
+preserves priority; removing the active owner reveals the latest state of the
+next owner; and removing the final owner restores the authored baseline.
+
+Route and saved-editor metadata are independent component owners. Their
+committed effects update one application-local coordinator, which returns one
+selected snapshot through a callback to the retained `App`. A separate
+committed effect applies that pair through the browser adapter. There is no
+global mutable ownership registry.
+
+### Measured Coordination
+
+| Application-local concern | Measurement |
+|---|---:|
+| state slots added | 3 call sites |
+| effects added | 2 call sites; at most 3 committed slots |
+| `UseUnmount` registrations added | 1 call site; at most 2 registrations |
+| owner records at peak | 2 (`route`, `saved-editor`) |
+| ownership handoff points | 1 selected-snapshot callback |
+| document-state context/prop boundaries | 4 |
+| browser DOM query sites | 6 |
+| browser DOM write sites | 2 |
+| head elements created | 0 |
+| head elements removed | 0 |
+| global mutable ownership variables | 0 |
+| pure coordinator lines | 214 |
+| pure coordinator test lines | 345 |
+| browser adapter lines | 137 (115 browser, 22 host stub) |
+| document-state helper declarations | 10 types, 25 helper functions |
+| existing app/GOX file delta | +355 / -128 (net +227) |
+| total production Go/GOX delta | +706 / -128 (net +578) |
+| browser harness delta | +780 / -4 (net +776) |
+
+The helper declaration count treats the browser and host adapter variants as
+separate source declarations and excludes the retained `App` entry point.
+The four context/prop boundaries are `main` to `App`, `App` to the committer,
+`App` to owners through context, and route/editor metadata to `DocumentOwner`.
+
+The server-backed reference was packaged with Go 1.22.12 and TinyGo 0.41.1 on
+Linux amd64. These sizes are informational and introduce no threshold:
+
+| Encoding | Frozen base | Integrated reference | Delta |
+|---|---:|---:|---:|
+| raw | 194393 | 372697 | +178304 |
+| gzip (`-n -9`) | 80475 | 152268 | +71793 |
+| Brotli (`-q 11`) | 66896 | 123201 | +56305 |
+| Zstandard (`-19`) | 71131 | 131582 | +60451 |
+
+### Decision
+
+**Result B:** The same ordered ownership contract appears in both the isolated
+fixture and this integrated route/resource/mutation reference. The measured
+coordination supports a separate narrow API design stage, but this example does
+not add or select a public document-state API.
+
+### Limits
+
+This example does not establish arbitrary head-element management, canonical
+links, Open Graph or other social metadata, JSON-LD, scripts, styles, SSR,
+hydration, production SEO, broad browser compatibility, or full
+URL/screen/data atomicity.
+
 ## Route Flow
 
 The executable flow uses only existing GoFrame primitives:
