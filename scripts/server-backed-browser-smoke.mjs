@@ -42,6 +42,7 @@ const savedGreetingTarget = "/saved-greeting";
 const savedGreetingHash = `#${savedGreetingTarget}`;
 const savedInitialName = "GoFrame";
 const savedSlowName = "slow";
+const savedEditedDraftName = "Mia";
 const savedFailureName = "fail";
 const savedRecoveryName = "Grace";
 const savedFailureMessage = "controlled saved greeting failure";
@@ -900,8 +901,48 @@ try {
     const slowMutationBaseline = await evidenceState(client);
     await startScenario(client, "saved-slow-duplicate");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedInitialName, "saved greeting slow mutation pending");
+    await waitForSavedMutationPending(
+        client,
+        savedInitialName,
+        savedSlowName,
+        "saved greeting slow mutation pending",
+    );
     await waitForMutationPostCount(client, slowMutationBaseline.mutationPostsStarted + 1, "saved greeting slow POST start");
+    const slowMutationRequest = await waitForActiveSavedMutationRequest(
+        client,
+        slowMutationBaseline.mutationPostsStarted + 1,
+        "saved greeting slow POST remains active",
+    );
+    await changeSavedGreetingDraftDuringMutation(
+        client,
+        savedEditedDraftName,
+        savedSlowName,
+    );
+    const pendingAttribution = await captureSavedMutationAttribution(
+        client,
+        "slow-pending-after-draft-change",
+        slowMutationRequest.id,
+    );
+    assertState(pendingAttribution, {
+        draft: savedEditedDraftName,
+        submitted: savedSlowName,
+        confirmed: "",
+        mutationStatus: "pending",
+        committedValue: savedInitialName,
+        activeMutationRequests: 1,
+        title: savedEditorDocumentState(
+            savedEditedDraftName,
+            "pending",
+            { submitted: savedSlowName },
+        ).title,
+        description: savedEditorDocumentState(
+            savedEditedDraftName,
+            "pending",
+            { submitted: savedSlowName },
+        ).description,
+        targetMismatch: false,
+        falseConfirmation: false,
+    }, "saved greeting pending mutation attribution");
     await dispatchSavedGreetingSubmit(client);
     await waitForDuplicateSubmitCount(client, slowMutationBaseline.duplicateSubmitAttempts + 1, "saved greeting duplicate submit attempt");
     await wait(100);
@@ -910,6 +951,37 @@ try {
         activeMutationRequests: 1,
     }, "saved greeting duplicate POST suppression");
     await waitForSavedCommitted(client, savedSlowName, "saved greeting slow committed state");
+    const confirmedAttribution = await captureSavedMutationAttribution(
+        client,
+        "slow-success-after-draft-change",
+        slowMutationRequest.id,
+    );
+    assertState(confirmedAttribution, {
+        draft: savedEditedDraftName,
+        submitted: savedSlowName,
+        confirmed: savedSlowName,
+        mutationStatus: "success",
+        committedValue: savedSlowName,
+        activeMutationRequests: 0,
+        title: savedEditorDocumentState(
+            savedEditedDraftName,
+            "success",
+            {
+                submitted: savedSlowName,
+                confirmed: savedSlowName,
+            },
+        ).title,
+        description: savedEditorDocumentState(
+            savedEditedDraftName,
+            "success",
+            {
+                submitted: savedSlowName,
+                confirmed: savedSlowName,
+            },
+        ).description,
+        targetMismatch: false,
+        falseConfirmation: false,
+    }, "saved greeting confirmed mutation attribution");
     const slowMutationReport = await finishScenario(client, "saved-slow-duplicate");
     assertSavedGreetingReport(slowMutationReport, "saved greeting slow mutation", {
         routeChanges: 0,
@@ -925,12 +997,20 @@ try {
     assertState(await appState(client), {
         savedReadStatus: "ready",
         savedCommitted: savedSlowName,
+        savedInput: savedEditedDraftName,
         mutationStatus: "success",
         mutationError: "",
         mutationErrorNonEmpty: false,
         mutationPending: false,
         mutationSubmitDisabled: false,
     }, "server-backed saved greeting slow success");
+    assertRequest(await savedRequestEvidence(client, slowMutationRequest.id), {
+        method: "POST",
+        name: savedSlowName,
+        confirmed: savedSlowName,
+        outcome: "success",
+        aborted: false,
+    }, "saved greeting slow mutation request attribution");
     await dispatchSavedGreetingFinishEditing(client);
     await assertDocumentState(
         client,
@@ -942,8 +1022,18 @@ try {
     await prepareSavedGreetingName(client, savedFailureName);
     await startScenario(client, "saved-controlled-failure");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedSlowName, "saved greeting controlled failure pending");
-    await waitForSavedMutationFailure(client, savedSlowName, "saved greeting controlled server failure");
+    await waitForSavedMutationPending(
+        client,
+        savedSlowName,
+        savedFailureName,
+        "saved greeting controlled failure pending",
+    );
+    await waitForSavedMutationFailure(
+        client,
+        savedSlowName,
+        savedFailureName,
+        "saved greeting controlled server failure",
+    );
     const savedFailureReport = await finishScenario(client, "saved-controlled-failure");
     assertSavedGreetingReport(savedFailureReport, "saved greeting controlled failure", {
         routeChanges: 0,
@@ -964,7 +1054,12 @@ try {
     await prepareSavedGreetingName(client, savedRecoveryName);
     await startScenario(client, "saved-recovery");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedSlowName, "saved greeting recovery pending");
+    await waitForSavedMutationPending(
+        client,
+        savedSlowName,
+        savedRecoveryName,
+        "saved greeting recovery pending",
+    );
     await waitForSavedCommitted(client, savedRecoveryName, "saved greeting recovery committed state");
     const savedRecoveryReport = await finishScenario(client, "saved-recovery");
     assertSavedGreetingReport(savedRecoveryReport, "saved greeting recovery", {
@@ -999,7 +1094,12 @@ try {
     const savedUnmountBaseline = await evidenceState(client);
     await startScenario(client, "saved-unmount-cancellation");
     await dispatchSavedGreetingSubmit(client);
-    await waitForSavedMutationPending(client, savedRecoveryName, "saved greeting unmount mutation pending");
+    await waitForSavedMutationPending(
+        client,
+        savedRecoveryName,
+        savedSlowName,
+        "saved greeting unmount mutation pending",
+    );
     const unmountedMutationRequest = await waitForActiveSavedMutationRequest(
         client,
         savedUnmountBaseline.mutationPostsStarted + 1,
@@ -1117,6 +1217,8 @@ try {
         activeMutationRequests: 0,
         duplicateSubmitAttempts: 1,
         staleCommittedValueAppearances: 0,
+        savedMutationTargetMismatches: 0,
+        savedFalseConfirmationAppearances: 0,
         transitionRequestsStarted: 10,
         transitionSuccessfulCompletions: 6,
         transitionFailedCompletions: 2,
@@ -1178,6 +1280,14 @@ try {
         "success",
         "aborted",
     ], "saved greeting POST outcomes");
+    assertSavedMutationAttributionArray(
+        finalEvidence.savedMutationAttributionObserved,
+        [
+            pendingAttribution,
+            confirmedAttribution,
+        ],
+        "saved greeting mutation attribution observations",
+    );
     assertState(finalEvidence.document, {
         invalidPairs: 0,
         duplicateDescriptionObservations: 0,
@@ -1354,21 +1464,36 @@ function savedReadyDocumentState(value) {
     };
 }
 
-function savedEditorDocumentState(draft, status) {
-    const name = draft.trim() || "empty";
+function savedEditorDocumentState(draft, status, target = {}) {
+    let name = draft.trim() || "empty";
     if (status === "pending") {
+        name = target.submitted?.trim() || "empty";
         return {
             title: `Saving greeting: ${name} · GoFrame`,
             description: `Saving the greeting ${name}.`,
         };
     }
-    if (status === "validation failed" || status === "server failed") {
+    if (status === "validation failed") {
+        return {
+            title: "Saved greeting needs attention · GoFrame",
+            description: `The draft ${name} has not been committed.`,
+        };
+    }
+    if (status === "server failed") {
+        name = target.submitted?.trim() || "empty";
         return {
             title: "Saved greeting needs attention · GoFrame",
             description: `The draft ${name} has not been committed.`,
         };
     }
     if (status === "success") {
+        name = target.confirmed?.trim() || "empty";
+        if (name === "empty") {
+            return {
+                title: "Saved greeting needs attention · GoFrame",
+                description: "The server did not confirm a saved greeting.",
+            };
+        }
         return {
             title: `Saved greeting confirmed: ${name} · GoFrame`,
             description: `The server confirmed ${name}; finish editing to reveal committed metadata.`,
@@ -1568,6 +1693,78 @@ async function prepareSavedGreetingName(client, name) {
     }
     const report = { name, owner: baseline.owner, baseline, updated, settled };
     console.log(`server-backed saved input preparation: ${JSON.stringify(report)}`);
+    return report;
+}
+
+async function changeSavedGreetingDraftDuringMutation(client, draft, submitted) {
+    const evidenceBefore = await evidenceState(client);
+    const baseline = await client.callFunction(`function(draft) {
+        const input = document.querySelector("[data-testid='saved-greeting-input']");
+        if (!input) {
+            return { ok: false, reason: "missing saved greeting input" };
+        }
+        const owner = "SavedGreetingRoute";
+        const renders = window.goframeComponentRenderCounts?.[owner] || 0;
+        const patches = window.goframeComponentPatchCounts?.[owner] || 0;
+        input.value = draft;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return { ok: true, owner, renders, patches, value: input.value };
+    }`, draft);
+    if (!baseline?.ok) {
+        throw new Error(
+            `APP FAILURE: could not change pending saved greeting draft: ${JSON.stringify(baseline)}`,
+        );
+    }
+
+    let updated = null;
+    await waitForCondition(async () => {
+        updated = await appState(client);
+        const activity = await savedInputPreparationState(client);
+        const evidence = await evidenceState(client);
+        return updated.savedInput === draft &&
+            updated.mutationStatus === "pending" &&
+            updated.mutationPending &&
+            updated.mutationSubmitDisabled &&
+            activity.renders > baseline.renders &&
+            activity.patches > baseline.patches &&
+            evidence.mutationPostsStarted === evidenceBefore.mutationPostsStarted &&
+            evidence.activeMutationRequests === 1;
+    }, `pending saved greeting draft ${draft} framework update`);
+
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(
+            draft,
+            "pending",
+            { submitted },
+        ),
+        `pending saved greeting draft ${draft} document state`,
+    );
+    await waitForDocumentStateToSettle(
+        client,
+        `pending saved greeting draft ${draft}`,
+    );
+
+    const evidenceAfter = await evidenceState(client);
+    assertEvidence(evidenceAfter, {
+        mutationPostsStarted: evidenceBefore.mutationPostsStarted,
+        activeMutationRequests: 1,
+        savedGetsStarted: evidenceBefore.savedGetsStarted,
+        successfulMutationReloadGets:
+            evidenceBefore.successfulMutationReloadGets,
+        duplicateSubmitAttempts: evidenceBefore.duplicateSubmitAttempts,
+    }, "pending saved greeting draft request ownership");
+
+    const report = {
+        draft,
+        submitted,
+        baseline,
+        updated,
+        mutationPostsStarted: evidenceAfter.mutationPostsStarted,
+        activeMutationRequests: evidenceAfter.activeMutationRequests,
+    };
+    console.log(`server-backed pending saved draft change: ${JSON.stringify(report)}`);
     return report;
 }
 
@@ -1991,7 +2188,14 @@ async function waitForSavedCommitted(client, expected, label) {
         await assertDocumentState(
             client,
             "saved-editor",
-            savedEditorDocumentState(state.savedInput, state.mutationStatus),
+            savedEditorDocumentState(
+                state.savedInput,
+                state.mutationStatus,
+                {
+                    submitted: expected,
+                    confirmed: expected,
+                },
+            ),
             `${label} editor document state`,
         );
         return;
@@ -2021,7 +2225,7 @@ async function waitForSavedValidationFailure(client, committed, label) {
     );
 }
 
-async function waitForSavedMutationPending(client, committed, label) {
+async function waitForSavedMutationPending(client, committed, submitted, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
         return state.savedCommitted === committed &&
@@ -2035,12 +2239,16 @@ async function waitForSavedMutationPending(client, committed, label) {
     await assertDocumentState(
         client,
         "saved-editor",
-        savedEditorDocumentState(state.savedInput, "pending"),
+        savedEditorDocumentState(
+            state.savedInput,
+            "pending",
+            { submitted },
+        ),
         `${label} document state`,
     );
 }
 
-async function waitForSavedMutationFailure(client, committed, label) {
+async function waitForSavedMutationFailure(client, committed, submitted, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
         return state.savedCommitted === committed &&
@@ -2054,7 +2262,11 @@ async function waitForSavedMutationFailure(client, committed, label) {
     await assertDocumentState(
         client,
         "saved-editor",
-        savedEditorDocumentState(state.savedInput, "server failed"),
+        savedEditorDocumentState(
+            state.savedInput,
+            "server failed",
+            { submitted },
+        ),
         `${label} document state`,
     );
 }
@@ -2230,6 +2442,25 @@ async function savedRequestEvidence(client, requestID) {
     return await client.callFunction(`function(requestID) {
         return window.__serverBackedEvidence?.savedRequest(requestID) ?? null;
     }`, requestID);
+}
+
+async function captureSavedMutationAttribution(client, phase, requestID) {
+    const observation = await client.callFunction(
+        `function(phase, requestID) {
+            return window.__serverBackedEvidence?.captureSavedMutationAttribution(
+                phase,
+                requestID,
+            ) ?? null;
+        }`,
+        phase,
+        requestID,
+    );
+    if (!observation) {
+        throw new Error(
+            `APP FAILURE: could not capture saved mutation attribution for ${phase}`,
+        );
+    }
+    return observation;
 }
 
 async function startScenario(client, label) {
@@ -2514,6 +2745,15 @@ function assertCommittedPairArray(actual, expected, label) {
     console.log(`${label}: ok`);
 }
 
+function assertSavedMutationAttributionArray(actual, expected, label) {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(
+            `APP FAILURE: ${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`,
+        );
+    }
+    console.log(`${label}: ok`);
+}
+
 function emptyOperations() {
     return {
         createElement: 0,
@@ -2594,6 +2834,9 @@ function installServerBackedEvidenceExpression() {
     let activeMutationRequests = 0;
     let duplicateSubmitAttempts = 0;
     let staleCommittedValueAppearances = 0;
+    let savedMutationTargetMismatches = 0;
+    let savedFalseConfirmationAppearances = 0;
+    const savedMutationAttributionObserved = [];
     const documentSnapshots = [];
     const selectedDocumentPairs = new Set();
     let authoredHead = null;
@@ -2765,6 +3008,9 @@ function installServerBackedEvidenceExpression() {
             const request = savedRequests.find((entry) => entry.id === id);
             return request ? { ...request } : null;
         },
+        captureSavedMutationAttribution(phase, requestID) {
+            return captureSavedMutationAttribution(phase, requestID);
+        },
         documentState() {
             return documentEvidenceState();
         },
@@ -2810,6 +3056,10 @@ function installServerBackedEvidenceExpression() {
                 activeMutationRequests,
                 duplicateSubmitAttempts,
                 staleCommittedValueAppearances,
+                savedMutationTargetMismatches,
+                savedFalseConfirmationAppearances,
+                savedMutationAttributionObserved:
+                    savedMutationAttributionObserved.map((entry) => ({ ...entry })),
                 committedValuesObserved: [...committedValuesObserved],
                 appIdentityChanges: this.identityChanged.app ? 1 : 0,
                 shellIdentityChanges: this.identityChanged.shell ? 1 : 0,
@@ -2923,6 +3173,7 @@ function installServerBackedEvidenceExpression() {
             target: requestURL.pathname + requestURL.search,
             outcome: "pending",
             aborted: false,
+            confirmed: "",
         };
         savedRequests.push(request);
         if (method === "GET") {
@@ -2965,11 +3216,17 @@ function installServerBackedEvidenceExpression() {
             }, { once: true });
         }
         return originalFetch(input, init).then((response) => {
-            return new Promise((resolve) => {
-                window.setTimeout(() => {
-                    if (!request.aborted) finish(response.ok ? "success" : "failed");
-                    resolve(response);
-                }, method === "POST" && name === ${JSON.stringify(savedSlowName)} ? 0 : 140);
+            const confirmed = method === "POST" && response.ok
+                ? response.clone().text()
+                : Promise.resolve("");
+            return confirmed.then((text) => {
+                request.confirmed = text.trim();
+                return new Promise((resolve) => {
+                    window.setTimeout(() => {
+                        if (!request.aborted) finish(response.ok ? "success" : "failed");
+                        resolve(response);
+                    }, method === "POST" && name === ${JSON.stringify(savedSlowName)} ? 0 : 140);
+                });
             });
         }, (error) => {
             if (signal?.aborted) {
@@ -3315,6 +3572,78 @@ function installServerBackedEvidenceExpression() {
             descriptionCount: descriptions.length,
         };
         return true;
+    }
+
+    function captureSavedMutationAttribution(phase, requestID) {
+        const request = savedRequests.find((entry) =>
+            entry.id === requestID &&
+            entry.method === "POST",
+        );
+        if (!request) return null;
+
+        const draft = document.querySelector(
+            "[data-testid='saved-greeting-input']",
+        )?.value || "";
+        const mutationStatus = document.querySelector(
+            "[data-testid='saved-greeting-mutation-status']",
+        )?.textContent.trim() || "";
+        const committedValue = document.querySelector(
+            "[data-testid='saved-greeting-committed']",
+        )?.textContent.trim() || "";
+        const owner = document.querySelector(
+            "[data-testid='server-backed-document-owner']",
+        )?.textContent.trim() || "";
+        const title = document.title;
+        const description = document.querySelector(
+            "head meta[name='description']",
+        )?.getAttribute("content") || "";
+
+        let expectedTitle = "";
+        let expectedDescription = "";
+        if (mutationStatus === "pending") {
+            expectedTitle =
+                "Saving greeting: " + request.name + " · GoFrame";
+            expectedDescription =
+                "Saving the greeting " + request.name + ".";
+        } else if (mutationStatus === "success") {
+            expectedTitle =
+                "Saved greeting confirmed: " + request.confirmed + " · GoFrame";
+            expectedDescription =
+                "The server confirmed " + request.confirmed +
+                "; finish editing to reveal committed metadata.";
+        }
+
+        const pairMatches = owner === "saved-editor" &&
+            expectedTitle !== "" &&
+            title === expectedTitle &&
+            description === expectedDescription;
+        const targetMismatch = mutationStatus === "pending" &&
+            (request.outcome !== "pending" || !pairMatches);
+        const falseConfirmation = mutationStatus === "success" &&
+            (request.outcome !== "success" ||
+                request.confirmed === "" ||
+                !pairMatches);
+        if (targetMismatch) savedMutationTargetMismatches++;
+        if (falseConfirmation) savedFalseConfirmationAppearances++;
+
+        const observation = {
+            phase,
+            requestID,
+            draft,
+            submitted: request.name,
+            confirmed: request.confirmed,
+            requestOutcome: request.outcome,
+            mutationStatus,
+            committedValue,
+            activeMutationRequests,
+            owner,
+            title,
+            description,
+            targetMismatch,
+            falseConfirmation,
+        };
+        savedMutationAttributionObserved.push(observation);
+        return { ...observation };
     }
 
     function captureDocumentSnapshot(phase) {
