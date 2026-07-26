@@ -99,6 +99,60 @@ try {
     await assertShellSame(client, "shell after nested fallback panic");
     await assertListenerNetStable(client, "nested fallback panic");
 
+    await waitForText(client, "[data-testid='eb-transaction-version']", "A", "initial transaction version");
+    await waitForProbe(client, (current) =>
+        current.transaction.aEffectSetups === 1 &&
+        current.transaction.aResourceStarts === 1 &&
+        current.transaction.aLaterSiblingSetups === 1 &&
+        current.transaction.aEffectCleanups === 0 &&
+        current.transaction.aUnmountCallbacks === 0 &&
+        current.transaction.aResourceCleanups === 0,
+    "initial protected transaction lifecycle");
+    const beforeTransactionFailure = await probe(client);
+
+    await click(client, "[data-testid='eb-trigger-transaction-error']");
+    await waitForSelector(client, "[data-testid='eb-transaction-fallback']", "transaction boundary fallback");
+    await waitForAbsent(client, "[data-testid='eb-transaction-owner']", "failed transaction owner removed");
+    await waitForText(
+        client,
+        "[data-testid='eb-transaction-error-component']",
+        "TransactionRiskyDescendant",
+        "transaction descendant component",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeTransactionFailure.reports.length + 1 &&
+        current.reports.at(-1).phase === "render" &&
+        current.reports.at(-1).component === "TransactionRiskyDescendant" &&
+        current.transaction.attemptedBEffectSetups === 0 &&
+        current.transaction.attemptedBUnmountCallbacks === 0 &&
+        current.transaction.attemptedBResourceStarts === 0 &&
+        current.transaction.attemptedBResourceCleanups === 0 &&
+        current.transaction.attemptedBLaterSetups === 0 &&
+        current.transaction.aEffectCleanups === 1 &&
+        current.transaction.aUnmountCallbacks === 1 &&
+        current.transaction.aResourceCleanups === 1,
+    "failed protected transaction rollback");
+    await assertShellSame(client, "protected transaction fallback");
+
+    const afterTransactionFailure = await probe(client);
+    const transactionBoundaryReports =
+        afterTransactionFailure.reports.length - beforeTransactionFailure.reports.length;
+    await click(client, "[data-testid='eb-transaction-retry']");
+    await waitForText(client, "[data-testid='eb-transaction-version']", "B", "transaction retry version");
+    await waitForAbsent(client, "[data-testid='eb-transaction-fallback']", "transaction fallback cleared");
+    await waitForProbe(client, (current) =>
+        current.reports.length === afterTransactionFailure.reports.length &&
+        current.transaction.retryBEffectSetups === 1 &&
+        current.transaction.retryBResourceStarts === 1 &&
+        current.transaction.retryBLaterSetups === 1 &&
+        current.transaction.attemptedBEffectSetups === 0 &&
+        current.transaction.attemptedBUnmountCallbacks === 0 &&
+        current.transaction.attemptedBResourceStarts === 0 &&
+        current.transaction.attemptedBLaterSetups === 0 &&
+        current.listenerAudit.add === current.listenerAudit.remove,
+    "healthy protected transaction retry");
+    await assertShellSame(client, "protected transaction retry");
+
     const beforeNoBoundary = await probe(client);
     await click(client, "[data-testid='eb-trigger-no-boundary-error']");
     await waitForAbsent(client, "[data-testid='eb-no-boundary-healthy']", "no-boundary subtree default Empty fallback");
@@ -108,6 +162,14 @@ try {
     "no-boundary render report");
     await assertShellSame(client, "shell after no-boundary failure");
 
+    const finalProbe = await probe(client);
+    console.log(`Error boundary protected transaction counters: ${JSON.stringify({
+        ...finalProbe.transaction,
+        boundaryReports: transactionBoundaryReports,
+        shellIdentityChanges: finalProbe.shellIdentityChanges,
+        listenerAdditions: finalProbe.listenerAudit.add,
+        listenerRemovals: finalProbe.listenerAudit.remove,
+    })}`);
     client.close();
     console.log("Error boundary browser smoke: ok");
 } finally {
@@ -139,6 +201,7 @@ async function installListenerAudit(client) {
 async function captureShell(client) {
     const ok = await client.evaluate(`(() => {
         window.__errorBoundaryShell = document.querySelector("[data-testid='eb-shell']");
+        window.__errorBoundaryShellIdentityChanges = 0;
         return Boolean(window.__errorBoundaryShell);
     })()`);
     if (!ok) {
@@ -147,7 +210,11 @@ async function captureShell(client) {
 }
 
 async function assertShellSame(client, label) {
-    const same = await client.evaluate(`(() => window.__errorBoundaryShell === document.querySelector("[data-testid='eb-shell']"))()`);
+    const same = await client.evaluate(`(() => {
+        const same = window.__errorBoundaryShell === document.querySelector("[data-testid='eb-shell']");
+        if (!same) window.__errorBoundaryShellIdentityChanges++;
+        return same;
+    })()`);
     if (!same) {
         throw new Error(`APP FAILURE: shell identity changed during ${label}`);
     }
@@ -158,6 +225,8 @@ async function probe(client) {
         effectCount: globalThis.goframeErrorBoundaryEffectCount ?? 0,
         cleanupCount: globalThis.goframeErrorBoundaryCleanupCount ?? 0,
         reports: Array.from(globalThis.goframeErrorBoundaryReports || []),
+        transaction: globalThis.goframeProtectedTransactionProbe || {},
+        shellIdentityChanges: globalThis.__errorBoundaryShellIdentityChanges || 0,
         listenerAudit: globalThis.__errorBoundaryListenerAudit || { add: 0, remove: 0 },
     }))()`);
 }

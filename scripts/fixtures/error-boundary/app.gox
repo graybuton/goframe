@@ -8,6 +8,8 @@ func App() gf.Node {
 	nestedBroken, setNestedBroken := gf.UseState(false)
 	innerFallbackCrash, setInnerFallbackCrash := gf.UseState(false)
 	noBoundaryBroken, setNoBoundaryBroken := gf.UseState(false)
+	transactionVersion, setTransactionVersion := gf.UseState("A")
+	transactionBroken, setTransactionBroken := gf.UseState(false)
 
 	return (
 		<main data-testid="eb-shell">
@@ -54,6 +56,20 @@ func App() gf.Node {
 				Trigger inner fallback panic
 			</button>
 			<NestedBoundaryScenario Broken={nestedBroken} FallbackCrash={innerFallbackCrash} />
+
+			<button
+				data-testid="eb-trigger-transaction-error"
+				OnClick={func() {
+					transactionAttemptPhase = "attempt"
+					setTransactionVersion("B")
+					setTransactionBroken(true)
+				}}
+			>
+				Trigger protected transaction error
+			</button>
+			<gf.ErrorBoundary Fallback={makeTransactionFallback(setTransactionBroken)}>
+				<TransactionOwner Version={transactionVersion} Broken={transactionBroken} />
+			</gf.ErrorBoundary>
 
 			<button
 				data-testid="eb-trigger-no-boundary-error"
