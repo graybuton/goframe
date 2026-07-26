@@ -45,6 +45,11 @@ const savedSlowName = "slow";
 const savedFailureName = "fail";
 const savedRecoveryName = "Grace";
 const savedFailureMessage = "controlled saved greeting failure";
+const authoredDocumentState = {
+    title: "GoFrame Server-Backed Example",
+    description: "GoFrame server-backed application reference.",
+};
+const authoredViewportContent = "width=device-width, initial-scale=1";
 const componentNames = [
     "App",
     "ServerBackedShell",
@@ -121,6 +126,7 @@ try {
     await navigateToApp(client, appURL);
     await waitForAppPage(client, expectedApp);
     await initializeBrowserEvidence(client);
+    await assertPreBootDocumentEvidence(client);
 
     assertState(await appState(client), {
         app: true,
@@ -141,6 +147,12 @@ try {
         shellSame: true,
         routeContentSame: true,
     }, "server-backed initial route");
+    await assertDocumentState(
+        client,
+        "route",
+        homeDocumentState(),
+        "server-backed initial Home document state",
+    );
     assertEvidence(await evidenceState(client), {
         fetchesStarted: 0,
         aborts: 0,
@@ -149,6 +161,39 @@ try {
         shellIdentityChanges: 0,
         routeContentIdentityChanges: 0,
     }, "initial route evidence");
+
+    const documentScopeIdentity = await documentScopeIdentityState(client);
+    await clickDocumentScopeControl(client, "server-backed-document-scope-unmount");
+    await assertDocumentState(
+        client,
+        "authored-baseline",
+        authoredDocumentState,
+        "server-backed authored document baseline after scope unmount",
+    );
+    assertState(await documentScopeIdentityState(client), {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        scopeInactive: true,
+    }, "server-backed document scope unmount identity");
+    await clickDocumentScopeControl(client, "server-backed-document-scope-remount");
+    await assertDocumentState(
+        client,
+        "route",
+        homeDocumentState(),
+        "server-backed Home document state after scope remount",
+    );
+    assertState(await documentScopeIdentityState(client), {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        scopeInactive: false,
+    }, "server-backed document scope remount identity");
+    if (!documentScopeIdentity.app ||
+        !documentScopeIdentity.shell ||
+        !documentScopeIdentity.routeContent) {
+        throw new Error(`APP FAILURE: document scope identity baseline is incomplete: ${JSON.stringify(documentScopeIdentity)}`);
+    }
 
     await startScenario(client, "direct-hash-navigation");
     await navigateGreetingHash(client, directName);
@@ -886,6 +931,13 @@ try {
         mutationPending: false,
         mutationSubmitDisabled: false,
     }, "server-backed saved greeting slow success");
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedSlowName),
+        "server-backed saved greeting slow route revealed after editor release",
+    );
 
     await prepareSavedGreetingName(client, savedFailureName);
     await startScenario(client, "saved-controlled-failure");
@@ -934,6 +986,13 @@ try {
         mutationPending: false,
         mutationSubmitDisabled: false,
     }, "server-backed saved greeting recovery state");
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedRecoveryName),
+        "server-backed saved greeting recovery route revealed after editor release",
+    );
     await assertSavedGreetingAPI(savedRecoveryName);
 
     await prepareSavedGreetingName(client, savedSlowName);
@@ -1119,7 +1178,52 @@ try {
         "success",
         "aborted",
     ], "saved greeting POST outcomes");
+    assertState(finalEvidence.document, {
+        invalidPairs: 0,
+        duplicateDescriptionObservations: 0,
+        viewportMutations: 0,
+        titleNodeReplacements: 0,
+        descriptionNodeReplacements: 0,
+        transitionRequestedMetadataAppearances: 0,
+        staleMetadataAppearances: 0,
+        baselineRestorations: 1,
+        scopeUnmounts: 1,
+        scopeRemounts: 1,
+        savedEditorActivations: 3,
+        savedEditorReleases: 3,
+        titleIdentityStable: true,
+        descriptionIdentityStable: true,
+        viewportIdentityStable: true,
+    }, "final document state evidence");
+    if (finalEvidence.document.titleMutationBatches < 1 ||
+        finalEvidence.document.descriptionMutationBatches < 1 ||
+        finalEvidence.document.headSnapshots < 1) {
+        throw new Error(
+            `APP FAILURE: document mutation evidence is incomplete: ${JSON.stringify(finalEvidence.document)}`,
+        );
+    }
     console.log(`server-backed mutation evidence: ${JSON.stringify(finalEvidence)}`);
+    console.log(`server-backed document evidence: ${JSON.stringify({
+        titleMutationBatches: finalEvidence.document.titleMutationBatches,
+        descriptionMutationBatches: finalEvidence.document.descriptionMutationBatches,
+        headSnapshots: finalEvidence.document.headSnapshots,
+        invalidPairs: finalEvidence.document.invalidPairs,
+        duplicateDescriptionObservations:
+            finalEvidence.document.duplicateDescriptionObservations,
+        viewportMutations: finalEvidence.document.viewportMutations,
+        titleNodeReplacements: finalEvidence.document.titleNodeReplacements,
+        descriptionNodeReplacements:
+            finalEvidence.document.descriptionNodeReplacements,
+        transitionRequestedMetadataAppearances:
+            finalEvidence.document.transitionRequestedMetadataAppearances,
+        staleMetadataAppearances:
+            finalEvidence.document.staleMetadataAppearances,
+        baselineRestorations: finalEvidence.document.baselineRestorations,
+        scopeUnmounts: finalEvidence.document.scopeUnmounts,
+        scopeRemounts: finalEvidence.document.scopeRemounts,
+        savedEditorActivations: finalEvidence.document.savedEditorActivations,
+        savedEditorReleases: finalEvidence.document.savedEditorReleases,
+    })}`);
 
     client.close();
     console.log("Server-backed browser smoke: ok");
@@ -1208,10 +1312,171 @@ function transitionPair(name, message) {
     };
 }
 
+function homeDocumentState() {
+    return {
+        title: "Server-backed Home · GoFrame",
+        description: "Choose a route-driven server-backed flow.",
+    };
+}
+
+function greetingDocumentState(name) {
+    return {
+        title: `Greeting ${name} · GoFrame`,
+        description: `Backend greeting route for ${name}.`,
+    };
+}
+
+function transitionPreparingDocumentState(name) {
+    return {
+        title: `Preparing retained greeting for ${name} · GoFrame`,
+        description: `Preparing the first retained greeting for ${name}.`,
+    };
+}
+
+function transitionCommittedDocumentState(name) {
+    return {
+        title: `Retained greeting: ${name} · GoFrame`,
+        description: `Committed retained greeting for ${name}.`,
+    };
+}
+
+function savedLoadingDocumentState() {
+    return {
+        title: "Saved greeting · GoFrame",
+        description: "Loading the committed saved greeting.",
+    };
+}
+
+function savedReadyDocumentState(value) {
+    return {
+        title: `Saved greeting: ${value} · GoFrame`,
+        description: `Committed saved greeting: ${value}.`,
+    };
+}
+
+function savedEditorDocumentState(draft, status) {
+    const name = draft.trim() || "empty";
+    if (status === "pending") {
+        return {
+            title: `Saving greeting: ${name} · GoFrame`,
+            description: `Saving the greeting ${name}.`,
+        };
+    }
+    if (status === "validation failed" || status === "server failed") {
+        return {
+            title: "Saved greeting needs attention · GoFrame",
+            description: `The draft ${name} has not been committed.`,
+        };
+    }
+    if (status === "success") {
+        return {
+            title: `Saved greeting confirmed: ${name} · GoFrame`,
+            description: `The server confirmed ${name}; finish editing to reveal committed metadata.`,
+        };
+    }
+    return {
+        title: `Editing saved greeting: ${name} · GoFrame`,
+        description: `Unsaved saved-greeting draft: ${name}.`,
+    };
+}
+
 async function initializeBrowserEvidence(client) {
     const initialized = await client.evaluate("window.__serverBackedEvidence?.initialize() ?? null");
     if (!initialized?.ready) {
         throw new Error(`APP FAILURE: server-backed evidence did not initialize: ${JSON.stringify(initialized)}`);
+    }
+}
+
+async function assertPreBootDocumentEvidence(client) {
+    const document = (await evidenceState(client)).document;
+    assertState(document, {
+        preBootCaptured: true,
+        authoredTitle: authoredDocumentState.title,
+        authoredDescription: authoredDocumentState.description,
+        authoredDescriptionCount: 1,
+        authoredViewportContent,
+        titleIdentityStable: true,
+        descriptionIdentityStable: true,
+        viewportIdentityStable: true,
+    }, "server-backed pre-boot authored head");
+}
+
+async function assertDocumentState(client, owner, expected, label) {
+    let state = null;
+    await waitForCondition(async () => {
+        state = await appState(client);
+        return state.documentOwner === owner &&
+            state.documentExpectedTitle === expected.title &&
+            state.documentExpectedDescription === expected.description &&
+            state.documentTitle === expected.title &&
+            state.documentDescription === expected.description &&
+            state.documentDescriptionCount === 1 &&
+            state.documentTitleIdentityStable &&
+            state.documentDescriptionIdentityStable &&
+            state.documentViewportIdentityStable &&
+            state.documentViewportContent === authoredViewportContent;
+    }, label);
+    const snapshot = await client.callFunction(`function(phase) {
+        return window.__serverBackedEvidence?.captureDocumentSnapshot(phase) ?? null;
+    }`, `settled:${label}`);
+    if (!snapshot?.valid) {
+        throw new Error(`APP FAILURE: ${label} document snapshot is invalid: ${JSON.stringify(snapshot)}`);
+    }
+    return state;
+}
+
+async function waitForDocumentStateToSettle(client, label) {
+    let state = null;
+    await waitForCondition(async () => {
+        state = await appState(client);
+        const schedulingSettled = await client.evaluate(
+            "window.__serverBackedAudit?.schedulingSettled() ?? false",
+        );
+        return schedulingSettled &&
+            state.documentExpectedTitle !== "" &&
+            state.documentExpectedDescription !== "" &&
+            state.documentTitle === state.documentExpectedTitle &&
+            state.documentDescription === state.documentExpectedDescription &&
+            state.documentDescriptionCount === 1 &&
+            state.documentTitleIdentityStable &&
+            state.documentDescriptionIdentityStable &&
+            state.documentViewportIdentityStable &&
+            state.documentViewportContent === authoredViewportContent;
+    }, `${label} document state settled`);
+    const snapshot = await client.callFunction(`function(phase) {
+        return window.__serverBackedEvidence?.captureDocumentSnapshot(phase) ?? null;
+    }`, `settled:${label}`);
+    if (!snapshot?.valid) {
+        throw new Error(`APP FAILURE: ${label} settled document snapshot is invalid: ${JSON.stringify(snapshot)}`);
+    }
+}
+
+async function documentScopeIdentityState(client) {
+    return await client.callFunction(`function() {
+        const identity = window.__serverBackedEvidence?.checkIdentity() ?? {};
+        return {
+            app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
+            shell: Boolean(document.querySelector("[data-testid='server-backed-shell']")),
+            routeContent: Boolean(document.querySelector("[data-testid='server-backed-route-content']")),
+            appSame: identity.appSame ?? false,
+            shellSame: identity.shellSame ?? false,
+            routeContentSame: identity.routeContentSame ?? false,
+            scopeInactive: Boolean(
+                document.querySelector("[data-testid='server-backed-document-scope-inactive']"),
+            ),
+        };
+    }`);
+}
+
+async function clickDocumentScopeControl(client, testID) {
+    const result = await client.callFunction(`function(testID) {
+        const control = document.querySelector("[data-testid='" + testID + "']");
+        if (!control) return { ok: false, reason: "missing control" };
+        control.click();
+        return { ok: true };
+    }`, testID);
+    if (!result?.ok) {
+        throw new Error(`APP FAILURE: could not use document scope control ${testID}: ${JSON.stringify(result)}`);
     }
 }
 
@@ -1276,14 +1541,24 @@ async function prepareSavedGreetingName(client, name) {
         throw new Error(`APP FAILURE: could not prepare saved greeting input: ${JSON.stringify(baseline)}`);
     }
 
-    let updated = null;
     await waitForCondition(async () => {
-        updated = await savedInputPreparationState(client);
+        const updated = await savedInputPreparationState(client);
         return updated.value === name &&
             updated.renders > baseline.renders &&
             updated.patches > baseline.patches;
     }, `controlled saved greeting input ${name} framework update`);
 
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(name, "idle"),
+        `controlled saved greeting input ${name} document state`,
+    );
+    await waitForDocumentStateToSettle(
+        client,
+        `controlled saved greeting input ${name}`,
+    );
+    const updated = await savedInputPreparationState(client);
     await waitForBrowserFrames(client, 2);
     const settled = await savedInputPreparationState(client);
     if (settled.value !== name ||
@@ -1447,6 +1722,22 @@ async function dispatchSavedGreetingSubmit(client) {
     }
 }
 
+async function dispatchSavedGreetingFinishEditing(client) {
+    const result = await client.evaluate(`(() => {
+        const control = document.querySelector(
+            "[data-testid='saved-greeting-finish-editing']",
+        );
+        if (!control) {
+            return { ok: false, reason: "missing finish editing control" };
+        }
+        control.click();
+        return { ok: true };
+    })()`);
+    if (!result?.ok) {
+        throw new Error(`APP FAILURE: could not finish saved greeting editing: ${JSON.stringify(result)}`);
+    }
+}
+
 async function waitForGreeting(client, expected, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
@@ -1463,7 +1754,7 @@ async function waitForFetchCount(client, expected, label) {
 async function waitForLoading(client, name, label) {
     await waitForCondition(async () => {
         const state = await appState(client);
-        return state.route === "greeting" &&
+        const liveLoading = state.route === "greeting" &&
             state.hash === greetingHash(name) &&
             state.routeTarget === greetingTarget(name) &&
             state.key === `/api/greeting?name=${encodeURIComponent(name)}` &&
@@ -1472,7 +1763,19 @@ async function waitForLoading(client, name, label) {
             state.loading &&
             !state.ready &&
             !state.failed;
+        if (liveLoading) {
+            return true;
+        }
+        return await client.callFunction(`function(target) {
+            return window.__serverBackedEvidence?.greetingLoadingObserved(target) ?? false;
+        }`, greetingTarget(name));
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        greetingDocumentState(name),
+        `${label} document state`,
+    );
 }
 
 async function waitForSlowActive(client, label) {
@@ -1486,6 +1789,12 @@ async function waitForSlowActive(client, label) {
             state.loading &&
             request !== null;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        greetingDocumentState(slowName),
+        `${label} document state`,
+    );
     return request;
 }
 
@@ -1515,6 +1824,12 @@ async function waitForTransitionInitialLoading(client, name, label) {
             !state.transitionFailed &&
             !state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionPreparingDocumentState(name),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionPending(client, requestedName, committedName, committedMessage, label) {
@@ -1531,6 +1846,12 @@ async function waitForTransitionPending(client, requestedName, committedName, co
             !state.transitionFailed &&
             state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(committedName),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionCommitted(client, name, message, label) {
@@ -1547,6 +1868,12 @@ async function waitForTransitionCommitted(client, name, message, label) {
             !state.transitionFailed &&
             state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(name),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionFailure(client, requestedName, committedName, committedMessage, label) {
@@ -1564,6 +1891,12 @@ async function waitForTransitionFailure(client, requestedName, committedName, co
             state.transitionError === failureMessage &&
             state.transitionCommittedScreen;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(committedName),
+        `${label} document state`,
+    );
 }
 
 async function waitForTransitionSlowActive(client, committedName, committedMessage, label) {
@@ -1582,6 +1915,12 @@ async function waitForTransitionSlowActive(client, committedName, committedMessa
             evidence.activeTransitionRequests === 1 &&
             request !== null;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        transitionCommittedDocumentState(committedName),
+        `${label} document state`,
+    );
     return request;
 }
 
@@ -1606,6 +1945,14 @@ async function waitForRoute(client, route, target) {
         const state = await appState(client);
         return state.route === route && state.routeTarget === target;
     }, `route ${route} at ${target}`);
+    if (route === "home") {
+        await assertDocumentState(
+            client,
+            "route",
+            homeDocumentState(),
+            `route ${route} at ${target} document state`,
+        );
+    }
 }
 
 async function waitForSavedReadLoading(client, label) {
@@ -1620,11 +1967,18 @@ async function waitForSavedReadLoading(client, label) {
             !state.savedReadReady &&
             !state.savedReadFailed;
     }, label);
+    await assertDocumentState(
+        client,
+        "route",
+        savedLoadingDocumentState(),
+        `${label} document state`,
+    );
 }
 
 async function waitForSavedCommitted(client, expected, label) {
+    let state = null;
     await waitForCondition(async () => {
-        const state = await appState(client);
+        state = await appState(client);
         return state.route === "savedGreeting" &&
             state.savedReadStatus === "ready" &&
             state.savedReadReady &&
@@ -1633,6 +1987,21 @@ async function waitForSavedCommitted(client, expected, label) {
             state.savedCommitted === expected &&
             state.mutationStatus !== "pending";
     }, label);
+    if (state.savedEditorActive) {
+        await assertDocumentState(
+            client,
+            "saved-editor",
+            savedEditorDocumentState(state.savedInput, state.mutationStatus),
+            `${label} editor document state`,
+        );
+        return;
+    }
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(expected),
+        `${label} route document state`,
+    );
 }
 
 async function waitForSavedValidationFailure(client, committed, label) {
@@ -1644,6 +2013,12 @@ async function waitForSavedValidationFailure(client, committed, label) {
             state.mutationError === "Name is required." &&
             !state.mutationPending;
     }, label);
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState("   ", "validation failed"),
+        `${label} document state`,
+    );
 }
 
 async function waitForSavedMutationPending(client, committed, label) {
@@ -1656,6 +2031,13 @@ async function waitForSavedMutationPending(client, committed, label) {
             state.mutationSubmitDisabled &&
             !state.mutationErrorNonEmpty;
     }, label);
+    const state = await appState(client);
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(state.savedInput, "pending"),
+        `${label} document state`,
+    );
 }
 
 async function waitForSavedMutationFailure(client, committed, label) {
@@ -1668,6 +2050,13 @@ async function waitForSavedMutationFailure(client, committed, label) {
             state.mutationErrorNonEmpty &&
             !state.mutationPending;
     }, label);
+    const state = await appState(client);
+    await assertDocumentState(
+        client,
+        "saved-editor",
+        savedEditorDocumentState(state.savedInput, "server failed"),
+        `${label} document state`,
+    );
 }
 
 async function waitForMutationPostCount(client, expected, label) {
@@ -1744,6 +2133,7 @@ async function appState(client) {
         const mutationError = document.querySelector("[data-testid='saved-greeting-mutation-error']")?.textContent.trim() ?? "";
         const mutationStatus = document.querySelector("[data-testid='saved-greeting-mutation-status']")?.textContent.trim() ?? "";
         const identity = window.__serverBackedEvidence?.checkIdentity() ?? {};
+        const documentEvidence = window.__serverBackedEvidence?.documentState() ?? {};
         return {
             app: Boolean(document.querySelector("[data-testid='server-backed-app']")),
             shell: Boolean(document.querySelector("[data-testid='server-backed-shell']")),
@@ -1794,6 +2184,24 @@ async function appState(client) {
             mutationError,
             mutationErrorNonEmpty: mutationError.length > 0,
             mutationSubmitDisabled: document.querySelector("[data-testid='saved-greeting-submit']")?.disabled ?? false,
+            savedEditorActive: Boolean(document.querySelector("[data-testid='saved-greeting-editor-state']")),
+            documentOwner: document.querySelector("[data-testid='server-backed-document-owner']")?.textContent.trim() ?? "",
+            documentOwnerCount:
+                Number(document.querySelector("[data-testid='server-backed-document-owner-count']")?.textContent.trim() ?? 0),
+            documentExpectedTitle:
+                document.querySelector("[data-testid='server-backed-document-title']")?.textContent.trim() ?? "",
+            documentExpectedDescription:
+                document.querySelector("[data-testid='server-backed-document-description']")?.textContent.trim() ?? "",
+            documentTitle: document.title,
+            documentDescription:
+                document.querySelector("head meta[name='description']")?.getAttribute("content") ?? "",
+            documentDescriptionCount:
+                document.querySelectorAll("head meta[name='description']").length,
+            documentViewportContent:
+                document.querySelector("head meta[name='viewport']")?.getAttribute("content") ?? "",
+            documentTitleIdentityStable: documentEvidence.titleIdentityStable ?? false,
+            documentDescriptionIdentityStable: documentEvidence.descriptionIdentityStable ?? false,
+            documentViewportIdentityStable: documentEvidence.viewportIdentityStable ?? false,
             origin: window.location.origin,
             appSame: identity.appSame ?? false,
             shellSame: identity.shellSame ?? false,
@@ -1834,6 +2242,7 @@ async function startScenario(client, label) {
 }
 
 async function finishScenario(client, label) {
+    await waitForDocumentStateToSettle(client, label);
     const report = await client.callFunction(`function(label) {
         return window.__serverBackedAudit?.finish(label) ?? null;
     }`, label);
@@ -2137,6 +2546,7 @@ function installServerBackedEvidenceExpression() {
     const routeTargetsVisited = [];
     const transitionRequestedTargetsObserved = [];
     const transitionCommittedPairsObserved = [];
+    const greetingLoadingTargetsObserved = new Set();
     const operations = ${JSON.stringify(emptyOperations())};
     const scheduling = {
         requestAnimationFrame: 0,
@@ -2184,6 +2594,83 @@ function installServerBackedEvidenceExpression() {
     let activeMutationRequests = 0;
     let duplicateSubmitAttempts = 0;
     let staleCommittedValueAppearances = 0;
+    const documentSnapshots = [];
+    const selectedDocumentPairs = new Set();
+    let authoredHead = null;
+    let documentTitleMutationBatches = 0;
+    let documentDescriptionMutationBatches = 0;
+    let documentInvalidPairs = 0;
+    let documentDuplicateDescriptionObservations = 0;
+    let documentViewportMutations = 0;
+    let documentTitleNodeReplacements = 0;
+    let documentDescriptionNodeReplacements = 0;
+    let documentTransitionRequestedMetadataAppearances = 0;
+    let documentStaleMetadataAppearances = 0;
+    let documentBaselineRestorations = 0;
+    let documentScopeUnmounts = 0;
+    let documentScopeRemounts = 0;
+    let savedEditorActivations = 0;
+    let savedEditorReleases = 0;
+    let lastDocumentOwner = "";
+    let titleIdentityBroken = false;
+    let descriptionIdentityBroken = false;
+    let viewportIdentityBroken = false;
+
+    const documentObserver = new MutationObserver((records) => {
+        const hadAuthoredHead = Boolean(authoredHead);
+        captureAuthoredHead();
+        if (!hadAuthoredHead) {
+            if (authoredHead) captureDocumentSnapshot("pre-boot");
+            return;
+        }
+
+        let titleChanged = false;
+        let descriptionChanged = false;
+        let viewportChanged = false;
+        let expectedChanged = false;
+        let headStructureChanged = false;
+        const evidenceRoot = document.querySelector(
+            "[data-testid='server-backed-document-state']",
+        );
+        for (const record of records) {
+            const target = record.target;
+            if (target === authoredHead.title ||
+                authoredHead.title.contains?.(target)) {
+                titleChanged = true;
+            }
+            if (target === authoredHead.description) {
+                descriptionChanged = true;
+            }
+            if (target === authoredHead.viewport) {
+                viewportChanged = true;
+            }
+            if (target === document.head && record.type === "childList") {
+                headStructureChanged = true;
+            }
+            if (evidenceRoot &&
+                (target === evidenceRoot || evidenceRoot.contains(target))) {
+                expectedChanged = true;
+            }
+        }
+        if (titleChanged) documentTitleMutationBatches++;
+        if (descriptionChanged) documentDescriptionMutationBatches++;
+        if (viewportChanged) documentViewportMutations++;
+        if (titleChanged ||
+            descriptionChanged ||
+            viewportChanged ||
+            expectedChanged ||
+            headStructureChanged) {
+            captureDocumentSnapshot("mutation");
+        }
+    });
+    documentObserver.observe(document, {
+        attributes: true,
+        attributeFilter: ["content"],
+        characterData: true,
+        childList: true,
+        subtree: true,
+    });
+    captureAuthoredHead();
 
     window.goframeComponentRenderCounts = {};
     window.goframeComponentPatchCounts = {};
@@ -2207,6 +2694,9 @@ function installServerBackedEvidenceExpression() {
             routeContent: false,
         },
         initialize() {
+            if (!captureAuthoredHead()) {
+                return { ready: false, reason: "authored head was not captured before application boot" };
+            }
             this.stable = {
                 app: document.querySelector("[data-testid='server-backed-app']"),
                 shell: document.querySelector("[data-testid='server-backed-shell']"),
@@ -2222,6 +2712,7 @@ function installServerBackedEvidenceExpression() {
             captureTransitionState();
             new MutationObserver((records) => {
                 routeContentMutations += records.length;
+                captureGreetingLoadingState();
                 const message = document.querySelector("[data-testid='greeting-message']")?.textContent.trim() || "";
                 if (message === slowMessage && lastMessage !== slowMessage) {
                     staleResultAppearances++;
@@ -2242,6 +2733,8 @@ function installServerBackedEvidenceExpression() {
                 subtree: true,
                 characterData: true,
             });
+            captureDocumentSnapshot("initialize");
+            captureGreetingLoadingState();
             return { ready: true };
         },
         checkIdentity() {
@@ -2271,6 +2764,15 @@ function installServerBackedEvidenceExpression() {
         savedRequest(id) {
             const request = savedRequests.find((entry) => entry.id === id);
             return request ? { ...request } : null;
+        },
+        documentState() {
+            return documentEvidenceState();
+        },
+        greetingLoadingObserved(target) {
+            return greetingLoadingTargetsObserved.has(target);
+        },
+        captureDocumentSnapshot(phase) {
+            return captureDocumentSnapshot(phase);
         },
         snapshot() {
             return {
@@ -2316,6 +2818,7 @@ function installServerBackedEvidenceExpression() {
                 requests: requests.map((request) => ({ ...request })),
                 transitionRequests: transitionRequests.map((request) => ({ ...request })),
                 savedRequests: savedRequests.map((request) => ({ ...request })),
+                document: documentEvidenceState(),
             };
         },
     };
@@ -2334,6 +2837,12 @@ function installServerBackedEvidenceExpression() {
     document.addEventListener("click", (event) => {
         if (event.target?.closest?.("[data-testid='transition-retry']")) {
             transitionRetryAttempts++;
+        }
+        if (event.target?.closest?.("[data-testid='server-backed-document-scope-unmount']")) {
+            documentScopeUnmounts++;
+        }
+        if (event.target?.closest?.("[data-testid='server-backed-document-scope-remount']")) {
+            documentScopeRemounts++;
         }
     }, true);
 
@@ -2622,6 +3131,12 @@ function installServerBackedEvidenceExpression() {
                 committedValues: committedValuesObserved.slice(this.committedValueBaseline),
             };
         },
+        schedulingSettled() {
+            return scheduling.requestAnimationFrame ===
+                scheduling.requestAnimationFrameCallbacks &&
+                scheduling.queueMicrotask ===
+                scheduling.queueMicrotaskCallbacks;
+        },
     };
     window.__serverBackedAudit = audit;
 
@@ -2762,6 +3277,267 @@ function installServerBackedEvidenceExpression() {
             return parsed.searchParams.get("name") || "GoFrame";
         } catch {
             return "";
+        }
+    }
+
+    function captureAuthoredHead() {
+        if (authoredHead) return true;
+        const titles = document.querySelectorAll("head title");
+        const descriptions = document.querySelectorAll(
+            "head meta[name='description']",
+        );
+        const viewports = document.querySelectorAll(
+            "head meta[name='viewport']",
+        );
+        if (titles.length !== 1 ||
+            descriptions.length !== 1 ||
+            viewports.length !== 1) {
+            return false;
+        }
+        const title = titles[0];
+        const description = descriptions[0];
+        const viewport = viewports[0];
+        const titleText = title.textContent;
+        const descriptionText = description.getAttribute("content") || "";
+        const viewportContent = viewport.getAttribute("content") || "";
+        if (titleText !== ${JSON.stringify(authoredDocumentState.title)} ||
+            descriptionText !== ${JSON.stringify(authoredDocumentState.description)} ||
+            viewportContent !== ${JSON.stringify(authoredViewportContent)}) {
+            return false;
+        }
+        authoredHead = {
+            title,
+            description,
+            viewport,
+            titleText,
+            descriptionText,
+            viewportContent,
+            descriptionCount: descriptions.length,
+        };
+        return true;
+    }
+
+    function captureDocumentSnapshot(phase) {
+        const title = document.querySelector("head title");
+        const description = document.querySelector(
+            "head meta[name='description']",
+        );
+        const viewport = document.querySelector(
+            "head meta[name='viewport']",
+        );
+        const descriptionCount = document.querySelectorAll(
+            "head meta[name='description']",
+        ).length;
+        const owner = document.querySelector(
+            "[data-testid='server-backed-document-owner']",
+        )?.textContent.trim() || "";
+        const expectedTitle = document.querySelector(
+            "[data-testid='server-backed-document-title']",
+        )?.textContent.trim() || "";
+        const expectedDescription = document.querySelector(
+            "[data-testid='server-backed-document-description']",
+        )?.textContent.trim() || "";
+        const actualTitle = title?.textContent || "";
+        const actualDescription = description?.getAttribute("content") || "";
+        const viewportContent = viewport?.getAttribute("content") || "";
+        const titleIdentityStable = Boolean(
+            authoredHead && title === authoredHead.title && title?.isConnected,
+        );
+        const descriptionIdentityStable = Boolean(
+            authoredHead &&
+            description === authoredHead.description &&
+            description?.isConnected,
+        );
+        const viewportIdentityStable = Boolean(
+            authoredHead &&
+            viewport === authoredHead.viewport &&
+            viewport?.isConnected,
+        );
+
+        if (!titleIdentityStable && !titleIdentityBroken) {
+            titleIdentityBroken = true;
+            documentTitleNodeReplacements++;
+        }
+        if (!descriptionIdentityStable && !descriptionIdentityBroken) {
+            descriptionIdentityBroken = true;
+            documentDescriptionNodeReplacements++;
+        }
+        if (!viewportIdentityStable && !viewportIdentityBroken) {
+            viewportIdentityBroken = true;
+            documentViewportMutations++;
+        }
+        if (descriptionCount !== 1) {
+            documentDuplicateDescriptionObservations++;
+        }
+        if (authoredHead && viewportContent !== authoredHead.viewportContent) {
+            documentViewportMutations++;
+        }
+
+        if (owner && owner !== lastDocumentOwner) {
+            if (owner === "saved-editor") savedEditorActivations++;
+            if (lastDocumentOwner === "saved-editor") savedEditorReleases++;
+            if (owner === "authored-baseline" &&
+                lastDocumentOwner &&
+                lastDocumentOwner !== "authored-baseline") {
+                documentBaselineRestorations++;
+            }
+            lastDocumentOwner = owner;
+        }
+
+        const expectedReady = expectedTitle !== "" && expectedDescription !== "";
+        const pairValid = !expectedReady ||
+            (actualTitle === expectedTitle &&
+                actualDescription === expectedDescription);
+        const valid = Boolean(
+            authoredHead &&
+            titleIdentityStable &&
+            descriptionIdentityStable &&
+            viewportIdentityStable &&
+            descriptionCount === 1 &&
+            viewportContent === authoredHead.viewportContent &&
+            pairValid,
+        );
+        if (!valid && expectedReady) {
+            documentInvalidPairs++;
+        }
+
+        const actualPairKey = actualTitle + "\\u0000" + actualDescription;
+        const expectedPairKey = expectedTitle + "\\u0000" + expectedDescription;
+        if (expectedReady && pairValid) {
+            selectedDocumentPairs.add(expectedPairKey);
+        } else if (expectedReady && selectedDocumentPairs.has(actualPairKey)) {
+            documentStaleMetadataAppearances++;
+        }
+
+        const transitionRequestedTarget = document.querySelector(
+            "[data-testid='transition-requested-target']",
+        )?.textContent.trim() || "";
+        const transitionCommittedTarget = document.querySelector(
+            "[data-testid='transition-committed-target']",
+        )?.textContent.trim() || "";
+        const requestedName = transitionNameFromTarget(
+            transitionRequestedTarget,
+        );
+        const committedName = transitionNameFromTarget(
+            transitionCommittedTarget,
+        );
+        if (requestedName &&
+            committedName &&
+            requestedName !== committedName &&
+            (actualTitle.includes(requestedName) ||
+                actualDescription.includes(requestedName))) {
+            documentTransitionRequestedMetadataAppearances++;
+        }
+
+        const snapshot = {
+            phase,
+            hash: window.location.hash,
+            renderedRoute: renderedRouteName(),
+            transitionRequestedTarget,
+            transitionCommittedTarget,
+            transitionCommittedMessage: document.querySelector(
+                "[data-testid='transition-message']",
+            )?.textContent.trim() || "",
+            savedCommittedValue: document.querySelector(
+                "[data-testid='saved-greeting-committed']",
+            )?.textContent.trim() || "",
+            savedMutationStatus: document.querySelector(
+                "[data-testid='saved-greeting-mutation-status']",
+            )?.textContent.trim() || "",
+            activeOwner: owner,
+            expectedTitle,
+            expectedDescription,
+            actualTitle,
+            actualDescription,
+            descriptionCount,
+            viewportContent,
+            titleIdentityStable,
+            descriptionIdentityStable,
+            viewportIdentityStable,
+            valid,
+        };
+        documentSnapshots.push(snapshot);
+        return { ...snapshot };
+    }
+
+    function documentEvidenceState() {
+        const title = document.querySelector("head title");
+        const description = document.querySelector(
+            "head meta[name='description']",
+        );
+        const viewport = document.querySelector(
+            "head meta[name='viewport']",
+        );
+        return {
+            preBootCaptured: Boolean(authoredHead),
+            authoredTitle: authoredHead?.titleText || "",
+            authoredDescription: authoredHead?.descriptionText || "",
+            authoredDescriptionCount: authoredHead?.descriptionCount || 0,
+            authoredViewportContent: authoredHead?.viewportContent || "",
+            titleIdentityStable: Boolean(
+                authoredHead &&
+                title === authoredHead.title &&
+                title?.isConnected,
+            ),
+            descriptionIdentityStable: Boolean(
+                authoredHead &&
+                description === authoredHead.description &&
+                description?.isConnected,
+            ),
+            viewportIdentityStable: Boolean(
+                authoredHead &&
+                viewport === authoredHead.viewport &&
+                viewport?.isConnected,
+            ),
+            titleMutationBatches: documentTitleMutationBatches,
+            descriptionMutationBatches: documentDescriptionMutationBatches,
+            headSnapshots: documentSnapshots.length,
+            invalidPairs: documentInvalidPairs,
+            duplicateDescriptionObservations:
+                documentDuplicateDescriptionObservations,
+            viewportMutations: documentViewportMutations,
+            titleNodeReplacements: documentTitleNodeReplacements,
+            descriptionNodeReplacements:
+                documentDescriptionNodeReplacements,
+            transitionRequestedMetadataAppearances:
+                documentTransitionRequestedMetadataAppearances,
+            staleMetadataAppearances: documentStaleMetadataAppearances,
+            baselineRestorations: documentBaselineRestorations,
+            scopeUnmounts: documentScopeUnmounts,
+            scopeRemounts: documentScopeRemounts,
+            savedEditorActivations,
+            savedEditorReleases,
+        };
+    }
+
+    function renderedRouteName() {
+        if (document.querySelector("[data-testid='server-backed-home']")) {
+            return "home";
+        }
+        if (document.querySelector("[data-testid='server-backed-greeting-route']")) {
+            return "greeting";
+        }
+        if (document.querySelector("[data-testid='server-backed-transition-route']")) {
+            return "transitionGreeting";
+        }
+        if (document.querySelector("[data-testid='server-backed-saved-route']")) {
+            return "savedGreeting";
+        }
+        if (document.querySelector("[data-testid='server-backed-not-found']")) {
+            return "notFound";
+        }
+        return "missing";
+    }
+
+    function captureGreetingLoadingState() {
+        if (!document.querySelector("[data-testid='greeting-loading']")) {
+            return;
+        }
+        const target = document.querySelector(
+            "[data-testid='server-backed-route-target']",
+        )?.textContent.trim() || "";
+        if (target) {
+            greetingLoadingTargetsObserved.add(target);
         }
     }
 
