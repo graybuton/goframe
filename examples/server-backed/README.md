@@ -188,7 +188,7 @@ read request attribution from later draft edits.
 | head elements removed | 0 |
 | global mutable ownership variables | 0 |
 | document-state and mutation-attribution helper lines | 263 |
-| pure document/mutation test lines | 547 |
+| pure document/mutation test lines | 574 |
 | browser adapter lines | 137 (115 browser, 22 host stub) |
 | document-state helper declarations | 11 types, 28 helper functions |
 | existing app/GOX file delta | +370 / -128 (net +242) |
@@ -205,10 +205,10 @@ Linux amd64. These sizes are informational and introduce no threshold:
 
 | Encoding | Frozen base | Integrated reference | Delta |
 |---|---:|---:|---:|
-| raw | 194393 | 372422 | +178029 |
-| gzip (`-n -9`) | 80475 | 152642 | +72167 |
-| Brotli (`-q 11`) | 66896 | 123179 | +56283 |
-| Zstandard (`-19`) | 71131 | 131033 | +59902 |
+| raw | 194393 | 372409 | +178016 |
+| gzip (`-n -9`) | 80475 | 152651 | +72176 |
+| Brotli (`-q 11`) | 66896 | 123064 | +56168 |
+| Zstandard (`-19`) | 71131 | 131032 | +59901 |
 
 ### Decision
 
@@ -384,6 +384,12 @@ separate values. Input remains editable while the existing POST owner is
 active. Pending and server-failure metadata use the submitted target; success
 metadata uses the trimmed non-empty response body. A later draft edit therefore
 cannot rename an active request or its confirmation.
+
+A trimmed zero-length POST response is not confirmation. The literal non-empty
+value `"empty"` remains a valid confirmed greeting. A pure metadata and
+confirmation regression test keeps these cases distinct; the browser evidence
+continues to exercise the `slow` submitted target, editable `Mia` draft, and
+confirmed `slow` response.
 
 ## Backend Contract
 
