@@ -879,9 +879,55 @@ try {
     }, "server-backed saved greeting initial state");
 
     await prepareSavedGreetingName(client, "   ");
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedInitialName),
+        "saved greeting validation owner released before submit",
+    );
+    const validationOwnershipBeforeSubmit = await captureSavedSubmitOwnership(
+        client,
+        "validation-before-submit",
+    );
+    const initialSavedDocument = savedReadyDocumentState(savedInitialName);
+    assertState(validationOwnershipBeforeSubmit, {
+        draft: "   ",
+        mutationStatus: "idle",
+        activeOwner: "route",
+        expectedTitle: initialSavedDocument.title,
+        actualTitle: initialSavedDocument.title,
+        expectedDescription: initialSavedDocument.description,
+        actualDescription: initialSavedDocument.description,
+        submittedRequestTarget: "",
+        activeRequestCount: 0,
+    }, "saved greeting validation ownership before submit");
     await startScenario(client, "saved-client-validation");
     await dispatchSavedGreetingSubmit(client);
     await waitForSavedValidationFailure(client, savedInitialName, "saved greeting client validation");
+    const validationOwnershipAfterSubmit = await captureSavedSubmitOwnership(
+        client,
+        "validation-after-submit",
+        validationOwnershipBeforeSubmit,
+    );
+    const validationDocument = savedEditorDocumentState(
+        "   ",
+        "validation failed",
+    );
+    assertState(validationOwnershipAfterSubmit, {
+        draft: "   ",
+        mutationStatus: "validation failed",
+        activeOwner: "saved-editor",
+        expectedTitle: validationDocument.title,
+        actualTitle: validationDocument.title,
+        expectedDescription: validationDocument.description,
+        actualDescription: validationDocument.description,
+        submittedRequestTarget: "",
+        activeRequestCount: 0,
+        postDelta: 0,
+        getDelta: 0,
+        inputEventDelta: 0,
+    }, "saved greeting validation ownership after submit");
     const validationReport = await finishScenario(client, "saved-client-validation");
     assertSavedGreetingReport(validationReport, "saved greeting client validation", {
         routeChanges: 0,
@@ -898,6 +944,28 @@ try {
     }, "server-backed saved greeting validation state");
 
     await prepareSavedGreetingName(client, savedSlowName);
+    await dispatchSavedGreetingFinishEditing(client);
+    await assertDocumentState(
+        client,
+        "route",
+        savedReadyDocumentState(savedInitialName),
+        "saved greeting slow owner released before submit",
+    );
+    const slowOwnershipBeforeSubmit = await captureSavedSubmitOwnership(
+        client,
+        "slow-before-submit",
+    );
+    assertState(slowOwnershipBeforeSubmit, {
+        draft: savedSlowName,
+        mutationStatus: "idle",
+        activeOwner: "route",
+        expectedTitle: initialSavedDocument.title,
+        actualTitle: initialSavedDocument.title,
+        expectedDescription: initialSavedDocument.description,
+        actualDescription: initialSavedDocument.description,
+        submittedRequestTarget: "",
+        activeRequestCount: 0,
+    }, "saved greeting slow ownership before submit");
     const slowMutationBaseline = await evidenceState(client);
     await startScenario(client, "saved-slow-duplicate");
     await dispatchSavedGreetingSubmit(client);
@@ -907,6 +975,30 @@ try {
         savedSlowName,
         "saved greeting slow mutation pending",
     );
+    const slowOwnershipDuringPending = await captureSavedSubmitOwnership(
+        client,
+        "slow-during-pending",
+        slowOwnershipBeforeSubmit,
+    );
+    const slowPendingDocument = savedEditorDocumentState(
+        savedSlowName,
+        "pending",
+        { submitted: savedSlowName },
+    );
+    assertState(slowOwnershipDuringPending, {
+        draft: savedSlowName,
+        mutationStatus: "pending",
+        activeOwner: "saved-editor",
+        expectedTitle: slowPendingDocument.title,
+        actualTitle: slowPendingDocument.title,
+        expectedDescription: slowPendingDocument.description,
+        actualDescription: slowPendingDocument.description,
+        submittedRequestTarget: savedSlowName,
+        activeRequestCount: 1,
+        postDelta: 1,
+        getDelta: 0,
+        inputEventDelta: 0,
+    }, "saved greeting slow ownership during pending");
     await waitForMutationPostCount(client, slowMutationBaseline.mutationPostsStarted + 1, "saved greeting slow POST start");
     const slowMutationRequest = await waitForActiveSavedMutationRequest(
         client,
@@ -1219,6 +1311,7 @@ try {
         staleCommittedValueAppearances: 0,
         savedMutationTargetMismatches: 0,
         savedFalseConfirmationAppearances: 0,
+        savedInputEvents: 6,
         transitionRequestsStarted: 10,
         transitionSuccessfulCompletions: 6,
         transitionFailedCompletions: 2,
@@ -1299,8 +1392,8 @@ try {
         baselineRestorations: 1,
         scopeUnmounts: 1,
         scopeRemounts: 1,
-        savedEditorActivations: 3,
-        savedEditorReleases: 3,
+        savedEditorActivations: 5,
+        savedEditorReleases: 5,
         titleIdentityStable: true,
         descriptionIdentityStable: true,
         viewportIdentityStable: true,
@@ -2463,6 +2556,47 @@ async function captureSavedMutationAttribution(client, phase, requestID) {
     return observation;
 }
 
+async function captureSavedSubmitOwnership(client, phase, baseline = null) {
+    const state = await appState(client);
+    const evidence = await evidenceState(client);
+    const savedRequestCount = evidence.savedRequests.length;
+    const newRequests = baseline
+        ? evidence.savedRequests.slice(baseline.savedRequestCount)
+        : [];
+    const submittedRequest = [...newRequests].reverse().find(
+        (request) => request.method === "POST",
+    );
+    const observation = {
+        phase,
+        draft: state.savedInput,
+        mutationStatus: state.mutationStatus,
+        activeOwner: state.documentOwner,
+        expectedTitle: state.documentExpectedTitle,
+        actualTitle: state.documentTitle,
+        expectedDescription: state.documentExpectedDescription,
+        actualDescription: state.documentDescription,
+        submittedRequestTarget: submittedRequest?.name ?? "",
+        activeRequestCount: evidence.activeMutationRequests,
+        savedRequestCount,
+        mutationPostsStarted: evidence.mutationPostsStarted,
+        savedGetsStarted: evidence.savedGetsStarted,
+        savedInputEvents: evidence.savedInputEvents,
+        postDelta: baseline
+            ? evidence.mutationPostsStarted - baseline.mutationPostsStarted
+            : 0,
+        getDelta: baseline
+            ? evidence.savedGetsStarted - baseline.savedGetsStarted
+            : 0,
+        inputEventDelta: baseline
+            ? evidence.savedInputEvents - baseline.savedInputEvents
+            : 0,
+    };
+    console.log(
+        `server-backed saved submit ownership: ${JSON.stringify(observation)}`,
+    );
+    return observation;
+}
+
 async function startScenario(client, label) {
     const started = await client.callFunction(`function(label) {
         return window.__serverBackedAudit?.start(label) ?? false;
@@ -2836,6 +2970,7 @@ function installServerBackedEvidenceExpression() {
     let staleCommittedValueAppearances = 0;
     let savedMutationTargetMismatches = 0;
     let savedFalseConfirmationAppearances = 0;
+    let savedInputEvents = 0;
     const savedMutationAttributionObserved = [];
     const documentSnapshots = [];
     const selectedDocumentPairs = new Set();
@@ -3058,6 +3193,7 @@ function installServerBackedEvidenceExpression() {
                 staleCommittedValueAppearances,
                 savedMutationTargetMismatches,
                 savedFalseConfirmationAppearances,
+                savedInputEvents,
                 savedMutationAttributionObserved:
                     savedMutationAttributionObserved.map((entry) => ({ ...entry })),
                 committedValuesObserved: [...committedValuesObserved],
@@ -3082,6 +3218,11 @@ function installServerBackedEvidenceExpression() {
         if (event.target?.matches?.("[data-testid='saved-greeting-form']") &&
             activeMutationRequests > 0) {
             duplicateSubmitAttempts++;
+        }
+    }, true);
+    document.addEventListener("input", (event) => {
+        if (event.target?.matches?.("[data-testid='saved-greeting-input']")) {
+            savedInputEvents++;
         }
     }, true);
     document.addEventListener("click", (event) => {
