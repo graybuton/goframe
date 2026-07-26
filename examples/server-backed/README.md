@@ -82,6 +82,9 @@ Open <http://127.0.0.1:8080>.
 - Editing the controlled draft during an active POST does not change the
   submitted target, pending metadata, request count, or eventual
   server-confirmed metadata.
+- An accepted saved-greeting submit activates the nested editor metadata owner
+  after the duplicate-submit guard and before validation or request state,
+  including when no input event occurred after `Finish editing`.
 - Client validation and server failure leave the previous committed value
   visible, and a later valid submit clears the mutation error.
 
@@ -104,6 +107,11 @@ Two local focused browser runs demonstrated that:
 - Back and Forward use that same requested-versus-committed distinction;
 - the saved editor temporarily overrides route metadata during editing,
   validation, pending mutation, failure, and server confirmation;
+- whitespace validation and the existing slow mutation both reactivate the
+  saved editor after `Finish editing` without another input event; validation
+  starts no request, while the slow flow starts its existing single POST;
+- duplicate submissions remain rejected before editor activation or request
+  state changes;
 - changing the editable draft from `slow` to `Mia` during the active `slow`
   POST leaves pending metadata attributed to `slow`, starts no additional
   request, and preserves the duplicate-submit guard;
@@ -131,9 +139,9 @@ The focused runs produced identical document-state counters:
 
 | Counter | Run 1 | Run 2 |
 |---|---:|---:|
-| title mutation batches | 41 | 41 |
-| description mutation batches | 41 | 41 |
-| relevant head snapshots | 135 | 135 |
+| title mutation batches | 43 | 43 |
+| description mutation batches | 43 | 43 |
+| relevant head snapshots | 139 | 139 |
 | invalid title/description pairs | 0 | 0 |
 | duplicate-description observations | 0 | 0 |
 | viewport mutations | 0 | 0 |
@@ -146,15 +154,16 @@ The focused runs produced identical document-state counters:
 | authored-baseline restorations | 1 | 1 |
 | route-owner scope unmounts | 1 | 1 |
 | route-owner scope remounts | 1 | 1 |
-| saved-editor activations | 3 | 3 |
-| saved-editor releases | 3 | 3 |
+| saved-editor activations | 5 | 5 |
+| saved-editor releases | 5 | 5 |
 
 The existing request evidence also remained unchanged: 11 ordinary greeting
 requests (6 successful, 3 failed, and 2 aborted), 10 retained-transition
 requests (6 successful, 2 failed, and 2 aborted), 4 saved-greeting GETs, and 4
 saved-greeting POSTs (2 completed, 1 failed, and 1 aborted). Editing `Mia`
 during the active `slow` POST added zero POSTs, GET reloads, or mutation
-attempts.
+attempts. Activating ownership from accepted submissions added zero GETs,
+POSTs, reloads, or mutation attempts to these totals.
 
 ### Ownership Model
 
@@ -191,9 +200,9 @@ read request attribution from later draft edits.
 | pure document/mutation test lines | 574 |
 | browser adapter lines | 137 (115 browser, 22 host stub) |
 | document-state helper declarations | 11 types, 28 helper functions |
-| existing app/GOX file delta | +370 / -128 (net +242) |
-| total production Go/GOX delta | +781 / -129 (net +652) |
-| browser harness delta | +1121 / -16 (net +1105) |
+| existing app/GOX file delta | +371 / -128 (net +243) |
+| total production Go/GOX delta | +782 / -129 (net +653) |
+| browser harness delta | +1262 / -16 (net +1246) |
 
 The helper declaration count treats the browser and host adapter variants as
 separate source declarations and excludes the retained `App` entry point.
@@ -205,10 +214,10 @@ Linux amd64. These sizes are informational and introduce no threshold:
 
 | Encoding | Frozen base | Integrated reference | Delta |
 |---|---:|---:|---:|
-| raw | 194393 | 372409 | +178016 |
-| gzip (`-n -9`) | 80475 | 152651 | +72176 |
-| Brotli (`-q 11`) | 66896 | 123064 | +56168 |
-| Zstandard (`-19`) | 71131 | 131032 | +59901 |
+| raw | 194393 | 372505 | +178112 |
+| gzip (`-n -9`) | 80475 | 152675 | +72200 |
+| Brotli (`-q 11`) | 66896 | 123042 | +56146 |
+| Zstandard (`-19`) | 71131 | 131031 | +59900 |
 
 ### Decision
 
@@ -358,6 +367,8 @@ browser transport helper, and the existing read-resource reload contract:
 GET /api/saved-greeting through UseResource and FetchText
 -> committed value is ready
 -> edit the controlled route-owned draft
+-> reject a duplicate submit while an existing POST is active
+-> activate saved-editor metadata ownership
 -> trim and validate on submit
 -> capture one immutable submitted target
 -> POST form data through the example-local fetch helper
@@ -378,6 +389,12 @@ reloads the read resource, and clears the prior error.
 The route reports `idle`, `pending`, `validation failed`, `server failed`, and
 `success` mutation states independently from the read resource's loading,
 failed, and ready states.
+
+Every accepted non-duplicate submit activates the `saved-editor` owner before
+validation or request state changes. This keeps validation, pending, failure,
+and success metadata nested under the editor even after `Finish editing` and
+without another input event. The duplicate guard runs first and therefore
+changes neither owner nor request state.
 
 The controlled draft, submitted mutation target, and confirmed response are
 separate values. Input remains editable while the existing POST owner is
@@ -432,6 +449,7 @@ request context before commit. Unsupported methods return HTTP 405 with
 | submitted mutation target | immutable trimmed value captured by `SavedGreetingRoute` when the existing request owner begins |
 | confirmed mutation value | trimmed non-empty POST response stored beside the submitted target |
 | client validation | `SavedGreetingRoute` submit handler trims the draft and rejects an empty name |
+| saved-editor activation | accepted non-duplicate submit after the duplicate guard and before validation or request state |
 | mutation pending state | route-owned mutation status plus the active request owner |
 | duplicate-submit suppression | the request owner's synchronous `active` guard; the button also reflects pending state |
 | POST transport | example-local `postSavedGreeting` browser helper |
@@ -529,6 +547,9 @@ simulated with extra application state.
 
 The same two final runs produced identical mutation request evidence:
 
+- whitespace validation and the existing slow submit each released the editor
+  first and submitted without another input event; the owner changed from
+  `route` to `saved-editor` in both cases;
 - four saved-state GETs started and completed, with zero GET failures: two
   ordinary route loads and two successful-mutation reloads;
 - four mutation POSTs: two completed, one controlled failure, and one aborted
