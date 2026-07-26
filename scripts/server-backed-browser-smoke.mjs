@@ -1487,16 +1487,16 @@ function savedEditorDocumentState(draft, status, target = {}) {
         };
     }
     if (status === "success") {
-        name = target.confirmed?.trim() || "empty";
-        if (name === "empty") {
+        const confirmed = target.confirmed?.trim() ?? "";
+        if (confirmed === "") {
             return {
                 title: "Saved greeting needs attention · GoFrame",
                 description: "The server did not confirm a saved greeting.",
             };
         }
         return {
-            title: `Saved greeting confirmed: ${name} · GoFrame`,
-            description: `The server confirmed ${name}; finish editing to reveal committed metadata.`,
+            title: `Saved greeting confirmed: ${confirmed} · GoFrame`,
+            description: `The server confirmed ${confirmed}; finish editing to reveal committed metadata.`,
         };
     }
     return {

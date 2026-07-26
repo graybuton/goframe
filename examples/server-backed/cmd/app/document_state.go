@@ -204,16 +204,16 @@ func savedGreetingEditorDocumentMetadata(
 			Description: "The draft " + name + " has not been committed.",
 		}
 	case "success":
-		name := savedGreetingMetadataName(target.Confirmed)
-		if name == "empty" {
+		confirmed := strings.TrimSpace(target.Confirmed)
+		if confirmed == "" {
 			return serverBackedDocumentState{
 				Title:       "Saved greeting needs attention · GoFrame",
 				Description: "The server did not confirm a saved greeting.",
 			}
 		}
 		return serverBackedDocumentState{
-			Title:       "Saved greeting confirmed: " + name + " · GoFrame",
-			Description: "The server confirmed " + name + "; finish editing to reveal committed metadata.",
+			Title:       "Saved greeting confirmed: " + confirmed + " · GoFrame",
+			Description: "The server confirmed " + confirmed + "; finish editing to reveal committed metadata.",
 		}
 	default:
 		name := savedGreetingMetadataName(draft)

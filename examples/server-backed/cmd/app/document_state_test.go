@@ -349,6 +349,19 @@ func TestSavedMutationDocumentMetadataAttribution(t *testing.T) {
 			},
 		},
 		{
+			name:   "success preserves literal empty response",
+			draft:  "another draft",
+			status: "success",
+			target: savedGreetingMutationTarget{
+				Submitted: "empty",
+				Confirmed: "empty",
+			},
+			want: serverBackedDocumentState{
+				Title:       "Saved greeting confirmed: empty · GoFrame",
+				Description: "The server confirmed empty; finish editing to reveal committed metadata.",
+			},
+		},
+		{
 			name:   "server failure keeps submitted target after draft edit",
 			draft:  "Mia",
 			status: "server failed",
@@ -397,6 +410,20 @@ func TestSavedMutationConfirmationNormalizesResponse(t *testing.T) {
 		Confirmed: "confirmed",
 	}) {
 		t.Fatalf("confirmed target = %#v", target)
+	}
+
+	target, ok = confirmedSavedGreetingMutationTarget(
+		savedGreetingMutationTarget{Submitted: "empty"},
+		"  empty  ",
+	)
+	if !ok {
+		t.Fatal("literal empty server response was rejected")
+	}
+	if target != (savedGreetingMutationTarget{
+		Submitted: "empty",
+		Confirmed: "empty",
+	}) {
+		t.Fatalf("literal empty confirmed target = %#v", target)
 	}
 
 	target, ok = confirmedSavedGreetingMutationTarget(target, " \t ")
