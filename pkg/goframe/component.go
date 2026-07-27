@@ -225,21 +225,9 @@ func markComponentDirty(instance *componentInstance) {
 		}
 		instance.dirtyCounted = true
 	}
-	scheduled := instance
-	if beginProtectedLifecycle != nil {
-		for ancestor := instance.parent; ancestor != nil; ancestor = ancestor.parent {
-			state := ancestor.errorBoundary
-			if state == nil || state.phase != errorBoundaryProtected {
-				continue
-			}
-			ancestor.dirty = true
-			scheduled = ancestor
-			break
-		}
-	}
 	instance.dirty = true
-	if instance.scheduleUpdate != nil {
-		instance.scheduleUpdate(scheduled)
+	if schedule := instance.scheduleUpdate; schedule != nil {
+		schedule(instance)
 	}
 }
 

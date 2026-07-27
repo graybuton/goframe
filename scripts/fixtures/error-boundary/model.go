@@ -9,10 +9,14 @@ import (
 )
 
 var (
-	protectedEffectCount    int
-	protectedCleanupCount   int
-	transactionAttemptPhase = "initial"
-	transactionProbe        protectedTransactionProbe
+	protectedEffectCount         int
+	protectedCleanupCount        int
+	transactionAttemptPhase      = "initial"
+	transactionProbe             protectedTransactionProbe
+	localTransactionVersion      = "A"
+	localTransactionAttemptPhase = "initial"
+	localUpdateProbe             localUpdateLifecycleProbe
+	localTransactionProbe        protectedTransactionProbe
 )
 
 type protectedTransactionProbe struct {
@@ -31,6 +35,21 @@ type protectedTransactionProbe struct {
 	retryBResourceStarts       int
 	retryBResourceCleanups     int
 	retryBLaterSetups          int
+}
+
+type localUpdateLifecycleProbe struct {
+	ownerRenders                 int
+	siblingRenders               int
+	siblingEffectSetups          int
+	siblingEffectCleanups        int
+	nestedInnerOwnerRenders      int
+	nestedInnerSiblingRenders    int
+	nestedOuterSiblingRenders    int
+	nestedInnerSiblingSetups     int
+	nestedInnerSiblingCleanups   int
+	nestedOuterSiblingSetups     int
+	nestedOuterSiblingCleanups   int
+	localTransactionOwnerRenders int
 }
 
 type RiskyPanelProps struct {
@@ -72,6 +91,18 @@ type TransactionLaterEffectProps struct {
 	Version string
 	Phase   string
 }
+
+type LocalStateOwnerProps struct{}
+
+type LocalUpdateSiblingProps struct{}
+
+type LocalInnerOwnerProps struct{}
+
+type NestedInnerSiblingProps struct{}
+
+type NestedOuterSiblingProps struct{}
+
+type LocalTransactionOwnerProps struct{}
 
 func RiskyPanel(props RiskyPanelProps) gf.Node {
 	count, setCount := gf.UseState(0)
@@ -210,6 +241,155 @@ func TransactionLaterEffect(props TransactionLaterEffectProps) gf.Node {
 	return gf.Empty()
 }
 
+func LocalStateOwner(LocalStateOwnerProps) gf.Node {
+	localUpdateProbe.ownerRenders++
+	syncBoundaryProbe()
+	count, setCount := gf.UseState(0)
+	return gf.El("section", gf.Props{"data-testid": "eb-local-owner"},
+		gf.El("p", gf.Props{"data-testid": "eb-local-owner-state"}, gf.Text(gf.ToString(count))),
+		gf.El("button", gf.Props{
+			"data-testid": "eb-local-owner-update",
+			"OnClick": func() {
+				setCount(count + 1)
+			},
+		}, gf.Text("Update local owner")),
+	)
+}
+
+func LocalUpdateSibling(LocalUpdateSiblingProps) gf.Node {
+	localUpdateProbe.siblingRenders++
+	syncBoundaryProbe()
+	gf.UseEffect(func() gf.Cleanup {
+		localUpdateProbe.siblingEffectSetups++
+		syncBoundaryProbe()
+		return func() {
+			localUpdateProbe.siblingEffectCleanups++
+			syncBoundaryProbe()
+		}
+	}, gf.EveryRender())
+	return gf.El("p", gf.Props{"data-testid": "eb-local-sibling"}, gf.Text("local sibling"))
+}
+
+func LocalInnerOwner(LocalInnerOwnerProps) gf.Node {
+	localUpdateProbe.nestedInnerOwnerRenders++
+	syncBoundaryProbe()
+	count, setCount := gf.UseState(0)
+	return gf.El("section", gf.Props{"data-testid": "eb-nested-local-owner"},
+		gf.El("p", gf.Props{"data-testid": "eb-nested-local-owner-state"}, gf.Text(gf.ToString(count))),
+		gf.El("button", gf.Props{
+			"data-testid": "eb-nested-local-owner-update",
+			"OnClick": func() {
+				setCount(count + 1)
+			},
+		}, gf.Text("Update nested local owner")),
+	)
+}
+
+func NestedInnerSibling(NestedInnerSiblingProps) gf.Node {
+	localUpdateProbe.nestedInnerSiblingRenders++
+	syncBoundaryProbe()
+	gf.UseEffect(func() gf.Cleanup {
+		localUpdateProbe.nestedInnerSiblingSetups++
+		syncBoundaryProbe()
+		return func() {
+			localUpdateProbe.nestedInnerSiblingCleanups++
+			syncBoundaryProbe()
+		}
+	}, gf.EveryRender())
+	return gf.El("p", gf.Props{"data-testid": "eb-nested-inner-sibling"}, gf.Text("nested inner sibling"))
+}
+
+func NestedOuterSibling(NestedOuterSiblingProps) gf.Node {
+	localUpdateProbe.nestedOuterSiblingRenders++
+	syncBoundaryProbe()
+	gf.UseEffect(func() gf.Cleanup {
+		localUpdateProbe.nestedOuterSiblingSetups++
+		syncBoundaryProbe()
+		return func() {
+			localUpdateProbe.nestedOuterSiblingCleanups++
+			syncBoundaryProbe()
+		}
+	}, gf.EveryRender())
+	return gf.El("p", gf.Props{"data-testid": "eb-nested-outer-sibling"}, gf.Text("nested outer sibling"))
+}
+
+func LocalTransactionOwner(LocalTransactionOwnerProps) gf.Node {
+	localUpdateProbe.localTransactionOwnerRenders++
+	syncBoundaryProbe()
+	version, setVersion := gf.UseState(localTransactionVersion)
+	phase := localTransactionAttemptPhase
+	gf.UseEffect(func() gf.Cleanup {
+		recordLocalTransactionEffectSetup(version, phase)
+		return func() {
+			recordLocalTransactionEffectCleanup(version, phase)
+		}
+	}, gf.Deps(version))
+	gf.UseUnmount(func() {
+		recordLocalTransactionUnmount(version, phase)
+	})
+	_, _ = gf.UseResource(version, func(
+		key string,
+		resolve func(string),
+		reject func(error),
+	) gf.Cleanup {
+		recordLocalTransactionResourceStart(key, phase)
+		return func() {
+			recordLocalTransactionResourceCleanup(key, phase)
+		}
+	})
+	return gf.El("section", gf.Props{"data-testid": "eb-local-transaction-owner"},
+		gf.El("p", gf.Props{"data-testid": "eb-local-transaction-version"}, gf.Text(version)),
+		gf.El("button", gf.Props{
+			"data-testid": "eb-local-transaction-trigger",
+			"OnClick": func() {
+				localTransactionVersion = "B"
+				localTransactionAttemptPhase = "attempt"
+				setVersion("B")
+			},
+		}, gf.Text("Trigger local transaction error")),
+		gf.Component("LocalTransactionRiskyDescendant", TransactionRiskyProps{
+			Broken: version == "B" && phase == "attempt",
+		}, TransactionRiskyDescendant),
+		gf.Component("LocalTransactionLaterEffect", TransactionLaterEffectProps{
+			Version: version,
+			Phase:   phase,
+		}, LocalTransactionLaterEffect),
+	)
+}
+
+func LocalTransactionLaterEffect(props TransactionLaterEffectProps) gf.Node {
+	gf.UseEffect(func() gf.Cleanup {
+		recordLocalTransactionLaterSetup(props.Version, props.Phase)
+		return nil
+	}, gf.Deps(props.Version))
+	return gf.Empty()
+}
+
+func localUpdateFallback(gf.ErrorBoundaryContext) gf.Node {
+	return gf.El("section", gf.Props{"data-testid": "eb-local-unexpected-fallback"},
+		gf.Text("unexpected local update fallback"),
+	)
+}
+
+func nestedLocalUpdateFallback(gf.ErrorBoundaryContext) gf.Node {
+	return gf.El("section", gf.Props{"data-testid": "eb-nested-local-unexpected-fallback"},
+		gf.Text("unexpected nested local update fallback"),
+	)
+}
+
+func localTransactionFallback(ctx gf.ErrorBoundaryContext) gf.Node {
+	return gf.El("section", gf.Props{"data-testid": "eb-local-transaction-fallback"},
+		gf.El("p", gf.Props{"data-testid": "eb-local-transaction-error-component"}, gf.Text(ctx.Info.Component)),
+		gf.El("button", gf.Props{
+			"data-testid": "eb-local-transaction-retry",
+			"OnClick": func() {
+				localTransactionAttemptPhase = "retry"
+				ctx.Reset()
+			},
+		}, gf.Text("Retry local transaction")),
+	)
+}
+
 func makeTransactionFallback(setBroken func(bool)) func(gf.ErrorBoundaryContext) gf.Node {
 	return func(ctx gf.ErrorBoundaryContext) gf.Node {
 		return gf.El("section", gf.Props{"data-testid": "eb-transaction-fallback"},
@@ -291,11 +471,80 @@ func recordTransactionLaterSetup(version, phase string) {
 	syncBoundaryProbe()
 }
 
+func recordLocalTransactionEffectSetup(version, phase string) {
+	switch {
+	case version == "A":
+		localTransactionProbe.aEffectSetups++
+	case phase == "attempt":
+		localTransactionProbe.attemptedBEffectSetups++
+	case phase == "retry":
+		localTransactionProbe.retryBEffectSetups++
+	}
+	syncBoundaryProbe()
+}
+
+func recordLocalTransactionEffectCleanup(version, phase string) {
+	if version == "A" {
+		localTransactionProbe.aEffectCleanups++
+	}
+	syncBoundaryProbe()
+}
+
+func recordLocalTransactionUnmount(version, phase string) {
+	switch {
+	case version == "A":
+		localTransactionProbe.aUnmountCallbacks++
+	case phase == "attempt":
+		localTransactionProbe.attemptedBUnmountCallbacks++
+	}
+	syncBoundaryProbe()
+}
+
+func recordLocalTransactionResourceStart(version, phase string) {
+	switch {
+	case version == "A":
+		localTransactionProbe.aResourceStarts++
+	case phase == "attempt":
+		localTransactionProbe.attemptedBResourceStarts++
+	case phase == "retry":
+		localTransactionProbe.retryBResourceStarts++
+	}
+	syncBoundaryProbe()
+}
+
+func recordLocalTransactionResourceCleanup(version, phase string) {
+	switch {
+	case version == "A":
+		localTransactionProbe.aResourceCleanups++
+	case phase == "attempt":
+		localTransactionProbe.attemptedBResourceCleanups++
+	case phase == "retry":
+		localTransactionProbe.retryBResourceCleanups++
+	}
+	syncBoundaryProbe()
+}
+
+func recordLocalTransactionLaterSetup(version, phase string) {
+	switch {
+	case version == "A":
+		localTransactionProbe.aLaterSiblingSetups++
+	case phase == "attempt":
+		localTransactionProbe.attemptedBLaterSetups++
+	case phase == "retry":
+		localTransactionProbe.retryBLaterSetups++
+	}
+	syncBoundaryProbe()
+}
+
 func initBoundaryProbe() {
 	protectedEffectCount = 0
 	protectedCleanupCount = 0
 	transactionAttemptPhase = "initial"
 	transactionProbe = protectedTransactionProbe{}
+	localTransactionVersion = "A"
+	localTransactionAttemptPhase = "initial"
+	localUpdateProbe = localUpdateLifecycleProbe{}
+	localTransactionProbe = protectedTransactionProbe{}
 	js.Global().Set("goframeErrorBoundaryReports", js.Global().Get("Array").New())
 	syncBoundaryProbe()
 }
@@ -320,4 +569,37 @@ func syncBoundaryProbe() {
 	probe.Set("retryBResourceCleanups", transactionProbe.retryBResourceCleanups)
 	probe.Set("retryBLaterSetups", transactionProbe.retryBLaterSetups)
 	js.Global().Set("goframeProtectedTransactionProbe", probe)
+
+	local := js.Global().Get("Object").New()
+	local.Set("ownerRenders", localUpdateProbe.ownerRenders)
+	local.Set("siblingRenders", localUpdateProbe.siblingRenders)
+	local.Set("siblingEffectSetups", localUpdateProbe.siblingEffectSetups)
+	local.Set("siblingEffectCleanups", localUpdateProbe.siblingEffectCleanups)
+	local.Set("nestedInnerOwnerRenders", localUpdateProbe.nestedInnerOwnerRenders)
+	local.Set("nestedInnerSiblingRenders", localUpdateProbe.nestedInnerSiblingRenders)
+	local.Set("nestedOuterSiblingRenders", localUpdateProbe.nestedOuterSiblingRenders)
+	local.Set("nestedInnerSiblingSetups", localUpdateProbe.nestedInnerSiblingSetups)
+	local.Set("nestedInnerSiblingCleanups", localUpdateProbe.nestedInnerSiblingCleanups)
+	local.Set("nestedOuterSiblingSetups", localUpdateProbe.nestedOuterSiblingSetups)
+	local.Set("nestedOuterSiblingCleanups", localUpdateProbe.nestedOuterSiblingCleanups)
+	local.Set("localTransactionOwnerRenders", localUpdateProbe.localTransactionOwnerRenders)
+	js.Global().Set("goframeLocalUpdateProbe", local)
+
+	localTransaction := js.Global().Get("Object").New()
+	localTransaction.Set("aEffectSetups", localTransactionProbe.aEffectSetups)
+	localTransaction.Set("aEffectCleanups", localTransactionProbe.aEffectCleanups)
+	localTransaction.Set("aUnmountCallbacks", localTransactionProbe.aUnmountCallbacks)
+	localTransaction.Set("aResourceStarts", localTransactionProbe.aResourceStarts)
+	localTransaction.Set("aResourceCleanups", localTransactionProbe.aResourceCleanups)
+	localTransaction.Set("aLaterSiblingSetups", localTransactionProbe.aLaterSiblingSetups)
+	localTransaction.Set("attemptedBEffectSetups", localTransactionProbe.attemptedBEffectSetups)
+	localTransaction.Set("attemptedBUnmountCallbacks", localTransactionProbe.attemptedBUnmountCallbacks)
+	localTransaction.Set("attemptedBResourceStarts", localTransactionProbe.attemptedBResourceStarts)
+	localTransaction.Set("attemptedBResourceCleanups", localTransactionProbe.attemptedBResourceCleanups)
+	localTransaction.Set("attemptedBLaterSetups", localTransactionProbe.attemptedBLaterSetups)
+	localTransaction.Set("retryBEffectSetups", localTransactionProbe.retryBEffectSetups)
+	localTransaction.Set("retryBResourceStarts", localTransactionProbe.retryBResourceStarts)
+	localTransaction.Set("retryBResourceCleanups", localTransactionProbe.retryBResourceCleanups)
+	localTransaction.Set("retryBLaterSetups", localTransactionProbe.retryBLaterSetups)
+	js.Global().Set("goframeLocalTransactionProbe", localTransaction)
 }

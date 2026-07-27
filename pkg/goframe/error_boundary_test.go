@@ -563,4 +563,5 @@ func resetRuntimeBoundaryTestState() {
 	currentProtectedLifecycleBoundary = nil
 	beginProtectedLifecycle = nil
 	finishProtectedLifecycle = nil
+	protectedDirtyUpdates = false
 }

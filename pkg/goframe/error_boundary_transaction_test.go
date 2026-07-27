@@ -5,6 +5,95 @@ import (
 	"testing"
 )
 
+func TestDirtyOwnerBelowProtectedBoundaryRemainsScheduled(t *testing.T) {
+	isolateLifecycleTestState(t)
+	boundary := transactionTestBoundary()
+	owner := dirtyCleanInstance("DirtyOwner", boundary)
+
+	var scheduled []*componentInstance
+	owner.scheduleUpdate = func(instance *componentInstance) {
+		scheduled = append(scheduled, instance)
+	}
+
+	markComponentDirty(owner)
+
+	assertInstances(t, scheduled, []*componentInstance{owner})
+	if got := nearestProtectedLifecycleState(owner); got != boundary.errorBoundary {
+		t.Fatalf("protected lifecycle state = %p, want boundary %p", got, boundary.errorBoundary)
+	}
+	if !owner.dirty || !owner.dirtyCounted {
+		t.Fatalf("owner dirty=%v counted=%v, want true/true", owner.dirty, owner.dirtyCounted)
+	}
+	if boundary.dirty {
+		t.Fatal("protected boundary was marked dirty for a descendant update")
+	}
+	if boundary.dirtyDescendants != 1 {
+		t.Fatalf("boundary dirty descendants = %d, want 1", boundary.dirtyDescendants)
+	}
+}
+
+func TestNestedDirtyOwnerRemainsScheduled(t *testing.T) {
+	isolateLifecycleTestState(t)
+	outer := transactionTestBoundary()
+	inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+		return Text("inner fallback")
+	}, nil)
+	renderComponentInstance(inner)
+	owner := dirtyCleanInstance("NestedDirtyOwner", inner)
+
+	var scheduled []*componentInstance
+	owner.scheduleUpdate = func(instance *componentInstance) {
+		scheduled = append(scheduled, instance)
+	}
+
+	markComponentDirty(owner)
+
+	assertInstances(t, scheduled, []*componentInstance{owner})
+	if got := nearestProtectedLifecycleState(owner); got != inner.errorBoundary {
+		t.Fatalf("protected lifecycle state = %p, want inner boundary %p", got, inner.errorBoundary)
+	}
+	if got := nearestProtectedLifecycleState(inner); got != nil {
+		t.Fatalf("dirty boundary selected ancestor lifecycle state %p, want nil", got)
+	}
+	if outer.dirty || inner.dirty {
+		t.Fatalf("boundaries dirty outer=%v inner=%v, want false/false", outer.dirty, inner.dirty)
+	}
+	if outer.dirtyDescendants != 1 || inner.dirtyDescendants != 1 {
+		t.Fatalf("dirty descendants outer=%d inner=%d, want 1/1",
+			outer.dirtyDescendants, inner.dirtyDescendants)
+	}
+}
+
+func TestDirtyFallbackChildRemainsScheduledBelowCapturedBoundary(t *testing.T) {
+	isolateLifecycleTestState(t)
+	outer := transactionTestBoundary()
+	inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+		return Text("inner fallback")
+	}, nil)
+	renderComponentInstance(inner)
+	inner.errorBoundary.phase = errorBoundaryFallback
+	owner := dirtyCleanInstance("FallbackDirtyOwner", inner)
+
+	var scheduled []*componentInstance
+	owner.scheduleUpdate = func(instance *componentInstance) {
+		scheduled = append(scheduled, instance)
+	}
+
+	markComponentDirty(owner)
+
+	assertInstances(t, scheduled, []*componentInstance{owner})
+	if got := nearestProtectedLifecycleState(owner); got != outer.errorBoundary {
+		t.Fatalf("protected lifecycle state = %p, want outer boundary %p", got, outer.errorBoundary)
+	}
+	if outer.dirty || inner.dirty {
+		t.Fatalf("boundaries dirty outer=%v inner=%v, want false/false", outer.dirty, inner.dirty)
+	}
+	if outer.dirtyDescendants != 1 || inner.dirtyDescendants != 1 {
+		t.Fatalf("dirty descendants outer=%d inner=%d, want 1/1",
+			outer.dirtyDescendants, inner.dirtyDescendants)
+	}
+}
+
 func TestProtectedSubtreeEffectStateRollsBackAfterDescendantFailure(t *testing.T) {
 	isolateLifecycleTestState(t)
 	boundary := transactionTestBoundary()
@@ -424,15 +513,20 @@ func TestProtectedSubtreeLifecycleHooksInstallAndRestoreLazily(t *testing.T) {
 	previousCurrent := currentProtectedLifecycleBoundary
 	previousBegin := beginProtectedLifecycle
 	previousFinish := finishProtectedLifecycle
+	previousDirtyUpdates := protectedDirtyUpdates
 	currentProtectedLifecycleBoundary = nil
 	beginProtectedLifecycle = nil
 	finishProtectedLifecycle = nil
+	protectedDirtyUpdates = false
 	t.Cleanup(func() {
 		currentProtectedLifecycleBoundary = previousCurrent
 		beginProtectedLifecycle = previousBegin
 		finishProtectedLifecycle = previousFinish
+		protectedDirtyUpdates = previousDirtyUpdates
 	})
-	if beginProtectedLifecycle != nil || finishProtectedLifecycle != nil {
+	if beginProtectedLifecycle != nil ||
+		finishProtectedLifecycle != nil ||
+		protectedDirtyUpdates {
 		t.Fatal("protected lifecycle hooks installed before an ErrorBoundary")
 	}
 
@@ -447,7 +541,9 @@ func TestProtectedSubtreeLifecycleHooksInstallAndRestoreLazily(t *testing.T) {
 	if currentProtectedLifecycleBoundary != nil {
 		t.Fatal("ordinary component render installed protected lifecycle boundary")
 	}
-	if beginProtectedLifecycle != nil || finishProtectedLifecycle != nil {
+	if beginProtectedLifecycle != nil ||
+		finishProtectedLifecycle != nil ||
+		protectedDirtyUpdates {
 		t.Fatal("ordinary component render installed protected lifecycle hooks")
 	}
 	if len(ordinary.effectSlots) != 1 {
@@ -455,7 +551,9 @@ func TestProtectedSubtreeLifecycleHooksInstallAndRestoreLazily(t *testing.T) {
 	}
 
 	outer := transactionTestBoundary()
-	if beginProtectedLifecycle == nil || finishProtectedLifecycle == nil {
+	if beginProtectedLifecycle == nil ||
+		finishProtectedLifecycle == nil ||
+		!protectedDirtyUpdates {
 		t.Fatal("ErrorBoundary did not install protected lifecycle hooks")
 	}
 	inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {

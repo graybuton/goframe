@@ -33,6 +33,7 @@ type errorBoundaryState struct {
 var (
 	beginProtectedLifecycle  func(*errorBoundaryState) *errorBoundaryState
 	finishProtectedLifecycle func(*errorBoundaryState, *errorBoundaryState)
+	protectedDirtyUpdates    bool
 )
 
 var errorBoundaryComponentType = NewComponentType("goframe.ErrorBoundary", "ErrorBoundary")
@@ -69,9 +70,23 @@ func ensureErrorBoundaryState(instance *componentInstance) *errorBoundaryState {
 	if instance.errorBoundary == nil {
 		beginProtectedLifecycle = beginProtectedSubtreeLifecycle
 		finishProtectedLifecycle = finishProtectedSubtreeLifecycle
+		protectedDirtyUpdates = true
 		instance.errorBoundary = &errorBoundaryState{}
 	}
 	return instance.errorBoundary
+}
+
+func nearestProtectedLifecycleState(instance *componentInstance) *errorBoundaryState {
+	if instance == nil || instance.errorBoundary != nil {
+		return nil
+	}
+	for ancestor := instance.parent; ancestor != nil; ancestor = ancestor.parent {
+		state := ancestor.errorBoundary
+		if state != nil && state.phase == errorBoundaryProtected {
+			return state
+		}
+	}
+	return nil
 }
 
 func updateErrorBoundaryResetKey(state *errorBoundaryState, resetKey string) {

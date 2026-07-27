@@ -71,6 +71,23 @@ func App() gf.Node {
 				<TransactionOwner Version={transactionVersion} Broken={transactionBroken} />
 			</gf.ErrorBoundary>
 
+			<gf.ErrorBoundary Fallback={localUpdateFallback}>
+				<LocalStateOwner />
+				<LocalUpdateSibling />
+			</gf.ErrorBoundary>
+
+			<gf.ErrorBoundary Fallback={nestedLocalUpdateFallback}>
+				<NestedOuterSibling />
+				<gf.ErrorBoundary Fallback={nestedLocalUpdateFallback}>
+					<LocalInnerOwner />
+					<NestedInnerSibling />
+				</gf.ErrorBoundary>
+			</gf.ErrorBoundary>
+
+			<gf.ErrorBoundary Fallback={localTransactionFallback}>
+				<LocalTransactionOwner />
+			</gf.ErrorBoundary>
+
 			<button
 				data-testid="eb-trigger-no-boundary-error"
 				OnClick={func() {

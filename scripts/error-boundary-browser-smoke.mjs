@@ -44,6 +44,155 @@ try {
     await captureShell(client);
     await installListenerAudit(client);
 
+    await waitForProbe(client, (current) =>
+        current.local.ownerRenders >= 1 &&
+        current.local.siblingRenders >= 1 &&
+        current.local.siblingEffectSetups >= 1 &&
+        current.local.nestedInnerOwnerRenders >= 1 &&
+        current.local.nestedInnerSiblingRenders >= 1 &&
+        current.local.nestedInnerSiblingSetups >= 1 &&
+        current.local.nestedOuterSiblingRenders >= 1 &&
+        current.local.nestedOuterSiblingSetups >= 1,
+    "initial local update probes");
+
+    const localEvidence = {};
+    const beforeLocalUpdate = await probe(client);
+    await click(client, "[data-testid='eb-local-owner-update']");
+    await waitForText(client, "[data-testid='eb-local-owner-state']", "1", "local owner state update");
+    const afterLocalUpdate = await probe(client);
+    localEvidence.ownerRenderDelta = counterDelta(
+        afterLocalUpdate.local.ownerRenders,
+        beforeLocalUpdate.local.ownerRenders,
+        1,
+        "local owner render",
+    );
+    localEvidence.siblingRenderDelta = counterDelta(
+        afterLocalUpdate.local.siblingRenders,
+        beforeLocalUpdate.local.siblingRenders,
+        0,
+        "unrelated sibling render",
+    );
+    localEvidence.siblingEveryRenderDelta = counterDelta(
+        afterLocalUpdate.local.siblingEffectSetups,
+        beforeLocalUpdate.local.siblingEffectSetups,
+        0,
+        "unrelated sibling EveryRender setup",
+    );
+    counterDelta(
+        afterLocalUpdate.reports.length,
+        beforeLocalUpdate.reports.length,
+        0,
+        "local update boundary report",
+    );
+    counterDelta(
+        afterLocalUpdate.listenerAudit.add,
+        beforeLocalUpdate.listenerAudit.add,
+        0,
+        "local update listener addition",
+    );
+    counterDelta(
+        afterLocalUpdate.listenerAudit.remove,
+        beforeLocalUpdate.listenerAudit.remove,
+        0,
+        "local update listener removal",
+    );
+    await waitForAbsent(client, "[data-testid='eb-local-unexpected-fallback']", "local update fallback stays inactive");
+    await assertShellSame(client, "successful local owner update");
+
+    const beforeNestedLocalUpdate = await probe(client);
+    await click(client, "[data-testid='eb-nested-local-owner-update']");
+    await waitForText(client, "[data-testid='eb-nested-local-owner-state']", "1", "nested local owner state update");
+    const afterNestedLocalUpdate = await probe(client);
+    localEvidence.nestedInnerOwnerRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedInnerOwnerRenders,
+        beforeNestedLocalUpdate.local.nestedInnerOwnerRenders,
+        1,
+        "nested inner owner render",
+    );
+    localEvidence.nestedInnerSiblingRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedInnerSiblingRenders,
+        beforeNestedLocalUpdate.local.nestedInnerSiblingRenders,
+        0,
+        "nested inner sibling render",
+    );
+    localEvidence.nestedInnerSiblingEveryRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedInnerSiblingSetups,
+        beforeNestedLocalUpdate.local.nestedInnerSiblingSetups,
+        0,
+        "nested inner sibling EveryRender setup",
+    );
+    localEvidence.nestedOuterSiblingRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedOuterSiblingRenders,
+        beforeNestedLocalUpdate.local.nestedOuterSiblingRenders,
+        0,
+        "nested outer sibling render",
+    );
+    counterDelta(
+        afterNestedLocalUpdate.reports.length,
+        beforeNestedLocalUpdate.reports.length,
+        0,
+        "nested local update boundary report",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-local-unexpected-fallback']",
+        "nested local update fallback stays inactive",
+    );
+    await assertShellSame(client, "successful nested local owner update");
+
+    await waitForText(client, "[data-testid='eb-local-transaction-version']", "A", "initial local transaction version");
+    await waitForProbe(client, (current) =>
+        current.localTransaction.aEffectSetups === 1 &&
+        current.localTransaction.aResourceStarts === 1 &&
+        current.localTransaction.aLaterSiblingSetups === 1 &&
+        current.localTransaction.aEffectCleanups === 0 &&
+        current.localTransaction.aUnmountCallbacks === 0 &&
+        current.localTransaction.aResourceCleanups === 0,
+    "initial local protected transaction lifecycle");
+    const beforeLocalTransactionFailure = await probe(client);
+
+    await click(client, "[data-testid='eb-local-transaction-trigger']");
+    await waitForSelector(client, "[data-testid='eb-local-transaction-fallback']", "local transaction boundary fallback");
+    await waitForAbsent(client, "[data-testid='eb-local-transaction-owner']", "failed local transaction owner removed");
+    await waitForText(
+        client,
+        "[data-testid='eb-local-transaction-error-component']",
+        "LocalTransactionRiskyDescendant",
+        "local transaction descendant component",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeLocalTransactionFailure.reports.length + 1 &&
+        current.reports.at(-1).phase === "render" &&
+        current.reports.at(-1).component === "LocalTransactionRiskyDescendant" &&
+        current.localTransaction.attemptedBEffectSetups === 0 &&
+        current.localTransaction.attemptedBUnmountCallbacks === 0 &&
+        current.localTransaction.attemptedBResourceStarts === 0 &&
+        current.localTransaction.attemptedBResourceCleanups === 0 &&
+        current.localTransaction.attemptedBLaterSetups === 0 &&
+        current.localTransaction.aEffectCleanups === 1 &&
+        current.localTransaction.aUnmountCallbacks === 1 &&
+        current.localTransaction.aResourceCleanups === 1,
+    "failed local protected transaction rollback");
+    await assertShellSame(client, "local protected transaction fallback");
+
+    const afterLocalTransactionFailure = await probe(client);
+    localEvidence.localTransactionBoundaryReports =
+        afterLocalTransactionFailure.reports.length - beforeLocalTransactionFailure.reports.length;
+    await click(client, "[data-testid='eb-local-transaction-retry']");
+    await waitForText(client, "[data-testid='eb-local-transaction-version']", "B", "local transaction retry version");
+    await waitForAbsent(client, "[data-testid='eb-local-transaction-fallback']", "local transaction fallback cleared");
+    await waitForProbe(client, (current) =>
+        current.reports.length === afterLocalTransactionFailure.reports.length &&
+        current.localTransaction.retryBEffectSetups === 1 &&
+        current.localTransaction.retryBResourceStarts === 1 &&
+        current.localTransaction.retryBLaterSetups === 1 &&
+        current.localTransaction.attemptedBEffectSetups === 0 &&
+        current.localTransaction.attemptedBUnmountCallbacks === 0 &&
+        current.localTransaction.attemptedBResourceStarts === 0 &&
+        current.localTransaction.attemptedBLaterSetups === 0,
+    "healthy local protected transaction retry");
+    await assertShellSame(client, "local protected transaction retry");
+
     await click(client, "[data-testid='eb-protected-increment']");
     await waitForText(client, "[data-testid='eb-protected-state']", "1", "protected state before failure");
     await waitForProbe(client, (probe) => probe.effectCount === 2 && probe.cleanupCount === 1, "effect rerun before failure");
@@ -165,6 +314,9 @@ try {
     const finalProbe = await probe(client);
     console.log(`Error boundary protected transaction counters: ${JSON.stringify({
         ...finalProbe.transaction,
+        localEvidence,
+        localUpdate: finalProbe.local,
+        localTransaction: finalProbe.localTransaction,
         boundaryReports: transactionBoundaryReports,
         shellIdentityChanges: finalProbe.shellIdentityChanges,
         listenerAdditions: finalProbe.listenerAudit.add,
@@ -226,9 +378,19 @@ async function probe(client) {
         cleanupCount: globalThis.goframeErrorBoundaryCleanupCount ?? 0,
         reports: Array.from(globalThis.goframeErrorBoundaryReports || []),
         transaction: globalThis.goframeProtectedTransactionProbe || {},
+        local: globalThis.goframeLocalUpdateProbe || {},
+        localTransaction: globalThis.goframeLocalTransactionProbe || {},
         shellIdentityChanges: globalThis.__errorBoundaryShellIdentityChanges || 0,
         listenerAudit: globalThis.__errorBoundaryListenerAudit || { add: 0, remove: 0 },
     }))()`);
+}
+
+function counterDelta(after, before, expected, label) {
+    const delta = after - before;
+    if (delta !== expected) {
+        throw new Error(`APP FAILURE: ${label} delta = ${delta}, want ${expected}`);
+    }
+    return delta;
 }
 
 async function click(client, selector) {
