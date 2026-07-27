@@ -94,6 +94,162 @@ func TestDirtyFallbackChildRemainsScheduledBelowCapturedBoundary(t *testing.T) {
 	}
 }
 
+func TestNestedFallbackTransactionSelectsProtectedAncestorByPhase(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		phase errorBoundaryPhase
+		outer bool
+	}{
+		{name: "protected", phase: errorBoundaryProtected},
+		{name: "captured", phase: errorBoundaryCaptured, outer: true},
+		{name: "fallback", phase: errorBoundaryFallback, outer: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			isolateLifecycleTestState(t)
+			outer := transactionTestBoundary()
+			inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+				return Text("inner fallback")
+			}, nil)
+			renderComponentInstance(inner)
+			inner.errorBoundary.phase = test.phase
+
+			want := (*errorBoundaryState)(nil)
+			if test.outer {
+				want = outer.errorBoundary
+			}
+			if got := nearestProtectedLifecycleState(inner); got != want {
+				t.Fatalf("%s inner boundary selected state %p, want %p",
+					test.name, got, want)
+			}
+		})
+	}
+}
+
+func TestNestedFallbackTransactionWithoutProtectedAncestorSelectsNil(t *testing.T) {
+	isolateLifecycleTestState(t)
+	boundary := transactionTestBoundary()
+
+	for _, phase := range []errorBoundaryPhase{
+		errorBoundaryCaptured,
+		errorBoundaryFallback,
+	} {
+		boundary.errorBoundary.phase = phase
+		if got := nearestProtectedLifecycleState(boundary); got != nil {
+			t.Fatalf("boundary phase %d selected state %p without protected ancestor, want nil",
+				phase, got)
+		}
+	}
+}
+
+func TestNestedFallbackTransactionSelectsNearestProtectedAncestor(t *testing.T) {
+	isolateLifecycleTestState(t)
+	outer := transactionTestBoundary()
+	middle := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+		return Text("middle fallback")
+	}, nil)
+	renderComponentInstance(middle)
+	middle.errorBoundary.phase = errorBoundaryFallback
+	inner := testErrorBoundaryInstanceWithParent(middle, "", func(ErrorBoundaryContext) Node {
+		return Text("inner fallback")
+	}, nil)
+	renderComponentInstance(inner)
+	inner.errorBoundary.phase = errorBoundaryCaptured
+
+	if got := nearestProtectedLifecycleState(inner); got != outer.errorBoundary {
+		t.Fatalf("captured inner selected state %p through fallback middle, want outer %p",
+			got, outer.errorBoundary)
+	}
+
+	nearer := testErrorBoundaryInstanceWithParent(middle, "", func(ErrorBoundaryContext) Node {
+		return Text("nearer fallback")
+	}, nil)
+	renderComponentInstance(nearer)
+	inner.parent = nearer
+	if got := nearestProtectedLifecycleState(inner); got != nearer.errorBoundary {
+		t.Fatalf("captured inner selected state %p, want nearest protected %p",
+			got, nearer.errorBoundary)
+	}
+}
+
+func TestNestedFallbackTransactionRestoresSelectedOuterState(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		isolateLifecycleTestState(t)
+		outer := transactionTestBoundary()
+		inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+			return Text("inner fallback")
+		}, nil)
+		renderComponentInstance(inner)
+		inner.errorBoundary.phase = errorBoundaryFallback
+		owner := testComponentInstanceWithParent("FallbackOwner", inner, func() Node {
+			UseEffect(func() Cleanup { return nil })
+			return Empty()
+		})
+
+		state := nearestProtectedLifecycleState(inner)
+		if state != outer.errorBoundary {
+			t.Fatalf("selected state = %p, want outer %p", state, outer.errorBoundary)
+		}
+		runProtectedLifecycleStateTestAttempt(state, func() {
+			renderComponentInstance(owner)
+		})
+
+		if currentProtectedLifecycleBoundary != nil {
+			t.Fatal("successful nested fallback transaction left current state installed")
+		}
+		if state.attempts != nil {
+			t.Fatalf("successful nested fallback transaction retained attempts: %#v", state.attempts)
+		}
+		if owner.lifecycleAttempt.active {
+			t.Fatal("successful nested fallback transaction left owner attempt active")
+		}
+		if len(owner.effectSlots) != 1 || len(pendingEffects) != 1 {
+			t.Fatalf("successful nested fallback commit slots=%d pending=%d, want 1/1",
+				len(owner.effectSlots), len(pendingEffects))
+		}
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		isolateLifecycleTestState(t)
+		outer := transactionTestBoundary()
+		inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+			return Text("inner fallback")
+		}, nil)
+		renderComponentInstance(inner)
+		inner.errorBoundary.phase = errorBoundaryFallback
+		owner := testComponentInstanceWithParent("FallbackOwner", inner, func() Node {
+			UseEffect(func() Cleanup { return nil })
+			UseUnmount(func() {})
+			return Empty()
+		})
+
+		state := nearestProtectedLifecycleState(inner)
+		if state != outer.errorBoundary {
+			t.Fatalf("selected state = %p, want outer %p", state, outer.errorBoundary)
+		}
+		runProtectedLifecycleStateTestAttempt(state, func() {
+			renderComponentInstance(owner)
+			renderComponentInstance(transactionTestRisky(inner, "nested fallback descendant boom"))
+		})
+
+		if outer.errorBoundary.phase != errorBoundaryCaptured {
+			t.Fatalf("outer phase = %d, want captured", outer.errorBoundary.phase)
+		}
+		if currentProtectedLifecycleBoundary != nil {
+			t.Fatal("failed nested fallback transaction left current state installed")
+		}
+		if state.attempts != nil {
+			t.Fatalf("failed nested fallback transaction retained attempts: %#v", state.attempts)
+		}
+		if owner.lifecycleAttempt.active {
+			t.Fatal("failed nested fallback transaction left owner attempt active")
+		}
+		if len(owner.effectSlots) != 0 || len(owner.unmountSlots) != 0 || len(pendingEffects) != 0 {
+			t.Fatalf("failed nested fallback committed effects=%d unmounts=%d pending=%d, want 0/0/0",
+				len(owner.effectSlots), len(owner.unmountSlots), len(pendingEffects))
+		}
+	})
+}
+
 func TestProtectedSubtreeEffectStateRollsBackAfterDescendantFailure(t *testing.T) {
 	isolateLifecycleTestState(t)
 	boundary := transactionTestBoundary()
@@ -698,6 +854,12 @@ func runProtectedSubtreeTestAttempt(boundary *componentInstance, reconcile func(
 	if state == nil {
 		panic("goframe: test boundary has no protected lifecycle reconcile hook")
 	}
+	previous := beginProtectedLifecycle(state)
+	defer finishProtectedLifecycle(state, previous)
+	reconcile()
+}
+
+func runProtectedLifecycleStateTestAttempt(state *errorBoundaryState, reconcile func()) {
 	previous := beginProtectedLifecycle(state)
 	defer finishProtectedLifecycle(state, previous)
 	reconcile()

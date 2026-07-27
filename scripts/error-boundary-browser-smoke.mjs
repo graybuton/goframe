@@ -55,6 +55,31 @@ try {
         current.local.nestedOuterSiblingSetups >= 1,
     "initial local update probes");
 
+    await waitForSelector(
+        client,
+        "[data-testid='eb-nested-fallback-protected']",
+        "initial nested fallback protected child",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-fallback-owner']",
+        "initial nested fallback owner absent",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-fallback-outer']",
+        "initial nested fallback outer absent",
+    );
+    await waitForProbe(client, (current) =>
+        current.nestedFallback.ownerRenders === 0 &&
+        current.nestedFallback.effectSetups === 0 &&
+        current.nestedFallback.effectCleanups === 0 &&
+        current.nestedFallback.unmountCallbacks === 0 &&
+        current.nestedFallback.resourceStarts === 0 &&
+        current.nestedFallback.resourceCleanups === 0 &&
+        current.nestedFallback.laterSiblingSetups === 0,
+    "initial nested fallback transaction counters");
+
     const localEvidence = {};
     const beforeLocalUpdate = await probe(client);
     await click(client, "[data-testid='eb-local-owner-update']");
@@ -248,6 +273,51 @@ try {
     await assertShellSame(client, "shell after nested fallback panic");
     await assertListenerNetStable(client, "nested fallback panic");
 
+    const beforeNestedFallbackTransaction = await probe(client);
+    await click(client, "[data-testid='eb-trigger-nested-fallback-transaction']");
+    await waitForSelector(
+        client,
+        "[data-testid='eb-nested-fallback-outer']",
+        "nested fallback descendant bubbles to outer",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-fallback-owner']",
+        "failed nested fallback lifecycle owner removed",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeNestedFallbackTransaction.reports.length + 2 &&
+        current.reports.at(-2).component === "InitialRiskyChild" &&
+        current.reports.at(-1).component === "FallbackRiskyDescendant" &&
+        current.nestedFallback.ownerRenders === 1 &&
+        current.nestedFallback.effectSetups === 0 &&
+        current.nestedFallback.effectCleanups === 0 &&
+        current.nestedFallback.unmountCallbacks === 0 &&
+        current.nestedFallback.resourceStarts === 0 &&
+        current.nestedFallback.resourceCleanups === 0 &&
+        current.nestedFallback.laterSiblingSetups === 0,
+    "nested fallback transaction rollback");
+    await waitForStableReportCount(
+        client,
+        beforeNestedFallbackTransaction.reports.length + 2,
+        "nested fallback transaction",
+    );
+    await assertShellSame(client, "nested fallback transaction");
+    await assertListenerNetStable(client, "nested fallback transaction");
+    const afterNestedFallbackTransaction = await probe(client);
+    const nestedFallbackReports = afterNestedFallbackTransaction.reports.slice(
+        beforeNestedFallbackTransaction.reports.length,
+    );
+    const nestedFallbackEvidence = {
+        ...afterNestedFallbackTransaction.nestedFallback,
+        innerReports: nestedFallbackReports.filter(
+            (report) => report.component === "InitialRiskyChild",
+        ).length,
+        outerReports: nestedFallbackReports.filter(
+            (report) => report.component === "FallbackRiskyDescendant",
+        ).length,
+    };
+
     await waitForText(client, "[data-testid='eb-transaction-version']", "A", "initial transaction version");
     await waitForProbe(client, (current) =>
         current.transaction.aEffectSetups === 1 &&
@@ -317,6 +387,7 @@ try {
         localEvidence,
         localUpdate: finalProbe.local,
         localTransaction: finalProbe.localTransaction,
+        nestedFallback: nestedFallbackEvidence,
         boundaryReports: transactionBoundaryReports,
         shellIdentityChanges: finalProbe.shellIdentityChanges,
         listenerAdditions: finalProbe.listenerAudit.add,
@@ -380,6 +451,7 @@ async function probe(client) {
         transaction: globalThis.goframeProtectedTransactionProbe || {},
         local: globalThis.goframeLocalUpdateProbe || {},
         localTransaction: globalThis.goframeLocalTransactionProbe || {},
+        nestedFallback: globalThis.goframeNestedFallbackTransactionProbe || {},
         shellIdentityChanges: globalThis.__errorBoundaryShellIdentityChanges || 0,
         listenerAudit: globalThis.__errorBoundaryListenerAudit || { add: 0, remove: 0 },
     }))()`);

@@ -77,7 +77,11 @@ func ensureErrorBoundaryState(instance *componentInstance) *errorBoundaryState {
 }
 
 func nearestProtectedLifecycleState(instance *componentInstance) *errorBoundaryState {
-	if instance == nil || instance.errorBoundary != nil {
+	if instance == nil {
+		return nil
+	}
+	if state := instance.errorBoundary; state != nil &&
+		state.phase == errorBoundaryProtected {
 		return nil
 	}
 	for ancestor := instance.parent; ancestor != nil; ancestor = ancestor.parent {

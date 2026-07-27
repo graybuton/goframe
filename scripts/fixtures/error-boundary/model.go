@@ -17,6 +17,7 @@ var (
 	localTransactionAttemptPhase = "initial"
 	localUpdateProbe             localUpdateLifecycleProbe
 	localTransactionProbe        protectedTransactionProbe
+	nestedFallbackProbe          nestedFallbackTransactionProbe
 )
 
 type protectedTransactionProbe struct {
@@ -52,6 +53,16 @@ type localUpdateLifecycleProbe struct {
 	localTransactionOwnerRenders int
 }
 
+type nestedFallbackTransactionProbe struct {
+	ownerRenders       int
+	effectSetups       int
+	effectCleanups     int
+	unmountCallbacks   int
+	resourceStarts     int
+	resourceCleanups   int
+	laterSiblingSetups int
+}
+
 type RiskyPanelProps struct {
 	Broken bool
 }
@@ -68,6 +79,14 @@ type NestedRiskyProps struct {
 type NestedBoundaryScenarioProps struct {
 	Broken        bool
 	FallbackCrash bool
+}
+
+type NestedFallbackTransactionScenarioProps struct {
+	Broken bool
+}
+
+type NestedFallbackInitialRiskyProps struct {
+	Broken bool
 }
 
 type InnerFallbackProps struct {
@@ -183,6 +202,105 @@ func InnerFallback(props InnerFallbackProps) gf.Node {
 
 func OuterFallback(gf.ErrorBoundaryContext) gf.Node {
 	return gf.El("section", gf.Props{"data-testid": "eb-nested-outer-fallback"}, gf.Text("outer fallback"))
+}
+
+func NestedFallbackTransactionScenario(props NestedFallbackTransactionScenarioProps) gf.Node {
+	return gf.ErrorBoundary(gf.ErrorBoundaryProps{
+		Fallback: nestedFallbackTransactionOuterFallback,
+		Children: []gf.Node{
+			gf.ErrorBoundary(gf.ErrorBoundaryProps{
+				Fallback: func(gf.ErrorBoundaryContext) gf.Node {
+					return gf.Component(
+						"FallbackLifecycleOwner",
+						struct{}{},
+						FallbackLifecycleOwner,
+					)
+				},
+				Children: []gf.Node{
+					gf.Component(
+						"InitialRiskyChild",
+						NestedFallbackInitialRiskyProps{Broken: props.Broken},
+						NestedFallbackInitialRiskyChild,
+					),
+				},
+			}),
+		},
+	})
+}
+
+func NestedFallbackInitialRiskyChild(props NestedFallbackInitialRiskyProps) gf.Node {
+	if props.Broken {
+		panic("nested fallback initial protected boom")
+	}
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-nested-fallback-protected"},
+		gf.Text("nested fallback protected"),
+	)
+}
+
+func FallbackLifecycleOwner(struct{}) gf.Node {
+	nestedFallbackProbe.ownerRenders++
+	syncBoundaryProbe()
+	gf.UseEffect(func() gf.Cleanup {
+		nestedFallbackProbe.effectSetups++
+		syncBoundaryProbe()
+		return func() {
+			nestedFallbackProbe.effectCleanups++
+			syncBoundaryProbe()
+		}
+	})
+	gf.UseUnmount(func() {
+		nestedFallbackProbe.unmountCallbacks++
+		syncBoundaryProbe()
+	})
+	_, _ = gf.UseResource("nested-fallback", func(
+		key string,
+		resolve func(string),
+		reject func(error),
+	) gf.Cleanup {
+		nestedFallbackProbe.resourceStarts++
+		syncBoundaryProbe()
+		return func() {
+			nestedFallbackProbe.resourceCleanups++
+			syncBoundaryProbe()
+		}
+	})
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-nested-fallback-owner"},
+		gf.Component(
+			"FallbackRiskyDescendant",
+			struct{}{},
+			FallbackRiskyDescendant,
+		),
+		gf.Component(
+			"FallbackLaterEffect",
+			struct{}{},
+			FallbackLaterEffect,
+		),
+	)
+}
+
+func FallbackRiskyDescendant(struct{}) gf.Node {
+	panic("nested fallback descendant boom")
+}
+
+func FallbackLaterEffect(struct{}) gf.Node {
+	gf.UseEffect(func() gf.Cleanup {
+		nestedFallbackProbe.laterSiblingSetups++
+		syncBoundaryProbe()
+		return nil
+	})
+	return gf.Empty()
+}
+
+func nestedFallbackTransactionOuterFallback(gf.ErrorBoundaryContext) gf.Node {
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-nested-fallback-outer"},
+		gf.Text("nested fallback outer"),
+	)
 }
 
 func NoBoundaryRisky(props NoBoundaryRiskyProps) gf.Node {
@@ -545,6 +663,7 @@ func initBoundaryProbe() {
 	localTransactionAttemptPhase = "initial"
 	localUpdateProbe = localUpdateLifecycleProbe{}
 	localTransactionProbe = protectedTransactionProbe{}
+	nestedFallbackProbe = nestedFallbackTransactionProbe{}
 	js.Global().Set("goframeErrorBoundaryReports", js.Global().Get("Array").New())
 	syncBoundaryProbe()
 }
@@ -602,4 +721,14 @@ func syncBoundaryProbe() {
 	localTransaction.Set("retryBResourceCleanups", localTransactionProbe.retryBResourceCleanups)
 	localTransaction.Set("retryBLaterSetups", localTransactionProbe.retryBLaterSetups)
 	js.Global().Set("goframeLocalTransactionProbe", localTransaction)
+
+	nestedFallback := js.Global().Get("Object").New()
+	nestedFallback.Set("ownerRenders", nestedFallbackProbe.ownerRenders)
+	nestedFallback.Set("effectSetups", nestedFallbackProbe.effectSetups)
+	nestedFallback.Set("effectCleanups", nestedFallbackProbe.effectCleanups)
+	nestedFallback.Set("unmountCallbacks", nestedFallbackProbe.unmountCallbacks)
+	nestedFallback.Set("resourceStarts", nestedFallbackProbe.resourceStarts)
+	nestedFallback.Set("resourceCleanups", nestedFallbackProbe.resourceCleanups)
+	nestedFallback.Set("laterSiblingSetups", nestedFallbackProbe.laterSiblingSetups)
+	js.Global().Set("goframeNestedFallbackTransactionProbe", nestedFallback)
 }
