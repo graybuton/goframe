@@ -560,5 +560,7 @@ func testComponentInstanceWithParent(name string, parent *componentInstance, ren
 func resetRuntimeBoundaryTestState() {
 	resetEffectsForTest()
 	contextSubscriptionsByID = nil
-	currentProtectedSubtreeTransaction = nil
+	currentProtectedLifecycleBoundary = nil
+	beginProtectedLifecycle = nil
+	finishProtectedLifecycle = nil
 }

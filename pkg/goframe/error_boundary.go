@@ -23,12 +23,17 @@ const (
 
 type errorBoundaryState struct {
 	phase       errorBoundaryPhase
+	hasResetKey bool
 	info        ErrorInfo
 	generation  int
 	resetKey    string
-	hasResetKey bool
-	transaction protectedSubtreeTransaction
+	attempts    []*componentInstance
 }
+
+var (
+	beginProtectedLifecycle  func(*errorBoundaryState) *errorBoundaryState
+	finishProtectedLifecycle func(*errorBoundaryState, *errorBoundaryState)
+)
 
 var errorBoundaryComponentType = NewComponentType("goframe.ErrorBoundary", "ErrorBoundary")
 
@@ -62,6 +67,8 @@ func renderErrorBoundary(props ErrorBoundaryProps) Node {
 
 func ensureErrorBoundaryState(instance *componentInstance) *errorBoundaryState {
 	if instance.errorBoundary == nil {
+		beginProtectedLifecycle = beginProtectedSubtreeLifecycle
+		finishProtectedLifecycle = finishProtectedSubtreeLifecycle
 		instance.errorBoundary = &errorBoundaryState{}
 	}
 	return instance.errorBoundary
@@ -101,9 +108,8 @@ func captureRenderErrorBoundary(failing *componentInstance, info ErrorInfo) {
 	if boundary == nil || boundary.errorBoundary == nil {
 		return
 	}
-	failProtectedSubtreeLifecycleTransaction(boundary)
-	cancelPendingEffectsUnderBoundary(boundary)
 	state := boundary.errorBoundary
+	cancelPendingEffectsUnderBoundary(boundary)
 	if state.phase == errorBoundaryProtected {
 		state.phase = errorBoundaryCaptured
 		state.info = info

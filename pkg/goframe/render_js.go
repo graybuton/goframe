@@ -132,14 +132,10 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 	fragment := document.Call("createDocumentFragment")
 	fragment.Call("appendChild", start)
 	rendered := renderComponentInstance(instance)
-	var child *mountedNode
-	if componentHasProtectedErrorBoundary(instance) {
-		runProtectedSubtreeLifecycleTransaction(instance, func() {
-			child = mountNode(document, rendered, instance)
-		})
-	} else {
-		child = mountNode(document, rendered, instance)
+	if state := instance.errorBoundary; state != nil {
+		defer finishProtectedLifecycle(state, beginProtectedLifecycle(state))
 	}
+	child := mountNode(document, rendered, instance)
 	placeMountedBefore(fragment, child, js.Null())
 	fragment.Call("appendChild", end)
 	mounted.componentChild = child
@@ -155,9 +151,7 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 		if parent.IsUndefined() || parent.IsNull() {
 			return
 		}
-		runProtectedDescendantLifecycleTransaction(instance, func() {
-			patchComponent(document, parent, mounted, instance.node, instance.parent)
-		})
+		patchComponent(document, parent, mounted, instance.node, instance.parent)
 	}
 }
 
@@ -173,15 +167,11 @@ func patchComponent(document, parent js.Value, mounted *mountedNode, newNode Com
 	}
 	instance.node = newNode
 	rendered := renderComponentInstance(instance)
-	var child *mountedNode
-	if componentHasProtectedErrorBoundary(instance) {
-		runProtectedSubtreeLifecycleTransaction(instance, func() {
-			child = patchMounted(document, parent, mounted.componentChild, rendered, instance)
-		})
-	} else {
-		child = patchMounted(document, parent, mounted.componentChild, rendered, instance)
+	if state := instance.errorBoundary; state != nil &&
+		state.phase == errorBoundaryProtected {
+		defer finishProtectedLifecycle(state, beginProtectedLifecycle(state))
 	}
-	mounted.componentChild = child
+	mounted.componentChild = patchMounted(document, parent, mounted.componentChild, rendered, instance)
 }
 
 func patchChildren(document, parent js.Value, oldChildren []*mountedNode, newNodes []Node, boundary js.Value, owner *componentInstance) []*mountedNode {

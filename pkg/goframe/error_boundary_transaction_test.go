@@ -388,9 +388,8 @@ func TestBoundaryTransactionInvariantEscapeRollsBackAndRestoresState(t *testing.
 	if currentComponent != nil {
 		t.Fatalf("current component after invariant escape = %p, want nil", currentComponent)
 	}
-	if currentProtectedSubtreeTransaction != nil {
-		t.Fatalf("protected transaction after invariant escape = %p, want nil",
-			currentProtectedSubtreeTransaction)
+	if currentProtectedLifecycleBoundary != nil {
+		t.Fatal("protected lifecycle boundary remained installed after invariant escape")
 	}
 	if owner.lifecycleAttempt.active || len(owner.lifecycleAttempt.effects) != 0 {
 		t.Fatalf("owner lifecycle attempt after invariant escape = %#v, want cleared", owner.lifecycleAttempt)
@@ -418,6 +417,71 @@ func TestBoundaryTransactionInvariantEscapeRollsBackAndRestoresState(t *testing.
 		"setup C",
 		"cleanup C",
 	})
+}
+
+func TestProtectedSubtreeLifecycleHooksInstallAndRestoreLazily(t *testing.T) {
+	isolateLifecycleTestState(t)
+	previousCurrent := currentProtectedLifecycleBoundary
+	previousBegin := beginProtectedLifecycle
+	previousFinish := finishProtectedLifecycle
+	currentProtectedLifecycleBoundary = nil
+	beginProtectedLifecycle = nil
+	finishProtectedLifecycle = nil
+	t.Cleanup(func() {
+		currentProtectedLifecycleBoundary = previousCurrent
+		beginProtectedLifecycle = previousBegin
+		finishProtectedLifecycle = previousFinish
+	})
+	if beginProtectedLifecycle != nil || finishProtectedLifecycle != nil {
+		t.Fatal("protected lifecycle hooks installed before an ErrorBoundary")
+	}
+
+	ordinary := testComponentInstance("Ordinary", func() Node {
+		UseEffect(func() Cleanup { return nil })
+		return Empty()
+	}, nil)
+	renderComponentInstance(ordinary)
+	if ordinary.errorBoundary != nil {
+		t.Fatal("ordinary component installed protected lifecycle hooks")
+	}
+	if currentProtectedLifecycleBoundary != nil {
+		t.Fatal("ordinary component render installed protected lifecycle boundary")
+	}
+	if beginProtectedLifecycle != nil || finishProtectedLifecycle != nil {
+		t.Fatal("ordinary component render installed protected lifecycle hooks")
+	}
+	if len(ordinary.effectSlots) != 1 {
+		t.Fatalf("ordinary component effect slots = %d, want immediate commit", len(ordinary.effectSlots))
+	}
+
+	outer := transactionTestBoundary()
+	if beginProtectedLifecycle == nil || finishProtectedLifecycle == nil {
+		t.Fatal("ErrorBoundary did not install protected lifecycle hooks")
+	}
+	inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
+		return Text("inner fallback")
+	}, nil)
+	renderComponentInstance(inner)
+	if currentProtectedLifecycleBoundary != nil {
+		t.Fatal("idle ErrorBoundary left protected lifecycle boundary installed")
+	}
+
+	runProtectedSubtreeTestAttempt(outer, func() {
+		if currentProtectedLifecycleBoundary != outer.errorBoundary {
+			t.Fatal("outer transaction did not install its protected lifecycle boundary")
+		}
+		runProtectedSubtreeTestAttempt(inner, func() {
+			if currentProtectedLifecycleBoundary != inner.errorBoundary {
+				t.Fatal("inner transaction did not install its protected lifecycle boundary")
+			}
+		})
+		if currentProtectedLifecycleBoundary != outer.errorBoundary {
+			t.Fatal("inner transaction did not restore outer protected lifecycle boundary")
+		}
+	})
+	if currentProtectedLifecycleBoundary != nil {
+		t.Fatal("outer transaction did not restore default protected lifecycle boundary")
+	}
 }
 
 func TestProtectedSubtreeSuccessfulUpdatePreservesLifecycleTiming(t *testing.T) {
@@ -527,7 +591,18 @@ func TestProtectedSubtreeSuccessfulLifecycleOrderRemainsParentFirst(t *testing.T
 }
 
 func runProtectedSubtreeTestAttempt(boundary *componentInstance, reconcile func()) {
-	runProtectedSubtreeLifecycleTransaction(boundary, reconcile)
+	var state *errorBoundaryState
+	if boundary != nil &&
+		boundary.errorBoundary != nil &&
+		boundary.errorBoundary.phase == errorBoundaryProtected {
+		state = boundary.errorBoundary
+	}
+	if state == nil {
+		panic("goframe: test boundary has no protected lifecycle reconcile hook")
+	}
+	previous := beginProtectedLifecycle(state)
+	defer finishProtectedLifecycle(state, previous)
+	reconcile()
 }
 
 func transactionTestBoundary() *componentInstance {
