@@ -141,9 +141,13 @@ func (control *resourceControl[T]) prepareRender(
 	return pending.snapshot, pending.generation
 }
 
-func (control *resourceControl[T]) commitLifecycleRender(attempt *renderLifecycleAttempt) {
+func (control *resourceControl[T]) finishRender(attempt *renderLifecycleAttempt, commit bool) {
 	pending := control.pending
 	if pending.attempt != attempt {
+		return
+	}
+	if !commit {
+		control.pending = resourceRenderState[T]{}
 		return
 	}
 	control.owner = pending.owner
@@ -160,12 +164,6 @@ func (control *resourceControl[T]) commitLifecycleRender(attempt *renderLifecycl
 		control.snapshot = pending.snapshot
 	}
 	control.pending = resourceRenderState[T]{}
-}
-
-func (control *resourceControl[T]) rollbackLifecycleRender(attempt *renderLifecycleAttempt) {
-	if control.pending.attempt == attempt {
-		control.pending = resourceRenderState[T]{}
-	}
 }
 
 func (control *resourceControl[T]) reload() {

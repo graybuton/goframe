@@ -226,8 +226,8 @@ func markComponentDirty(instance *componentInstance) {
 		instance.dirtyCounted = true
 	}
 	instance.dirty = true
-	if instance.scheduleUpdate != nil {
-		instance.scheduleUpdate(instance)
+	if schedule := instance.scheduleUpdate; schedule != nil {
+		schedule(instance)
 	}
 }
 

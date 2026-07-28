@@ -8,6 +8,9 @@ func App() gf.Node {
 	nestedBroken, setNestedBroken := gf.UseState(false)
 	innerFallbackCrash, setInnerFallbackCrash := gf.UseState(false)
 	noBoundaryBroken, setNoBoundaryBroken := gf.UseState(false)
+	transactionVersion, setTransactionVersion := gf.UseState("A")
+	transactionBroken, setTransactionBroken := gf.UseState(false)
+	nestedFallbackBroken, setNestedFallbackBroken := gf.UseState(false)
 
 	return (
 		<main data-testid="eb-shell">
@@ -56,6 +59,61 @@ func App() gf.Node {
 			<NestedBoundaryScenario Broken={nestedBroken} FallbackCrash={innerFallbackCrash} />
 
 			<button
+				data-testid="eb-trigger-nested-fallback-transaction"
+				OnClick={func() {
+					setNestedFallbackBroken(true)
+				}}
+			>
+				Trigger nested fallback transaction
+			</button>
+			<NestedFallbackTransactionScenario Broken={nestedFallbackBroken} />
+
+			<button
+				data-testid="eb-trigger-transaction-error"
+				OnClick={func() {
+					transactionAttemptPhase = "attempt"
+					setTransactionVersion("B")
+					setTransactionBroken(true)
+				}}
+			>
+				Trigger protected transaction error
+			</button>
+			<gf.ErrorBoundary Fallback={makeTransactionFallback(setTransactionBroken)}>
+				<TransactionOwner Version={transactionVersion} Broken={transactionBroken} />
+			</gf.ErrorBoundary>
+
+			<ProtectedTeardownScenario />
+
+			<gf.ErrorBoundary Fallback={localUpdateFallback}>
+				<LocalStateOwner />
+				<LocalUpdateSibling />
+			</gf.ErrorBoundary>
+
+			<gf.ErrorBoundary Fallback={nestedLocalUpdateFallback}>
+				<NestedOuterSibling />
+				<gf.ErrorBoundary Fallback={nestedLocalUpdateFallback}>
+					<LocalInnerOwner />
+					<NestedInnerSibling />
+				</gf.ErrorBoundary>
+			</gf.ErrorBoundary>
+
+			<gf.ErrorBoundary Fallback={localTransactionFallback}>
+				<LocalTransactionOwner />
+			</gf.ErrorBoundary>
+
+			<button
+				data-testid="eb-trigger-dirty-batch"
+				OnClick={triggerDirtyBatch}
+			>
+				Trigger captured dirty batch
+			</button>
+			<gf.ErrorBoundary Fallback={dirtyBatchFallback}>
+				<DirtyBatchFailingOwner />
+				<DirtyBatchLaterOwner />
+			</gf.ErrorBoundary>
+			<DirtyBatchIndependentOwner />
+
+			<button
 				data-testid="eb-trigger-no-boundary-error"
 				OnClick={func() {
 					setNoBoundaryBroken(true)
@@ -65,5 +123,27 @@ func App() gf.Node {
 			</button>
 			<NoBoundaryRisky Broken={noBoundaryBroken} />
 		</main>
+	)
+}
+
+func ProtectedTeardownScenario(ProtectedTeardownScenarioProps) gf.Node {
+	version, setVersion := gf.UseState("A")
+	broken, setBroken := gf.UseState(false)
+
+	return (
+		<section data-testid="eb-teardown-scenario">
+			<button
+				data-testid="eb-trigger-teardown-error"
+				OnClick={func() {
+					setVersion("B")
+					setBroken(true)
+				}}
+			>
+				Trigger protected teardown error
+			</button>
+			<gf.ErrorBoundary Fallback={makeTeardownFallback(setBroken)}>
+				<TeardownOwner Version={version} Broken={broken} />
+			</gf.ErrorBoundary>
+		</section>
 	)
 }

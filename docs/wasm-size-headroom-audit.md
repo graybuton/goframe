@@ -58,8 +58,46 @@ If no match exists, it reports the default missing path
 | multipackage | 110592 B | 43008 B | 56320 B | 49152 B |
 | cmdapp | 110592 B | 43008 B | 56320 B | 49152 B |
 | router | 116736 B | 45056 B | 58368 B | 51200 B |
-| router-dashboard | 230400 B | 77824 B | 94208 B | 81920 B |
-| resource | 153600 B | 57344 B | 67584 B | 61440 B |
+| router-dashboard | 233472 B | 77824 B | 94208 B | 81920 B |
+| resource | 156672 B | 57344 B | 68608 B | 61440 B |
+
+## Targeted ErrorBoundary Correctness Rebaseline — 2026-07-28
+
+This targeted rebaseline covers complete mounted-subtree teardown ownership
+during protected ErrorBoundary reconciliation. The frozen main base is
+`15a0b8fe4f5d3f0da79b57acc10e1fab4e6cbac5`; the PR head before this
+correction is `ee68d49296586a42d142b9b4031fcb173f127b2d`. The runtime correction
+is `a3463d9d88837a3adb46d30f1d03e1e8c1947d1c`, and the browser evidence is
+`481d8ea5945caec08ac57668af49e3dc456e2762`.
+
+Measurements use Go `1.22.12` and TinyGo `0.41.1` on Linux amd64. Compression
+uses the unchanged budget-script commands. Head-to-final deltas compare
+artifacts with the same `bundle.wasm` basename.
+
+| app/format | PR head size | final size | delta | old budget | new budget | final headroom |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| router-dashboard raw | 230316 B | 232586 B | +2270 B | 230400 B | 233472 B | 886 B |
+| router-dashboard gzip | 92577 B | 93271 B | +694 B | 94208 B | 94208 B | 937 B |
+| router-dashboard br | 76183 B | 76703 B | +520 B | 77824 B | 77824 B | 1121 B |
+| router-dashboard zstd | 81281 B | 81813 B | +532 B | 81920 B | 81920 B | 107 B |
+| resource raw | 153200 B | 155484 B | +2284 B | 153600 B | 156672 B | 1188 B |
+| resource gzip | 67158 B | 67897 B | +739 B | 67584 B | 68608 B | 711 B |
+| resource br | 56578 B | 57182 B | +604 B | 57344 B | 57344 B | 162 B |
+| resource zstd | 59968 B | 60748 B | +780 B | 61440 B | 61440 B | 692 B |
+
+The nine non-ErrorBoundary applications (`counter`, `components`, `todo`,
+`dashboard`, `context`, `virtualized`, `multipackage`, `cmdapp`, and `router`)
+remain byte-identical at the raw WASM SHA-256 boundary; their compressed sizes
+are also unchanged. The final compression ratios remain within the existing
+limits: gzip `52.00%`, Brotli `38.00%`, and Zstandard `46.00%`.
+
+The earlier recommendation to keep budgets unchanged is superseded only for
+this accepted ErrorBoundary correctness guarantee. Raw budgets increase by
+3 KiB for `router-dashboard` and `resource`. Resource gzip increases by 1 KiB
+under the aligned compressed-budget rule; the other compressed budgets remain
+unchanged because their final artifacts fit. No workflow or ratio limit
+changes, no unrelated application budget changes, and no general runtime
+headroom are authorized by this rebaseline.
 
 ## Toolchain Matrix
 

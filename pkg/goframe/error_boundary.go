@@ -23,11 +23,18 @@ const (
 
 type errorBoundaryState struct {
 	phase       errorBoundaryPhase
+	hasResetKey bool
 	info        ErrorInfo
 	generation  int
 	resetKey    string
-	hasResetKey bool
+	attempts    []*componentInstance
+	teardown    protectedTeardownState
 }
+
+var (
+	beginProtectedLifecycle  func(*errorBoundaryState) *errorBoundaryState
+	finishProtectedLifecycle func(*errorBoundaryState, *errorBoundaryState)
+)
 
 var errorBoundaryComponentType = NewComponentType("goframe.ErrorBoundary", "ErrorBoundary")
 
@@ -54,16 +61,46 @@ func renderErrorBoundary(props ErrorBoundaryProps) Node {
 				resetErrorBoundary(instance, state)
 			},
 		}
-		return Key(errorBoundaryFallbackKey(state.generation), Child(props.Fallback(context)))
+		fallback := Child(props.Fallback(context))
+		prepareProtectedFallbackReconcile(state)
+		return Key(errorBoundaryFallbackKey(state.generation), fallback)
 	}
 	return Key(errorBoundaryProtectedKey(state.generation), Fragment(props.Children...))
 }
 
 func ensureErrorBoundaryState(instance *componentInstance) *errorBoundaryState {
 	if instance.errorBoundary == nil {
-		instance.errorBoundary = &errorBoundaryState{}
+		beginProtectedLifecycle = beginProtectedSubtreeLifecycle
+		finishProtectedLifecycle = finishProtectedSubtreeLifecycle
+		installProtectedMountedTeardown()
+		state := &errorBoundaryState{}
+		instance.errorBoundary = state
+		instance.unmountSlots = append(instance.unmountSlots, func() {
+			state.teardown.release()
+		})
 	}
 	return instance.errorBoundary
+}
+
+//go:noinline
+func lifecycleStateForDirtyUpdate(instance *componentInstance) *errorBoundaryState {
+	var nearest *errorBoundaryState
+	for current := instance; current != nil; current = current.parent {
+		state := current.errorBoundary
+		if state == nil {
+			continue
+		}
+		if current != instance && state.phase == errorBoundaryCaptured {
+			return state
+		}
+		if nearest == nil && state.phase == errorBoundaryProtected {
+			nearest = state
+		}
+	}
+	if instance != nil && nearest == instance.errorBoundary {
+		return nil
+	}
+	return nearest
 }
 
 func updateErrorBoundaryResetKey(state *errorBoundaryState, resetKey string) {
@@ -100,8 +137,8 @@ func captureRenderErrorBoundary(failing *componentInstance, info ErrorInfo) {
 	if boundary == nil || boundary.errorBoundary == nil {
 		return
 	}
-	cancelPendingEffectsUnderBoundary(boundary)
 	state := boundary.errorBoundary
+	cancelPendingEffectsUnderBoundary(boundary)
 	if state.phase == errorBoundaryProtected {
 		state.phase = errorBoundaryCaptured
 		state.info = info
@@ -112,7 +149,11 @@ func captureRenderErrorBoundary(failing *componentInstance, info ErrorInfo) {
 
 func nearestErrorBoundary(instance *componentInstance) *componentInstance {
 	for current := instance.parent; current != nil; current = current.parent {
-		if current.active && current.errorBoundary != nil && current.errorBoundary.phase != errorBoundaryFallback {
+		if current.active &&
+			current.errorBoundary != nil &&
+			current.errorBoundary.phase != errorBoundaryFallback &&
+			(current.errorBoundary.phase != errorBoundaryProtected ||
+				current.errorBoundary.info.Phase == 0) {
 			return current
 		}
 	}

@@ -198,22 +198,23 @@ type effectRenderUpdate struct {
 }
 
 type lifecycleRenderParticipant interface {
-	commitLifecycleRender(*renderLifecycleAttempt)
-	rollbackLifecycleRender(*renderLifecycleAttempt)
+	finishRender(attempt *renderLifecycleAttempt, commit bool)
 }
 
 type renderLifecycleAttempt struct {
 	active       bool
+	hooks        bool
 	effects      []effectRenderUpdate
 	unmounts     []Cleanup
 	participants []lifecycleRenderParticipant
-	// Keep hook commit indirect so hook-free TinyGo apps discard effect machinery.
-	commitHooks func(*componentInstance)
 }
 
 var (
-	pendingEffects  []*effectSlot
-	flushingEffects bool
+	pendingEffects                    []*effectSlot
+	flushingEffects                   bool
+	currentProtectedLifecycleBoundary *errorBoundaryState
+	// Keep hook commit indirect so hook-free TinyGo apps discard effect machinery.
+	commitLifecycleHook func(*componentInstance)
 )
 
 // UseMount runs effect once after this component instance is first mounted.
@@ -233,7 +234,8 @@ func UseUnmount(cleanup Cleanup) {
 	if index != len(attempt.unmounts) {
 		panic("goframe: invalid unmount hook index")
 	}
-	attempt.commitHooks = commitLifecycleHooks
+	commitLifecycleHook = commitLifecycleHooks
+	attempt.hooks = true
 	attempt.unmounts = append(attempt.unmounts, cleanup)
 }
 
@@ -264,7 +266,8 @@ func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 	if index != len(attempt.effects) {
 		panic("goframe: invalid effect hook index")
 	}
-	attempt.commitHooks = commitLifecycleHooks
+	commitLifecycleHook = commitLifecycleHooks
+	attempt.hooks = true
 
 	update := effectRenderUpdate{
 		kind:   kind,
@@ -314,12 +317,16 @@ func requireLifecycleRenderAttempt(instance *componentInstance) *renderLifecycle
 }
 
 func commitLifecycleRenderAttempt(instance *componentInstance) {
+	if boundary := currentProtectedLifecycleBoundary; boundary != nil {
+		boundary.attempts = append(boundary.attempts, instance)
+		return
+	}
 	attempt := requireLifecycleRenderAttempt(instance)
 	for _, participant := range attempt.participants {
-		participant.commitLifecycleRender(attempt)
+		participant.finishRender(attempt, true)
 	}
-	if attempt.commitHooks != nil {
-		attempt.commitHooks(instance)
+	if attempt.hooks {
+		commitLifecycleHook(instance)
 	}
 	finishLifecycleRenderAttempt(attempt)
 }
@@ -360,7 +367,7 @@ func rollbackLifecycleRenderAttempt(instance *componentInstance) {
 	}
 	attempt := &instance.lifecycleAttempt
 	for _, participant := range attempt.participants {
-		participant.rollbackLifecycleRender(attempt)
+		participant.finishRender(attempt, false)
 	}
 	finishLifecycleRenderAttempt(attempt)
 }
@@ -369,7 +376,7 @@ func finishLifecycleRenderAttempt(attempt *renderLifecycleAttempt) {
 	clear(attempt.effects)
 	clear(attempt.unmounts)
 	clear(attempt.participants)
-	attempt.commitHooks = nil
+	attempt.hooks = false
 	attempt.effects = attempt.effects[:0]
 	attempt.unmounts = attempt.unmounts[:0]
 	attempt.participants = attempt.participants[:0]

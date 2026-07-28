@@ -131,7 +131,11 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 	end := document.Call("createComment", "/goframe-component")
 	fragment := document.Call("createDocumentFragment")
 	fragment.Call("appendChild", start)
-	child := mountNode(document, renderComponentInstance(instance), instance)
+	rendered := renderComponentInstance(instance)
+	if state := instance.errorBoundary; state != nil {
+		defer finishProtectedLifecycle(state, beginProtectedLifecycle(state))
+	}
+	child := mountNode(document, rendered, instance)
 	placeMountedBefore(fragment, child, js.Null())
 	fragment.Call("appendChild", end)
 	mounted.componentChild = child
@@ -146,6 +150,20 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 		parent := mounted.first.Get("parentNode")
 		if parent.IsUndefined() || parent.IsNull() {
 			return
+		}
+		if beginProtectedLifecycle != nil {
+			if state := lifecycleStateForDirtyUpdate(instance); state != nil {
+				if state.phase != errorBoundaryProtected {
+					clearComponentDirty(instance)
+					return
+				}
+				// Dirty flushes are non-reentrant, so no owner update can
+				// begin while this boundary transaction is already active.
+				defer finishProtectedSubtreeLifecycle(
+					state,
+					beginProtectedSubtreeLifecycle(state),
+				)
+			}
 		}
 		patchComponent(document, parent, mounted, instance.node, instance.parent)
 	}
@@ -162,8 +180,12 @@ func patchComponent(document, parent js.Value, mounted *mountedNode, newNode Com
 		return
 	}
 	instance.node = newNode
-	child := patchMounted(document, parent, mounted.componentChild, renderComponentInstance(instance), instance)
-	mounted.componentChild = child
+	rendered := renderComponentInstance(instance)
+	if state := instance.errorBoundary; state != nil &&
+		state.phase == errorBoundaryProtected {
+		defer finishProtectedLifecycle(state, beginProtectedLifecycle(state))
+	}
+	mounted.componentChild = patchMounted(document, parent, mounted.componentChild, rendered, instance)
 }
 
 func patchChildren(document, parent js.Value, oldChildren []*mountedNode, newNodes []Node, boundary js.Value, owner *componentInstance) []*mountedNode {
@@ -243,6 +265,10 @@ func removeMounted(parent js.Value, mounted *mountedNode) {
 }
 
 func releaseMounted(mounted *mountedNode) {
+	if stageProtectedMountedTeardown != nil &&
+		stageProtectedMountedTeardown(mounted) {
+		return
+	}
 	if mounted.component != nil {
 		releaseMounted(mounted.componentChild)
 		deactivateComponent(mounted.component)

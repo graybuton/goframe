@@ -44,6 +44,363 @@ try {
     await captureShell(client);
     await installListenerAudit(client);
 
+    await waitForProbe(client, (current) =>
+        current.local.ownerRenders >= 1 &&
+        current.local.siblingRenders >= 1 &&
+        current.local.siblingEffectSetups >= 1 &&
+        current.local.nestedInnerOwnerRenders >= 1 &&
+        current.local.nestedInnerSiblingRenders >= 1 &&
+        current.local.nestedInnerSiblingSetups >= 1 &&
+        current.local.nestedOuterSiblingRenders >= 1 &&
+        current.local.nestedOuterSiblingSetups >= 1,
+    "initial local update probes");
+
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-later-version']",
+        "A",
+        "initial captured dirty batch later owner",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-independent']",
+        "0",
+        "initial captured dirty batch independent owner",
+    );
+    await waitForProbe(client, (current) =>
+        current.dirtyBatch.failingOwnerRenders === 1 &&
+        current.dirtyBatch.laterARenders === 1 &&
+        current.dirtyBatch.aEffectSetups === 1 &&
+        current.dirtyBatch.aResourceStarts === 1 &&
+        current.dirtyBatch.independentOwnerRenders === 1,
+    "initial captured dirty batch lifecycle");
+
+    await waitForSelector(
+        client,
+        "[data-testid='eb-nested-fallback-protected']",
+        "initial nested fallback protected child",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-fallback-owner']",
+        "initial nested fallback owner absent",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-fallback-outer']",
+        "initial nested fallback outer absent",
+    );
+    await waitForProbe(client, (current) =>
+        current.nestedFallback.ownerRenders === 0 &&
+        current.nestedFallback.effectSetups === 0 &&
+        current.nestedFallback.effectCleanups === 0 &&
+        current.nestedFallback.unmountCallbacks === 0 &&
+        current.nestedFallback.resourceStarts === 0 &&
+        current.nestedFallback.resourceCleanups === 0 &&
+        current.nestedFallback.laterSiblingSetups === 0,
+    "initial nested fallback transaction counters");
+
+    await waitForSelector(
+        client,
+        "[data-testid='eb-teardown-removed']",
+        "initial removable lifecycle child",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-teardown-replaced']",
+        "replaced A",
+        "initial replaceable lifecycle child",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-teardown-fallback']",
+        "initial teardown fallback absent",
+    );
+    await waitForProbe(client, (current) =>
+        current.teardown.ownerRenders === 1 &&
+        current.teardown.removedEffectSetups === 1 &&
+        current.teardown.removedEffectCleanups === 0 &&
+        current.teardown.removedUnmountCallbacks === 0 &&
+        current.teardown.removedResourceStarts === 1 &&
+        current.teardown.removedResourceCleanups === 0 &&
+        current.teardown.replacedEffectSetups === 1 &&
+        current.teardown.replacedEffectCleanups === 0 &&
+        current.teardown.replacedUnmountCallbacks === 0 &&
+        current.teardown.replacedResourceStarts === 1 &&
+        current.teardown.replacedResourceCleanups === 0 &&
+        current.teardown.fallbackRenders === 0 &&
+        current.teardown.boundaryReports === 0 &&
+        current.teardown.order === "",
+    "initial protected teardown lifecycle");
+
+    const beforeTeardownFailure = await probe(client);
+    await click(client, "[data-testid='eb-trigger-teardown-error']");
+    await waitForSelector(
+        client,
+        "[data-testid='eb-teardown-fallback']",
+        "protected teardown fallback",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-teardown-owner']",
+        "failed teardown owner removed",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-teardown-error-component']",
+        "TeardownRiskyDescendant",
+        "protected teardown report component",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeTeardownFailure.reports.length + 1 &&
+        current.reports.at(-1).component === "TeardownRiskyDescendant" &&
+        current.teardown.ownerRenders === 2 &&
+        current.teardown.removedEffectSetups === 1 &&
+        current.teardown.removedEffectCleanups === 1 &&
+        current.teardown.removedUnmountCallbacks === 1 &&
+        current.teardown.removedResourceStarts === 1 &&
+        current.teardown.removedResourceCleanups === 1 &&
+        current.teardown.replacedEffectSetups === 1 &&
+        current.teardown.replacedEffectCleanups === 1 &&
+        current.teardown.replacedUnmountCallbacks === 1 &&
+        current.teardown.replacedResourceStarts === 1 &&
+        current.teardown.replacedResourceCleanups === 1 &&
+        current.teardown.fallbackRenders === 1 &&
+        current.teardown.boundaryReports === 1,
+    "protected teardown cleanup");
+    const afterTeardownFailure = await probe(client);
+    const teardownOrdering = assertProtectedTeardownOrdering(
+        afterTeardownFailure.teardown.order,
+        "protected teardown fallback",
+    );
+    await assertShellSame(client, "protected teardown fallback");
+
+    await click(client, "[data-testid='eb-teardown-retry']");
+    await waitForText(
+        client,
+        "[data-testid='eb-teardown-replaced']",
+        "replaced B",
+        "healthy teardown retry",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-teardown-fallback']",
+        "teardown fallback cleared",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === afterTeardownFailure.reports.length &&
+        current.teardown.ownerRenders === 3 &&
+        current.teardown.removedEffectSetups === 1 &&
+        current.teardown.removedEffectCleanups === 1 &&
+        current.teardown.removedUnmountCallbacks === 1 &&
+        current.teardown.removedResourceStarts === 1 &&
+        current.teardown.removedResourceCleanups === 1 &&
+        current.teardown.replacedEffectSetups === 2 &&
+        current.teardown.replacedEffectCleanups === 1 &&
+        current.teardown.replacedUnmountCallbacks === 1 &&
+        current.teardown.replacedResourceStarts === 2 &&
+        current.teardown.replacedResourceCleanups === 1 &&
+        current.teardown.fallbackRenders === 1 &&
+        current.teardown.boundaryReports === 1 &&
+        current.teardown.order === afterTeardownFailure.teardown.order &&
+        current.listenerAudit.add === current.listenerAudit.remove,
+    "healthy protected teardown retry");
+    await assertShellSame(client, "protected teardown retry");
+    const afterTeardownRetry = await probe(client);
+    const protectedTeardownEvidence = {
+        ...afterTeardownRetry.teardown,
+        boundaryReportDelta:
+            afterTeardownRetry.reports.length -
+            beforeTeardownFailure.reports.length,
+        fallbackIndex: teardownOrdering.fallbackIndex,
+        earliestTeardownIndex: teardownOrdering.earliestTeardownIndex,
+    };
+
+    const beforeDirtyBatch = await probe(client);
+    await click(client, "[data-testid='eb-trigger-dirty-batch']");
+    await waitForSelector(
+        client,
+        "[data-testid='eb-dirty-batch-fallback']",
+        "captured dirty batch fallback",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-error-component']",
+        "DirtyBatchRiskyDescendant",
+        "captured dirty batch report component",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-independent']",
+        "1",
+        "captured dirty batch independent update",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeDirtyBatch.reports.length + 1 &&
+        current.reports.at(-1).component === "DirtyBatchRiskyDescendant" &&
+        current.dirtyBatch.setterOrder === "failing B,later B,independent 1" &&
+        current.dirtyBatch.renderOrder === "failing B,risky B,independent 1" &&
+        current.dirtyBatch.attemptedBRenders === 0 &&
+        current.dirtyBatch.attemptedBEffectSetups === 0 &&
+        current.dirtyBatch.attemptedBEffectCleanups === 0 &&
+        current.dirtyBatch.attemptedBUnmounts === 0 &&
+        current.dirtyBatch.attemptedBResourceStarts === 0 &&
+        current.dirtyBatch.attemptedBResourceCleanups === 0 &&
+        current.dirtyBatch.aEffectCleanups === 1 &&
+        current.dirtyBatch.aUnmountCallbacks === 1 &&
+        current.dirtyBatch.aResourceCleanups === 1 &&
+        current.dirtyBatch.independentOwnerRenders ===
+            beforeDirtyBatch.dirtyBatch.independentOwnerRenders + 1,
+    "captured dirty batch discard");
+    await assertShellSame(client, "captured dirty batch fallback");
+    const afterDirtyBatch = await probe(client);
+    const dirtyBatchEvidence = {
+        ...afterDirtyBatch.dirtyBatch,
+        boundaryReports:
+            afterDirtyBatch.reports.length - beforeDirtyBatch.reports.length,
+        independentRenderDelta:
+            afterDirtyBatch.dirtyBatch.independentOwnerRenders -
+            beforeDirtyBatch.dirtyBatch.independentOwnerRenders,
+    };
+
+    const localEvidence = {};
+    const beforeLocalUpdate = await probe(client);
+    await click(client, "[data-testid='eb-local-owner-update']");
+    await waitForText(client, "[data-testid='eb-local-owner-state']", "1", "local owner state update");
+    const afterLocalUpdate = await probe(client);
+    localEvidence.ownerRenderDelta = counterDelta(
+        afterLocalUpdate.local.ownerRenders,
+        beforeLocalUpdate.local.ownerRenders,
+        1,
+        "local owner render",
+    );
+    localEvidence.siblingRenderDelta = counterDelta(
+        afterLocalUpdate.local.siblingRenders,
+        beforeLocalUpdate.local.siblingRenders,
+        0,
+        "unrelated sibling render",
+    );
+    localEvidence.siblingEveryRenderDelta = counterDelta(
+        afterLocalUpdate.local.siblingEffectSetups,
+        beforeLocalUpdate.local.siblingEffectSetups,
+        0,
+        "unrelated sibling EveryRender setup",
+    );
+    counterDelta(
+        afterLocalUpdate.reports.length,
+        beforeLocalUpdate.reports.length,
+        0,
+        "local update boundary report",
+    );
+    counterDelta(
+        afterLocalUpdate.listenerAudit.add,
+        beforeLocalUpdate.listenerAudit.add,
+        0,
+        "local update listener addition",
+    );
+    counterDelta(
+        afterLocalUpdate.listenerAudit.remove,
+        beforeLocalUpdate.listenerAudit.remove,
+        0,
+        "local update listener removal",
+    );
+    await waitForAbsent(client, "[data-testid='eb-local-unexpected-fallback']", "local update fallback stays inactive");
+    await assertShellSame(client, "successful local owner update");
+
+    const beforeNestedLocalUpdate = await probe(client);
+    await click(client, "[data-testid='eb-nested-local-owner-update']");
+    await waitForText(client, "[data-testid='eb-nested-local-owner-state']", "1", "nested local owner state update");
+    const afterNestedLocalUpdate = await probe(client);
+    localEvidence.nestedInnerOwnerRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedInnerOwnerRenders,
+        beforeNestedLocalUpdate.local.nestedInnerOwnerRenders,
+        1,
+        "nested inner owner render",
+    );
+    localEvidence.nestedInnerSiblingRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedInnerSiblingRenders,
+        beforeNestedLocalUpdate.local.nestedInnerSiblingRenders,
+        0,
+        "nested inner sibling render",
+    );
+    localEvidence.nestedInnerSiblingEveryRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedInnerSiblingSetups,
+        beforeNestedLocalUpdate.local.nestedInnerSiblingSetups,
+        0,
+        "nested inner sibling EveryRender setup",
+    );
+    localEvidence.nestedOuterSiblingRenderDelta = counterDelta(
+        afterNestedLocalUpdate.local.nestedOuterSiblingRenders,
+        beforeNestedLocalUpdate.local.nestedOuterSiblingRenders,
+        0,
+        "nested outer sibling render",
+    );
+    counterDelta(
+        afterNestedLocalUpdate.reports.length,
+        beforeNestedLocalUpdate.reports.length,
+        0,
+        "nested local update boundary report",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-local-unexpected-fallback']",
+        "nested local update fallback stays inactive",
+    );
+    await assertShellSame(client, "successful nested local owner update");
+
+    await waitForText(client, "[data-testid='eb-local-transaction-version']", "A", "initial local transaction version");
+    await waitForProbe(client, (current) =>
+        current.localTransaction.aEffectSetups === 1 &&
+        current.localTransaction.aResourceStarts === 1 &&
+        current.localTransaction.aLaterSiblingSetups === 1 &&
+        current.localTransaction.aEffectCleanups === 0 &&
+        current.localTransaction.aUnmountCallbacks === 0 &&
+        current.localTransaction.aResourceCleanups === 0,
+    "initial local protected transaction lifecycle");
+    const beforeLocalTransactionFailure = await probe(client);
+
+    await click(client, "[data-testid='eb-local-transaction-trigger']");
+    await waitForSelector(client, "[data-testid='eb-local-transaction-fallback']", "local transaction boundary fallback");
+    await waitForAbsent(client, "[data-testid='eb-local-transaction-owner']", "failed local transaction owner removed");
+    await waitForText(
+        client,
+        "[data-testid='eb-local-transaction-error-component']",
+        "LocalTransactionRiskyDescendant",
+        "local transaction descendant component",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeLocalTransactionFailure.reports.length + 1 &&
+        current.reports.at(-1).phase === "render" &&
+        current.reports.at(-1).component === "LocalTransactionRiskyDescendant" &&
+        current.localTransaction.attemptedBEffectSetups === 0 &&
+        current.localTransaction.attemptedBUnmountCallbacks === 0 &&
+        current.localTransaction.attemptedBResourceStarts === 0 &&
+        current.localTransaction.attemptedBResourceCleanups === 0 &&
+        current.localTransaction.attemptedBLaterSetups === 0 &&
+        current.localTransaction.aEffectCleanups === 1 &&
+        current.localTransaction.aUnmountCallbacks === 1 &&
+        current.localTransaction.aResourceCleanups === 1,
+    "failed local protected transaction rollback");
+    await assertShellSame(client, "local protected transaction fallback");
+
+    const afterLocalTransactionFailure = await probe(client);
+    localEvidence.localTransactionBoundaryReports =
+        afterLocalTransactionFailure.reports.length - beforeLocalTransactionFailure.reports.length;
+    await click(client, "[data-testid='eb-local-transaction-retry']");
+    await waitForText(client, "[data-testid='eb-local-transaction-version']", "B", "local transaction retry version");
+    await waitForAbsent(client, "[data-testid='eb-local-transaction-fallback']", "local transaction fallback cleared");
+    await waitForProbe(client, (current) =>
+        current.reports.length === afterLocalTransactionFailure.reports.length &&
+        current.localTransaction.retryBEffectSetups === 1 &&
+        current.localTransaction.retryBResourceStarts === 1 &&
+        current.localTransaction.retryBLaterSetups === 1 &&
+        current.localTransaction.attemptedBEffectSetups === 0 &&
+        current.localTransaction.attemptedBUnmountCallbacks === 0 &&
+        current.localTransaction.attemptedBResourceStarts === 0 &&
+        current.localTransaction.attemptedBLaterSetups === 0,
+    "healthy local protected transaction retry");
+    await assertShellSame(client, "local protected transaction retry");
+
     await click(client, "[data-testid='eb-protected-increment']");
     await waitForText(client, "[data-testid='eb-protected-state']", "1", "protected state before failure");
     await waitForProbe(client, (probe) => probe.effectCount === 2 && probe.cleanupCount === 1, "effect rerun before failure");
@@ -99,6 +456,105 @@ try {
     await assertShellSame(client, "shell after nested fallback panic");
     await assertListenerNetStable(client, "nested fallback panic");
 
+    const beforeNestedFallbackTransaction = await probe(client);
+    await click(client, "[data-testid='eb-trigger-nested-fallback-transaction']");
+    await waitForSelector(
+        client,
+        "[data-testid='eb-nested-fallback-outer']",
+        "nested fallback descendant bubbles to outer",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-nested-fallback-owner']",
+        "failed nested fallback lifecycle owner removed",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeNestedFallbackTransaction.reports.length + 2 &&
+        current.reports.at(-2).component === "InitialRiskyChild" &&
+        current.reports.at(-1).component === "FallbackRiskyDescendant" &&
+        current.nestedFallback.ownerRenders === 1 &&
+        current.nestedFallback.effectSetups === 0 &&
+        current.nestedFallback.effectCleanups === 0 &&
+        current.nestedFallback.unmountCallbacks === 0 &&
+        current.nestedFallback.resourceStarts === 0 &&
+        current.nestedFallback.resourceCleanups === 0 &&
+        current.nestedFallback.laterSiblingSetups === 0,
+    "nested fallback transaction rollback");
+    await waitForStableReportCount(
+        client,
+        beforeNestedFallbackTransaction.reports.length + 2,
+        "nested fallback transaction",
+    );
+    await assertShellSame(client, "nested fallback transaction");
+    await assertListenerNetStable(client, "nested fallback transaction");
+    const afterNestedFallbackTransaction = await probe(client);
+    const nestedFallbackReports = afterNestedFallbackTransaction.reports.slice(
+        beforeNestedFallbackTransaction.reports.length,
+    );
+    const nestedFallbackEvidence = {
+        ...afterNestedFallbackTransaction.nestedFallback,
+        innerReports: nestedFallbackReports.filter(
+            (report) => report.component === "InitialRiskyChild",
+        ).length,
+        outerReports: nestedFallbackReports.filter(
+            (report) => report.component === "FallbackRiskyDescendant",
+        ).length,
+    };
+
+    await waitForText(client, "[data-testid='eb-transaction-version']", "A", "initial transaction version");
+    await waitForProbe(client, (current) =>
+        current.transaction.aEffectSetups === 1 &&
+        current.transaction.aResourceStarts === 1 &&
+        current.transaction.aLaterSiblingSetups === 1 &&
+        current.transaction.aEffectCleanups === 0 &&
+        current.transaction.aUnmountCallbacks === 0 &&
+        current.transaction.aResourceCleanups === 0,
+    "initial protected transaction lifecycle");
+    const beforeTransactionFailure = await probe(client);
+
+    await click(client, "[data-testid='eb-trigger-transaction-error']");
+    await waitForSelector(client, "[data-testid='eb-transaction-fallback']", "transaction boundary fallback");
+    await waitForAbsent(client, "[data-testid='eb-transaction-owner']", "failed transaction owner removed");
+    await waitForText(
+        client,
+        "[data-testid='eb-transaction-error-component']",
+        "TransactionRiskyDescendant",
+        "transaction descendant component",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeTransactionFailure.reports.length + 1 &&
+        current.reports.at(-1).phase === "render" &&
+        current.reports.at(-1).component === "TransactionRiskyDescendant" &&
+        current.transaction.attemptedBEffectSetups === 0 &&
+        current.transaction.attemptedBUnmountCallbacks === 0 &&
+        current.transaction.attemptedBResourceStarts === 0 &&
+        current.transaction.attemptedBResourceCleanups === 0 &&
+        current.transaction.attemptedBLaterSetups === 0 &&
+        current.transaction.aEffectCleanups === 1 &&
+        current.transaction.aUnmountCallbacks === 1 &&
+        current.transaction.aResourceCleanups === 1,
+    "failed protected transaction rollback");
+    await assertShellSame(client, "protected transaction fallback");
+
+    const afterTransactionFailure = await probe(client);
+    const transactionBoundaryReports =
+        afterTransactionFailure.reports.length - beforeTransactionFailure.reports.length;
+    await click(client, "[data-testid='eb-transaction-retry']");
+    await waitForText(client, "[data-testid='eb-transaction-version']", "B", "transaction retry version");
+    await waitForAbsent(client, "[data-testid='eb-transaction-fallback']", "transaction fallback cleared");
+    await waitForProbe(client, (current) =>
+        current.reports.length === afterTransactionFailure.reports.length &&
+        current.transaction.retryBEffectSetups === 1 &&
+        current.transaction.retryBResourceStarts === 1 &&
+        current.transaction.retryBLaterSetups === 1 &&
+        current.transaction.attemptedBEffectSetups === 0 &&
+        current.transaction.attemptedBUnmountCallbacks === 0 &&
+        current.transaction.attemptedBResourceStarts === 0 &&
+        current.transaction.attemptedBLaterSetups === 0 &&
+        current.listenerAudit.add === current.listenerAudit.remove,
+    "healthy protected transaction retry");
+    await assertShellSame(client, "protected transaction retry");
+
     const beforeNoBoundary = await probe(client);
     await click(client, "[data-testid='eb-trigger-no-boundary-error']");
     await waitForAbsent(client, "[data-testid='eb-no-boundary-healthy']", "no-boundary subtree default Empty fallback");
@@ -108,6 +564,20 @@ try {
     "no-boundary render report");
     await assertShellSame(client, "shell after no-boundary failure");
 
+    const finalProbe = await probe(client);
+    console.log(`Error boundary protected transaction counters: ${JSON.stringify({
+        ...finalProbe.transaction,
+        localEvidence,
+        localUpdate: finalProbe.local,
+        localTransaction: finalProbe.localTransaction,
+        nestedFallback: nestedFallbackEvidence,
+        capturedDirtyBatch: dirtyBatchEvidence,
+        protectedTeardown: protectedTeardownEvidence,
+        boundaryReports: transactionBoundaryReports,
+        shellIdentityChanges: finalProbe.shellIdentityChanges,
+        listenerAdditions: finalProbe.listenerAudit.add,
+        listenerRemovals: finalProbe.listenerAudit.remove,
+    })}`);
     client.close();
     console.log("Error boundary browser smoke: ok");
 } finally {
@@ -139,6 +609,7 @@ async function installListenerAudit(client) {
 async function captureShell(client) {
     const ok = await client.evaluate(`(() => {
         window.__errorBoundaryShell = document.querySelector("[data-testid='eb-shell']");
+        window.__errorBoundaryShellIdentityChanges = 0;
         return Boolean(window.__errorBoundaryShell);
     })()`);
     if (!ok) {
@@ -147,7 +618,11 @@ async function captureShell(client) {
 }
 
 async function assertShellSame(client, label) {
-    const same = await client.evaluate(`(() => window.__errorBoundaryShell === document.querySelector("[data-testid='eb-shell']"))()`);
+    const same = await client.evaluate(`(() => {
+        const same = window.__errorBoundaryShell === document.querySelector("[data-testid='eb-shell']");
+        if (!same) window.__errorBoundaryShellIdentityChanges++;
+        return same;
+    })()`);
     if (!same) {
         throw new Error(`APP FAILURE: shell identity changed during ${label}`);
     }
@@ -158,8 +633,59 @@ async function probe(client) {
         effectCount: globalThis.goframeErrorBoundaryEffectCount ?? 0,
         cleanupCount: globalThis.goframeErrorBoundaryCleanupCount ?? 0,
         reports: Array.from(globalThis.goframeErrorBoundaryReports || []),
+        transaction: globalThis.goframeProtectedTransactionProbe || {},
+        local: globalThis.goframeLocalUpdateProbe || {},
+        localTransaction: globalThis.goframeLocalTransactionProbe || {},
+        nestedFallback: globalThis.goframeNestedFallbackTransactionProbe || {},
+        dirtyBatch: globalThis.goframeCapturedDirtyBatchProbe || {},
+        teardown: globalThis.goframeProtectedTeardownProbe || {},
+        shellIdentityChanges: globalThis.__errorBoundaryShellIdentityChanges || 0,
         listenerAudit: globalThis.__errorBoundaryListenerAudit || { add: 0, remove: 0 },
     }))()`);
+}
+
+function counterDelta(after, before, expected, label) {
+    const delta = after - before;
+    if (delta !== expected) {
+        throw new Error(`APP FAILURE: ${label} delta = ${delta}, want ${expected}`);
+    }
+    return delta;
+}
+
+function assertProtectedTeardownOrdering(order, label) {
+    const events = order.split(",").filter(Boolean);
+    const fallbackIndex = events.indexOf("fallback-render");
+    const teardownMarkers = [
+        "removed-effect-cleanup",
+        "removed-resource-cleanup",
+        "removed-unmount",
+        "replaced-effect-cleanup",
+        "replaced-resource-cleanup",
+        "replaced-unmount",
+    ];
+    const teardownIndices = teardownMarkers.map((marker) => {
+        const index = events.indexOf(marker);
+        if (index < 0) {
+            throw new Error(
+                `APP FAILURE: missing ${marker} during ${label}; order=${JSON.stringify(events)}`,
+            );
+        }
+        if (events.indexOf(marker, index + 1) >= 0) {
+            throw new Error(
+                `APP FAILURE: duplicate ${marker} during ${label}; order=${JSON.stringify(events)}`,
+            );
+        }
+        return index;
+    });
+    const earliestTeardownIndex = Math.min(...teardownIndices);
+    if (fallbackIndex < 0 || teardownIndices.some((index) => index <= fallbackIndex)) {
+        throw new Error(
+            `APP FAILURE: protected teardown ran before fallback render during ${label}; ` +
+            `fallbackIndex=${fallbackIndex}; earliestTeardownIndex=${earliestTeardownIndex}; ` +
+            `order=${JSON.stringify(events)}`,
+        );
+    }
+    return { fallbackIndex, earliestTeardownIndex };
 }
 
 async function click(client, selector) {
