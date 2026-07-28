@@ -13,6 +13,7 @@ var (
 	protectedCleanupCount        int
 	transactionAttemptPhase      = "initial"
 	transactionProbe             protectedTransactionProbe
+	teardownProbe                protectedTeardownProbe
 	localTransactionVersion      = "A"
 	localTransactionAttemptPhase = "initial"
 	localUpdateProbe             localUpdateLifecycleProbe
@@ -40,6 +41,23 @@ type protectedTransactionProbe struct {
 	retryBResourceStarts       int
 	retryBResourceCleanups     int
 	retryBLaterSetups          int
+}
+
+type protectedTeardownProbe struct {
+	ownerRenders             int
+	removedEffectSetups      int
+	removedEffectCleanups    int
+	removedUnmountCallbacks  int
+	removedResourceStarts    int
+	removedResourceCleanups  int
+	replacedEffectSetups     int
+	replacedEffectCleanups   int
+	replacedUnmountCallbacks int
+	replacedResourceStarts   int
+	replacedResourceCleanups int
+	fallbackRenders          int
+	boundaryReports          int
+	order                    string
 }
 
 type localUpdateLifecycleProbe struct {
@@ -132,6 +150,21 @@ type TransactionRiskyProps struct {
 type TransactionLaterEffectProps struct {
 	Version string
 	Phase   string
+}
+
+type ProtectedTeardownScenarioProps struct{}
+
+type TeardownOwnerProps struct {
+	Version string
+	Broken  bool
+}
+
+type TeardownLifecycleChildProps struct {
+	Version string
+}
+
+type TeardownRiskyDescendantProps struct {
+	Broken bool
 }
 
 type LocalStateOwnerProps struct{}
@@ -390,6 +423,169 @@ func TransactionLaterEffect(props TransactionLaterEffectProps) gf.Node {
 		return nil
 	}, gf.Deps(props.Version))
 	return gf.Empty()
+}
+
+func TeardownOwner(props TeardownOwnerProps) gf.Node {
+	teardownProbe.ownerRenders++
+	syncBoundaryProbe()
+
+	children := make([]gf.Node, 0, 3)
+	if props.Version == "A" {
+		children = append(children, gf.Key(
+			"removed",
+			gf.Component(
+				"RemovedLifecycleChild",
+				TeardownLifecycleChildProps{Version: "A"},
+				RemovedLifecycleChild,
+			),
+		))
+	}
+
+	replaced := gf.Component(
+		"ReplacedLifecycleChildA",
+		TeardownLifecycleChildProps{Version: props.Version},
+		ReplacedLifecycleChildA,
+	)
+	if props.Version == "B" {
+		replaced = gf.Component(
+			"ReplacedLifecycleChildB",
+			TeardownLifecycleChildProps{Version: props.Version},
+			ReplacedLifecycleChildB,
+		)
+	}
+	children = append(
+		children,
+		gf.Key("replaced", replaced),
+		gf.Component(
+			"TeardownRiskyDescendant",
+			TeardownRiskyDescendantProps{Broken: props.Broken},
+			TeardownRiskyDescendant,
+		),
+	)
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-teardown-owner"},
+		children...,
+	)
+}
+
+func RemovedLifecycleChild(props TeardownLifecycleChildProps) gf.Node {
+	gf.UseEffect(func() gf.Cleanup {
+		teardownProbe.removedEffectSetups++
+		syncBoundaryProbe()
+		return func() {
+			teardownProbe.removedEffectCleanups++
+			recordTeardownEvent("removed-effect-cleanup")
+		}
+	})
+	gf.UseUnmount(func() {
+		teardownProbe.removedUnmountCallbacks++
+		recordTeardownEvent("removed-unmount")
+	})
+	_, _ = gf.UseResource("removed-"+props.Version, func(
+		key string,
+		resolve func(string),
+		reject func(error),
+	) gf.Cleanup {
+		teardownProbe.removedResourceStarts++
+		syncBoundaryProbe()
+		return func() {
+			teardownProbe.removedResourceCleanups++
+			recordTeardownEvent("removed-resource-cleanup")
+		}
+	})
+	return gf.El(
+		"p",
+		gf.Props{"data-testid": "eb-teardown-removed"},
+		gf.Text("removed "+props.Version),
+	)
+}
+
+func ReplacedLifecycleChildA(props TeardownLifecycleChildProps) gf.Node {
+	return replacedLifecycleChild(props)
+}
+
+func ReplacedLifecycleChildB(props TeardownLifecycleChildProps) gf.Node {
+	return replacedLifecycleChild(props)
+}
+
+func replacedLifecycleChild(props TeardownLifecycleChildProps) gf.Node {
+	gf.UseEffect(func() gf.Cleanup {
+		teardownProbe.replacedEffectSetups++
+		syncBoundaryProbe()
+		return func() {
+			teardownProbe.replacedEffectCleanups++
+			recordTeardownEvent("replaced-effect-cleanup")
+		}
+	})
+	gf.UseUnmount(func() {
+		teardownProbe.replacedUnmountCallbacks++
+		recordTeardownEvent("replaced-unmount")
+	})
+	_, _ = gf.UseResource("replaced-"+props.Version, func(
+		key string,
+		resolve func(string),
+		reject func(error),
+	) gf.Cleanup {
+		teardownProbe.replacedResourceStarts++
+		syncBoundaryProbe()
+		return func() {
+			teardownProbe.replacedResourceCleanups++
+			recordTeardownEvent("replaced-resource-cleanup")
+		}
+	})
+	return gf.El(
+		"p",
+		gf.Props{"data-testid": "eb-teardown-replaced"},
+		gf.Text("replaced "+props.Version),
+	)
+}
+
+func TeardownRiskyDescendant(props TeardownRiskyDescendantProps) gf.Node {
+	if props.Broken {
+		recordTeardownEvent("risky-panic")
+		panic("protected teardown descendant boom")
+	}
+	return gf.El(
+		"p",
+		gf.Props{"data-testid": "eb-teardown-risky"},
+		gf.Text("healthy"),
+	)
+}
+
+func makeTeardownFallback(
+	setBroken func(bool),
+) func(gf.ErrorBoundaryContext) gf.Node {
+	return func(ctx gf.ErrorBoundaryContext) gf.Node {
+		teardownProbe.fallbackRenders++
+		teardownProbe.boundaryReports++
+		recordTeardownEvent("fallback-render")
+		return gf.El(
+			"section",
+			gf.Props{"data-testid": "eb-teardown-fallback"},
+			gf.El(
+				"p",
+				gf.Props{"data-testid": "eb-teardown-error-component"},
+				gf.Text(ctx.Info.Component),
+			),
+			gf.El(
+				"button",
+				gf.Props{
+					"data-testid": "eb-teardown-retry",
+					"OnClick": func() {
+						setBroken(false)
+						ctx.Reset()
+					},
+				},
+				gf.Text("Retry teardown transaction"),
+			),
+		)
+	}
+}
+
+func recordTeardownEvent(event string) {
+	teardownProbe.order = appendDirtyBatchStep(teardownProbe.order, event)
+	syncBoundaryProbe()
 }
 
 func LocalStateOwner(LocalStateOwnerProps) gf.Node {
@@ -844,6 +1040,7 @@ func initBoundaryProbe() {
 	protectedCleanupCount = 0
 	transactionAttemptPhase = "initial"
 	transactionProbe = protectedTransactionProbe{}
+	teardownProbe = protectedTeardownProbe{}
 	localTransactionVersion = "A"
 	localTransactionAttemptPhase = "initial"
 	localUpdateProbe = localUpdateLifecycleProbe{}
@@ -877,6 +1074,23 @@ func syncBoundaryProbe() {
 	probe.Set("retryBResourceCleanups", transactionProbe.retryBResourceCleanups)
 	probe.Set("retryBLaterSetups", transactionProbe.retryBLaterSetups)
 	js.Global().Set("goframeProtectedTransactionProbe", probe)
+
+	teardown := js.Global().Get("Object").New()
+	teardown.Set("ownerRenders", teardownProbe.ownerRenders)
+	teardown.Set("removedEffectSetups", teardownProbe.removedEffectSetups)
+	teardown.Set("removedEffectCleanups", teardownProbe.removedEffectCleanups)
+	teardown.Set("removedUnmountCallbacks", teardownProbe.removedUnmountCallbacks)
+	teardown.Set("removedResourceStarts", teardownProbe.removedResourceStarts)
+	teardown.Set("removedResourceCleanups", teardownProbe.removedResourceCleanups)
+	teardown.Set("replacedEffectSetups", teardownProbe.replacedEffectSetups)
+	teardown.Set("replacedEffectCleanups", teardownProbe.replacedEffectCleanups)
+	teardown.Set("replacedUnmountCallbacks", teardownProbe.replacedUnmountCallbacks)
+	teardown.Set("replacedResourceStarts", teardownProbe.replacedResourceStarts)
+	teardown.Set("replacedResourceCleanups", teardownProbe.replacedResourceCleanups)
+	teardown.Set("fallbackRenders", teardownProbe.fallbackRenders)
+	teardown.Set("boundaryReports", teardownProbe.boundaryReports)
+	teardown.Set("order", teardownProbe.order)
+	js.Global().Set("goframeProtectedTeardownProbe", teardown)
 
 	local := js.Global().Get("Object").New()
 	local.Set("ownerRenders", localUpdateProbe.ownerRenders)

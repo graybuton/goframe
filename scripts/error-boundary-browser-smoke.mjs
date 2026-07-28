@@ -100,6 +100,122 @@ try {
         current.nestedFallback.laterSiblingSetups === 0,
     "initial nested fallback transaction counters");
 
+    await waitForSelector(
+        client,
+        "[data-testid='eb-teardown-removed']",
+        "initial removable lifecycle child",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-teardown-replaced']",
+        "replaced A",
+        "initial replaceable lifecycle child",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-teardown-fallback']",
+        "initial teardown fallback absent",
+    );
+    await waitForProbe(client, (current) =>
+        current.teardown.ownerRenders === 1 &&
+        current.teardown.removedEffectSetups === 1 &&
+        current.teardown.removedEffectCleanups === 0 &&
+        current.teardown.removedUnmountCallbacks === 0 &&
+        current.teardown.removedResourceStarts === 1 &&
+        current.teardown.removedResourceCleanups === 0 &&
+        current.teardown.replacedEffectSetups === 1 &&
+        current.teardown.replacedEffectCleanups === 0 &&
+        current.teardown.replacedUnmountCallbacks === 0 &&
+        current.teardown.replacedResourceStarts === 1 &&
+        current.teardown.replacedResourceCleanups === 0 &&
+        current.teardown.fallbackRenders === 0 &&
+        current.teardown.boundaryReports === 0 &&
+        current.teardown.order === "",
+    "initial protected teardown lifecycle");
+
+    const beforeTeardownFailure = await probe(client);
+    await click(client, "[data-testid='eb-trigger-teardown-error']");
+    await waitForSelector(
+        client,
+        "[data-testid='eb-teardown-fallback']",
+        "protected teardown fallback",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-teardown-owner']",
+        "failed teardown owner removed",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-teardown-error-component']",
+        "TeardownRiskyDescendant",
+        "protected teardown report component",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeTeardownFailure.reports.length + 1 &&
+        current.reports.at(-1).component === "TeardownRiskyDescendant" &&
+        current.teardown.ownerRenders === 2 &&
+        current.teardown.removedEffectSetups === 1 &&
+        current.teardown.removedEffectCleanups === 1 &&
+        current.teardown.removedUnmountCallbacks === 1 &&
+        current.teardown.removedResourceStarts === 1 &&
+        current.teardown.removedResourceCleanups === 1 &&
+        current.teardown.replacedEffectSetups === 1 &&
+        current.teardown.replacedEffectCleanups === 1 &&
+        current.teardown.replacedUnmountCallbacks === 1 &&
+        current.teardown.replacedResourceStarts === 1 &&
+        current.teardown.replacedResourceCleanups === 1 &&
+        current.teardown.fallbackRenders === 1 &&
+        current.teardown.boundaryReports === 1,
+    "protected teardown cleanup");
+    const afterTeardownFailure = await probe(client);
+    const teardownOrdering = assertProtectedTeardownOrdering(
+        afterTeardownFailure.teardown.order,
+        "protected teardown fallback",
+    );
+    await assertShellSame(client, "protected teardown fallback");
+
+    await click(client, "[data-testid='eb-teardown-retry']");
+    await waitForText(
+        client,
+        "[data-testid='eb-teardown-replaced']",
+        "replaced B",
+        "healthy teardown retry",
+    );
+    await waitForAbsent(
+        client,
+        "[data-testid='eb-teardown-fallback']",
+        "teardown fallback cleared",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === afterTeardownFailure.reports.length &&
+        current.teardown.ownerRenders === 3 &&
+        current.teardown.removedEffectSetups === 1 &&
+        current.teardown.removedEffectCleanups === 1 &&
+        current.teardown.removedUnmountCallbacks === 1 &&
+        current.teardown.removedResourceStarts === 1 &&
+        current.teardown.removedResourceCleanups === 1 &&
+        current.teardown.replacedEffectSetups === 2 &&
+        current.teardown.replacedEffectCleanups === 1 &&
+        current.teardown.replacedUnmountCallbacks === 1 &&
+        current.teardown.replacedResourceStarts === 2 &&
+        current.teardown.replacedResourceCleanups === 1 &&
+        current.teardown.fallbackRenders === 1 &&
+        current.teardown.boundaryReports === 1 &&
+        current.teardown.order === afterTeardownFailure.teardown.order &&
+        current.listenerAudit.add === current.listenerAudit.remove,
+    "healthy protected teardown retry");
+    await assertShellSame(client, "protected teardown retry");
+    const afterTeardownRetry = await probe(client);
+    const protectedTeardownEvidence = {
+        ...afterTeardownRetry.teardown,
+        boundaryReportDelta:
+            afterTeardownRetry.reports.length -
+            beforeTeardownFailure.reports.length,
+        fallbackIndex: teardownOrdering.fallbackIndex,
+        earliestTeardownIndex: teardownOrdering.earliestTeardownIndex,
+    };
+
     const beforeDirtyBatch = await probe(client);
     await click(client, "[data-testid='eb-trigger-dirty-batch']");
     await waitForSelector(
@@ -456,6 +572,7 @@ try {
         localTransaction: finalProbe.localTransaction,
         nestedFallback: nestedFallbackEvidence,
         capturedDirtyBatch: dirtyBatchEvidence,
+        protectedTeardown: protectedTeardownEvidence,
         boundaryReports: transactionBoundaryReports,
         shellIdentityChanges: finalProbe.shellIdentityChanges,
         listenerAdditions: finalProbe.listenerAudit.add,
@@ -521,6 +638,7 @@ async function probe(client) {
         localTransaction: globalThis.goframeLocalTransactionProbe || {},
         nestedFallback: globalThis.goframeNestedFallbackTransactionProbe || {},
         dirtyBatch: globalThis.goframeCapturedDirtyBatchProbe || {},
+        teardown: globalThis.goframeProtectedTeardownProbe || {},
         shellIdentityChanges: globalThis.__errorBoundaryShellIdentityChanges || 0,
         listenerAudit: globalThis.__errorBoundaryListenerAudit || { add: 0, remove: 0 },
     }))()`);
@@ -532,6 +650,42 @@ function counterDelta(after, before, expected, label) {
         throw new Error(`APP FAILURE: ${label} delta = ${delta}, want ${expected}`);
     }
     return delta;
+}
+
+function assertProtectedTeardownOrdering(order, label) {
+    const events = order.split(",").filter(Boolean);
+    const fallbackIndex = events.indexOf("fallback-render");
+    const teardownMarkers = [
+        "removed-effect-cleanup",
+        "removed-resource-cleanup",
+        "removed-unmount",
+        "replaced-effect-cleanup",
+        "replaced-resource-cleanup",
+        "replaced-unmount",
+    ];
+    const teardownIndices = teardownMarkers.map((marker) => {
+        const index = events.indexOf(marker);
+        if (index < 0) {
+            throw new Error(
+                `APP FAILURE: missing ${marker} during ${label}; order=${JSON.stringify(events)}`,
+            );
+        }
+        if (events.indexOf(marker, index + 1) >= 0) {
+            throw new Error(
+                `APP FAILURE: duplicate ${marker} during ${label}; order=${JSON.stringify(events)}`,
+            );
+        }
+        return index;
+    });
+    const earliestTeardownIndex = Math.min(...teardownIndices);
+    if (fallbackIndex < 0 || teardownIndices.some((index) => index <= fallbackIndex)) {
+        throw new Error(
+            `APP FAILURE: protected teardown ran before fallback render during ${label}; ` +
+            `fallbackIndex=${fallbackIndex}; earliestTeardownIndex=${earliestTeardownIndex}; ` +
+            `order=${JSON.stringify(events)}`,
+        );
+    }
+    return { fallbackIndex, earliestTeardownIndex };
 }
 
 async function click(client, selector) {

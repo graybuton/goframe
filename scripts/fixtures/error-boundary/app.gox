@@ -82,6 +82,8 @@ func App() gf.Node {
 				<TransactionOwner Version={transactionVersion} Broken={transactionBroken} />
 			</gf.ErrorBoundary>
 
+			<ProtectedTeardownScenario />
+
 			<gf.ErrorBoundary Fallback={localUpdateFallback}>
 				<LocalStateOwner />
 				<LocalUpdateSibling />
@@ -121,5 +123,27 @@ func App() gf.Node {
 			</button>
 			<NoBoundaryRisky Broken={noBoundaryBroken} />
 		</main>
+	)
+}
+
+func ProtectedTeardownScenario(ProtectedTeardownScenarioProps) gf.Node {
+	version, setVersion := gf.UseState("A")
+	broken, setBroken := gf.UseState(false)
+
+	return (
+		<section data-testid="eb-teardown-scenario">
+			<button
+				data-testid="eb-trigger-teardown-error"
+				OnClick={func() {
+					setVersion("B")
+					setBroken(true)
+				}}
+			>
+				Trigger protected teardown error
+			</button>
+			<gf.ErrorBoundary Fallback={makeTeardownFallback(setBroken)}>
+				<TeardownOwner Version={version} Broken={broken} />
+			</gf.ErrorBoundary>
+		</section>
 	)
 }
