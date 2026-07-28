@@ -265,6 +265,10 @@ func removeMounted(parent js.Value, mounted *mountedNode) {
 }
 
 func releaseMounted(mounted *mountedNode) {
+	if stageProtectedMountedTeardown != nil &&
+		stageProtectedMountedTeardown(mounted) {
+		return
+	}
 	if mounted.component != nil {
 		releaseMounted(mounted.componentChild)
 		deactivateComponent(mounted.component)

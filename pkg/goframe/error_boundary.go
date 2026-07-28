@@ -28,6 +28,7 @@ type errorBoundaryState struct {
 	generation  int
 	resetKey    string
 	attempts    []*componentInstance
+	teardown    protectedTeardownState
 }
 
 var (
@@ -60,7 +61,9 @@ func renderErrorBoundary(props ErrorBoundaryProps) Node {
 				resetErrorBoundary(instance, state)
 			},
 		}
-		return Key(errorBoundaryFallbackKey(state.generation), Child(props.Fallback(context)))
+		fallback := Child(props.Fallback(context))
+		prepareProtectedFallbackReconcile(state)
+		return Key(errorBoundaryFallbackKey(state.generation), fallback)
 	}
 	return Key(errorBoundaryProtectedKey(state.generation), Fragment(props.Children...))
 }
@@ -69,7 +72,12 @@ func ensureErrorBoundaryState(instance *componentInstance) *errorBoundaryState {
 	if instance.errorBoundary == nil {
 		beginProtectedLifecycle = beginProtectedSubtreeLifecycle
 		finishProtectedLifecycle = finishProtectedSubtreeLifecycle
-		instance.errorBoundary = &errorBoundaryState{}
+		installProtectedMountedTeardown()
+		state := &errorBoundaryState{}
+		instance.errorBoundary = state
+		instance.unmountSlots = append(instance.unmountSlots, func() {
+			state.teardown.release()
+		})
 	}
 	return instance.errorBoundary
 }
@@ -141,7 +149,11 @@ func captureRenderErrorBoundary(failing *componentInstance, info ErrorInfo) {
 
 func nearestErrorBoundary(instance *componentInstance) *componentInstance {
 	for current := instance.parent; current != nil; current = current.parent {
-		if current.active && current.errorBoundary != nil && current.errorBoundary.phase != errorBoundaryFallback {
+		if current.active &&
+			current.errorBoundary != nil &&
+			current.errorBoundary.phase != errorBoundaryFallback &&
+			(current.errorBoundary.phase != errorBoundaryProtected ||
+				current.errorBoundary.info.Phase == 0) {
 			return current
 		}
 	}

@@ -6,6 +6,7 @@ func beginProtectedSubtreeLifecycle(state *errorBoundaryState) *errorBoundarySta
 	}
 	previous := currentProtectedLifecycleBoundary
 	state.attempts = make([]*componentInstance, 0)
+	state.teardown.begin()
 	currentProtectedLifecycleBoundary = state
 	return previous
 }
@@ -23,22 +24,43 @@ func finishProtectedSubtreeLifecycle(
 	currentProtectedLifecycleBoundary = previous
 	attempts := state.attempts
 	state.attempts = nil
+	if state.phase == errorBoundaryProtected &&
+		state.info.Phase != 0 {
+		state.phase = errorBoundaryFallback
+	}
 
 	if recovered != nil {
 		rollbackProtectedSubtreeLifecycleAttempts(attempts)
+		state.teardown.retain()
 		panic(recovered)
 	}
-	if state.phase != errorBoundaryProtected {
+	if state.phase != errorBoundaryProtected &&
+		state.phase != errorBoundaryFallback {
 		rollbackProtectedSubtreeLifecycleAttempts(attempts)
+		state.teardown.retain()
 		return
 	}
 	if previous != nil {
 		// The outer boundary still owns commit: a later outer failure must be
 		// able to roll back work from this successful nested subtree.
 		previous.attempts = append(previous.attempts, attempts...)
+		state.teardown.merge(&previous.teardown)
 		return
 	}
+	state.teardown.retain()
 	commitProtectedSubtreeLifecycleAttempts(attempts)
+	state.teardown.release()
+}
+
+func finalizePendingProtectedSubtreeTeardown(state *errorBoundaryState) {
+	if state == nil {
+		return
+	}
+	if currentProtectedLifecycleBoundary != nil {
+		state.teardown.merge(&currentProtectedLifecycleBoundary.teardown)
+		return
+	}
+	state.teardown.release()
 }
 
 func commitProtectedSubtreeLifecycleAttempts(attempts []*componentInstance) {
