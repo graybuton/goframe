@@ -100,6 +100,18 @@ func App() gf.Node {
 			</gf.ErrorBoundary>
 
 			<button
+				data-testid="eb-trigger-dirty-batch"
+				OnClick={triggerDirtyBatch}
+			>
+				Trigger captured dirty batch
+			</button>
+			<gf.ErrorBoundary Fallback={dirtyBatchFallback}>
+				<DirtyBatchFailingOwner />
+				<DirtyBatchLaterOwner />
+			</gf.ErrorBoundary>
+			<DirtyBatchIndependentOwner />
+
+			<button
 				data-testid="eb-trigger-no-boundary-error"
 				OnClick={func() {
 					setNoBoundaryBroken(true)

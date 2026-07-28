@@ -18,6 +18,10 @@ var (
 	localUpdateProbe             localUpdateLifecycleProbe
 	localTransactionProbe        protectedTransactionProbe
 	nestedFallbackProbe          nestedFallbackTransactionProbe
+	dirtyBatchProbe              capturedDirtyBatchProbe
+	setDirtyBatchFailingVersion  func(string)
+	setDirtyBatchLaterVersion    func(string)
+	setDirtyBatchIndependent     func(int)
 )
 
 type protectedTransactionProbe struct {
@@ -61,6 +65,25 @@ type nestedFallbackTransactionProbe struct {
 	resourceStarts     int
 	resourceCleanups   int
 	laterSiblingSetups int
+}
+
+type capturedDirtyBatchProbe struct {
+	setterOrder                string
+	renderOrder                string
+	failingOwnerRenders        int
+	laterARenders              int
+	attemptedBRenders          int
+	aEffectSetups              int
+	aEffectCleanups            int
+	aUnmountCallbacks          int
+	aResourceStarts            int
+	aResourceCleanups          int
+	attemptedBEffectSetups     int
+	attemptedBEffectCleanups   int
+	attemptedBUnmounts         int
+	attemptedBResourceStarts   int
+	attemptedBResourceCleanups int
+	independentOwnerRenders    int
 }
 
 type RiskyPanelProps struct {
@@ -122,6 +145,16 @@ type NestedInnerSiblingProps struct{}
 type NestedOuterSiblingProps struct{}
 
 type LocalTransactionOwnerProps struct{}
+
+type DirtyBatchFailingOwnerProps struct{}
+
+type DirtyBatchLaterOwnerProps struct{}
+
+type DirtyBatchIndependentOwnerProps struct{}
+
+type DirtyBatchRiskyDescendantProps struct {
+	Broken bool
+}
 
 func RiskyPanel(props RiskyPanelProps) gf.Node {
 	count, setCount := gf.UseState(0)
@@ -483,6 +516,158 @@ func LocalTransactionLaterEffect(props TransactionLaterEffectProps) gf.Node {
 	return gf.Empty()
 }
 
+func DirtyBatchFailingOwner(DirtyBatchFailingOwnerProps) gf.Node {
+	version, setVersion := gf.UseState("A")
+	setDirtyBatchFailingVersion = setVersion
+	dirtyBatchProbe.failingOwnerRenders++
+	if version == "B" {
+		recordDirtyBatchRender("failing B")
+	}
+	syncBoundaryProbe()
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-dirty-batch-failing-owner"},
+		gf.Component(
+			"DirtyBatchRiskyDescendant",
+			DirtyBatchRiskyDescendantProps{Broken: version == "B"},
+			DirtyBatchRiskyDescendant,
+		),
+	)
+}
+
+func DirtyBatchRiskyDescendant(props DirtyBatchRiskyDescendantProps) gf.Node {
+	if props.Broken {
+		recordDirtyBatchRender("risky B")
+		panic("captured dirty batch descendant boom")
+	}
+	return gf.El(
+		"p",
+		gf.Props{"data-testid": "eb-dirty-batch-risky"},
+		gf.Text("healthy"),
+	)
+}
+
+func DirtyBatchLaterOwner(DirtyBatchLaterOwnerProps) gf.Node {
+	version, setVersion := gf.UseState("A")
+	setDirtyBatchLaterVersion = setVersion
+	if version == "A" {
+		dirtyBatchProbe.laterARenders++
+	} else {
+		dirtyBatchProbe.attemptedBRenders++
+		recordDirtyBatchRender("later B")
+	}
+	syncBoundaryProbe()
+
+	gf.UseEffect(func() gf.Cleanup {
+		if version == "A" {
+			dirtyBatchProbe.aEffectSetups++
+		} else {
+			dirtyBatchProbe.attemptedBEffectSetups++
+		}
+		syncBoundaryProbe()
+		return func() {
+			if version == "A" {
+				dirtyBatchProbe.aEffectCleanups++
+			} else {
+				dirtyBatchProbe.attemptedBEffectCleanups++
+			}
+			syncBoundaryProbe()
+		}
+	}, gf.Deps(version))
+	gf.UseUnmount(func() {
+		if version == "A" {
+			dirtyBatchProbe.aUnmountCallbacks++
+		} else {
+			dirtyBatchProbe.attemptedBUnmounts++
+		}
+		syncBoundaryProbe()
+	})
+	_, _ = gf.UseResource(version, func(
+		key string,
+		resolve func(string),
+		reject func(error),
+	) gf.Cleanup {
+		if key == "A" {
+			dirtyBatchProbe.aResourceStarts++
+		} else {
+			dirtyBatchProbe.attemptedBResourceStarts++
+		}
+		syncBoundaryProbe()
+		return func() {
+			if key == "A" {
+				dirtyBatchProbe.aResourceCleanups++
+			} else {
+				dirtyBatchProbe.attemptedBResourceCleanups++
+			}
+			syncBoundaryProbe()
+		}
+	})
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-dirty-batch-later-owner"},
+		gf.El(
+			"p",
+			gf.Props{"data-testid": "eb-dirty-batch-later-version"},
+			gf.Text(version),
+		),
+	)
+}
+
+func DirtyBatchIndependentOwner(DirtyBatchIndependentOwnerProps) gf.Node {
+	value, setValue := gf.UseState(0)
+	setDirtyBatchIndependent = setValue
+	dirtyBatchProbe.independentOwnerRenders++
+	if value == 1 {
+		recordDirtyBatchRender("independent 1")
+	}
+	syncBoundaryProbe()
+	return gf.El(
+		"p",
+		gf.Props{"data-testid": "eb-dirty-batch-independent"},
+		gf.Text(gf.ToString(value)),
+	)
+}
+
+func triggerDirtyBatch() {
+	dirtyBatchProbe.setterOrder = ""
+	dirtyBatchProbe.renderOrder = ""
+	recordDirtyBatchSetter("failing B")
+	setDirtyBatchFailingVersion("B")
+	recordDirtyBatchSetter("later B")
+	setDirtyBatchLaterVersion("B")
+	recordDirtyBatchSetter("independent 1")
+	setDirtyBatchIndependent(1)
+}
+
+func recordDirtyBatchSetter(step string) {
+	dirtyBatchProbe.setterOrder = appendDirtyBatchStep(dirtyBatchProbe.setterOrder, step)
+	syncBoundaryProbe()
+}
+
+func recordDirtyBatchRender(step string) {
+	dirtyBatchProbe.renderOrder = appendDirtyBatchStep(dirtyBatchProbe.renderOrder, step)
+	syncBoundaryProbe()
+}
+
+func appendDirtyBatchStep(order, step string) string {
+	if order == "" {
+		return step
+	}
+	return order + "," + step
+}
+
+func dirtyBatchFallback(ctx gf.ErrorBoundaryContext) gf.Node {
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-dirty-batch-fallback"},
+		gf.El(
+			"p",
+			gf.Props{"data-testid": "eb-dirty-batch-error-component"},
+			gf.Text(ctx.Info.Component),
+		),
+	)
+}
+
 func localUpdateFallback(gf.ErrorBoundaryContext) gf.Node {
 	return gf.El("section", gf.Props{"data-testid": "eb-local-unexpected-fallback"},
 		gf.Text("unexpected local update fallback"),
@@ -664,6 +849,10 @@ func initBoundaryProbe() {
 	localUpdateProbe = localUpdateLifecycleProbe{}
 	localTransactionProbe = protectedTransactionProbe{}
 	nestedFallbackProbe = nestedFallbackTransactionProbe{}
+	dirtyBatchProbe = capturedDirtyBatchProbe{}
+	setDirtyBatchFailingVersion = nil
+	setDirtyBatchLaterVersion = nil
+	setDirtyBatchIndependent = nil
 	js.Global().Set("goframeErrorBoundaryReports", js.Global().Get("Array").New())
 	syncBoundaryProbe()
 }
@@ -731,4 +920,23 @@ func syncBoundaryProbe() {
 	nestedFallback.Set("resourceCleanups", nestedFallbackProbe.resourceCleanups)
 	nestedFallback.Set("laterSiblingSetups", nestedFallbackProbe.laterSiblingSetups)
 	js.Global().Set("goframeNestedFallbackTransactionProbe", nestedFallback)
+
+	dirtyBatch := js.Global().Get("Object").New()
+	dirtyBatch.Set("setterOrder", dirtyBatchProbe.setterOrder)
+	dirtyBatch.Set("renderOrder", dirtyBatchProbe.renderOrder)
+	dirtyBatch.Set("failingOwnerRenders", dirtyBatchProbe.failingOwnerRenders)
+	dirtyBatch.Set("laterARenders", dirtyBatchProbe.laterARenders)
+	dirtyBatch.Set("attemptedBRenders", dirtyBatchProbe.attemptedBRenders)
+	dirtyBatch.Set("aEffectSetups", dirtyBatchProbe.aEffectSetups)
+	dirtyBatch.Set("aEffectCleanups", dirtyBatchProbe.aEffectCleanups)
+	dirtyBatch.Set("aUnmountCallbacks", dirtyBatchProbe.aUnmountCallbacks)
+	dirtyBatch.Set("aResourceStarts", dirtyBatchProbe.aResourceStarts)
+	dirtyBatch.Set("aResourceCleanups", dirtyBatchProbe.aResourceCleanups)
+	dirtyBatch.Set("attemptedBEffectSetups", dirtyBatchProbe.attemptedBEffectSetups)
+	dirtyBatch.Set("attemptedBEffectCleanups", dirtyBatchProbe.attemptedBEffectCleanups)
+	dirtyBatch.Set("attemptedBUnmounts", dirtyBatchProbe.attemptedBUnmounts)
+	dirtyBatch.Set("attemptedBResourceStarts", dirtyBatchProbe.attemptedBResourceStarts)
+	dirtyBatch.Set("attemptedBResourceCleanups", dirtyBatchProbe.attemptedBResourceCleanups)
+	dirtyBatch.Set("independentOwnerRenders", dirtyBatchProbe.independentOwnerRenders)
+	js.Global().Set("goframeCapturedDirtyBatchProbe", dirtyBatch)
 }

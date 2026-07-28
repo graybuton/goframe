@@ -55,6 +55,26 @@ try {
         current.local.nestedOuterSiblingSetups >= 1,
     "initial local update probes");
 
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-later-version']",
+        "A",
+        "initial captured dirty batch later owner",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-independent']",
+        "0",
+        "initial captured dirty batch independent owner",
+    );
+    await waitForProbe(client, (current) =>
+        current.dirtyBatch.failingOwnerRenders === 1 &&
+        current.dirtyBatch.laterARenders === 1 &&
+        current.dirtyBatch.aEffectSetups === 1 &&
+        current.dirtyBatch.aResourceStarts === 1 &&
+        current.dirtyBatch.independentOwnerRenders === 1,
+    "initial captured dirty batch lifecycle");
+
     await waitForSelector(
         client,
         "[data-testid='eb-nested-fallback-protected']",
@@ -79,6 +99,53 @@ try {
         current.nestedFallback.resourceCleanups === 0 &&
         current.nestedFallback.laterSiblingSetups === 0,
     "initial nested fallback transaction counters");
+
+    const beforeDirtyBatch = await probe(client);
+    await click(client, "[data-testid='eb-trigger-dirty-batch']");
+    await waitForSelector(
+        client,
+        "[data-testid='eb-dirty-batch-fallback']",
+        "captured dirty batch fallback",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-error-component']",
+        "DirtyBatchRiskyDescendant",
+        "captured dirty batch report component",
+    );
+    await waitForText(
+        client,
+        "[data-testid='eb-dirty-batch-independent']",
+        "1",
+        "captured dirty batch independent update",
+    );
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeDirtyBatch.reports.length + 1 &&
+        current.reports.at(-1).component === "DirtyBatchRiskyDescendant" &&
+        current.dirtyBatch.setterOrder === "failing B,later B,independent 1" &&
+        current.dirtyBatch.renderOrder === "failing B,risky B,independent 1" &&
+        current.dirtyBatch.attemptedBRenders === 0 &&
+        current.dirtyBatch.attemptedBEffectSetups === 0 &&
+        current.dirtyBatch.attemptedBEffectCleanups === 0 &&
+        current.dirtyBatch.attemptedBUnmounts === 0 &&
+        current.dirtyBatch.attemptedBResourceStarts === 0 &&
+        current.dirtyBatch.attemptedBResourceCleanups === 0 &&
+        current.dirtyBatch.aEffectCleanups === 1 &&
+        current.dirtyBatch.aUnmountCallbacks === 1 &&
+        current.dirtyBatch.aResourceCleanups === 1 &&
+        current.dirtyBatch.independentOwnerRenders ===
+            beforeDirtyBatch.dirtyBatch.independentOwnerRenders + 1,
+    "captured dirty batch discard");
+    await assertShellSame(client, "captured dirty batch fallback");
+    const afterDirtyBatch = await probe(client);
+    const dirtyBatchEvidence = {
+        ...afterDirtyBatch.dirtyBatch,
+        boundaryReports:
+            afterDirtyBatch.reports.length - beforeDirtyBatch.reports.length,
+        independentRenderDelta:
+            afterDirtyBatch.dirtyBatch.independentOwnerRenders -
+            beforeDirtyBatch.dirtyBatch.independentOwnerRenders,
+    };
 
     const localEvidence = {};
     const beforeLocalUpdate = await probe(client);
@@ -388,6 +455,7 @@ try {
         localUpdate: finalProbe.local,
         localTransaction: finalProbe.localTransaction,
         nestedFallback: nestedFallbackEvidence,
+        capturedDirtyBatch: dirtyBatchEvidence,
         boundaryReports: transactionBoundaryReports,
         shellIdentityChanges: finalProbe.shellIdentityChanges,
         listenerAdditions: finalProbe.listenerAudit.add,
@@ -452,6 +520,7 @@ async function probe(client) {
         local: globalThis.goframeLocalUpdateProbe || {},
         localTransaction: globalThis.goframeLocalTransactionProbe || {},
         nestedFallback: globalThis.goframeNestedFallbackTransactionProbe || {},
+        dirtyBatch: globalThis.goframeCapturedDirtyBatchProbe || {},
         shellIdentityChanges: globalThis.__errorBoundaryShellIdentityChanges || 0,
         listenerAudit: globalThis.__errorBoundaryListenerAudit || { add: 0, remove: 0 },
     }))()`);

@@ -151,11 +151,18 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 		if parent.IsUndefined() || parent.IsNull() {
 			return
 		}
-		if protectedDirtyUpdates {
-			if state := nearestProtectedLifecycleState(instance); state != nil {
+		if beginProtectedLifecycle != nil {
+			if state := lifecycleStateForDirtyUpdate(instance); state != nil {
+				if state.phase != errorBoundaryProtected {
+					clearComponentDirty(instance)
+					return
+				}
 				// Dirty flushes are non-reentrant, so no owner update can
 				// begin while this boundary transaction is already active.
-				defer finishProtectedLifecycle(state, beginProtectedLifecycle(state))
+				defer finishProtectedSubtreeLifecycle(
+					state,
+					beginProtectedSubtreeLifecycle(state),
+				)
 			}
 		}
 		patchComponent(document, parent, mounted, instance.node, instance.parent)

@@ -18,7 +18,7 @@ func TestDirtyOwnerBelowProtectedBoundaryRemainsScheduled(t *testing.T) {
 	markComponentDirty(owner)
 
 	assertInstances(t, scheduled, []*componentInstance{owner})
-	if got := nearestProtectedLifecycleState(owner); got != boundary.errorBoundary {
+	if got := lifecycleStateForDirtyUpdate(owner); got != boundary.errorBoundary {
 		t.Fatalf("protected lifecycle state = %p, want boundary %p", got, boundary.errorBoundary)
 	}
 	if !owner.dirty || !owner.dirtyCounted {
@@ -49,10 +49,10 @@ func TestNestedDirtyOwnerRemainsScheduled(t *testing.T) {
 	markComponentDirty(owner)
 
 	assertInstances(t, scheduled, []*componentInstance{owner})
-	if got := nearestProtectedLifecycleState(owner); got != inner.errorBoundary {
+	if got := lifecycleStateForDirtyUpdate(owner); got != inner.errorBoundary {
 		t.Fatalf("protected lifecycle state = %p, want inner boundary %p", got, inner.errorBoundary)
 	}
-	if got := nearestProtectedLifecycleState(inner); got != nil {
+	if got := lifecycleStateForDirtyUpdate(inner); got != nil {
 		t.Fatalf("dirty boundary selected ancestor lifecycle state %p, want nil", got)
 	}
 	if outer.dirty || inner.dirty {
@@ -82,7 +82,7 @@ func TestDirtyFallbackChildRemainsScheduledBelowCapturedBoundary(t *testing.T) {
 	markComponentDirty(owner)
 
 	assertInstances(t, scheduled, []*componentInstance{owner})
-	if got := nearestProtectedLifecycleState(owner); got != outer.errorBoundary {
+	if got := lifecycleStateForDirtyUpdate(owner); got != outer.errorBoundary {
 		t.Fatalf("protected lifecycle state = %p, want outer boundary %p", got, outer.errorBoundary)
 	}
 	if outer.dirty || inner.dirty {
@@ -91,6 +91,135 @@ func TestDirtyFallbackChildRemainsScheduledBelowCapturedBoundary(t *testing.T) {
 	if outer.dirtyDescendants != 1 || inner.dirtyDescendants != 1 {
 		t.Fatalf("dirty descendants outer=%d inner=%d, want 1/1",
 			outer.dirtyDescendants, inner.dirtyDescendants)
+	}
+}
+
+func TestCapturedDirtyBatchLifecycleStateSelection(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func() (*componentInstance, *errorBoundaryState)
+	}{
+		{
+			name: "owner under captured boundary",
+			build: func() (*componentInstance, *errorBoundaryState) {
+				boundary := transactionTestBoundary()
+				boundary.errorBoundary.phase = errorBoundaryCaptured
+				return dirtyCleanInstance("DirtyOwner", boundary), boundary.errorBoundary
+			},
+		},
+		{
+			name: "protected inner under captured outer",
+			build: func() (*componentInstance, *errorBoundaryState) {
+				outer := transactionTestBoundary()
+				outer.errorBoundary.phase = errorBoundaryCaptured
+				inner := transactionTestBoundaryWithParent(outer)
+				return dirtyCleanInstance("DirtyOwner", inner), outer.errorBoundary
+			},
+		},
+		{
+			name: "owner under captured inner and protected outer",
+			build: func() (*componentInstance, *errorBoundaryState) {
+				outer := transactionTestBoundary()
+				inner := transactionTestBoundaryWithParent(outer)
+				inner.errorBoundary.phase = errorBoundaryCaptured
+				return dirtyCleanInstance("DirtyOwner", inner), inner.errorBoundary
+			},
+		},
+		{
+			name: "captured boundary instance under protected outer",
+			build: func() (*componentInstance, *errorBoundaryState) {
+				outer := transactionTestBoundary()
+				inner := transactionTestBoundaryWithParent(outer)
+				inner.errorBoundary.phase = errorBoundaryCaptured
+				return inner, outer.errorBoundary
+			},
+		},
+		{
+			name: "protected boundary instance under captured outer",
+			build: func() (*componentInstance, *errorBoundaryState) {
+				outer := transactionTestBoundary()
+				outer.errorBoundary.phase = errorBoundaryCaptured
+				inner := transactionTestBoundaryWithParent(outer)
+				return inner, outer.errorBoundary
+			},
+		},
+		{
+			name: "fallback child under protected outer",
+			build: func() (*componentInstance, *errorBoundaryState) {
+				outer := transactionTestBoundary()
+				inner := transactionTestBoundaryWithParent(outer)
+				inner.errorBoundary.phase = errorBoundaryFallback
+				return dirtyCleanInstance("DirtyFallbackChild", inner), outer.errorBoundary
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			isolateLifecycleTestState(t)
+			instance, want := test.build()
+			if got := lifecycleStateForDirtyUpdate(instance); got != want {
+				t.Fatalf("dirty lifecycle state = %p phase=%v, want %p phase=%v",
+					got, boundaryPhaseForTest(got), want, boundaryPhaseForTest(want))
+			}
+		})
+	}
+}
+
+func TestCapturedDirtyBatchIndependentBranchRemainsRunnable(t *testing.T) {
+	isolateLifecycleTestState(t)
+	boundary := transactionTestBoundary()
+	boundary.errorBoundary.phase = errorBoundaryCaptured
+	stale := dirtyCleanInstance("StaleOwner", boundary)
+	independent := dirtyCleanInstance("IndependentOwner", nil)
+
+	if got := lifecycleStateForDirtyUpdate(stale); got != boundary.errorBoundary {
+		t.Fatalf("stale owner state = %p, want captured boundary %p",
+			got, boundary.errorBoundary)
+	}
+	if got := lifecycleStateForDirtyUpdate(independent); got != nil {
+		t.Fatalf("independent owner state = %p, want nil", got)
+	}
+}
+
+func TestCapturedDirtyBatchDiscardBalancesBookkeeping(t *testing.T) {
+	isolateLifecycleTestState(t)
+	boundary := transactionTestBoundary()
+	boundary.errorBoundary.phase = errorBoundaryCaptured
+	markComponentDirty(boundary)
+
+	owner := dirtyCleanInstance("StaleOwner", boundary)
+	renders := 0
+	owner.update = func() {
+		renders++
+	}
+	markComponentDirty(owner)
+
+	state := lifecycleStateForDirtyUpdate(owner)
+	if state != boundary.errorBoundary || state.phase != errorBoundaryCaptured {
+		t.Fatalf("dirty lifecycle state = %p phase=%v, want captured boundary %p",
+			state, boundaryPhaseForTest(state), boundary.errorBoundary)
+	}
+	if state.phase == errorBoundaryCaptured {
+		clearComponentDirty(owner)
+	} else {
+		owner.update()
+	}
+
+	if renders != 0 {
+		t.Fatalf("discarded owner renders = %d, want 0", renders)
+	}
+	if owner.dirty || owner.dirtyCounted {
+		t.Fatalf("discarded owner dirty=%v counted=%v, want false/false",
+			owner.dirty, owner.dirtyCounted)
+	}
+	if boundary.dirtyDescendants != 0 {
+		t.Fatalf("captured boundary dirty descendants = %d, want 0",
+			boundary.dirtyDescendants)
+	}
+	if !boundary.dirty || !boundary.dirtyCounted {
+		t.Fatalf("captured boundary dirty=%v counted=%v, want true/true",
+			boundary.dirty, boundary.dirtyCounted)
 	}
 }
 
@@ -117,7 +246,7 @@ func TestNestedFallbackTransactionSelectsProtectedAncestorByPhase(t *testing.T) 
 			if test.outer {
 				want = outer.errorBoundary
 			}
-			if got := nearestProtectedLifecycleState(inner); got != want {
+			if got := lifecycleStateForDirtyUpdate(inner); got != want {
 				t.Fatalf("%s inner boundary selected state %p, want %p",
 					test.name, got, want)
 			}
@@ -134,7 +263,7 @@ func TestNestedFallbackTransactionWithoutProtectedAncestorSelectsNil(t *testing.
 		errorBoundaryFallback,
 	} {
 		boundary.errorBoundary.phase = phase
-		if got := nearestProtectedLifecycleState(boundary); got != nil {
+		if got := lifecycleStateForDirtyUpdate(boundary); got != nil {
 			t.Fatalf("boundary phase %d selected state %p without protected ancestor, want nil",
 				phase, got)
 		}
@@ -155,7 +284,7 @@ func TestNestedFallbackTransactionSelectsNearestProtectedAncestor(t *testing.T) 
 	renderComponentInstance(inner)
 	inner.errorBoundary.phase = errorBoundaryCaptured
 
-	if got := nearestProtectedLifecycleState(inner); got != outer.errorBoundary {
+	if got := lifecycleStateForDirtyUpdate(inner); got != outer.errorBoundary {
 		t.Fatalf("captured inner selected state %p through fallback middle, want outer %p",
 			got, outer.errorBoundary)
 	}
@@ -165,7 +294,7 @@ func TestNestedFallbackTransactionSelectsNearestProtectedAncestor(t *testing.T) 
 	}, nil)
 	renderComponentInstance(nearer)
 	inner.parent = nearer
-	if got := nearestProtectedLifecycleState(inner); got != nearer.errorBoundary {
+	if got := lifecycleStateForDirtyUpdate(inner); got != nearer.errorBoundary {
 		t.Fatalf("captured inner selected state %p, want nearest protected %p",
 			got, nearer.errorBoundary)
 	}
@@ -185,7 +314,7 @@ func TestNestedFallbackTransactionRestoresSelectedOuterState(t *testing.T) {
 			return Empty()
 		})
 
-		state := nearestProtectedLifecycleState(inner)
+		state := lifecycleStateForDirtyUpdate(inner)
 		if state != outer.errorBoundary {
 			t.Fatalf("selected state = %p, want outer %p", state, outer.errorBoundary)
 		}
@@ -222,7 +351,7 @@ func TestNestedFallbackTransactionRestoresSelectedOuterState(t *testing.T) {
 			return Empty()
 		})
 
-		state := nearestProtectedLifecycleState(inner)
+		state := lifecycleStateForDirtyUpdate(inner)
 		if state != outer.errorBoundary {
 			t.Fatalf("selected state = %p, want outer %p", state, outer.errorBoundary)
 		}
@@ -669,20 +798,16 @@ func TestProtectedSubtreeLifecycleHooksInstallAndRestoreLazily(t *testing.T) {
 	previousCurrent := currentProtectedLifecycleBoundary
 	previousBegin := beginProtectedLifecycle
 	previousFinish := finishProtectedLifecycle
-	previousDirtyUpdates := protectedDirtyUpdates
 	currentProtectedLifecycleBoundary = nil
 	beginProtectedLifecycle = nil
 	finishProtectedLifecycle = nil
-	protectedDirtyUpdates = false
 	t.Cleanup(func() {
 		currentProtectedLifecycleBoundary = previousCurrent
 		beginProtectedLifecycle = previousBegin
 		finishProtectedLifecycle = previousFinish
-		protectedDirtyUpdates = previousDirtyUpdates
 	})
 	if beginProtectedLifecycle != nil ||
-		finishProtectedLifecycle != nil ||
-		protectedDirtyUpdates {
+		finishProtectedLifecycle != nil {
 		t.Fatal("protected lifecycle hooks installed before an ErrorBoundary")
 	}
 
@@ -698,8 +823,7 @@ func TestProtectedSubtreeLifecycleHooksInstallAndRestoreLazily(t *testing.T) {
 		t.Fatal("ordinary component render installed protected lifecycle boundary")
 	}
 	if beginProtectedLifecycle != nil ||
-		finishProtectedLifecycle != nil ||
-		protectedDirtyUpdates {
+		finishProtectedLifecycle != nil {
 		t.Fatal("ordinary component render installed protected lifecycle hooks")
 	}
 	if len(ordinary.effectSlots) != 1 {
@@ -708,8 +832,7 @@ func TestProtectedSubtreeLifecycleHooksInstallAndRestoreLazily(t *testing.T) {
 
 	outer := transactionTestBoundary()
 	if beginProtectedLifecycle == nil ||
-		finishProtectedLifecycle == nil ||
-		!protectedDirtyUpdates {
+		finishProtectedLifecycle == nil {
 		t.Fatal("ErrorBoundary did not install protected lifecycle hooks")
 	}
 	inner := testErrorBoundaryInstanceWithParent(outer, "", func(ErrorBoundaryContext) Node {
@@ -871,6 +994,21 @@ func transactionTestBoundary() *componentInstance {
 	}, nil)
 	renderComponentInstance(boundary)
 	return boundary
+}
+
+func transactionTestBoundaryWithParent(parent *componentInstance) *componentInstance {
+	boundary := testErrorBoundaryInstanceWithParent(parent, "", func(ErrorBoundaryContext) Node {
+		return Text("fallback")
+	}, nil)
+	renderComponentInstance(boundary)
+	return boundary
+}
+
+func boundaryPhaseForTest(state *errorBoundaryState) any {
+	if state == nil {
+		return nil
+	}
+	return state.phase
 }
 
 func transactionTestRisky(parent *componentInstance, panicValue string) *componentInstance {
