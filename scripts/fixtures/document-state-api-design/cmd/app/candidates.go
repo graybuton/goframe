@@ -114,18 +114,28 @@ func useControlDocumentMetadata(props candidateOwnerProps) {
 
 func useHookDocumentMetadata(role string, metadata documentmeta.Metadata) {
 	bindings := requireDocumentBindings()
-	owner, _ := gf.UseState(bindings.coordinator.NewOwner())
+	owner, setOwner := gf.UseState[*documentmeta.Owner](nil)
 	recordCandidateOwnerRender("hook", role, owner.ID())
 
 	gf.UseEffect(func() gf.Cleanup {
+		setOwner(bindings.coordinator.NewOwner())
+		return nil
+	}, gf.Once())
+	gf.UseEffect(func() gf.Cleanup {
+		if owner == nil {
+			return nil
+		}
 		transition, err := bindings.coordinator.Publish(owner, metadata)
 		if err != nil {
 			panic("document-state API design hook publish: " + err.Error())
 		}
 		publishCandidateTransition("hook", role, transition, bindings.onSnapshot)
 		return nil
-	}, gf.Deps(metadata.Title, metadata.Description))
+	}, gf.Deps(owner != nil, metadata.Title, metadata.Description))
 	gf.UseUnmount(func() {
+		if owner == nil {
+			return
+		}
 		transition, err := bindings.coordinator.Release(owner)
 		if err != nil {
 			panic("document-state API design hook release: " + err.Error())
@@ -136,20 +146,32 @@ func useHookDocumentMetadata(role string, metadata documentmeta.Metadata) {
 
 func ComponentDocumentMetadata(props componentDocumentMetadataProps) gf.Node {
 	bindings := requireDocumentBindings()
-	owner, _ := gf.UseState(bindings.coordinator.NewOwner())
+	owner, setOwner := gf.UseState[*documentmeta.Owner](nil)
 	recordCandidateOwnerRender("component", props.Role, owner.ID())
 	metadata := props.Metadata
 
 	gf.UseEffect(func() gf.Cleanup {
-		recordComponentOwnerMount(props.Role, owner.ID())
+		setOwner(bindings.coordinator.NewOwner())
+		return nil
+	}, gf.Once())
+	gf.UseEffect(func() gf.Cleanup {
+		if owner == nil {
+			return nil
+		}
 		transition, err := bindings.coordinator.Publish(owner, metadata)
 		if err != nil {
 			panic("document-state API design component publish: " + err.Error())
 		}
+		if transition.Change == documentmeta.ChangeAdded {
+			recordComponentOwnerMount(props.Role, owner.ID())
+		}
 		publishCandidateTransition("component", props.Role, transition, bindings.onSnapshot)
 		return nil
-	}, gf.Deps(metadata.Title, metadata.Description))
+	}, gf.Deps(owner != nil, metadata.Title, metadata.Description))
 	gf.UseUnmount(func() {
+		if owner == nil || owner.ID() == 0 {
+			return
+		}
 		recordComponentOwnerUnmount(props.Role, owner.ID())
 		transition, err := bindings.coordinator.Release(owner)
 		if err != nil {
@@ -166,10 +188,14 @@ func ComponentDocumentMetadata(props componentDocumentMetadataProps) gf.Node {
 
 func useDocumentMetadataOwnerHandle(role string) *documentMetadataOwnerHandle {
 	bindings := requireDocumentBindings()
-	handle, _ := gf.UseState(&documentMetadataOwnerHandle{
-		owner: bindings.coordinator.NewOwner(),
-	})
-	recordCandidateOwnerRender("handle", role, handle.owner.ID())
+	handle, setHandle := gf.UseState[*documentMetadataOwnerHandle](nil)
+	gf.UseEffect(func() gf.Cleanup {
+		setHandle(&documentMetadataOwnerHandle{
+			owner: bindings.coordinator.NewOwner(),
+		})
+		return nil
+	}, gf.Once())
+	recordCandidateOwnerRender("handle", role, documentMetadataHandleOwnerID(handle))
 	return handle
 }
 
@@ -178,8 +204,7 @@ func useOwnedDocumentMetadataThroughHelper(
 	role string,
 	metadata documentmeta.Metadata,
 ) {
-	recordHandleForward(handle.owner.ID())
-	useOwnedDocumentMetadata(handle, role, metadata)
+	useOwnedDocumentMetadataSlot(handle, role, metadata, true)
 }
 
 func useOwnedDocumentMetadata(
@@ -187,13 +212,26 @@ func useOwnedDocumentMetadata(
 	role string,
 	metadata documentmeta.Metadata,
 ) {
+	useOwnedDocumentMetadataSlot(handle, role, metadata, false)
+}
+
+func useOwnedDocumentMetadataSlot(
+	handle *documentMetadataOwnerHandle,
+	role string,
+	metadata documentmeta.Metadata,
+	forwarded bool,
+) {
 	bindings := requireDocumentBindings()
-	if handle == nil || handle.owner == nil {
-		panic("document-state API design: document owner handle is nil")
-	}
-	publication, _ := gf.UseState(&documentMetadataPublication{})
+	publication, setPublication := gf.UseState[*documentMetadataPublication](nil)
 
 	gf.UseEffect(func() gf.Cleanup {
+		setPublication(&documentMetadataPublication{})
+		return nil
+	}, gf.Once())
+	gf.UseEffect(func() gf.Cleanup {
+		if handle == nil || handle.owner == nil || publication == nil {
+			return nil
+		}
 		switch {
 		case !publication.active && handle.activePublications == 0:
 			publication.active = true
@@ -224,10 +262,22 @@ func useOwnedDocumentMetadata(
 		default:
 			panic("document-state API design: one owner handle has conflicting active publications")
 		}
+		if forwarded {
+			recordHandleForward(handle.owner.ID())
+		}
 		return nil
-	}, gf.Deps(metadata.Title, metadata.Description))
+	}, gf.Deps(
+		handle != nil,
+		publication != nil,
+		metadata.Title,
+		metadata.Description,
+	))
 	gf.UseUnmount(func() {
-		if !publication.active || handle.activePublications <= 0 {
+		if handle == nil || handle.owner == nil || publication == nil ||
+			!publication.active {
+			return
+		}
+		if handle.activePublications <= 0 {
 			panic("document-state API design: document owner handle publication underflow")
 		}
 		publication.active = false
@@ -242,4 +292,11 @@ func useOwnedDocumentMetadata(
 		}
 		publishCandidateTransition("handle", role, transition, bindings.onSnapshot)
 	})
+}
+
+func documentMetadataHandleOwnerID(handle *documentMetadataOwnerHandle) uint64 {
+	if handle == nil || handle.owner == nil {
+		return 0
+	}
+	return handle.owner.ID()
 }

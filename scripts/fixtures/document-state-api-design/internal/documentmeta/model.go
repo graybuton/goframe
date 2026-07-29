@@ -72,6 +72,17 @@ type ownerRecord struct {
 	metadata Metadata
 }
 
+// Statistics records fixture-only ownership lifecycle evidence.
+type Statistics struct {
+	TokenCreations         int
+	CommittedIDAssignments int
+	ActiveAdditions        int
+	Updates                int
+	Releases               int
+	ActiveOwnerCount       int
+	LastCommittedOwnerID   uint64
+}
+
 // Coordinator selects the most recently activated owner while preserving
 // existing-owner priority across updates.
 type Coordinator struct {
@@ -79,6 +90,7 @@ type Coordinator struct {
 	nextID   uint64
 	owners   []ownerRecord
 	index    map[*Owner]int
+	stats    Statistics
 }
 
 // New creates an empty coordinator with an authored baseline.
@@ -94,10 +106,9 @@ func (coordinator *Coordinator) NewOwner() *Owner {
 	if coordinator == nil {
 		panic("document metadata: owner coordinator is nil")
 	}
-	coordinator.nextID++
+	coordinator.stats.TokenCreations++
 	return &Owner{
 		coordinator: coordinator,
-		id:          coordinator.nextID,
 	}
 }
 
@@ -128,13 +139,20 @@ func (coordinator *Coordinator) Publish(owner *Owner, metadata Metadata) (Transi
 			return coordinator.transition(owner, ChangeNone), nil
 		}
 		coordinator.owners[index].metadata = metadata
+		coordinator.stats.Updates++
 		return coordinator.transition(owner, ChangeUpdated), nil
+	}
+	if owner.id == 0 {
+		coordinator.nextID++
+		owner.id = coordinator.nextID
+		coordinator.stats.CommittedIDAssignments++
 	}
 	coordinator.index[owner] = len(coordinator.owners)
 	coordinator.owners = append(coordinator.owners, ownerRecord{
 		owner:    owner,
 		metadata: metadata,
 	})
+	coordinator.stats.ActiveAdditions++
 	return coordinator.transition(owner, ChangeAdded), nil
 }
 
@@ -153,7 +171,19 @@ func (coordinator *Coordinator) Release(owner *Owner) (Transition, error) {
 	for next := index; next < len(coordinator.owners); next++ {
 		coordinator.index[coordinator.owners[next].owner] = next
 	}
+	coordinator.stats.Releases++
 	return coordinator.transition(owner, ChangeRemoved), nil
+}
+
+// Stats returns a read-only snapshot of fixture ownership lifecycle evidence.
+func (coordinator *Coordinator) Stats() Statistics {
+	if coordinator == nil {
+		return Statistics{}
+	}
+	stats := coordinator.stats
+	stats.ActiveOwnerCount = len(coordinator.owners)
+	stats.LastCommittedOwnerID = coordinator.nextID
+	return stats
 }
 
 // OwnerIDs returns active owners in activation-priority order.
