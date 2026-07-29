@@ -29,6 +29,8 @@ type HookTwoSlotProbeProps struct {
 	Children []gf.Node
 }
 
+type HandleConflictProbeProps struct{}
+
 var (
 	candidateScopeType = gf.NewComponentType(
 		"fixture.document-state-api-design.CandidateScope",
@@ -37,6 +39,10 @@ var (
 	hookTwoSlotProbeType = gf.NewComponentType(
 		"fixture.document-state-api-design.HookTwoSlotProbe",
 		"DocumentAPIDesignHookTwoSlotProbe",
+	)
+	handleConflictProbeType = gf.NewComponentType(
+		"fixture.document-state-api-design.HandleConflictProbe",
+		"DocumentAPIDesignHandleConflictProbe",
 	)
 )
 
@@ -67,10 +73,10 @@ func App(props AppProps) gf.Node {
 			</header>
 
 			<nav class="design-modes" aria-label="Candidate modes">
-				<a href="#/control">Control</a>
-				<a href="#/hook">Hook</a>
-				<a href="#/component">Component</a>
-				<a href="#/handle">Handle</a>
+				<a href="./?candidate=control#/control" data-testid="candidate-mode-control">Control</a>
+				<a href="./?candidate=hook#/hook" data-testid="candidate-mode-hook">Hook</a>
+				<a href="./?candidate=component#/component" data-testid="candidate-mode-component">Component</a>
+				<a href="./?candidate=handle#/handle" data-testid="candidate-mode-handle">Handle</a>
 			</nav>
 
 			<DocumentCommitter Adapter={props.Adapter} Snapshot={snapshot} />
@@ -114,6 +120,7 @@ func CandidateScope(props CandidateScopeProps) gf.Node {
 	nestedC, setNestedC := gf.UseState(false)
 	failureActive, setFailureActive := gf.UseState(false)
 	probeActive, setProbeActive := gf.UseState(false)
+	handleConflictActive, setHandleConflictActive := gf.UseState(false)
 	renderNonce, setRenderNonce := gf.UseState(0)
 
 	gf.UseEffect(func() gf.Cleanup {
@@ -185,6 +192,7 @@ func CandidateScope(props CandidateScopeProps) gf.Node {
 		},
 	)
 	probe := candidateProbeNode(props, probeActive)
+	handleConflictProbe := handleConflictProbeNode(props, handleConflictActive)
 	failure := speculativeOwnerNode(props, failureActive)
 
 	return (
@@ -214,6 +222,11 @@ func CandidateScope(props CandidateScopeProps) gf.Node {
 				<button Type="button" data-testid="release-probe" OnClick={func() {
 					setProbeActive(false)
 				}}>Release candidate probe</button>
+				{handleConflictProbeControls(
+					props.Mode,
+					handleConflictActive,
+					setHandleConflictActive,
+				)}
 				<button Type="button" data-testid="activate-failure" OnClick={func() {
 					setFailureActive(true)
 				}}>Activate speculative failure</button>
@@ -223,6 +236,7 @@ func CandidateScope(props CandidateScopeProps) gf.Node {
 			{nestedBNode}
 			{nestedCNode}
 			{probe}
+			{handleConflictProbe}
 
 			<gf.ErrorBoundary Fallback={func(ctx gf.ErrorBoundaryContext) gf.Node {
 				return failureFallback(ctx, setFailureActive)
@@ -243,6 +257,44 @@ func HookTwoSlotProbe(HookTwoSlotProbeProps) gf.Node {
 		Description: "Hook slot two metadata.",
 	})
 	return gf.Empty()
+}
+
+func HandleConflictProbe(props HandleConflictProbeProps) gf.Node {
+	primaryMetadata, setPrimaryMetadata := gf.UseState(handleConflictMetadataA())
+	duplicateActive, setDuplicateActive := gf.UseState(true)
+	handle := useDocumentMetadataOwnerHandle("handle-conflict-probe")
+
+	useOwnedDocumentMetadata(
+		handle,
+		"handle-conflict-primary",
+		primaryMetadata,
+	)
+	useOptionalOwnedDocumentMetadata(
+		handle,
+		"handle-conflict-duplicate",
+		handleConflictMetadataA(),
+		duplicateActive,
+	)
+
+	return (
+		<section data-testid="handle-conflict-probe">
+			<span data-testid="handle-conflict-owner-id">
+				{gf.ToString(documentMetadataHandleOwnerID(handle))}
+			</span>
+			<span data-testid="handle-conflict-publication-count">
+				{gf.ToString(documentMetadataHandlePublicationCount(handle))}
+			</span>
+			<button Type="button" data-testid="handle-conflict-primary-b" OnClick={func() {
+				setPrimaryMetadata(handleConflictMetadataB())
+			}}>Update primary to B</button>
+			<button Type="button" data-testid="handle-conflict-release-duplicate" OnClick={func() {
+				setDuplicateActive(false)
+			}}>Release duplicate</button>
+			<button Type="button" data-testid="handle-conflict-primary-c" OnClick={func() {
+				setPrimaryMetadata(handleConflictMetadataC())
+			}}>Update sole primary to C</button>
+		</section>
+	)
 }
 
 func conditionalCandidateOwner(active bool, props candidateOwnerProps) gf.Node {
@@ -279,6 +331,76 @@ func candidateProbeNode(props CandidateScopeProps, active bool) gf.Node {
 		})
 	default:
 		return gf.Empty()
+	}
+}
+
+func handleConflictProbeNode(
+	props CandidateScopeProps,
+	active bool,
+) gf.Node {
+	if props.Mode != "handle" || !active {
+		return gf.Empty()
+	}
+	return gf.Key(
+		"handle-conflict-probe",
+		gf.ComponentT(
+			handleConflictProbeType,
+			HandleConflictProbeProps{},
+			HandleConflictProbe,
+		),
+	)
+}
+
+func handleConflictProbeControls(
+	mode string,
+	active bool,
+	setActive func(bool),
+) gf.Node {
+	if mode != "handle" {
+		return gf.Empty()
+	}
+	if active {
+		return gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "release-handle-conflict-probe",
+				"OnClick": func() {
+					setActive(false)
+				},
+			},
+			gf.Text("Release handle conflict probe"),
+		)
+	}
+	return gf.El(
+		"button",
+		gf.Props{
+			"data-testid": "activate-handle-conflict-probe",
+			"OnClick": func() {
+				setActive(true)
+			},
+		},
+		gf.Text("Activate handle conflict probe"),
+	)
+}
+
+func handleConflictMetadataA() documentmeta.Metadata {
+	return documentmeta.Metadata{
+		Title:       "Handle conflict A · GoFrame",
+		Description: "Coalesced handle metadata A.",
+	}
+}
+
+func handleConflictMetadataB() documentmeta.Metadata {
+	return documentmeta.Metadata{
+		Title:       "Handle conflict B · GoFrame",
+		Description: "Rejected handle metadata B.",
+	}
+}
+
+func handleConflictMetadataC() documentmeta.Metadata {
+	return documentmeta.Metadata{
+		Title:       "Handle conflict C · GoFrame",
+		Description: "Sole-primary handle metadata C.",
 	}
 }
 

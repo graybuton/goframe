@@ -124,6 +124,7 @@ func initDocumentAPIDesignEvidence(mode string) {
 		"handleDuplicateOwnerIDs",
 		"handleCreationEvents",
 		"publicationCreationEvents",
+		"handlePublicationEvents",
 		"coordinatorStatisticsEvents",
 		"runtimeErrors",
 	} {
@@ -217,6 +218,21 @@ func recordHandleCreation(role string) {
 func recordPublicationCreation(role string, forwarded bool) {
 	incrementEvidence("publicationCreations")
 	recordLifecycleCreation("publicationCreationEvents", role, forwarded)
+}
+
+func recordHandlePublicationState(
+	role string,
+	action string,
+	ownerID uint64,
+	activePublications int,
+) {
+	event := js.Global().Get("Object").New()
+	event.Set("role", role)
+	event.Set("action", action)
+	event.Set("ownerID", ownerID)
+	event.Set("activePublications", activePublications)
+	setCurrentEvidencePhase(event)
+	evidence().Get("handlePublicationEvents").Call("push", event)
 }
 
 func recordLifecycleCreation(field string, role string, forwarded bool) {

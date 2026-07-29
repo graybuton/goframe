@@ -17,8 +17,6 @@ const fixtureDir = join(
     "document-state-api-design",
 );
 const chrome = process.env.CHROME ?? "google-chrome";
-const tempRoot = await mkdtemp(join(tmpdir(), "goframe-document-api-design-"));
-const profile = await mkdtemp(join(tmpdir(), "goframe-document-api-design-chrome-"));
 const appPort = Number(
     process.env.GOFRAME_DOCUMENT_API_DESIGN_PORT ?? await pickFreePort(),
 );
@@ -48,6 +46,18 @@ const metadataC = {
     title: "Dialog C · GoFrame",
     description: "Nested dialog metadata C.",
 };
+const handleConflictA = {
+    title: "Handle conflict A · GoFrame",
+    description: "Coalesced handle metadata A.",
+};
+const handleConflictB = {
+    title: "Handle conflict B · GoFrame",
+    description: "Rejected handle metadata B.",
+};
+const handleConflictC = {
+    title: "Handle conflict C · GoFrame",
+    description: "Sole-primary handle metadata C.",
+};
 const speculative = {
     title: "Speculative failure · GoFrame",
     description: "This pair must never commit.",
@@ -57,11 +67,17 @@ let browser = null;
 let browserError = "";
 let client = null;
 let server = null;
+let tempRoot = null;
+let profile = null;
 const commandOutput = [];
 const results = {};
+let modeLinks = null;
 const startedAt = Date.now();
 
 try {
+    await validateBrowserCommand(chrome);
+    tempRoot = await mkdtemp(join(tmpdir(), "goframe-document-api-design-"));
+    profile = await mkdtemp(join(tmpdir(), "goframe-document-api-design-chrome-"));
     const goxc = await prepareTools();
     await runCommand(goxc, ["package", fixtureDir, "--compiler=go"]);
     server = await startServer(
@@ -71,19 +87,14 @@ try {
         "document-state API design fixture",
     );
 
-    browser = spawn(chrome, [
+    browser = await startBrowser(chrome, [
         "--headless",
         "--no-sandbox",
         "--disable-gpu",
         `--remote-debugging-port=${debugPort}`,
         `--user-data-dir=${profile}`,
         "about:blank",
-    ], {
-        stdio: ["ignore", "ignore", "pipe"],
-    });
-    browser.stderr.on("data", (chunk) => {
-        browserError += chunk;
-    });
+    ]);
 
     const page = await waitForPage(debugPort);
     client = await connect(page.webSocketDebuggerUrl);
@@ -93,6 +104,7 @@ try {
         source: `(${installHeadObserver.toString()})()`,
     });
 
+    modeLinks = await runModeLinkProbe(client);
     for (const mode of modes) {
         results[mode] = await runMode(client, mode);
     }
@@ -105,6 +117,7 @@ try {
     console.log(
         `document API design evidence: ${JSON.stringify({
             modes: results,
+            modeLinks,
             elapsedMilliseconds,
         })}`,
     );
@@ -118,24 +131,100 @@ try {
     client?.close();
     await stopProcess(browser, false);
     await stopProcess(server?.child, true);
-    await rm(profile, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 100,
-    });
-    await rm(tempRoot, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 100,
-    });
+    if (profile) {
+        await rm(profile, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 100,
+        });
+    }
+    if (tempRoot) {
+        await rm(tempRoot, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 100,
+        });
+    }
     await rm(join(fixtureDir, ".goframe"), {
         recursive: true,
         force: true,
         maxRetries: 5,
         retryDelay: 100,
     });
+}
+
+async function runModeLinkProbe(browserClient) {
+    const transitions = [];
+    const initialURL = `${origin}/?candidate=control&mode-link-smoke=1#/control`;
+    await browserClient.call("Page.navigate", { url: initialURL });
+    await waitForCondition(async () => {
+        const state = await pageState(browserClient);
+        return state.app && state.mode === "control" &&
+            state.baselineCaptured && state.documentBootCount > 0;
+    }, "mode-link control fixture boot");
+
+    let current = await pageState(browserClient);
+    assertModeLinkState(current, "control", "mode-link initial control");
+    const initialBootCount = current.documentBootCount;
+    for (const target of ["hook", "component", "handle", "control"]) {
+        const previous = current;
+        await click(browserClient, `candidate-mode-${target}`);
+        await waitForCondition(async () => {
+            const state = await pageState(browserClient);
+            return state.app &&
+                state.mode === target &&
+                state.runtime.mode === target &&
+                state.hash === `#/${target}` &&
+                state.candidateQuery === target &&
+                state.documentBootCount > previous.documentBootCount &&
+                state.baselineCaptured;
+        }, `mode-link ${previous.mode} to ${target}`);
+        current = await pageState(browserClient);
+        assertModeLinkState(
+            current,
+            target,
+            `mode-link ${previous.mode} to ${target}`,
+        );
+        transitions.push({
+            from: previous.mode,
+            to: target,
+            beforeBootCount: previous.documentBootCount,
+            afterBootCount: current.documentBootCount,
+            hash: current.hash,
+            candidateQuery: current.candidateQuery,
+            renderedMode: current.mode,
+            baselineRecaptured: current.baselineCaptured,
+        });
+    }
+
+    return {
+        initialBootCount,
+        finalBootCount: current.documentBootCount,
+        transitions,
+    };
+}
+
+function assertModeLinkState(state, mode, label) {
+    assert(state.hash === `#/${mode}`, `${label} hash = ${state.hash}`);
+    assert(
+        state.candidateQuery === mode,
+        `${label} candidate query = ${state.candidateQuery}`,
+    );
+    assert(state.mode === mode, `${label} displayed mode = ${state.mode}`);
+    assert(state.runtime.mode === mode, `${label} runtime mode = ${state.runtime.mode}`);
+    assert(
+        state.authoredTitle === baseline.title &&
+            state.authoredDescription === baseline.description &&
+            state.authoredDescriptionCount === 1,
+        `${label} authored baseline was not recaptured`,
+    );
+    assert(pairMatches(state, baseline), `${label} did not begin at the baseline`);
+    assert(
+        state.titleNodeSame && state.descriptionNodeSame,
+        `${label} authored node identity was not recaptured`,
+    );
 }
 
 async function runMode(browserClient, mode) {
@@ -260,8 +349,15 @@ async function runMode(browserClient, mode) {
     });
 
     const candidateProbe = await runCandidateProbe(browserClient, mode);
-    const candidateChecks = candidateProbe.checks;
-    boundaries.candidateProbe = candidateProbe.boundary;
+    const handleConflict = mode === "handle"
+        ? await runHandleConflictProbe(browserClient)
+        : null;
+    const candidateChecks = {
+        ...candidateProbe.checks,
+        ...(handleConflict ? { handleConflict } : {}),
+    };
+    boundaries.candidateProbe =
+        handleConflict?.boundary ?? candidateProbe.boundary;
 
     await setPhase(browserClient, "speculative-failure");
     const beforeFailure = await pageState(browserClient);
@@ -336,6 +432,31 @@ async function runMode(browserClient, mode) {
     );
     assert(final.titleNodeSame, `${mode} title identity changed`);
     assert(final.descriptionNodeSame, `${mode} description identity changed`);
+    assert(
+        final.titleMutationBatches > 0,
+        `${mode} observer liveness: no title mutation batches`,
+    );
+    assert(
+        final.descriptionMutationBatches > 0,
+        `${mode} observer liveness: no description mutation batches`,
+    );
+    assert(
+        final.headSnapshots > 0,
+        `${mode} observer liveness: no managed head snapshots`,
+    );
+    assert(
+        final.snapshots.length === final.headSnapshots,
+        `${mode} observer liveness: snapshot length ${final.snapshots.length}, ` +
+            `head snapshots ${final.headSnapshots}`,
+    );
+    assert(
+        final.snapshots.some((snapshot) =>
+            snapshot.descriptionCount === 1 &&
+            snapshot.title !== baseline.title &&
+            snapshot.description !== baseline.description
+        ),
+        `${mode} observer liveness: no managed title/description snapshot`,
+    );
     assertGenericLifecycleEvidence(mode, boundaries, routeOwnerID);
     assertCandidateLifecycleEvidence(mode, boundaries, candidateProbe);
 
@@ -471,6 +592,168 @@ async function runCandidateProbe(browserClient, mode) {
         };
     }
     throw new Error(`APP FAILURE: unsupported candidate probe mode ${mode}`);
+}
+
+async function runHandleConflictProbe(browserClient) {
+    await setPhase(browserClient, "handle-conflict-activation");
+    await click(browserClient, "activate-handle-conflict-probe");
+    await waitForCondition(async () => {
+        const state = await pageState(browserClient);
+        const publications = state.runtime.handlePublicationEvents.filter(
+            (event) => event.role.startsWith("handle-conflict-"),
+        );
+        return pairMatches(state, handleConflictA) &&
+            state.ownerCount === 3 &&
+            publications.length >= 2 &&
+            publications.at(-1)?.activePublications === 2;
+    }, "handle conflict duplicate activation");
+    const duplicated = await pageState(browserClient);
+    const added = duplicated.runtime.events.filter((event) =>
+        event.role === "handle-conflict-primary" &&
+        event.change === "added"
+    );
+    assert(added.length === 1, `handle conflict owner additions = ${added.length}`);
+    const ownerID = Number(added[0].ownerID);
+    const activePublicationsBefore = duplicated.runtime.handlePublicationEvents
+        .filter((event) => event.role.startsWith("handle-conflict-"))
+        .at(-1).activePublications;
+    const publicationsBeforeConflict =
+        duplicated.runtime.handlePublicationEvents.length;
+
+    await setPhase(browserClient, "handle-conflict-primary-b");
+    await click(browserClient, "handle-conflict-primary-b");
+    await waitForCondition(async () => {
+        const state = await pageState(browserClient);
+        return state.runtime.runtimeErrors.length ===
+            duplicated.runtime.runtimeErrors.length + 1;
+    }, "handle conflict report");
+    const conflicted = await pageState(browserClient);
+    const conflictErrors = conflicted.runtime.runtimeErrors.slice(
+        duplicated.runtime.runtimeErrors.length,
+    );
+    assert(conflictErrors.length === 1, `handle conflict errors = ${conflictErrors.length}`);
+    assert(
+        conflictErrors[0].panic ===
+            "document-state API design: one owner handle has conflicting active publications",
+        `handle conflict diagnostic = ${JSON.stringify(conflictErrors[0].panic)}`,
+    );
+    assert(pairMatches(conflicted, handleConflictA), "handle conflict changed selected pair");
+    assert(conflicted.ownerCount === 3, "handle conflict changed active owner count");
+    assert(
+        conflicted.handleConflictPublicationCount === 2,
+        `handle conflict publication count = ${conflicted.handleConflictPublicationCount}`,
+    );
+    assert(
+        Number(conflicted.handleConflictOwnerID) === ownerID,
+        `handle conflict owner ID = ${conflicted.handleConflictOwnerID}, want ${ownerID}`,
+    );
+    assert(
+        conflicted.runtime.handlePublicationEvents.length ===
+            publicationsBeforeConflict,
+        "handle conflict changed publication evidence before rejection",
+    );
+    assertStatisticsDelta(
+        "handle conflict rejection",
+        lifecycleBoundary(duplicated),
+        lifecycleBoundary(conflicted),
+        zeroStatisticsDelta(),
+    );
+    assertNoDocumentDelta(
+        "handle conflict rejection",
+        lifecycleBoundary(duplicated),
+        lifecycleBoundary(conflicted),
+    );
+    assert(
+        !conflicted.runtime.events.some((event) =>
+            event.title === handleConflictB.title ||
+            event.description === handleConflictB.description
+        ),
+        "rejected handle metadata reached the coordinator",
+    );
+    assert(
+        !conflicted.snapshots.some((snapshot) =>
+            snapshot.title === handleConflictB.title ||
+            snapshot.description === handleConflictB.description
+        ),
+        "rejected handle metadata reached the document",
+    );
+
+    await setPhase(browserClient, "handle-conflict-duplicate-release");
+    await click(browserClient, "handle-conflict-release-duplicate");
+    await waitForCondition(async () => {
+        const state = await pageState(browserClient);
+        const publication = state.runtime.handlePublicationEvents.at(-1);
+        return publication?.role === "handle-conflict-duplicate" &&
+            publication.action === "release" &&
+            publication.activePublications === 1;
+    }, "handle conflict duplicate release");
+    const duplicateReleased = await pageState(browserClient);
+    assert(pairMatches(duplicateReleased, handleConflictA), "duplicate release changed pair");
+    assert(duplicateReleased.ownerCount === 3, "duplicate release changed owner count");
+    assertStatisticsDelta(
+        "handle duplicate release",
+        lifecycleBoundary(conflicted),
+        lifecycleBoundary(duplicateReleased),
+        zeroStatisticsDelta(),
+    );
+
+    await setPhase(browserClient, "handle-conflict-primary-c");
+    await click(browserClient, "handle-conflict-primary-c");
+    await waitForState(browserClient, handleConflictC, {
+        label: "handle sole-primary update",
+        ownerCount: 3,
+    });
+    const updated = await pageState(browserClient);
+    const updateEvents = updated.runtime.events.filter((event) =>
+        event.role === "handle-conflict-primary" &&
+        event.change === "updated"
+    );
+    assert(updateEvents.length === 1, `handle conflict updates = ${updateEvents.length}`);
+    assert(
+        Number(updateEvents[0].ownerID) === ownerID,
+        `handle conflict update owner = ${updateEvents[0].ownerID}, want ${ownerID}`,
+    );
+    assert(
+        updated.handleConflictPublicationCount === 1,
+        `sole-primary publication count = ${updated.handleConflictPublicationCount}`,
+    );
+    assertStatisticsDelta(
+        "handle sole-primary update",
+        lifecycleBoundary(duplicateReleased),
+        lifecycleBoundary(updated),
+        {
+            ...zeroStatisticsDelta(),
+            updates: 1,
+        },
+    );
+
+    await setPhase(browserClient, "handle-conflict-probe-release");
+    await click(browserClient, "release-handle-conflict-probe");
+    await waitForState(browserClient, metadataC, {
+        label: "handle conflict probe release",
+        ownerCount: 2,
+    });
+    const released = await pageState(browserClient);
+    assert(
+        released.runtime.runtimeErrors.length ===
+            duplicated.runtime.runtimeErrors.length + 1,
+        "handle conflict probe reported more than one runtime error",
+    );
+
+    return {
+        ownerID,
+        conflictDiagnostic: conflictErrors[0].panic,
+        activeOwnerCountBefore: duplicated.ownerCount,
+        activeOwnerCountAfter: conflicted.ownerCount,
+        activePublicationsBefore,
+        activePublicationsAfter: conflicted.handleConflictPublicationCount,
+        coordinatorUnchanged: true,
+        documentUnchanged: true,
+        duplicateReleased: true,
+        solePrimaryUpdate: handleConflictC,
+        sameOwnerUpdated: Number(updateEvents[0].ownerID) === ownerID,
+        boundary: lifecycleBoundary(released),
+    };
 }
 
 function lifecycleBoundary(state) {
@@ -797,6 +1080,8 @@ function collectModeEvidence(state, candidateChecks, boundaries) {
                 state.runtime.publicationCreationEvents,
             coordinatorStatisticsEvents:
                 state.runtime.coordinatorStatisticsEvents,
+            handlePublicationEvents:
+                state.runtime.handlePublicationEvents,
             runtimeErrors: state.runtime.runtimeErrors,
         },
         candidateChecks,
@@ -805,6 +1090,7 @@ function collectModeEvidence(state, candidateChecks, boundaries) {
             titleMutationBatches: state.titleMutationBatches,
             descriptionMutationBatches: state.descriptionMutationBatches,
             headSnapshots: state.headSnapshots,
+            snapshotLength: state.snapshots.length,
             invalidPairs: state.invalidPairs,
             duplicateDescriptions: state.duplicateDescriptions,
             speculativeAppearances: state.speculativeAppearances,
@@ -885,8 +1171,11 @@ async function pageState(browserClient) {
         );
         const titleNode = document.querySelector("head title");
         const descriptionNode = descriptions[0] || null;
+        const currentURL = new URL(location.href);
         return {
             href: location.href,
+            hash: location.hash,
+            candidateQuery: currentURL.searchParams.get("candidate") ?? "",
             mode: text("design-mode").replace(/^Mode:\\s*/, ""),
             app: Boolean(document.querySelector("[data-testid='design-app']")),
             scopeActive: Boolean(document.querySelector(
@@ -902,6 +1191,10 @@ async function pageState(browserClient) {
             ownerCount: Number(text("active-owner-count") || 0),
             expectedTitle: text("expected-title"),
             expectedDescription: text("expected-description"),
+            handleConflictOwnerID: text("handle-conflict-owner-id"),
+            handleConflictPublicationCount: Number(
+                text("handle-conflict-publication-count") || 0
+            ),
             title: document.title,
             description: descriptionNode?.getAttribute("content") ?? "",
             descriptionCount: descriptions.length,
@@ -909,6 +1202,7 @@ async function pageState(browserClient) {
                 'head meta[name="fixture-unrelated"]'
             )?.getAttribute("content") ?? "",
             baselineCaptured: Boolean(head.baselineCaptured),
+            documentBootCount: head.documentBootCount ?? 0,
             authoredTitle: head.authoredTitle ?? "",
             authoredDescription: head.authoredDescription ?? "",
             authoredDescriptionCount: head.authoredDescriptionCount ?? 0,
@@ -977,6 +1271,8 @@ async function pageState(browserClient) {
                     runtime.publicationCreationEvents ?? [],
                 coordinatorStatisticsEvents:
                     runtime.coordinatorStatisticsEvents ?? [],
+                handlePublicationEvents:
+                    runtime.handlePublicationEvents ?? [],
                 runtimeErrors: runtime.runtimeErrors ?? [],
             },
         };
@@ -1005,8 +1301,17 @@ async function click(browserClient, testID) {
 }
 
 function installHeadObserver() {
+    let documentBootCount = 1;
+    try {
+        const key = "goframe-document-api-design-boot-count";
+        documentBootCount = Number(sessionStorage.getItem(key) || 0) + 1;
+        sessionStorage.setItem(key, String(documentBootCount));
+    } catch {
+        // The fixture assertions still require a positive per-document count.
+    }
     const evidence = {
         baselineCaptured: false,
+        documentBootCount,
         authoredTitle: "",
         authoredDescription: "",
         authoredDescriptionCount: 0,
@@ -1134,6 +1439,48 @@ function installHeadObserver() {
     queueMicrotask(captureBaseline);
     document.addEventListener("DOMContentLoaded", captureBaseline, {
         once: true,
+    });
+}
+
+function validateBrowserCommand(command) {
+    return new Promise((resolveValidation, reject) => {
+        const child = spawn(command, ["--version"], {
+            cwd: rootDir,
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        let output = "";
+        child.stdout.on("data", (chunk) => {
+            output += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+            output += chunk;
+        });
+        child.once("error", reject);
+        child.once("exit", (code, signal) => {
+            if (code === 0) {
+                resolveValidation();
+                return;
+            }
+            reject(new Error(
+                `HARNESS FAILURE: browser command ${JSON.stringify(command)} ` +
+                `validation failed with ${signal ?? code}\n${output}`,
+            ));
+        });
+    });
+}
+
+function startBrowser(command, args) {
+    return new Promise((resolveBrowser, reject) => {
+        const child = spawn(command, args, {
+            stdio: ["ignore", "ignore", "pipe"],
+        });
+        child.stderr.on("data", (chunk) => {
+            browserError += chunk;
+        });
+        child.once("error", reject);
+        child.once("spawn", () => {
+            resolveBrowser(child);
+        });
     });
 }
 

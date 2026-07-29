@@ -256,7 +256,7 @@ func useOwnedDocumentMetadataThroughHelper(
 	role string,
 	metadata documentmeta.Metadata,
 ) {
-	useOwnedDocumentMetadataSlot(handle, role, metadata, true)
+	useOwnedDocumentMetadataSlot(handle, role, metadata, true, true)
 }
 
 func useOwnedDocumentMetadata(
@@ -264,7 +264,16 @@ func useOwnedDocumentMetadata(
 	role string,
 	metadata documentmeta.Metadata,
 ) {
-	useOwnedDocumentMetadataSlot(handle, role, metadata, false)
+	useOwnedDocumentMetadataSlot(handle, role, metadata, false, true)
+}
+
+func useOptionalOwnedDocumentMetadata(
+	handle *documentMetadataOwnerHandle,
+	role string,
+	metadata documentmeta.Metadata,
+	active bool,
+) {
+	useOwnedDocumentMetadataSlot(handle, role, metadata, false, active)
 }
 
 func useOwnedDocumentMetadataSlot(
@@ -272,6 +281,7 @@ func useOwnedDocumentMetadataSlot(
 	role string,
 	metadata documentmeta.Metadata,
 	forwarded bool,
+	active bool,
 ) {
 	bindings := requireDocumentBindings()
 	publication, setPublication := gf.UseState[*documentMetadataPublication](nil)
@@ -285,6 +295,32 @@ func useOwnedDocumentMetadataSlot(
 		if handle == nil || handle.owner == nil || publication == nil {
 			return nil
 		}
+		if !active {
+			transition, err := releaseDocumentMetadataPublication(
+				bindings.coordinator,
+				handle,
+				publication,
+			)
+			if err != nil {
+				panic(err.Error())
+			}
+			recordHandlePublicationState(
+				role,
+				"release",
+				handle.owner.ID(),
+				handle.activePublications,
+			)
+			if transition.Change != documentmeta.ChangeNone {
+				publishCandidateTransition(
+					"handle",
+					role,
+					transition,
+					bindings.coordinator.Stats(),
+					bindings.onSnapshot,
+				)
+			}
+			return nil
+		}
 		transition, coalesced, err := reconcileDocumentMetadataPublication(
 			bindings.coordinator,
 			handle,
@@ -294,9 +330,17 @@ func useOwnedDocumentMetadataSlot(
 		if err != nil {
 			panic(err.Error())
 		}
+		action := transition.Change.String()
 		if coalesced {
+			action = "coalesced"
 			recordHandleDuplicateCoalesced(handle.owner.ID())
 		}
+		recordHandlePublicationState(
+			role,
+			action,
+			handle.owner.ID(),
+			handle.activePublications,
+		)
 		if transition.Change != documentmeta.ChangeNone {
 			publishCandidateTransition(
 				"handle",
@@ -313,6 +357,7 @@ func useOwnedDocumentMetadataSlot(
 	}, gf.Deps(
 		handle != nil,
 		publication != nil,
+		active,
 		metadata.Title,
 		metadata.Description,
 	))
@@ -329,6 +374,12 @@ func useOwnedDocumentMetadataSlot(
 		if err != nil {
 			panic(err.Error())
 		}
+		recordHandlePublicationState(
+			role,
+			"unmount",
+			handle.owner.ID(),
+			handle.activePublications,
+		)
 		if transition.Change != documentmeta.ChangeNone {
 			publishCandidateTransition(
 				"handle",
@@ -434,4 +485,13 @@ func documentMetadataHandleOwnerID(handle *documentMetadataOwnerHandle) uint64 {
 		return 0
 	}
 	return handle.owner.ID()
+}
+
+func documentMetadataHandlePublicationCount(
+	handle *documentMetadataOwnerHandle,
+) int {
+	if handle == nil {
+		return 0
+	}
+	return handle.activePublications
 }

@@ -46,6 +46,8 @@ func recordHandleCreation(string) {}
 
 func recordPublicationCreation(string, bool) {}
 
+func recordHandlePublicationState(string, string, uint64, int) {}
+
 func recordCoordinatorStatistics(documentmeta.Statistics) {}
 
 func recordScopeMount() {}
