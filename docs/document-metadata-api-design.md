@@ -2,18 +2,24 @@
 
 ## Status
 
-Accepted — Component Candidate
+Corrected - Result D: no implementation candidate selected.
 
-This record selects the non-DOM component form as the implementation candidate.
-No public API is added by this branch.
+The hook, non-DOM component, and owner-handle prototypes satisfy the focused
+coordinator and wrapper-lifecycle contract. After owner creation was moved out
+of render, however, all three corrected server-backed projections exposed an
+extra committed initialization phase between route-owner lifetimes. That phase
+temporarily restored the authored baseline during ordinary route changes.
+
+No public API is added by this branch. The previous Component Candidate result
+and its measurements are superseded by this record.
 
 ## Context
 
-The document-state fixture and the server-backed example independently implement
-the same title and description ownership model. Each application currently owns
-an ordered coordinator, stable owner identity, publication and release
-lifecycle, selected-snapshot state, browser bindings, and a central document
-committer.
+The document-state fixture and the server-backed example independently
+implement the same title and description ownership model. Each application
+currently owns an ordered coordinator, stable owner identity, publication and
+release lifecycle, selected-snapshot state, browser bindings, and a central
+document committer.
 
 The repeated value is one pair:
 
@@ -24,59 +30,102 @@ type DocumentMetadata struct {
 }
 ```
 
-The design comparison asks which application-facing shape can hide owner keys
-and coordinator plumbing while retaining component-scoped ownership. The
-comparison does not add a general head manager or change runtime lifecycle
-semantics.
+The comparison asks which application-facing shape can hide owner keys and
+coordinator plumbing while retaining component-scoped ownership. It does not
+add a general head manager or change runtime lifecycle semantics.
 
 ## Evidence Surfaces
 
 The executable comparison uses
-`scripts/fixtures/document-state-api-design`. It contains one common ordered
-model, one explicit string-owner control, and separate hook, component, and
-owner-handle implementations.
+`scripts/fixtures/document-state-api-design`. It contains one ordered
+coordinator model, one explicit string-owner control, and private hook,
+component, and owner-handle wrappers.
 
-The browser harness loads control, hook, component, and handle modes in one
-Chrome process. A pre-boot observer records the authored title, description,
-viewport metadata, node identities, and every managed mutation before WASM
-starts.
+Pure Go tests exercise coordinator ordering, token identity, publication,
+release, and error behavior. They do not execute hook, component, or handle
+lifecycle wrappers through a host renderer.
 
-Temporary copies of `examples/server-backed` project each candidate onto route
-metadata and the saved-editor override. Those copies are measurement artifacts;
-none is part of this branch.
+The browser harness executes the actual wrappers in one Chrome process. A
+pre-boot observer records the authored title, description, viewport metadata,
+node identities, managed mutations, coordinator statistics, owner IDs, and
+candidate-specific lifetime events before WASM starts.
 
-## Current Application-Local Pattern
+Temporary candidate-only copies provide TinyGo size evidence. Temporary copies
+of `examples/server-backed` test package-level integration. None of those
+measurement copies is committed.
 
-The control keeps the current application responsibilities:
+## Previous Allocation Defect
 
-- string owner keys;
-- coordinator and snapshot callback bindings;
-- one publication effect and one unmount callback;
-- selected-snapshot state;
-- one central browser committer;
-- explicit route and nested-editor owner wrappers.
+The old wrappers passed side-effectful expressions to `UseState`:
 
-This pattern implements the required behavior, but ownership identity and
-coordination remain application code.
+```go
+owner, _ := gf.UseState(bindings.coordinator.NewOwner())
+```
+
+```go
+handle, _ := gf.UseState(&documentMetadataOwnerHandle{
+	owner: bindings.coordinator.NewOwner(),
+})
+```
+
+The handle publication used the same eager pattern. Go evaluates those
+arguments on every render even when `UseState` retains the existing slot.
+`NewOwner` also assigned an ID immediately. Ordinary rerenders and failed
+speculative renders therefore created discarded objects and consumed IDs.
+
+A temporary old-head probe observed the route committed as ID 1 while the same
+initial route pass evaluated a discarded ID 2. An ordinary update evaluated
+discarded IDs 7 and 8 while the active route remained ID 1. A same-value
+rerender evaluated discarded IDs 25 and 26. A failed speculative hook render
+evaluated ID 41 without adding an active owner. Component and handle modes
+showed the same class of discarded allocation.
+
+## Corrected Identity Contract
+
+An owner token begins inactive:
+
+```text
+ID = 0
+not in active order
+does not reserve the next committed ID
+```
+
+`NewOwner` creates only that inactive token. The first successful
+`Coordinator.Publish` assigns the next numeric ID, appends the owner, and does
+so from committed effect work. Updating the same owner retains its ID and
+priority. Releasing an unpublished token is a no-op. IDs are never recycled.
+
+The candidate wrappers use two committed phases:
+
+```text
+render with nil private state
+-> initialization effect creates and installs token/handle/publication
+-> next committed render publishes through the stable token
+```
+
+No candidate setter runs during render. A render that fails before commit
+creates no token, handle, publication, ID, or active owner.
 
 ## Fixed Ownership Contract
 
-The candidates use the same contract:
+The corrected prototypes retain these requirements:
 
-1. The authored title and description are captured before the first owner.
-2. A newly committed owner receives the highest priority.
+1. Title and description are one value.
+2. A newly committed owner receives highest priority.
 3. Updating an active owner changes its pair without changing priority.
 4. Releasing the selected owner reveals the latest remaining owner.
 5. Releasing a non-selected owner does not change the selected pair.
 6. Releasing the final owner restores the authored baseline.
-7. Failed speculative renders publish no owner.
-8. Title and description are committed as one selected pair.
-9. Identical selected values cause no document write.
-10. Existing title, description, and unrelated head-node identities remain
-    stable.
+7. Remount creates a new ownership lifetime.
+8. Failed speculative renders publish no owner.
+9. Identical selected metadata causes no document write.
+10. Authored title and description node identities remain stable.
+11. Unrelated authored head elements remain unchanged.
+12. No document mutation occurs during render.
 
-Owner activation is lifecycle-committed. None of the candidates mutates the
-document during render.
+The browser evidence establishes pair consistency at committed application and
+MutationObserver boundaries. It does not claim one atomic browser operation for
+both DOM writes.
 
 ## Non-Goals
 
@@ -91,9 +140,9 @@ This comparison does not define:
 - cross-document ownership;
 - a public API in this branch.
 
-## Candidate A — Implicit Hook
+## Candidate A - Implicit Hook
 
-The proposed shape is:
+The compared shape is:
 
 ```go
 gf.UseDocumentMetadata(gf.DocumentMetadata{
@@ -102,20 +151,20 @@ gf.UseDocumentMetadata(gf.DocumentMetadata{
 })
 ```
 
-The private prototype allocates one opaque owner per hook slot. Its effect
-publishes after commit, updates retain priority, and its unmount callback
-releases the owner. Two calls in one component produce two distinct owners.
+The private hook retains one nil token state slot. Its initialization effect
+creates the token, its publication effect activates or updates it, and its
+unmount callback releases it. Two calls in one component create two committed
+owners. Failed initial render creates neither.
 
-The hook has the smallest candidate-specific TinyGo result and the shortest
-ordinary route call site. Ownership is not visible in the returned node tree,
-however. Conditional ownership requires an additional component boundary or an
-unconditional hook call with separately defined inactive semantics. Moving a
-call across a condition can change owner-slot identity without a visible tree
-change.
+The hook has the smallest corrected candidate-only TinyGo result and the
+shortest ordinary route call site. Ownership is not visible in the returned
+node tree. Conditional ownership still needs another component boundary, and
+the extra committed initialization phase is visible when one route component
+replaces another.
 
-## Candidate B — Non-DOM Component
+## Candidate B - Non-DOM Component
 
-The proposed shape is:
+The compared shape is:
 
 ```gox
 <gf.DocumentMetadata
@@ -128,19 +177,18 @@ The proposed shape is:
 </gf.DocumentMetadata>
 ```
 
-The exact props spelling remains open. One mounted component instance owns one
-metadata pair. The component returns its children as a fragment and emits no DOM
-element. Prop updates retain owner identity and priority. Conditional component
-mounting expresses activation and unmount expresses release.
+One mounted component instance retains one nil token state slot. Conditional
+mounting expresses activation and unmount expresses release. Prop updates
+retain owner identity and priority. The component returns children as a
+fragment and emits no wrapper element.
 
-This form makes the ownership boundary visible in GOX and avoids positional-hook
-conditions in application components. Its main surprise is that a component
-with children owns browser state but adds no layout or DOM node. Documentation
-and naming must state that behavior directly.
+This shape still makes ownership most visible in GOX and avoids positional-hook
+conditions in application components. Its corrected server-backed projection
+nevertheless has the same committed initialization gap as the hook.
 
-## Candidate C — Explicit Owner Handle
+## Candidate C - Explicit Owner Handle
 
-The proposed shape is:
+The compared shape is:
 
 ```go
 owner := gf.UseDocumentMetadataOwner()
@@ -150,19 +198,60 @@ gf.UseOwnedDocumentMetadata(owner, gf.DocumentMetadata{
 })
 ```
 
-The private prototype keeps a stable opaque handle and a separate publication
-slot. Passing the handle through a helper preserves owner identity. Identical
-duplicate publications coalesce, while conflicting simultaneous publications
-are rejected.
+The private prototype retains a nil handle slot and a nil publication slot.
+Committed initialization effects create them. A later publication effect
+activates the owner. Passing the handle through a helper preserves identity.
+Identical duplicate publications coalesce, while conflicting simultaneous
+publications are rejected.
 
-The handle supports helper composition explicitly, but requires two calls and
-two lifecycle state values for ordinary ownership. Its misuse surface includes
-escaping a handle, reusing it across unrelated component lifetimes, and
-confusing handle creation with active publication.
+The handle supports helper composition explicitly, but requires two calls,
+three effect sites, and split handle/publication lifetime rules. It also has the
+largest corrected source and TinyGo cost, while retaining the same integration
+gap.
 
-## Behavioral Evidence
+## Pure Coordinator Conformance
 
-All candidates pass the same host and browser scenarios:
+Pure host tests cover the control and opaque-token coordinator models, not the
+actual candidate wrappers.
+
+| Scenario | Required result | Corrected result |
+|---|---|---|
+| inactive token | ID 0 | pass |
+| unpublished token before published token | no ID gap | pass |
+| first publication | ID 1 | pass |
+| existing-owner update | same ID and priority | pass |
+| identical publication | no transition | pass |
+| unpublished release | no-op | pass |
+| release and remount | exactly next ID | pass |
+| foreign token | rejected before and after publication | pass |
+| title-only and description-only updates | compare the complete pair | pass |
+
+The focused pure suite passed 100 repetitions and 20 race-detector
+repetitions.
+
+## Candidate Wrapper Lifecycle Evidence
+
+Actual hook, component, and handle lifecycle wrappers are exercised in the
+browser renderer. Pure host tests cover their shared coordinator model and
+identity allocation rules.
+
+The ordinary route lifetime for each candidate produced one token, one
+committed ID, and one active addition. Metadata and identical rerenders created
+no token or ID. A speculative failed owner created none. Scope remount created
+exactly one next lifetime.
+
+Candidate-specific browser evidence showed:
+
+- hook: the two-slot probe created tokens and IDs 5 and 6, then released both
+  exactly once;
+- component: five successful mounts matched four unmounts with one active
+  remount, and no wrapper DOM element appeared;
+- handle: six handle/token/ID lifetimes and seven publication lifetimes were
+  committed; one forwarded duplicate coalesced through owner ID 5;
+- all candidates: the failed-render token, ID, and active-owner deltas were
+  zero.
+
+## Focused Browser Evidence
 
 | Scenario | Control | Hook | Component | Handle |
 |---|---:|---:|---:|---:|
@@ -171,226 +260,350 @@ All candidates pass the same host and browser scenarios:
 | parent update beneath nested owner | pass | pass | pass | pass |
 | selected release reveals updated parent | pass | pass | pass | pass |
 | non-selected release | pass | pass | pass | pass |
-| identical selected update | pass | pass | pass | pass |
+| identical selected rerender | pass | pass | pass | pass |
 | failed speculative render | pass | pass | pass | pass |
 | final release restores baseline | pass | pass | pass | pass |
 | scope remount | pass | pass | pass | pass |
+| node identity | pass | pass | pass | pass |
+| duplicate description prevention | pass | pass | pass | pass |
 
-Two focused browser runs produced identical normalized transition, candidate,
-and mutation evidence. Every mode reported:
+Two focused browser runs produced byte-identical normalized evidence after
+excluding elapsed time:
 
-- zero invalid title/description pairs;
-- zero duplicate descriptions;
-- zero speculative metadata appearances;
-- zero unrelated metadata mutations;
-- zero title-node replacements;
-- zero description-node replacements;
-- one authored-baseline restoration;
-- one captured speculative render failure.
+```text
+SHA-256:
+8a6df8a2eab01b652405c861d66609299c6f67f122d6d3cf1429428f9a5dc058
+```
 
-Candidate-specific evidence also showed:
+The runs took 5,908 ms and 5,674 ms. Transition counters, coordinator
+statistics, committed owner-ID sequences, mutation logs, baseline restoration,
+node identity, and failure counters were identical.
 
-- hook: two calls in one component had distinct owner identities and added no
-  DOM element;
-- component: conditional mount and release matched owner lifetime and added no
-  wrapper element;
-- handle: forwarding retained one owner, and one identical duplicate
-  publication coalesced.
+Final focused statistics were:
 
-## Call-Site Measurements
+| Mode | Tokens | IDs | Adds | Updates | Releases | Active | Last ID |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| control | 5 | 5 | 5 | 1 | 4 | 1 | 5 |
+| hook | 7 | 7 | 7 | 1 | 6 | 1 | 7 |
+| component | 5 | 5 | 5 | 1 | 4 | 1 | 5 |
+| handle | 6 | 6 | 6 | 1 | 5 | 1 | 6 |
 
-The common hidden support is one coordinator, one selected-snapshot state, one
-context binding, and one central committer. Candidate numbers below count
-ownership-specific application shape, not browser evidence.
+## Candidate Measurements
+
+Counts below cover one ordinary owner. Initialization renders count committed
+renders from mount through the first publication. Effect sites count
+`UseEffect` calls; unmount callbacks are listed separately. Support lines use
+the same source-span rule as the superseded measurements: the complete private
+lifecycle wrapper and its private owner/publication types, including embedded
+fixture evidence calls.
 
 | Measure | Control | Hook | Component | Handle |
 |---|---:|---:|---:|---:|
-| metadata arguments per owner | 2 fields plus key | 1 value | 1 value | handle plus 1 value |
+| private state slots | 0 | 1 | 1 | 2 |
+| effect sites | 1 | 2 | 2 | 3 |
+| initialization renders | 1 | 2 | 2 | 2 |
+| token creations | 1 | 1 | 1 | 1 |
+| committed owner IDs | 1 | 1 | 1 | 1 |
+| unmount callbacks | 1 | 1 | 1 | 1 |
+| ownership support lines | 34 | 44 | 61 | 147 |
 | application-visible owner keys | 2 | 0 | 0 | 0 |
-| owner state slots | 0 | 1 | 1 | 2 |
-| owner publication effects | 1 | 1 | 1 | 1 |
-| owner unmount callbacks | 1 | 1 | 1 | 1 |
-| owner helper types | 1 adapter | 0 | 1 props type | 2 |
-| owner helper functions | 1 | 1 | 1 | 3 |
-| coordinator methods visible to caller | 2 | 0 | 0 | 0 |
-| explicit caller cleanup callbacks | 1 | 0 | 0 | 0 |
 | positional-hook restriction at caller | yes | yes | no | yes |
 
-The temporary server-backed projections contained six ownership sites: five
-route owners and one saved-editor override.
-
-| Measure | Current control | Hook | Component | Handle |
-|---|---:|---:|---:|---:|
-| ownership expression lines | 18 | 8 | 14 | 13 |
-| route-owner lines | 14 | 5 | 11 | 10 |
-| nested-override lines | 4 | 3 | 3 | 3 |
-| owner-key props | 6 | 0 | 0 | 0 |
-| candidate-specific route helper needed | no | no | no | no |
-| conditional editor helper needed | existing wrapper | yes | no | yes |
-
-The central committer and selected-snapshot plumbing remain common hidden costs;
-they are not evidence for one candidate over another.
-
-## Misuse Analysis
-
-| Risk | Hook | Component | Handle |
-|---|---|---|---|
-| accidental conditional use | positional slot can change | ordinary conditional mount is valid | either handle or publication call can become conditional |
-| duplicate owner creation | one owner per accidental extra hook call | one owner per extra mounted component | extra handle creates an owner; repeated publication needs validation |
-| stale cleanup | hidden by hook implementation | tied to component unmount | split handle/publication lifetimes require checks |
-| token escape or reuse | no token exposed | no token exposed | handle can escape or be reused |
-| invisible ownership | high | ownership appears in tree | handle calls are visible but not in tree |
-| non-DOM surprise | none | component adds no DOM node | none |
-| repeated publication | another hook call means another owner | another component means another owner | same handle needs duplicate/conflict rules |
-| missing root binding | runtime diagnostic required | runtime diagnostic required | runtime diagnostic required |
-| multiple mounted apps | binding must remain mount-local | binding must remain mount-local | handle must not cross mounts |
-| non-browser use | should be an inert lifecycle contract or diagnosed | same | same |
-| testing ergonomics | render a hook owner | mount a visible ownership boundary | create and publish a handle |
-
-Concrete invalid forms include calling the hook only inside `if open`, mounting
-two metadata components for one logical owner, and retaining a handle after its
-publishing component unmounts. A future implementation must diagnose missing
-root bindings and reject a handle from another mounted application.
-
-The decision rubric scores 0 as weakest and 3 as strongest:
-
-| Category | Hook | Component | Handle |
-|---|---:|---:|---:|
-| semantic fit | 3 | 3 | 3 |
-| call-site clarity | 2 | 3 | 2 |
-| nested-owner ergonomics | 2 | 3 | 2 |
-| update ergonomics | 3 | 3 | 3 |
-| lifecycle safety | 2 | 3 | 2 |
-| positional-hook burden | 1 | 3 | 2 |
-| GOX ergonomics | 2 | 3 | 1 |
-| helper composition | 3 | 2 | 3 |
-| testability | 2 | 3 | 2 |
-| misuse resistance | 2 | 2 | 1 |
-| implementation narrowness | 3 | 3 | 2 |
-| DCE feasibility | 3 | 3 | 3 |
-| TinyGo cost | 3 | 2 | 1 |
-| integrated projection | 2 | 3 | 1 |
-| **Total** | **33** | **39** | **28** |
-
-The score does not override hard rejection conditions. No candidate triggered a
-hard rejection; the component lead is supported by the integrated projection,
-not aesthetics alone.
+All candidates require one more effect site than the eager versions. Hook and
+component support grew from 21 and 36 lines to 44 and 61. Handle support grew
+from 90 to 147 lines.
 
 ## TinyGo Size Evidence
 
 Measurements use Go 1.22.12, TinyGo 0.41.1, Linux amd64, `gzip -n -9`,
 Brotli quality 11, and Zstandard level 19. Each candidate-only copy retains the
-same coordinator, adapter, and scenario UI, with only one ownership candidate
-reachable.
+same scenario UI, coordinator, and browser adapter, with only one candidate
+wrapper and its candidate-specific probe reachable.
 
-| Fixture | Ownership support lines | Raw | gzip | Brotli | Zstandard | Raw delta from control |
-|---|---:|---:|---:|---:|---:|---:|
-| control only | 22 | 302,625 B | 129,291 B | 105,829 B | 112,125 B | 0 B |
-| hook only | 21 | 307,577 B | 130,542 B | 106,997 B | 112,916 B | +4,952 B |
-| component only | 36 | 308,669 B | 130,780 B | 107,106 B | 113,326 B | +6,044 B |
-| handle only | 90 | 311,210 B | 131,896 B | 107,898 B | 114,266 B | +8,585 B |
-| combined comparison fixture | not applicable | 331,409 B | 139,181 B | 112,401 B | 119,208 B | not comparable |
+| Fixture | Raw | gzip | Brotli | Zstandard | Raw delta from control |
+|---|---:|---:|---:|---:|---:|
+| control only | 307,235 B | 130,835 B | 107,144 B | 113,214 B | 0 B |
+| hook only | 313,588 B | 132,352 B | 108,503 B | 114,483 B | +6,353 B |
+| component only | 314,758 B | 132,782 B | 108,507 B | 114,976 B | +7,523 B |
+| handle only | 319,836 B | 135,242 B | 109,902 B | 116,914 B | +12,601 B |
+| combined comparison fixture | 341,382 B | 142,089 B | 114,833 B | 121,807 B | not comparable |
 
-The component costs 1,092 raw bytes more than the hook in this fixture. This
-difference does not outweigh its explicit lifecycle boundary and simpler
-conditional ownership in the integrated projection.
+The corrected component costs 1,170 raw bytes more than the hook. The corrected
+combined fixture is 9,973 raw bytes, 2,908 gzip bytes, 2,432 Brotli bytes, and
+2,599 Zstandard bytes larger than the old eager-allocation head. The previous
+candidate-only and combined measurements are superseded.
 
-Ownership support lines count each candidate's lifecycle wrapper and private
-owner/publication types. They exclude the shared coordinator, adapter, scenario,
-browser evidence, and dispatch used only to host all candidates in one fixture.
+## Candidate Size Reproduction
+
+The measurement source is commit
+`7eb2f01804876c317e652e7b48f90dc9c36d90bb`. A reproducible temporary layout is:
+
+```bash
+root="$(mktemp -d)"
+git archive 7eb2f01804876c317e652e7b48f90dc9c36d90bb \
+  | tar -x -C "$root"
+
+for mode in control hook component handle combined; do
+  cp -a "$root" "$root-$mode"
+done
+```
+
+For `control`, `hook`, `component`, and `handle`, replace the
+`CandidateOwner` mode switch with the corresponding direct wrapper call. Keep
+the common failure and render recording after the direct hook/control/handle
+call; the component dispatch returns the component directly. In
+`candidateProbeNode`, retain only the hook two-slot probe for `hook`, only the
+forwarded duplicate probe for `handle`, and return `gf.Empty()` for `control`
+and `component`. The `combined` copy is unchanged. Run `gofmt` on
+`candidates.go`.
+
+Normalized projection patch hashes are:
+
+| Copy | Patch SHA-256 |
+|---|---|
+| control | `62d6193bbb811d50a1719407a960cf1effa7dfd0ee2548c155461db986ec7d64` |
+| hook | `85cc1776b00a6467354a58f8ab1b8a52f4443f2449560054367d3089e0a10bde` |
+| component | `afd9195392a7eb70bb5794b877bc30677076d6ef74b909cb82e5564c73799ee6` |
+| handle | `436687cc326028c6d951dab38437299f4c6676f7825380424f440b29d51d6614` |
+| combined | no patch |
+
+Each patch is a unified diff with repository-relative labels for
+`candidates.go` and `app.gox`, created before generation. Build and measure each
+copy with:
+
+```bash
+goxc build ./scripts/fixtures/document-state-api-design --compiler=tinygo
+
+wasm="./scripts/fixtures/document-state-api-design/.goframe/build/tinygo/dev/bundle.wasm"
+wc -c "$wasm"
+gzip -n -9 -c "$wasm" | wc -c
+brotli -q 11 -c "$wasm" | wc -c
+zstd -19 -q -c "$wasm" | wc -c
+sha256sum "$wasm"
+```
+
+Remove the copies and owned caches with:
+
+```bash
+rm -rf "$root" "$root-control" "$root-hook" "$root-component" \
+  "$root-handle" "$root-combined"
+```
 
 ## Integrated Server-Backed Projection
 
-Every temporary projection:
+Each temporary projection:
 
 - generated successfully;
 - passed `examples/server-backed/...` pure tests;
-- completed a Go/WASM build;
+- completed a TinyGo WASM build;
 - produced a standard-Go standalone package;
-- retained route metadata, nested saved-editor ownership, metadata updates
-  beneath the editor, validation, pending and confirmed states, editor release,
-  and route-scope unmount code paths.
+- removed six caller-supplied owner-key props and the application
+  `DocumentOwner`/`useServerBackedDocumentState` adapter;
+- added an inactive opaque token path whose ID is assigned on first committed
+  publication.
 
-| Candidate | Added | Removed | Total changed lines | Result |
-|---|---:|---:|---:|---|
-| hook | 29 | 44 | 73 | compile, tests, build, package pass |
-| component | 21 | 27 | 48 | compile, tests, build, package pass |
-| handle | 53 | 44 | 97 | compile, tests, build, package pass |
+| Candidate | Patch SHA-256 | Added | Removed | Total changed | Generate/tests/build/package |
+|---|---|---:|---:|---:|---|
+| hook | `0f559023f210fda6697722cab125c3f4c8d795e671cbf394e00dfdffe0d79ec7` | 159 | 99 | 258 | pass |
+| component | `a9dc2653d80932bd178e4ad28dc235b987006e5c336e1b8c2c6eab00c3673970` | 128 | 69 | 197 | pass |
+| handle | `5dc404d16abaf5958660e9121956fe6317c5527abbe485cde691917e90702bb4` | 244 | 99 | 343 | pass |
 
-The selected component projection also passed the existing focused
-server-backed browser harness. It retained 11 ordinary greeting requests, 10
-transition requests, 4 saved GETs, 4 saved POSTs, 43 title mutation batches, 43
-description mutation batches, 139 document snapshots, one baseline restoration,
-and five saved-editor activations and releases. Invalid pairs, stale metadata,
-duplicate descriptions, node replacements, false confirmations, and ownership
-mismatches remained zero.
+The evidence-label adapter maps zero active owners to the authored baseline,
+one active owner to `route`, and a deeper active owner to `saved-editor`.
+Those labels are not identity and do not appear at candidate call sites.
 
-The evidence-label adapter in the temporary projection derived the existing
-`route` and `saved-editor` labels from owner depth. Those labels were not owner
-identity and were not supplied at component call sites.
+The full existing server-backed browser harness was run against all three
+corrected projections. Each reached the final document assertion with the
+request and safety evidence intact:
+
+```text
+ordinary greeting requests: 11
+retained-transition requests: 10
+saved GET requests: 4
+saved POST requests: 4
+invalid metadata pairs: 0
+stale metadata appearances: 0
+duplicate descriptions: 0
+saved-editor activations/releases: 5/5
+```
+
+Each projection failed the existing lifecycle counters in the same way:
+
+| Counter | Reference | Hook | Component | Handle |
+|---|---:|---:|---:|---:|
+| authored-baseline restorations | 1 | 9 | 9 | 9 |
+| title mutation batches | 43 | 51 | 51 | 51 |
+| description mutation batches | 43 | 51 | 51 | 51 |
+| document snapshots | 139 | 147 | 147 | 147 |
+
+The eight extra restorations occur when an old route owner releases before the
+replacement wrapper reaches its second committed publication phase. They are
+observable completed states, not invalid title/description pairs.
+
+## Server Projection Reproduction
+
+Use the same source commit and one temporary copy per candidate:
+
+```bash
+root="$(mktemp -d)"
+git archive 7eb2f01804876c317e652e7b48f90dc9c36d90bb \
+  | tar -x -C "$root"
+
+for mode in hook component handle; do
+  cp -a "$root" "$root-$mode"
+done
+```
+
+Apply these exact transformation rules to each copy:
+
+1. In `document_state.go`, adapt the `Owner`, `NewOwner`, `Publish`, `Release`,
+   and foreign-owner validation from
+   `scripts/fixtures/document-state-api-design/internal/documentmeta/model.go`
+   to `serverBackedDocumentState`. Store `coordinator` and `key` on the token,
+   add `nextID uint64`, and set the key to
+   `"owner-"+strconv.FormatUint(nextID, 10)` only in first `Publish`. Preserve
+   the existing string `Set`, `Remove`, `Snapshot`, and pure tests. Map the
+   candidate result label to empty at count 0, `route` at count 1, and
+   `saved-editor` above count 1.
+2. In `app.gox`, remove `DocumentOwnerProps`, the two string-owner constants,
+   `DocumentOwner`, and `useServerBackedDocumentState`.
+3. Add `document_candidate.go` with `//go:build js && wasm`. For hook,
+   component, or handle respectively, copy the corrected lifecycle structure
+   of `useHookDocumentMetadata`, `ComponentDocumentMetadata`, or the
+   `documentMetadataOwnerHandle`/`documentMetadataPublication` block from
+   `scripts/fixtures/document-state-api-design/cmd/app/candidates.go`. Remove
+   roles and fixture evidence calls, substitute the server-backed types, and
+   call `OnSnapshot` only when the coordinator reports a change.
+4. Replace the five route ownership sites and one saved-editor site. Hook and
+   handle projections add a conditional `SavedGreetingEditor` component;
+   component projection directly replaces `DocumentOwner` with
+   `DocumentMetadata`.
+5. Do not modify tests, the browser harness, backend protocol, document
+   adapter, or committer.
+
+Create repository-relative unified diffs for `app.gox`,
+`document_state.go`, and the added `document_candidate.go`; their hashes must
+match the table above. Run from each temporary root:
+
+```bash
+goxc generate ./examples/server-backed
+go test -count=1 ./examples/server-backed/...
+goxc build ./examples/server-backed --compiler=tinygo
+goxc package ./examples/server-backed --compiler=go
+```
+
+Browser evidence uses:
+
+```bash
+node --experimental-websocket scripts/server-backed-browser-smoke.mjs
+```
+
+The expected corrected-projection result is the final lifecycle-counter
+failure shown above. Cleanup is:
+
+```bash
+rm -rf "$root" "$root-hook" "$root-component" "$root-handle"
+```
+
+## Misuse Analysis
+
+| Risk | Hook | Component | Handle |
+|---|---|---|---|
+| conditional use | positional slot can change | ordinary conditional mount is valid | handle or publication call can become conditional |
+| initialization | hidden two-phase activation | visible owner still activates in two phases | handle and publication initialize separately |
+| route replacement | baseline gap before publication | baseline gap before publication | baseline gap before publication |
+| duplicate owner creation | extra hook call creates owner | extra mounted component creates owner | extra handle creates owner |
+| token escape or reuse | no token exposed | no token exposed | handle can escape or be reused |
+| helper composition | implicit slot survives helper only through caller shape | requires component composition | explicit handle forwarding |
+| publication conflict | another hook means another owner | another component means another owner | duplicate/conflicting publication rules required |
+| missing root binding | diagnostic required | diagnostic required | diagnostic required |
+| multiple mounted apps | binding must remain mount-local | binding must remain mount-local | handle must not cross mounts |
+| testing ergonomics | render hook owner | mount non-DOM owner component | create handle and publication |
+
+## Decision Matrix
+
+The score uses 0 as weakest and 3 as strongest. Integration receives zero for
+all candidates because the corrected projections do not preserve the reference
+owner-handoff counters.
+
+| Category | Hook | Component | Handle |
+|---|---:|---:|---:|
+| semantic fit | 2 | 2 | 2 |
+| call-site clarity | 2 | 3 | 2 |
+| nested-owner ergonomics | 2 | 3 | 2 |
+| update ergonomics | 3 | 3 | 3 |
+| lifecycle safety | 1 | 1 | 1 |
+| initialization complexity | 2 | 2 | 1 |
+| positional-hook burden | 1 | 3 | 2 |
+| GOX ergonomics | 2 | 3 | 1 |
+| helper composition | 3 | 2 | 3 |
+| testability | 2 | 3 | 2 |
+| misuse resistance | 2 | 2 | 1 |
+| implementation narrowness | 2 | 2 | 1 |
+| DCE feasibility | 3 | 3 | 3 |
+| TinyGo cost | 3 | 2 | 1 |
+| integrated projection | 0 | 0 | 0 |
+| **Total** | **30** | **34** | **25** |
 
 ## Decision
 
-The component candidate is selected for a possible later implementation stage.
-It satisfies the fixed contract, makes owner lifetime visible in GOX, expresses
-conditional overrides through ordinary component mounting, removes string owner
-keys and coordinator methods from call sites, and creates the smallest
-server-backed projection.
+Result D is selected: no implementation candidate.
 
-The hook is smaller, but its invisible ownership and positional conditional-use
-burden are material for route and editor composition. The handle preserves
-explicit identity through helpers, but its extra ceremony and token-lifetime
-rules are not justified by the current evidence.
+The component remains the clearest call-site shape and the narrowest integrated
+patch, but that relative lead does not override the shared lifecycle
+regression. A component, hook, or handle API should not be selected until
+committed owner activation can hand off between component lifetimes without an
+observable authored-baseline interval and without moving owner creation back
+into render.
 
-Selection here means only that the component form is the implementation
-candidate. No production API, compatibility promise, or implementation schedule
-is established.
+No proposed public spelling or stability tier is assigned. If a later design
+produces a viable candidate, it remains an Experimental Frontier question, not
+a Public-Candidate or compatibility promise.
 
 ## Rejected Alternatives
 
 - The explicit string-owner control remains application-local and exposes the
   machinery this design intends to hide.
-- Independent title and description APIs can create mixed document pairs and
-  are outside the fixed contract.
+- Moving `NewOwner` back into a `UseState` argument recreates discarded
+  per-render allocations and failed-render ID gaps.
 - Render-time setters or direct DOM writes violate lifecycle commit semantics.
-- A public coordinator, global registry, router integration, or general head
-  manager broadens the current evidence boundary.
-- The hook and handle remain documented comparison candidates, not alternate
-  public spellings to ship together.
+- Accepting the eight extra baseline restorations weakens existing
+  server-backed ownership evidence.
+- Independent title and description APIs can create mixed pairs and are outside
+  the fixed contract.
+- A public coordinator, global registry, router integration, transactional
+  lifecycle redesign, or general head manager broadens this stage.
 
-## Proposed Stability Tier
+## Public Surface Boundary
 
-If implemented later, the candidate belongs in **Experimental Frontier**.
+This branch does not add:
 
-The exact exported name, props shape, root binding, diagnostics, and non-browser
-behavior require implementation evidence. The candidate is not stable and is
-not classified as Public-Candidate by this record.
+```text
+gf.DocumentMetadata
+gf.UseDocumentMetadata
+gf.UseDocumentMetadataOwner
+gf.UseOwnedDocumentMetadata
+```
 
-## Implementation Boundary
-
-A later implementation would need a private mount-local coordinator and browser
-adapter, stable opaque owner identity per component instance, lifecycle-committed
-publication, release on unmount, selected-pair state, baseline capture, and one
-document committer.
-
-The application-facing component must not accept a coordinator, callback,
-browser adapter, string owner key, owner index, or global registry. Generated
-DOM must contain only its children.
+No production implementation is authorized by this record.
 
 ## Remaining Limits
 
 The evidence covers one browser document, one authored title, one authored
 description element, nested component owners, route ownership, editor
-overrides, failed-render isolation, and baseline restoration.
+overrides, failed-render isolation, baseline restoration, and one real
+server-backed route workflow.
 
 It does not establish:
 
-- SSR, hydration, or server metadata behavior;
-- multiple browser documents or portals;
 - arbitrary head-element ownership;
+- SSR or hydration behavior;
+- multiple browser documents or portals;
 - concurrent independently mounted apps targeting one document;
-- interaction with authored scripts that mutate the same nodes;
+- interaction with external scripts that mutate the same head nodes;
+- one atomic browser operation for title and description;
 - a stable diagnostic or testing API;
-- production SEO behavior.
+- production SEO behavior;
+- TinyGo panic/recover containment.
 
 Those limits must not be inferred from the private prototype.
