@@ -403,6 +403,11 @@ export GOFRAME_DOCUMENT_STATE_CHROME_DEBUG_PORT="${GOFRAME_DOCUMENT_STATE_CHROME
 GOXC="$GOXC" CHROME="$CHROME_BIN" node --experimental-websocket scripts/document-state-browser-smoke.mjs
 
 echo
+echo "== Document metadata API design comparison =="
+export GOFRAME_DOCUMENT_API_DESIGN_CHROME_DEBUG_PORT="${GOFRAME_DOCUMENT_API_DESIGN_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+GOXC="$GOXC" CHROME="$CHROME_BIN" node --experimental-websocket scripts/document-state-api-design-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
