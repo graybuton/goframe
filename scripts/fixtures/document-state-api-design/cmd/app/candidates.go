@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+
 	gf "github.com/graybuton/goframe/pkg/goframe"
 	"github.com/graybuton/goframe/scripts/fixtures/document-state-api-design/internal/documentmeta"
 )
@@ -36,6 +38,15 @@ type documentMetadataPublication struct {
 	active   bool
 	metadata documentmeta.Metadata
 }
+
+var (
+	errDocumentMetadataPublicationConflict = errors.New(
+		"document-state API design: one owner handle has conflicting active publications",
+	)
+	errDocumentMetadataPublicationUnderflow = errors.New(
+		"document-state API design: document owner handle publication underflow",
+	)
+)
 
 var (
 	candidateOwnerType = gf.NewComponentType(
@@ -274,36 +285,19 @@ func useOwnedDocumentMetadataSlot(
 		if handle == nil || handle.owner == nil || publication == nil {
 			return nil
 		}
-		switch {
-		case !publication.active && handle.activePublications == 0:
-			publication.active = true
-			publication.metadata = metadata
-			handle.activePublications = 1
-			handle.metadata = metadata
-			handle.primary = publication
-			transition, err := bindings.coordinator.Publish(handle.owner, metadata)
-			if err != nil {
-				panic("document-state API design handle publish: " + err.Error())
-			}
-			publishCandidateTransition(
-				"handle",
-				role,
-				transition,
-				bindings.coordinator.Stats(),
-				bindings.onSnapshot,
-			)
-		case !publication.active && handle.metadata == metadata:
-			publication.active = true
-			publication.metadata = metadata
-			handle.activePublications++
+		transition, coalesced, err := reconcileDocumentMetadataPublication(
+			bindings.coordinator,
+			handle,
+			publication,
+			metadata,
+		)
+		if err != nil {
+			panic(err.Error())
+		}
+		if coalesced {
 			recordHandleDuplicateCoalesced(handle.owner.ID())
-		case publication.active && handle.primary == publication:
-			publication.metadata = metadata
-			handle.metadata = metadata
-			transition, err := bindings.coordinator.Publish(handle.owner, metadata)
-			if err != nil {
-				panic("document-state API design handle update: " + err.Error())
-			}
+		}
+		if transition.Change != documentmeta.ChangeNone {
 			publishCandidateTransition(
 				"handle",
 				role,
@@ -311,10 +305,6 @@ func useOwnedDocumentMetadataSlot(
 				bindings.coordinator.Stats(),
 				bindings.onSnapshot,
 			)
-		case publication.active && handle.metadata == metadata:
-			publication.metadata = metadata
-		default:
-			panic("document-state API design: one owner handle has conflicting active publications")
 		}
 		if forwarded {
 			recordHandleForward(handle.owner.ID())
@@ -331,27 +321,112 @@ func useOwnedDocumentMetadataSlot(
 			!publication.active {
 			return
 		}
-		if handle.activePublications <= 0 {
-			panic("document-state API design: document owner handle publication underflow")
+		transition, err := releaseDocumentMetadataPublication(
+			bindings.coordinator,
+			handle,
+			publication,
+		)
+		if err != nil {
+			panic(err.Error())
 		}
+		if transition.Change != documentmeta.ChangeNone {
+			publishCandidateTransition(
+				"handle",
+				role,
+				transition,
+				bindings.coordinator.Stats(),
+				bindings.onSnapshot,
+			)
+		}
+	})
+}
+
+func reconcileDocumentMetadataPublication(
+	coordinator *documentmeta.Coordinator,
+	handle *documentMetadataOwnerHandle,
+	publication *documentMetadataPublication,
+	metadata documentmeta.Metadata,
+) (documentmeta.Transition, bool, error) {
+	if !publication.active {
+		if handle.activePublications < 0 {
+			return documentmeta.Transition{}, false,
+				errDocumentMetadataPublicationUnderflow
+		}
+		if handle.activePublications == 0 {
+			transition, err := coordinator.Publish(handle.owner, metadata)
+			if err != nil {
+				return documentmeta.Transition{}, false, errors.New(
+					"document-state API design handle publish: " + err.Error(),
+				)
+			}
+			publication.active = true
+			publication.metadata = metadata
+			handle.activePublications = 1
+			handle.metadata = metadata
+			handle.primary = publication
+			return transition, false, nil
+		}
+		if handle.metadata != metadata {
+			return documentmeta.Transition{}, false,
+				errDocumentMetadataPublicationConflict
+		}
+		publication.active = true
+		publication.metadata = metadata
+		handle.activePublications++
+		return documentmeta.Transition{}, true, nil
+	}
+
+	if publication.metadata == metadata && handle.metadata == metadata {
+		return documentmeta.Transition{}, false, nil
+	}
+	if handle.primary != publication || handle.activePublications > 1 {
+		return documentmeta.Transition{}, false,
+			errDocumentMetadataPublicationConflict
+	}
+	if handle.activePublications <= 0 {
+		return documentmeta.Transition{}, false,
+			errDocumentMetadataPublicationUnderflow
+	}
+
+	transition, err := coordinator.Publish(handle.owner, metadata)
+	if err != nil {
+		return documentmeta.Transition{}, false, errors.New(
+			"document-state API design handle update: " + err.Error(),
+		)
+	}
+	publication.metadata = metadata
+	handle.metadata = metadata
+	return transition, false, nil
+}
+
+func releaseDocumentMetadataPublication(
+	coordinator *documentmeta.Coordinator,
+	handle *documentMetadataOwnerHandle,
+	publication *documentMetadataPublication,
+) (documentmeta.Transition, error) {
+	if !publication.active {
+		return documentmeta.Transition{}, nil
+	}
+	if handle.activePublications <= 0 {
+		return documentmeta.Transition{},
+			errDocumentMetadataPublicationUnderflow
+	}
+	if handle.activePublications > 1 {
 		publication.active = false
 		handle.activePublications--
-		if handle.activePublications != 0 {
-			return
-		}
-		handle.primary = nil
-		transition, err := bindings.coordinator.Release(handle.owner)
-		if err != nil {
-			panic("document-state API design handle release: " + err.Error())
-		}
-		publishCandidateTransition(
-			"handle",
-			role,
-			transition,
-			bindings.coordinator.Stats(),
-			bindings.onSnapshot,
+		return documentmeta.Transition{}, nil
+	}
+
+	transition, err := coordinator.Release(handle.owner)
+	if err != nil {
+		return documentmeta.Transition{}, errors.New(
+			"document-state API design handle release: " + err.Error(),
 		)
-	})
+	}
+	publication.active = false
+	handle.activePublications = 0
+	handle.primary = nil
+	return transition, nil
 }
 
 func documentMetadataHandleOwnerID(handle *documentMetadataOwnerHandle) uint64 {
