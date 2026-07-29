@@ -139,6 +139,7 @@ try {
 }
 
 async function runMode(browserClient, mode) {
+    const boundaries = {};
     const appURL = `${origin}/?smoke=${Date.now()}#/${mode}`;
     await browserClient.call("Page.navigate", { url: appURL });
     await waitForCondition(async () => {
@@ -152,6 +153,7 @@ async function runMode(browserClient, mode) {
     });
 
     const initial = await pageState(browserClient);
+    boundaries.initialBaseline = lifecycleBoundary(initial);
     assert(initial.authoredTitle === baseline.title, `${mode} authored title changed`);
     assert(
         initial.authoredDescription === baseline.description,
@@ -168,7 +170,9 @@ async function runMode(browserClient, mode) {
         label: `${mode} route A`,
         ownerCount: 1,
     });
-    const routeOwnerID = (await pageState(browserClient)).activeOwnerID;
+    const routeAState = await pageState(browserClient);
+    boundaries.routeA = lifecycleBoundary(routeAState);
+    const routeOwnerID = Number(routeAState.activeOwnerID);
 
     await setPhase(browserClient, "nested-b");
     await click(browserClient, "activate-b");
@@ -176,6 +180,7 @@ async function runMode(browserClient, mode) {
         label: `${mode} nested B`,
         ownerCount: 2,
     });
+    boundaries.nestedB = lifecycleBoundary(await pageState(browserClient));
 
     await setPhase(browserClient, "route-a2-beneath-b");
     await click(browserClient, "update-route-a2");
@@ -192,6 +197,7 @@ async function runMode(browserClient, mode) {
         label: `${mode} A2 beneath B`,
         ownerCount: 2,
     });
+    boundaries.routeA2 = lifecycleBoundary(await pageState(browserClient));
 
     await setPhase(browserClient, "release-selected-b");
     await click(browserClient, "release-b");
@@ -199,6 +205,7 @@ async function runMode(browserClient, mode) {
         label: `${mode} release B reveals A2`,
         ownerCount: 1,
     });
+    boundaries.selectedBRelease = lifecycleBoundary(await pageState(browserClient));
 
     await setPhase(browserClient, "non-top-release");
     await click(browserClient, "activate-b");
@@ -206,11 +213,13 @@ async function runMode(browserClient, mode) {
         label: `${mode} B reactivation`,
         ownerCount: 2,
     });
+    boundaries.bRemount = lifecycleBoundary(await pageState(browserClient));
     await click(browserClient, "activate-c");
     await waitForState(browserClient, metadataC, {
         label: `${mode} C activation`,
         ownerCount: 3,
     });
+    boundaries.cActivation = lifecycleBoundary(await pageState(browserClient));
     const beforeNonTop = await pageState(browserClient);
     await click(browserClient, "release-b");
     await waitForCondition(async () => {
@@ -218,6 +227,7 @@ async function runMode(browserClient, mode) {
         return pairMatches(state, metadataC) && state.ownerCount === 2;
     }, `${mode} non-top B release`);
     const afterNonTop = await pageState(browserClient);
+    boundaries.nonTopBRelease = lifecycleBoundary(afterNonTop);
     assert(
         afterNonTop.titleMutationBatches === beforeNonTop.titleMutationBatches &&
             afterNonTop.descriptionMutationBatches ===
@@ -233,6 +243,7 @@ async function runMode(browserClient, mode) {
         return state.runtime.renders > beforeSame.runtime.renders;
     }, `${mode} selected owner rerender`);
     const afterSame = await pageState(browserClient);
+    boundaries.identicalRerender = lifecycleBoundary(afterSame);
     assert(
         afterSame.runtime.transitions === beforeSame.runtime.transitions,
         `${mode} identical rerender reached the coordinator`,
@@ -248,7 +259,9 @@ async function runMode(browserClient, mode) {
         ownerCount: 2,
     });
 
-    const candidateChecks = await runCandidateProbe(browserClient, mode);
+    const candidateProbe = await runCandidateProbe(browserClient, mode);
+    const candidateChecks = candidateProbe.checks;
+    boundaries.candidateProbe = candidateProbe.boundary;
 
     await setPhase(browserClient, "speculative-failure");
     const beforeFailure = await pageState(browserClient);
@@ -260,6 +273,7 @@ async function runMode(browserClient, mode) {
                 beforeFailure.runtime.errorBoundaryCaptures + 1;
     }, `${mode} speculative fallback`);
     const failed = await pageState(browserClient);
+    boundaries.speculativeFailure = lifecycleBoundary(failed);
     assert(pairMatches(failed, metadataC), `${mode} speculative owner changed selected pair`);
     assert(
         !failed.runtime.events.some((event) => event.role === "speculative"),
@@ -282,6 +296,7 @@ async function runMode(browserClient, mode) {
         scopeActive: false,
     });
     const unmounted = await pageState(browserClient);
+    boundaries.scopeUnmount = lifecycleBoundary(unmounted);
     assert(
         unmounted.runtime.baselineRestorations === 1,
         `${mode} baseline restorations = ${unmounted.runtime.baselineRestorations}`,
@@ -295,8 +310,9 @@ async function runMode(browserClient, mode) {
         scopeActive: true,
     });
     const final = await pageState(browserClient);
+    boundaries.scopeRemount = lifecycleBoundary(final);
     assert(
-        final.activeOwnerID !== routeOwnerID,
+        Number(final.activeOwnerID) !== routeOwnerID,
         `${mode} remount reused owner lifetime ${routeOwnerID}`,
     );
     assert(final.runtime.scopeMounts === 2, `${mode} scope mounts = ${final.runtime.scopeMounts}`);
@@ -320,14 +336,19 @@ async function runMode(browserClient, mode) {
     );
     assert(final.titleNodeSame, `${mode} title identity changed`);
     assert(final.descriptionNodeSame, `${mode} description identity changed`);
+    assertGenericLifecycleEvidence(mode, boundaries, routeOwnerID);
+    assertCandidateLifecycleEvidence(mode, boundaries, candidateProbe);
 
     console.log(`${mode} document metadata ownership: ok`);
-    return collectModeEvidence(final, candidateChecks);
+    return collectModeEvidence(final, candidateChecks, boundaries);
 }
 
 async function runCandidateProbe(browserClient, mode) {
     if (mode === "control") {
-        return {};
+        return {
+            checks: {},
+            boundary: lifecycleBoundary(await pageState(browserClient)),
+        };
     }
     if (mode === "component") {
         const state = await pageState(browserClient);
@@ -350,8 +371,11 @@ async function runCandidateProbe(browserClient, mode) {
         })()`);
         assert(directChild, "component ownership added a wrapper element");
         return {
-            conditionalMountRelease: true,
-            wrapperElementsAdded: 0,
+            checks: {
+                conditionalMountRelease: true,
+                wrapperElementsAdded: 0,
+            },
+            boundary: lifecycleBoundary(state),
         };
     }
 
@@ -394,8 +418,13 @@ async function runCandidateProbe(browserClient, mode) {
             ownerCount: 2,
         });
         return {
-            hookSlotsDistinct: true,
-            ownershipElementsAdded: 0,
+            checks: {
+                hookSlotsDistinct: true,
+                ownershipElementsAdded: 0,
+            },
+            before: lifecycleBoundary(before),
+            committed: lifecycleBoundary(state),
+            boundary: lifecycleBoundary(await pageState(browserClient)),
         };
     }
 
@@ -430,16 +459,308 @@ async function runCandidateProbe(browserClient, mode) {
         const after = await pageState(browserClient);
         assert(after.runtime.adds > before.runtime.adds, `${mode} probe did not add an owner`);
         return {
-            forwardedOwnerStable: true,
-            ownerRecordsAdded: 1,
-            duplicatePublicationsCoalesced:
-                state.runtime.handleDuplicateCoalesces,
+            checks: {
+                forwardedOwnerStable: true,
+                ownerRecordsAdded: 1,
+                duplicatePublicationsCoalesced:
+                    state.runtime.handleDuplicateCoalesces,
+            },
+            before: lifecycleBoundary(before),
+            committed: lifecycleBoundary(state),
+            boundary: lifecycleBoundary(after),
         };
     }
     throw new Error(`APP FAILURE: unsupported candidate probe mode ${mode}`);
 }
 
-function collectModeEvidence(state, candidateChecks) {
+function lifecycleBoundary(state) {
+    return {
+        coordinator: { ...state.runtime.coordinatorStatistics },
+        transitions: state.runtime.transitions,
+        documentCommits: state.runtime.documentCommits,
+        titleMutationBatches: state.titleMutationBatches,
+        descriptionMutationBatches: state.descriptionMutationBatches,
+        activeOwnerID: numericOwnerID(state.activeOwnerID),
+        ownerCount: state.ownerCount,
+        title: state.title,
+        description: state.description,
+        componentMounts: state.runtime.componentMounts,
+        componentUnmounts: state.runtime.componentUnmounts,
+        handleCreations: state.runtime.handleCreations,
+        publicationCreations: state.runtime.publicationCreations,
+        handleForwards: state.runtime.handleForwards,
+        handleDuplicateCoalesces:
+            state.runtime.handleDuplicateCoalesces,
+        zeroIDOwnerRenders: state.runtime.zeroIDOwnerRenders,
+        committedOwnerIDs: state.runtime.events
+            .filter((event) => event.change === "added")
+            .map((event) => event.ownerID),
+    };
+}
+
+function numericOwnerID(value) {
+    const ownerID = Number(value);
+    return Number.isFinite(ownerID) ? ownerID : 0;
+}
+
+function assertGenericLifecycleEvidence(mode, boundaries, routeOwnerID) {
+    assertStatisticsDelta(
+        `${mode} route activation`,
+        boundaries.initialBaseline,
+        boundaries.routeA,
+        {
+            tokenCreations: 1,
+            committedIDAssignments: 1,
+            activeAdditions: 1,
+            updates: 0,
+            releases: 0,
+            activeOwnerCount: 1,
+            lastCommittedOwnerID: 1,
+        },
+    );
+    assertStatisticsDelta(
+        `${mode} metadata update`,
+        boundaries.nestedB,
+        boundaries.routeA2,
+        {
+            tokenCreations: 0,
+            committedIDAssignments: 0,
+            activeAdditions: 0,
+            updates: 1,
+            releases: 0,
+            activeOwnerCount: 0,
+            lastCommittedOwnerID: 0,
+        },
+    );
+    assertStatisticsDelta(
+        `${mode} identical rerender`,
+        boundaries.nonTopBRelease,
+        boundaries.identicalRerender,
+        zeroStatisticsDelta(),
+    );
+    assert(
+        boundaries.identicalRerender.transitions ===
+            boundaries.nonTopBRelease.transitions,
+        `${mode} identical rerender transition delta`,
+    );
+    assertNoDocumentDelta(
+        `${mode} identical rerender`,
+        boundaries.nonTopBRelease,
+        boundaries.identicalRerender,
+    );
+    assertStatisticsDelta(
+        `${mode} speculative failure`,
+        boundaries.candidateProbe,
+        boundaries.speculativeFailure,
+        zeroStatisticsDelta(),
+    );
+    assert(
+        boundaries.speculativeFailure.transitions ===
+            boundaries.candidateProbe.transitions,
+        `${mode} speculative failure transition delta`,
+    );
+    assertNoDocumentDelta(
+        `${mode} speculative failure`,
+        boundaries.candidateProbe,
+        boundaries.speculativeFailure,
+    );
+    assert(
+        boundaries.speculativeFailure.ownerCount ===
+            boundaries.candidateProbe.ownerCount &&
+            boundaries.speculativeFailure.activeOwnerID ===
+                boundaries.candidateProbe.activeOwnerID,
+        `${mode} speculative failure changed active ownership`,
+    );
+    assert(
+        boundaries.speculativeFailure.title ===
+            boundaries.candidateProbe.title &&
+            boundaries.speculativeFailure.description ===
+                boundaries.candidateProbe.description,
+        `${mode} speculative failure changed selected metadata`,
+    );
+    assertStatisticsDelta(
+        `${mode} scope remount`,
+        boundaries.scopeUnmount,
+        boundaries.scopeRemount,
+        {
+            tokenCreations: 1,
+            committedIDAssignments: 1,
+            activeAdditions: 1,
+            updates: 0,
+            releases: 0,
+            activeOwnerCount: 1,
+            lastCommittedOwnerID: 1,
+        },
+    );
+    assert(
+        boundaries.scopeRemount.activeOwnerID ===
+            boundaries.scopeRemount.coordinator.lastCommittedOwnerID,
+        `${mode} remount did not use the latest committed owner ID`,
+    );
+    assert(
+        boundaries.scopeRemount.activeOwnerID !== routeOwnerID,
+        `${mode} remount reused route owner ${routeOwnerID}`,
+    );
+}
+
+function assertCandidateLifecycleEvidence(mode, boundaries, probe) {
+    if (mode === "control") {
+        return;
+    }
+    assert(
+        boundaries.routeA.zeroIDOwnerRenders -
+            boundaries.initialBaseline.zeroIDOwnerRenders === 2,
+        `${mode} route initialization render count`,
+    );
+    assert(
+        boundaries.scopeRemount.zeroIDOwnerRenders -
+            boundaries.scopeUnmount.zeroIDOwnerRenders === 2,
+        `${mode} remount initialization render count`,
+    );
+
+    if (mode === "hook") {
+        assertStatisticsDelta(
+            "hook two-slot activation",
+            probe.before,
+            probe.committed,
+            {
+                tokenCreations: 2,
+                committedIDAssignments: 2,
+                activeAdditions: 2,
+                updates: 0,
+                releases: 0,
+                activeOwnerCount: 2,
+                lastCommittedOwnerID: 2,
+            },
+        );
+        assertStatisticsDelta(
+            "hook two-slot release",
+            probe.committed,
+            probe.boundary,
+            {
+                ...zeroStatisticsDelta(),
+                releases: 2,
+                activeOwnerCount: -2,
+            },
+        );
+        assert(
+            probe.committed.zeroIDOwnerRenders -
+                probe.before.zeroIDOwnerRenders === 4,
+            "hook two-slot initialization render count",
+        );
+        return;
+    }
+
+    if (mode === "component") {
+        assertStatisticsDelta(
+            "component conditional remount",
+            boundaries.selectedBRelease,
+            boundaries.bRemount,
+            {
+                tokenCreations: 1,
+                committedIDAssignments: 1,
+                activeAdditions: 1,
+                updates: 0,
+                releases: 0,
+                activeOwnerCount: 1,
+                lastCommittedOwnerID: 1,
+            },
+        );
+        assert(
+            boundaries.bRemount.componentMounts -
+                boundaries.selectedBRelease.componentMounts === 1,
+            "component conditional remount record count",
+        );
+        assert(
+            boundaries.nonTopBRelease.componentUnmounts -
+                boundaries.cActivation.componentUnmounts === 1,
+            "component conditional unmount record count",
+        );
+        return;
+    }
+
+    if (mode === "handle") {
+        assertStatisticsDelta(
+            "handle forwarded activation",
+            probe.before,
+            probe.committed,
+            {
+                tokenCreations: 1,
+                committedIDAssignments: 1,
+                activeAdditions: 1,
+                updates: 0,
+                releases: 0,
+                activeOwnerCount: 1,
+                lastCommittedOwnerID: 1,
+            },
+        );
+        assert(
+            probe.committed.handleCreations - probe.before.handleCreations === 1,
+            "handle probe creation count",
+        );
+        assert(
+            probe.committed.publicationCreations -
+                probe.before.publicationCreations === 2,
+            "handle probe publication creation count",
+        );
+        assert(
+            probe.committed.handleDuplicateCoalesces -
+                probe.before.handleDuplicateCoalesces === 1,
+            "handle probe duplicate coalescing count",
+        );
+        assertStatisticsDelta(
+            "handle forwarded release",
+            probe.committed,
+            probe.boundary,
+            {
+                ...zeroStatisticsDelta(),
+                releases: 1,
+                activeOwnerCount: -1,
+            },
+        );
+        assert(
+            boundaries.speculativeFailure.handleCreations ===
+                boundaries.candidateProbe.handleCreations &&
+            boundaries.speculativeFailure.publicationCreations ===
+                boundaries.candidateProbe.publicationCreations,
+            "failed handle owner created committed private state",
+        );
+    }
+}
+
+function assertStatisticsDelta(label, before, after, expected) {
+    for (const [field, value] of Object.entries(expected)) {
+        const actual = after.coordinator[field] - before.coordinator[field];
+        assert(
+            actual === value,
+            `${label} ${field} delta = ${actual}, want ${value}`,
+        );
+    }
+}
+
+function zeroStatisticsDelta() {
+    return {
+        tokenCreations: 0,
+        committedIDAssignments: 0,
+        activeAdditions: 0,
+        updates: 0,
+        releases: 0,
+        activeOwnerCount: 0,
+        lastCommittedOwnerID: 0,
+    };
+}
+
+function assertNoDocumentDelta(label, before, after) {
+    assert(
+        after.documentCommits === before.documentCommits &&
+            after.titleMutationBatches === before.titleMutationBatches &&
+            after.descriptionMutationBatches ===
+                before.descriptionMutationBatches,
+        `${label} changed document evidence`,
+    );
+}
+
+function collectModeEvidence(state, candidateChecks, boundaries) {
     return {
         runtime: {
             transitions: state.runtime.transitions,
@@ -456,18 +777,30 @@ function collectModeEvidence(state, candidateChecks) {
             handleForwards: state.runtime.handleForwards,
             handleDuplicateCoalesces:
                 state.runtime.handleDuplicateCoalesces,
+            handleCreations: state.runtime.handleCreations,
+            publicationCreations: state.runtime.publicationCreations,
+            zeroIDOwnerRenders: state.runtime.zeroIDOwnerRenders,
+            coordinatorStatistics: state.runtime.coordinatorStatistics,
             errorBoundaryCaptures: state.runtime.errorBoundaryCaptures,
             events: state.runtime.events.map((event) => ({
                 candidate: event.candidate,
                 role: event.role,
                 change: event.change,
+                ownerID: event.ownerID,
+                activeOwnerID: event.activeOwnerID,
                 ownerCount: event.ownerCount,
                 title: event.title,
                 description: event.description,
             })),
+            handleCreationEvents: state.runtime.handleCreationEvents,
+            publicationCreationEvents:
+                state.runtime.publicationCreationEvents,
+            coordinatorStatisticsEvents:
+                state.runtime.coordinatorStatisticsEvents,
             runtimeErrors: state.runtime.runtimeErrors,
         },
         candidateChecks,
+        boundaries,
         observer: {
             titleMutationBatches: state.titleMutationBatches,
             descriptionMutationBatches: state.descriptionMutationBatches,
@@ -614,6 +947,21 @@ async function pageState(browserClient) {
                 handleForwards: runtime.handleForwards ?? 0,
                 handleDuplicateCoalesces:
                     runtime.handleDuplicateCoalesces ?? 0,
+                handleCreations: runtime.handleCreations ?? 0,
+                publicationCreations:
+                    runtime.publicationCreations ?? 0,
+                zeroIDOwnerRenders:
+                    runtime.zeroIDOwnerRenders ?? 0,
+                coordinatorStatistics:
+                    runtime.coordinatorStatistics ?? {
+                        tokenCreations: 0,
+                        committedIDAssignments: 0,
+                        activeAdditions: 0,
+                        updates: 0,
+                        releases: 0,
+                        activeOwnerCount: 0,
+                        lastCommittedOwnerID: 0,
+                    },
                 errorBoundaryCaptures:
                     runtime.errorBoundaryCaptures ?? 0,
                 events: runtime.events ?? [],
@@ -623,6 +971,12 @@ async function pageState(browserClient) {
                     runtime.handleForwardedOwnerIDs ?? [],
                 handleDuplicateOwnerIDs:
                     runtime.handleDuplicateOwnerIDs ?? [],
+                handleCreationEvents:
+                    runtime.handleCreationEvents ?? [],
+                publicationCreationEvents:
+                    runtime.publicationCreationEvents ?? [],
+                coordinatorStatisticsEvents:
+                    runtime.coordinatorStatisticsEvents ?? [],
                 runtimeErrors: runtime.runtimeErrors ?? [],
             },
         };

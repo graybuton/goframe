@@ -31,9 +31,11 @@ func publishCandidateTransition(
 	candidate string,
 	role string,
 	transition documentmeta.Transition,
+	statistics documentmeta.Statistics,
 	onSnapshot func(documentmeta.Snapshot),
 ) {
 	recordCandidateTransition(candidate, role, transition)
+	recordCoordinatorStatistics(statistics)
 	if transition.Change != documentmeta.ChangeNone {
 		onSnapshot(transition.Snapshot)
 	}

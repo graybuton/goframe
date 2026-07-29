@@ -268,3 +268,11 @@ func (owners *StringOwners) Release(key string) (Transition, error) {
 	}
 	return transition, err
 }
+
+// Stats returns fixture ownership evidence for the explicit control adapter.
+func (owners *StringOwners) Stats() Statistics {
+	if owners == nil {
+		return Statistics{}
+	}
+	return owners.coordinator.Stats()
+}

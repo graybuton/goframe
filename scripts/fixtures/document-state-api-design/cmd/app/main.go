@@ -21,6 +21,7 @@ func main() {
 		panic("document-state API design fixture: " + err.Error())
 	}
 	coordinator := documentmeta.New(adapter.Baseline())
+	recordCoordinatorStatistics(coordinator.Stats())
 	control := documentmeta.NewStringOwners(coordinator)
 	gf.SetErrorHandler(recordDocumentAPIDesignError)
 

@@ -109,6 +109,9 @@ func initDocumentAPIDesignEvidence(mode string) {
 		"componentUnmounts",
 		"handleForwards",
 		"handleDuplicateCoalesces",
+		"handleCreations",
+		"publicationCreations",
+		"zeroIDOwnerRenders",
 		"errorBoundaryCaptures",
 	} {
 		evidence.Set(field, 0)
@@ -119,6 +122,9 @@ func initDocumentAPIDesignEvidence(mode string) {
 		"componentLifetimes",
 		"handleForwardedOwnerIDs",
 		"handleDuplicateOwnerIDs",
+		"handleCreationEvents",
+		"publicationCreationEvents",
+		"coordinatorStatisticsEvents",
 		"runtimeErrors",
 	} {
 		evidence.Set(field, js.Global().Get("Array").New())
@@ -165,6 +171,9 @@ func recordCandidateRender(candidate string, role string, nonce int) {
 
 func recordCandidateOwnerRender(candidate string, role string, ownerID uint64) {
 	incrementEvidence("renders")
+	if ownerID == 0 {
+		incrementEvidence("zeroIDOwnerRenders")
+	}
 	event := js.Global().Get("Object").New()
 	event.Set("candidate", candidate)
 	event.Set("role", role)
@@ -198,6 +207,52 @@ func recordHandleForward(ownerID uint64) {
 func recordHandleDuplicateCoalesced(ownerID uint64) {
 	incrementEvidence("handleDuplicateCoalesces")
 	evidence().Get("handleDuplicateOwnerIDs").Call("push", ownerID)
+}
+
+func recordHandleCreation(role string) {
+	incrementEvidence("handleCreations")
+	recordLifecycleCreation("handleCreationEvents", role, false)
+}
+
+func recordPublicationCreation(role string, forwarded bool) {
+	incrementEvidence("publicationCreations")
+	recordLifecycleCreation("publicationCreationEvents", role, forwarded)
+}
+
+func recordLifecycleCreation(field string, role string, forwarded bool) {
+	event := js.Global().Get("Object").New()
+	event.Set("role", role)
+	event.Set("forwarded", forwarded)
+	setCurrentEvidencePhase(event)
+	evidence().Get(field).Call("push", event)
+}
+
+func recordCoordinatorStatistics(statistics documentmeta.Statistics) {
+	current := coordinatorStatisticsValue(statistics)
+	evidence().Set("coordinatorStatistics", current)
+	event := coordinatorStatisticsValue(statistics)
+	setCurrentEvidencePhase(event)
+	evidence().Get("coordinatorStatisticsEvents").Call("push", event)
+}
+
+func coordinatorStatisticsValue(statistics documentmeta.Statistics) js.Value {
+	value := js.Global().Get("Object").New()
+	value.Set("tokenCreations", statistics.TokenCreations)
+	value.Set("committedIDAssignments", statistics.CommittedIDAssignments)
+	value.Set("activeAdditions", statistics.ActiveAdditions)
+	value.Set("updates", statistics.Updates)
+	value.Set("releases", statistics.Releases)
+	value.Set("activeOwnerCount", statistics.ActiveOwnerCount)
+	value.Set("lastCommittedOwnerID", statistics.LastCommittedOwnerID)
+	return value
+}
+
+func setCurrentEvidencePhase(value js.Value) {
+	head := js.Global().Get("__documentAPIDesignHeadEvidence")
+	if head.IsUndefined() || head.IsNull() {
+		return
+	}
+	value.Set("phase", head.Get("phase"))
 }
 
 func recordScopeMount() {

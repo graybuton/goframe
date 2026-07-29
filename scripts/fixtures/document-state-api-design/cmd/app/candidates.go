@@ -100,7 +100,13 @@ func useControlDocumentMetadata(props candidateOwnerProps) {
 		if err != nil {
 			panic("document-state API design control publish: " + err.Error())
 		}
-		publishCandidateTransition("control", key, transition, props.OnSnapshot)
+		publishCandidateTransition(
+			"control",
+			key,
+			transition,
+			props.Control.Stats(),
+			props.OnSnapshot,
+		)
 		return nil
 	}, gf.Deps(key, metadata.Title, metadata.Description))
 	gf.UseUnmount(func() {
@@ -108,7 +114,13 @@ func useControlDocumentMetadata(props candidateOwnerProps) {
 		if err != nil {
 			panic("document-state API design control release: " + err.Error())
 		}
-		publishCandidateTransition("control", key, transition, props.OnSnapshot)
+		publishCandidateTransition(
+			"control",
+			key,
+			transition,
+			props.Control.Stats(),
+			props.OnSnapshot,
+		)
 	})
 }
 
@@ -119,6 +131,7 @@ func useHookDocumentMetadata(role string, metadata documentmeta.Metadata) {
 
 	gf.UseEffect(func() gf.Cleanup {
 		setOwner(bindings.coordinator.NewOwner())
+		recordCoordinatorStatistics(bindings.coordinator.Stats())
 		return nil
 	}, gf.Once())
 	gf.UseEffect(func() gf.Cleanup {
@@ -129,7 +142,13 @@ func useHookDocumentMetadata(role string, metadata documentmeta.Metadata) {
 		if err != nil {
 			panic("document-state API design hook publish: " + err.Error())
 		}
-		publishCandidateTransition("hook", role, transition, bindings.onSnapshot)
+		publishCandidateTransition(
+			"hook",
+			role,
+			transition,
+			bindings.coordinator.Stats(),
+			bindings.onSnapshot,
+		)
 		return nil
 	}, gf.Deps(owner != nil, metadata.Title, metadata.Description))
 	gf.UseUnmount(func() {
@@ -140,7 +159,13 @@ func useHookDocumentMetadata(role string, metadata documentmeta.Metadata) {
 		if err != nil {
 			panic("document-state API design hook release: " + err.Error())
 		}
-		publishCandidateTransition("hook", role, transition, bindings.onSnapshot)
+		publishCandidateTransition(
+			"hook",
+			role,
+			transition,
+			bindings.coordinator.Stats(),
+			bindings.onSnapshot,
+		)
 	})
 }
 
@@ -152,6 +177,7 @@ func ComponentDocumentMetadata(props componentDocumentMetadataProps) gf.Node {
 
 	gf.UseEffect(func() gf.Cleanup {
 		setOwner(bindings.coordinator.NewOwner())
+		recordCoordinatorStatistics(bindings.coordinator.Stats())
 		return nil
 	}, gf.Once())
 	gf.UseEffect(func() gf.Cleanup {
@@ -165,7 +191,13 @@ func ComponentDocumentMetadata(props componentDocumentMetadataProps) gf.Node {
 		if transition.Change == documentmeta.ChangeAdded {
 			recordComponentOwnerMount(props.Role, owner.ID())
 		}
-		publishCandidateTransition("component", props.Role, transition, bindings.onSnapshot)
+		publishCandidateTransition(
+			"component",
+			props.Role,
+			transition,
+			bindings.coordinator.Stats(),
+			bindings.onSnapshot,
+		)
 		return nil
 	}, gf.Deps(owner != nil, metadata.Title, metadata.Description))
 	gf.UseUnmount(func() {
@@ -177,7 +209,13 @@ func ComponentDocumentMetadata(props componentDocumentMetadataProps) gf.Node {
 		if err != nil {
 			panic("document-state API design component release: " + err.Error())
 		}
-		publishCandidateTransition("component", props.Role, transition, bindings.onSnapshot)
+		publishCandidateTransition(
+			"component",
+			props.Role,
+			transition,
+			bindings.coordinator.Stats(),
+			bindings.onSnapshot,
+		)
 	})
 	if props.Failure {
 		panic("document-state API design speculative render failure")
@@ -190,9 +228,12 @@ func useDocumentMetadataOwnerHandle(role string) *documentMetadataOwnerHandle {
 	bindings := requireDocumentBindings()
 	handle, setHandle := gf.UseState[*documentMetadataOwnerHandle](nil)
 	gf.UseEffect(func() gf.Cleanup {
-		setHandle(&documentMetadataOwnerHandle{
+		next := &documentMetadataOwnerHandle{
 			owner: bindings.coordinator.NewOwner(),
-		})
+		}
+		recordHandleCreation(role)
+		recordCoordinatorStatistics(bindings.coordinator.Stats())
+		setHandle(next)
 		return nil
 	}, gf.Once())
 	recordCandidateOwnerRender("handle", role, documentMetadataHandleOwnerID(handle))
@@ -225,6 +266,7 @@ func useOwnedDocumentMetadataSlot(
 	publication, setPublication := gf.UseState[*documentMetadataPublication](nil)
 
 	gf.UseEffect(func() gf.Cleanup {
+		recordPublicationCreation(role, forwarded)
 		setPublication(&documentMetadataPublication{})
 		return nil
 	}, gf.Once())
@@ -243,7 +285,13 @@ func useOwnedDocumentMetadataSlot(
 			if err != nil {
 				panic("document-state API design handle publish: " + err.Error())
 			}
-			publishCandidateTransition("handle", role, transition, bindings.onSnapshot)
+			publishCandidateTransition(
+				"handle",
+				role,
+				transition,
+				bindings.coordinator.Stats(),
+				bindings.onSnapshot,
+			)
 		case !publication.active && handle.metadata == metadata:
 			publication.active = true
 			publication.metadata = metadata
@@ -256,7 +304,13 @@ func useOwnedDocumentMetadataSlot(
 			if err != nil {
 				panic("document-state API design handle update: " + err.Error())
 			}
-			publishCandidateTransition("handle", role, transition, bindings.onSnapshot)
+			publishCandidateTransition(
+				"handle",
+				role,
+				transition,
+				bindings.coordinator.Stats(),
+				bindings.onSnapshot,
+			)
 		case publication.active && handle.metadata == metadata:
 			publication.metadata = metadata
 		default:
@@ -290,7 +344,13 @@ func useOwnedDocumentMetadataSlot(
 		if err != nil {
 			panic("document-state API design handle release: " + err.Error())
 		}
-		publishCandidateTransition("handle", role, transition, bindings.onSnapshot)
+		publishCandidateTransition(
+			"handle",
+			role,
+			transition,
+			bindings.coordinator.Stats(),
+			bindings.onSnapshot,
+		)
 	})
 }
 

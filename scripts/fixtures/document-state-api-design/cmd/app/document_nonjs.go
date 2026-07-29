@@ -42,6 +42,12 @@ func recordHandleForward(uint64) {}
 
 func recordHandleDuplicateCoalesced(uint64) {}
 
+func recordHandleCreation(string) {}
+
+func recordPublicationCreation(string, bool) {}
+
+func recordCoordinatorStatistics(documentmeta.Statistics) {}
+
 func recordScopeMount() {}
 
 func recordScopeUnmount() {}
