@@ -1,0 +1,416 @@
+package main
+
+import (
+	gf "github.com/graybuton/goframe/pkg/goframe"
+	"github.com/graybuton/goframe/scripts/fixtures/document-state-api-design/internal/documentmeta"
+)
+
+type AppProps struct {
+	Mode        string
+	Adapter     *browserDocumentAdapter
+	Coordinator *documentmeta.Coordinator
+	Control     *documentmeta.StringOwners
+}
+
+type DocumentCommitterProps struct {
+	Adapter  *browserDocumentAdapter
+	Snapshot documentmeta.Snapshot
+}
+
+type CandidateScopeProps struct {
+	Mode        string
+	Control     *documentmeta.StringOwners
+	OnSnapshot  func(documentmeta.Snapshot)
+	StartActive bool
+	StartA2     bool
+}
+
+type HookTwoSlotProbeProps struct {
+	Children []gf.Node
+}
+
+var (
+	candidateScopeType = gf.NewComponentType(
+		"fixture.document-state-api-design.CandidateScope",
+		"DocumentAPIDesignCandidateScope",
+	)
+	hookTwoSlotProbeType = gf.NewComponentType(
+		"fixture.document-state-api-design.HookTwoSlotProbe",
+		"DocumentAPIDesignHookTwoSlotProbe",
+	)
+)
+
+func App(props AppProps) gf.Node {
+	scopeActive, setScopeActive := gf.UseState(true)
+	scopeGeneration, setScopeGeneration := gf.UseState(0)
+	snapshot, setSnapshot := gf.UseState(props.Coordinator.Snapshot())
+	bindings, _ := gf.UseState(&documentBindings{
+		coordinator: props.Coordinator,
+		onSnapshot: func(next documentmeta.Snapshot) {
+			setSnapshot(next)
+		},
+	})
+	provideDocumentBindings(bindings)
+
+	scope := candidateScopeNode(
+		scopeActive,
+		scopeGeneration,
+		props,
+		bindings.onSnapshot,
+	)
+
+	return (
+		<main class="design-app" data-testid="design-app" data-mode={props.Mode}>
+			<header>
+				<h1>Document metadata API design</h1>
+				<p data-testid="design-mode">Mode: {props.Mode}</p>
+			</header>
+
+			<nav class="design-modes" aria-label="Candidate modes">
+				<a href="#/control">Control</a>
+				<a href="#/hook">Hook</a>
+				<a href="#/component">Component</a>
+				<a href="#/handle">Handle</a>
+			</nav>
+
+			<DocumentCommitter Adapter={props.Adapter} Snapshot={snapshot} />
+
+			<section class="design-evidence" data-testid="design-evidence">
+				<span data-testid="active-owner-id">{activeOwnerID(snapshot)}</span>
+				<span data-testid="active-owner-count">{gf.ToString(snapshot.OwnerCount)}</span>
+				<span data-testid="expected-title">{snapshot.Metadata.Title}</span>
+				<span data-testid="expected-description">{snapshot.Metadata.Description}</span>
+			</section>
+
+			<div class="design-controls">
+				{scopeToggle(
+					scopeActive,
+					scopeGeneration,
+					setScopeActive,
+					setScopeGeneration,
+				)}
+			</div>
+
+			{scope}
+		</main>
+	)
+}
+
+func DocumentCommitter(props DocumentCommitterProps) gf.Node {
+	metadata := props.Snapshot.Metadata
+	gf.UseEffect(func() gf.Cleanup {
+		if err := props.Adapter.Apply(metadata); err != nil {
+			panic("document-state API design apply: " + err.Error())
+		}
+		return nil
+	}, gf.Deps(metadata.Title, metadata.Description))
+	return gf.Empty()
+}
+
+func CandidateScope(props CandidateScopeProps) gf.Node {
+	routeActive, setRouteActive := gf.UseState(props.StartActive)
+	routeA2, setRouteA2 := gf.UseState(props.StartA2)
+	nestedB, setNestedB := gf.UseState(false)
+	nestedC, setNestedC := gf.UseState(false)
+	failureActive, setFailureActive := gf.UseState(false)
+	probeActive, setProbeActive := gf.UseState(false)
+	renderNonce, setRenderNonce := gf.UseState(0)
+
+	gf.UseEffect(func() gf.Cleanup {
+		recordScopeMount()
+		return nil
+	})
+	gf.UseUnmount(func() {
+		recordScopeUnmount()
+	})
+
+	routeMetadata := routeMetadataA(routeA2)
+	routeNode := conditionalCandidateOwner(
+		routeActive,
+		candidateOwnerProps{
+			Mode:        props.Mode,
+			Role:        "route",
+			Metadata:    routeMetadata,
+			Control:     props.Control,
+			OnSnapshot:  props.OnSnapshot,
+			RenderNonce: renderNonce,
+			Children: []gf.Node{
+				gf.El(
+					"section",
+					gf.Props{"data-testid": "route-owner-content"},
+					gf.El("h2", nil, gf.Text(routeMetadata.Title)),
+				),
+			},
+		},
+	)
+	nestedBNode := conditionalCandidateOwner(
+		nestedB,
+		candidateOwnerProps{
+			Mode:       props.Mode,
+			Role:       "nested-b",
+			Metadata:   metadataB(),
+			Control:    props.Control,
+			OnSnapshot: props.OnSnapshot,
+			Children: []gf.Node{
+				gf.El(
+					"aside",
+					gf.Props{
+						"class":       "nested-owner",
+						"data-testid": "nested-owner-b",
+					},
+					gf.Text("Nested owner B"),
+				),
+			},
+		},
+	)
+	nestedCNode := conditionalCandidateOwner(
+		nestedC,
+		candidateOwnerProps{
+			Mode:        props.Mode,
+			Role:        "nested-c",
+			Metadata:    metadataC(),
+			Control:     props.Control,
+			OnSnapshot:  props.OnSnapshot,
+			RenderNonce: renderNonce,
+			Children: []gf.Node{
+				gf.El(
+					"aside",
+					gf.Props{
+						"class":       "nested-owner",
+						"data-testid": "nested-owner-c",
+					},
+					gf.Text("Nested owner C"),
+				),
+			},
+		},
+	)
+	probe := candidateProbeNode(props, probeActive)
+	failure := speculativeOwnerNode(props, failureActive)
+
+	return (
+		<section class="design-card" data-testid="candidate-scope">
+			<div class="design-controls">
+				<button Type="button" data-testid="activate-route-a" OnClick={func() {
+					setRouteActive(true)
+				}}>Activate route A</button>
+				<button Type="button" data-testid="update-route-a2" OnClick={func() {
+					setRouteA2(true)
+				}}>Update route to A2</button>
+				<button Type="button" data-testid="activate-b" OnClick={func() {
+					setNestedB(true)
+				}}>Activate nested B</button>
+				<button Type="button" data-testid="release-b" OnClick={func() {
+					setNestedB(false)
+				}}>Release nested B</button>
+				<button Type="button" data-testid="activate-c" OnClick={func() {
+					setNestedC(true)
+				}}>Activate nested C</button>
+				<button Type="button" data-testid="same-value-update" OnClick={func() {
+					setRenderNonce(renderNonce + 1)
+				}}>Rerender selected value</button>
+				<button Type="button" data-testid="activate-probe" OnClick={func() {
+					setProbeActive(true)
+				}}>Activate candidate probe</button>
+				<button Type="button" data-testid="release-probe" OnClick={func() {
+					setProbeActive(false)
+				}}>Release candidate probe</button>
+				<button Type="button" data-testid="activate-failure" OnClick={func() {
+					setFailureActive(true)
+				}}>Activate speculative failure</button>
+			</div>
+
+			{routeNode}
+			{nestedBNode}
+			{nestedCNode}
+			{probe}
+
+			<gf.ErrorBoundary Fallback={func(ctx gf.ErrorBoundaryContext) gf.Node {
+				return failureFallback(ctx, setFailureActive)
+			}}>
+				{failure}
+			</gf.ErrorBoundary>
+		</section>
+	)
+}
+
+func HookTwoSlotProbe(HookTwoSlotProbeProps) gf.Node {
+	useHookDocumentMetadata("hook-probe-one", documentmeta.Metadata{
+		Title:       "Hook probe one · GoFrame",
+		Description: "Hook slot one metadata.",
+	})
+	useHookDocumentMetadata("hook-probe-two", documentmeta.Metadata{
+		Title:       "Hook probe two · GoFrame",
+		Description: "Hook slot two metadata.",
+	})
+	return gf.Empty()
+}
+
+func conditionalCandidateOwner(active bool, props candidateOwnerProps) gf.Node {
+	if !active {
+		return gf.Empty()
+	}
+	return candidateOwnerNode(props)
+}
+
+func candidateProbeNode(props CandidateScopeProps, active bool) gf.Node {
+	if !active {
+		return gf.Empty()
+	}
+	switch props.Mode {
+	case "hook":
+		return gf.Key(
+			"hook-two-slot-probe",
+			gf.ComponentT(
+				hookTwoSlotProbeType,
+				HookTwoSlotProbeProps{},
+				HookTwoSlotProbe,
+			),
+		)
+	case "handle":
+		return candidateOwnerNode(candidateOwnerProps{
+			Mode:       props.Mode,
+			Role:       "handle-duplicate-probe",
+			Metadata:   documentmeta.Metadata{
+				Title:       "Handle probe · GoFrame",
+				Description: "One forwarded handle publication.",
+			},
+			OnSnapshot: props.OnSnapshot,
+			Duplicate:  true,
+		})
+	default:
+		return gf.Empty()
+	}
+}
+
+func speculativeOwnerNode(props CandidateScopeProps, active bool) gf.Node {
+	if !active {
+		return gf.Empty()
+	}
+	return candidateOwnerNode(candidateOwnerProps{
+		Mode: props.Mode,
+		Role: "speculative",
+		Metadata: documentmeta.Metadata{
+			Title:       "Speculative failure · GoFrame",
+			Description: "This pair must never commit.",
+		},
+		Control:    props.Control,
+		OnSnapshot: props.OnSnapshot,
+		Failure:    true,
+	})
+}
+
+func candidateScopeNode(
+	active bool,
+	generation int,
+	props AppProps,
+	onSnapshot func(documentmeta.Snapshot),
+) gf.Node {
+	if !active {
+		return (
+			<section data-testid="candidate-scope-inactive">
+				Candidate ownership scope is unmounted.
+			</section>
+		)
+	}
+	return gf.Key(
+		"candidate-scope:"+gf.ToString(generation),
+		gf.ComponentT(
+			candidateScopeType,
+			CandidateScopeProps{
+				Mode:        props.Mode,
+				Control:     props.Control,
+				OnSnapshot:  onSnapshot,
+				StartActive: generation > 0,
+				StartA2:     generation > 0,
+			},
+			CandidateScope,
+		),
+	)
+}
+
+func scopeToggle(
+	active bool,
+	generation int,
+	setActive func(bool),
+	setGeneration func(int),
+) gf.Node {
+	if active {
+		return gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "unmount-scope",
+				"OnClick": func() {
+					setActive(false)
+				},
+			},
+			gf.Text("Unmount candidate scope"),
+		)
+	}
+	return gf.El(
+		"button",
+		gf.Props{
+			"data-testid": "remount-scope",
+			"OnClick": func() {
+				setGeneration(generation + 1)
+				setActive(true)
+			},
+		},
+		gf.Text("Remount candidate scope"),
+	)
+}
+
+func failureFallback(
+	ctx gf.ErrorBoundaryContext,
+	setFailureActive func(bool),
+) gf.Node {
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "failure-fallback"},
+		gf.El("p", nil, gf.Text("Speculative metadata owner failed.")),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "reset-failure",
+				"OnClick": func() {
+					setFailureActive(false)
+					ctx.Reset()
+				},
+			},
+			gf.Text("Remove failed owner"),
+		),
+	)
+}
+
+func routeMetadataA(updated bool) documentmeta.Metadata {
+	if updated {
+		return documentmeta.Metadata{
+			Title:       "Route A2 · GoFrame",
+			Description: "Route metadata A2.",
+		}
+	}
+	return documentmeta.Metadata{
+		Title:       "Route A · GoFrame",
+		Description: "Route metadata A.",
+	}
+}
+
+func metadataB() documentmeta.Metadata {
+	return documentmeta.Metadata{
+		Title:       "Editor B · GoFrame",
+		Description: "Nested editor metadata B.",
+	}
+}
+
+func metadataC() documentmeta.Metadata {
+	return documentmeta.Metadata{
+		Title:       "Dialog C · GoFrame",
+		Description: "Nested dialog metadata C.",
+	}
+}
+
+func activeOwnerID(snapshot documentmeta.Snapshot) string {
+	if !snapshot.HasOwner {
+		return "authored-baseline"
+	}
+	return gf.ToString(snapshot.ActiveOwnerID)
+}
