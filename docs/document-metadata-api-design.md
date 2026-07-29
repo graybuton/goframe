@@ -46,9 +46,10 @@ release, and error behavior. They do not execute hook, component, or handle
 lifecycle wrappers through a host renderer.
 
 The browser harness executes the actual wrappers in one Chrome process. A
-pre-boot observer records the authored title, description, viewport metadata,
-node identities, managed mutations, coordinator statistics, owner IDs, and
-candidate-specific lifetime events before WASM starts.
+pre-boot observer records the authored title and description, their node
+identities, managed title and description mutations, coordinator statistics,
+owner IDs, and candidate-specific lifetime events before WASM starts. One
+unrelated authored metadata node remains outside the managed pair.
 
 Temporary candidate-only copies provide TinyGo size evidence. Temporary copies
 of `examples/server-backed` test package-level integration. None of those
@@ -201,8 +202,13 @@ gf.UseOwnedDocumentMetadata(owner, gf.DocumentMetadata{
 The private prototype retains a nil handle slot and a nil publication slot.
 Committed initialization effects create them. A later publication effect
 activates the owner. Passing the handle through a helper preserves identity.
-Identical duplicate publications coalesce, while conflicting simultaneous
-publications are rejected.
+The first publication becomes primary. An identical duplicate coalesces without
+another coordinator publication. While multiple publications coexist, their
+metadata is immutable: changing either one is rejected before coordinator,
+document, handle, or publication state changes. Releasing the duplicate leaves
+the primary active, after which that sole primary can update through the same
+owner. The prototype does not transfer primary status when the primary itself
+is released first.
 
 The handle supports helper composition explicitly, but requires two calls,
 three effect sites, and split handle/publication lifetime rules. It also has the
@@ -229,6 +235,22 @@ actual candidate wrappers.
 The focused pure suite passed 100 repetitions and 20 race-detector
 repetitions.
 
+The handle publication state machine has separate focused coverage:
+
+| Scenario | Corrected result |
+|---|---|
+| first publication | primary, count one |
+| identical duplicate | coalesced, count two, no coordinator write |
+| conflicting duplicate activation | rejected before mutation |
+| primary update while duplicated | rejected before mutation |
+| duplicate release | count one, owner remains active |
+| sole-primary update after duplicate release | same owner, one update |
+| final release | exactly one coordinator release |
+| repeated release | no-op |
+| publication-count underflow | rejected |
+
+Those tests also passed 100 repetitions and 20 race-detector repetitions.
+
 ## Candidate Wrapper Lifecycle Evidence
 
 Actual hook, component, and handle lifecycle wrappers are exercised in the
@@ -246,8 +268,13 @@ Candidate-specific browser evidence showed:
   exactly once;
 - component: five successful mounts matched four unmounts with one active
   remount, and no wrapper DOM element appeared;
-- handle: six handle/token/ID lifetimes and seven publication lifetimes were
-  committed; one forwarded duplicate coalesced through owner ID 5;
+- handle: seven handle/token/ID lifetimes and nine publication lifetimes were
+  committed; one forwarded duplicate and one conflict-probe duplicate
+  coalesced through owner IDs 5 and 6;
+- handle conflict probe: changing the primary while its identical duplicate
+  remained active produced the precise conflict diagnostic with no coordinator,
+  document, handle-count, or publication-state change; after duplicate release,
+  the primary published metadata C through the same owner ID;
 - all candidates: the failed-render token, ID, and active-owner deltas were
   zero.
 
@@ -267,17 +294,35 @@ Candidate-specific browser evidence showed:
 | node identity | pass | pass | pass | pass |
 | duplicate description prevention | pass | pass | pass | pass |
 
+The harness requires positive observer evidence for every mode. Exact counts
+below are deterministic evidence for the pinned toolchain, not compatibility
+requirements:
+
+| Mode | Title batches | Description batches | Head snapshots | Snapshot length | Invalid pairs |
+|---|---:|---:|---:|---:|---:|
+| control | 7 | 7 | 7 | 7 | 0 |
+| hook | 9 | 9 | 9 | 9 | 0 |
+| component | 7 | 7 | 7 | 7 | 0 |
+| handle | 12 | 12 | 12 | 12 | 0 |
+
+Every mode requires title batches, description batches, and head snapshots to
+be positive, and requires snapshot length to equal the head-snapshot count. A
+temporary fault injection that classified managed title and description nodes
+as unrelated failed with `control observer liveness: no title mutation
+batches`; the injected copy was removed.
+
 Two focused browser runs produced byte-identical normalized evidence after
 excluding elapsed time:
 
 ```text
 SHA-256:
-8a6df8a2eab01b652405c861d66609299c6f67f122d6d3cf1429428f9a5dc058
+1bf05e4c9b3f0cb26f0835146d6440f9850eb380d4b8f1eb1b35458b16b2b03b
 ```
 
-The runs took 5,908 ms and 5,674 ms. Transition counters, coordinator
+The runs took 7,580 ms and 7,486 ms. Transition counters, coordinator
 statistics, committed owner-ID sequences, mutation logs, baseline restoration,
-node identity, and failure counters were identical.
+node identity, handle-conflict evidence, full-navigation evidence, and failure
+counters were identical.
 
 Final focused statistics were:
 
@@ -286,7 +331,20 @@ Final focused statistics were:
 | control | 5 | 5 | 5 | 1 | 4 | 1 | 5 |
 | hook | 7 | 7 | 7 | 1 | 6 | 1 | 7 |
 | component | 5 | 5 | 5 | 1 | 4 | 1 | 5 |
-| handle | 6 | 6 | 6 | 1 | 5 | 1 | 6 |
+| handle | 7 | 7 | 7 | 2 | 6 | 1 | 7 |
+
+Candidate mode links preserve boot-time mode selection by navigating the full
+document to `./?candidate=<mode>#/<mode>`. The browser sequence control -> hook
+-> component -> handle -> control increased the document boot count from 1 to
+5. Every navigation updated the query and hash, rendered the target mode, and
+recaptured the authored baseline. The fixture adds no router or `hashchange`
+listener.
+
+Browser command validation is awaited before fixture packaging, temporary
+browser roots, or the detached fixture server are created. The actual Chrome
+spawn is also awaited. A missing absolute browser command returned its original
+`ENOENT` spawn diagnostic, left the selected port closed, created no fixture
+package or task-owned temporary root, and settled without a leaked server.
 
 ## Candidate Measurements
 
@@ -305,13 +363,14 @@ fixture evidence calls.
 | token creations | 1 | 1 | 1 | 1 |
 | committed owner IDs | 1 | 1 | 1 | 1 |
 | unmount callbacks | 1 | 1 | 1 | 1 |
-| ownership support lines | 34 | 44 | 61 | 147 |
+| ownership support lines | 34 | 44 | 61 | 280 |
 | application-visible owner keys | 2 | 0 | 0 | 0 |
 | positional-hook restriction at caller | yes | yes | no | yes |
 
 All candidates require one more effect site than the eager versions. Hook and
-component support grew from 21 and 36 lines to 44 and 61. Handle support grew
-from 90 to 147 lines.
+component support grew from 21 and 36 lines to 44 and 61. The corrected
+duplicate-publication state machine grows handle support from the earlier 147
+lines to 280.
 
 ## TinyGo Size Evidence
 
@@ -322,25 +381,28 @@ wrapper and its candidate-specific probe reachable.
 
 | Fixture | Raw | gzip | Brotli | Zstandard | Raw delta from control |
 |---|---:|---:|---:|---:|---:|
-| control only | 307,235 B | 130,835 B | 107,144 B | 113,214 B | 0 B |
-| hook only | 313,588 B | 132,352 B | 108,503 B | 114,483 B | +6,353 B |
-| component only | 314,758 B | 132,782 B | 108,507 B | 114,976 B | +7,523 B |
-| handle only | 319,836 B | 135,242 B | 109,902 B | 116,914 B | +12,601 B |
-| combined comparison fixture | 341,382 B | 142,089 B | 114,833 B | 121,807 B | not comparable |
+| control only | 307,855 B | 131,023 B | 107,380 B | 113,305 B | 0 B |
+| hook only | 314,220 B | 132,653 B | 108,452 B | 114,642 B | +6,365 B |
+| component only | 315,374 B | 133,030 B | 108,848 B | 115,222 B | +7,519 B |
+| handle only | 331,049 B | 139,465 B | 112,706 B | 119,471 B | +23,194 B |
+| combined comparison fixture | 352,383 B | 146,161 B | 117,522 B | 124,598 B | not comparable |
 
-The corrected component costs 1,170 raw bytes more than the hook. The corrected
-combined fixture is 9,973 raw bytes, 2,908 gzip bytes, 2,432 Brotli bytes, and
-2,599 Zstandard bytes larger than the old eager-allocation head. The previous
-candidate-only and combined measurements are superseded.
+The corrected component costs 1,154 raw bytes more than the hook. The handle
+measurement includes the corrected conflict state machine and its focused
+probe. The previous candidate-only and combined values are superseded.
 
 ## Candidate Size Reproduction
 
-The measurement source is commit
-`7eb2f01804876c317e652e7b48f90dc9c36d90bb`. A reproducible temporary layout is:
+The pinned pre-review measurement source remains
+`7eb2f01804876c317e652e7b48f90dc9c36d90bb`, a direct ancestor of this record.
+The current measurements require the corrected handle and browser evidence, so
+their source is commit
+`2e197aec7fa52e2c3cf8799371af401eeb9bbf41`. A reproducible temporary layout for
+the current values is:
 
 ```bash
 root="$(mktemp -d)"
-git archive 7eb2f01804876c317e652e7b48f90dc9c36d90bb \
+git archive 2e197aec7fa52e2c3cf8799371af401eeb9bbf41 \
   | tar -x -C "$root"
 
 for mode in control hook component handle combined; do
@@ -354,17 +416,18 @@ the common failure and render recording after the direct hook/control/handle
 call; the component dispatch returns the component directly. In
 `candidateProbeNode`, retain only the hook two-slot probe for `hook`, only the
 forwarded duplicate probe for `handle`, and return `gf.Empty()` for `control`
-and `component`. The `combined` copy is unchanged. Run `gofmt` on
-`candidates.go`.
+and `component`. Retain `handleConflictProbeNode` and its controls only for the
+`handle` copy; make them unreachable in the other candidate-only copies. The
+`combined` copy is unchanged. Run `gofmt` on `candidates.go`.
 
 Normalized projection patch hashes are:
 
 | Copy | Patch SHA-256 |
 |---|---|
-| control | `62d6193bbb811d50a1719407a960cf1effa7dfd0ee2548c155461db986ec7d64` |
-| hook | `85cc1776b00a6467354a58f8ab1b8a52f4443f2449560054367d3089e0a10bde` |
-| component | `afd9195392a7eb70bb5794b877bc30677076d6ef74b909cb82e5564c73799ee6` |
-| handle | `436687cc326028c6d951dab38437299f4c6676f7825380424f440b29d51d6614` |
+| control | `c2d31c8ec7c8cd6595ded28918765460510d604c4ce0ab448712efe512c36066` |
+| hook | `41957c7fea1321f6f110e7407ff6c04cdbb6711827edccea3d3d25181bdd513f` |
+| component | `da9cb9c8d313c22bccf8808bcb41c525968c7e1b75f2de37418dd5782d978b39` |
+| handle | `76ed7dd79004f524ed9d49763ba83b6ff5381d46f443d4161495df17fadb1e05` |
 | combined | no patch |
 
 Each patch is a unified diff with repository-relative labels for
@@ -404,17 +467,20 @@ Each temporary projection:
 
 | Candidate | Patch SHA-256 | Added | Removed | Total changed | Generate/tests/build/package |
 |---|---|---:|---:|---:|---|
-| hook | `0f559023f210fda6697722cab125c3f4c8d795e671cbf394e00dfdffe0d79ec7` | 159 | 99 | 258 | pass |
-| component | `a9dc2653d80932bd178e4ad28dc235b987006e5c336e1b8c2c6eab00c3673970` | 128 | 69 | 197 | pass |
-| handle | `5dc404d16abaf5958660e9121956fe6317c5527abbe485cde691917e90702bb4` | 244 | 99 | 343 | pass |
+| hook | `1558632036e4e7e8ea0cf9c0f0fd93495bef10b7dc9a83c44512f1b4add4bb57` | 189 | 98 | 287 | pass |
+| component | `0611546ba45c3bfc5ffc36a8db794e1c58d68277ae1c1bf849e6f81f5f88bbb2` | 144 | 70 | 214 | pass |
+| handle | `f0c7c1f84e5a2eb77df50caec653b41de49b902512547b2e205e897f3b994ae8` | 349 | 100 | 449 | pass |
 
-The evidence-label adapter maps zero active owners to the authored baseline,
-one active owner to `route`, and a deeper active owner to `saved-editor`.
-Those labels are not identity and do not appear at candidate call sites.
+Opaque owner identity and evidence labels are stored separately. A token's first
+publication labels the first active candidate owner as `route` and a deeper
+owner as `saved-editor`; the existing string-key coordinator path retains its
+exact labels for pure-test compatibility. Labels are not identity and do not
+appear at candidate call sites.
 
-The full existing server-backed browser harness was run against all three
-corrected projections. Each reached the final document assertion with the
-request and safety evidence intact:
+The earlier corrected projection ran the full existing server-backed browser
+harness against all three candidates. The refreshed handle projection includes
+the corrected duplicate-publication state machine and again reached the final
+document assertion with request and safety evidence intact:
 
 ```text
 ordinary greeting requests: 11
@@ -427,7 +493,7 @@ duplicate descriptions: 0
 saved-editor activations/releases: 5/5
 ```
 
-Each projection failed the existing lifecycle counters in the same way:
+The refreshed handle result matches the prior shared lifecycle failure:
 
 | Counter | Reference | Hook | Component | Handle |
 |---|---:|---:|---:|---:|
@@ -442,11 +508,13 @@ observable completed states, not invalid title/description pairs.
 
 ## Server Projection Reproduction
 
-Use the same source commit and one temporary copy per candidate:
+Use corrected evidence commit
+`2e197aec7fa52e2c3cf8799371af401eeb9bbf41` and one temporary copy per
+candidate:
 
 ```bash
 root="$(mktemp -d)"
-git archive 7eb2f01804876c317e652e7b48f90dc9c36d90bb \
+git archive 2e197aec7fa52e2c3cf8799371af401eeb9bbf41 \
   | tar -x -C "$root"
 
 for mode in hook component handle; do
@@ -462,9 +530,10 @@ Apply these exact transformation rules to each copy:
    to `serverBackedDocumentState`. Store `coordinator` and `key` on the token,
    add `nextID uint64`, and set the key to
    `"owner-"+strconv.FormatUint(nextID, 10)` only in first `Publish`. Preserve
-   the existing string `Set`, `Remove`, `Snapshot`, and pure tests. Map the
-   candidate result label to empty at count 0, `route` at count 1, and
-   `saved-editor` above count 1.
+   the existing string `Set`, `Remove`, `Snapshot`, and pure tests. Store opaque
+   owner identity separately from the evidence label; label the first candidate
+   owner `route` and a deeper candidate owner `saved-editor` when its token
+   first publishes.
 2. In `app.gox`, remove `DocumentOwnerProps`, the two string-owner constants,
    `DocumentOwner`, and `useServerBackedDocumentState`.
 3. Add `document_candidate.go` with `//go:build js && wasm`. For hook,
@@ -481,9 +550,9 @@ Apply these exact transformation rules to each copy:
 5. Do not modify tests, the browser harness, backend protocol, document
    adapter, or committer.
 
-Create repository-relative unified diffs for `app.gox`,
-`document_state.go`, and the added `document_candidate.go`; their hashes must
-match the table above. Run from each temporary root:
+Create repository-relative unified diffs in `app.gox`, added
+`document_candidate.go`, then `document_state.go` order; their hashes must match
+the table above. Run from each temporary root:
 
 ```bash
 goxc generate ./examples/server-backed
