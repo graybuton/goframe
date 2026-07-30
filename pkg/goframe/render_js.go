@@ -42,7 +42,7 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 		mounted.pending = element
 		patchProps(element, mounted, nil, node.Props, owner)
 		mounted.children = mountChildren(document, element, node.Children, js.Null(), owner)
-		applyPostMountProps(element, node)
+		applyPostChildrenProps(element, node)
 	case TextNode:
 		text := document.Call("createTextNode", node.Value)
 		mounted.first = text
@@ -71,7 +71,7 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 	return mounted
 }
 
-func applyPostMountProps(element js.Value, node VNode) {
+func applyPostChildrenProps(element js.Value, node VNode) {
 	if node.Tag != "select" || len(node.Props) == 0 {
 		return
 	}
@@ -106,6 +106,7 @@ func patchMounted(document, parent js.Value, mounted *mountedNode, newNode Node,
 		newNode := newNode.(VNode)
 		patchProps(mounted.first, mounted, oldNode.Props, newNode.Props, owner)
 		mounted.children = patchChildren(document, mounted.first, mounted.children, newNode.Children, js.Null(), owner)
+		applyPostChildrenProps(mounted.first, newNode)
 	case TextNode:
 		newNode := newNode.(TextNode)
 		if oldNode.Value != newNode.Value {
