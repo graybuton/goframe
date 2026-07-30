@@ -114,6 +114,9 @@ identity. It also covers route Error Boundary fallback and safe navigation
 recovery in the reference app. It also covers the resource example for explicit
 loading/ready/failed state, reload, stale completion guards, and
 cleanup-after-unmount behavior.
+The private controlled-select fixture verifies post-option reconciliation,
+uncontrolled selection ownership, stable DOM identity, and event behavior under
+both standard Go and TinyGo on the current Chrome/Linux heavy baseline.
 The suite also runs a focused `goxc dev` reload lifecycle against a temporary
 standard-Go browser/WASM application. It verifies the initial non-reloading
 connection, GOX, Go, and asset rebuild reloads, burst coalescing, failure

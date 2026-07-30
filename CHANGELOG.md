@@ -192,6 +192,7 @@
 
 ### Fixed
 
+- Controlled select values are restored after dynamic option reconciliation.
 - `splitProps` allocation behavior was characterized and reduced for common
   runtime prop paths while preserving nil and empty zero-allocation behavior.
 - `VirtualTable` runtime code was reduced to recover dashboard WASM size
