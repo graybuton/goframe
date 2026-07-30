@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"go/build"
+	"go/version"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1626,6 +1627,199 @@ var _goxComponent_view_Button = 1
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("compile browser package: %v\n%s", err, output)
 	}
+}
+
+func TestFeatureTaggedStandardGoBuild(t *testing.T) {
+	runFeatureTaggedCompilerBuild(t, "go")
+}
+
+func TestFeatureTaggedTinyGoBuild(t *testing.T) {
+	if _, err := exec.LookPath("tinygo"); err != nil {
+		t.Skip("tinygo is not installed")
+	}
+	runFeatureTaggedCompilerBuild(t, "tinygo")
+}
+
+func runFeatureTaggedCompilerBuild(t *testing.T, compiler string) {
+	t.Helper()
+	observation, err := observeSelectedBrowserToolchain(
+		compiler,
+		os.Environ(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	languageVersion, err := selectedGoLanguageVersion(observation.goVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version.Compare(languageVersion, "go1.26") < 0 &&
+		os.Getenv("GOWASM") == "" {
+		t.Setenv("GOWASM", "satconv,signext")
+	}
+
+	selection, err := browserGenerationSourceSelection(compiler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, feature := range []string{"wasm.satconv", "wasm.signext"} {
+		if !containsString(selection.buildContext.ToolTags, feature) {
+			t.Fatalf(
+				"%s selected Go %s ToolTags %v do not contain %q",
+				compiler,
+				observation.goVersion,
+				selection.buildContext.ToolTags,
+				feature,
+			)
+		}
+	}
+
+	appDir := newFeatureTaggedCompilerFixture(t, compiler)
+	selected, err := authoredPackageSources(appDir, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selectedAuthored []string
+	for _, source := range selected {
+		selectedAuthored = append(
+			selectedAuthored,
+			filepath.Base(source.Filename),
+		)
+	}
+	sort.Strings(selectedAuthored)
+	for _, name := range []string{
+		"feature_satconv.go",
+		"feature_signext.go",
+	} {
+		if !containsString(selectedAuthored, name) {
+			t.Fatalf(
+				"%s private authored selection %v does not contain %s",
+				compiler,
+				selectedAuthored,
+				name,
+			)
+		}
+	}
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	output, err := buildApp(buildOptions{
+		appDir:    appDir,
+		compiler:  compiler,
+		workspace: workspace,
+	})
+	if err != nil {
+		t.Fatalf(
+			"%s feature-tagged WASM build with selected Go %s: %v",
+			compiler,
+			observation.goVersion,
+			err,
+		)
+	}
+	assertNonEmptyCompilerOutput(t, output)
+
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    appDir,
+		compiler:  compiler,
+		profile:   defaultProfileName,
+		workspace: workspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := workspaceModuleConfigForApp(appDir)
+	appWorkDir := filepath.Join(
+		layout.WorkDir,
+		filepath.FromSlash(config.AppRel),
+	)
+	metadata := realToolchainSourceMetadata(t, compiler, appWorkDir)
+	active := metadata.activeFiles()
+	for _, name := range []string{
+		"feature_satconv.go",
+		"feature_signext.go",
+		"satconv.gox.go",
+		"signext.gox.go",
+	} {
+		if !containsString(active, name) {
+			t.Fatalf(
+				"%s active workspace files %v do not contain %s",
+				compiler,
+				active,
+				name,
+			)
+		}
+	}
+	t.Logf(
+		"%s selected Go %s active feature files: %v",
+		compiler,
+		observation.goVersion,
+		active,
+	)
+}
+
+func newFeatureTaggedCompilerFixture(t *testing.T, compiler string) string {
+	t.Helper()
+	appDir := t.TempDir()
+	writeTestFile(
+		t,
+		appDir,
+		"go.mod",
+		"module example.com/feature-tags\n\ngo 1.22\n",
+	)
+	writeTestFile(
+		t,
+		appDir,
+		manifestName,
+		`{"name":"feature-tags","compiler":"`+compiler+`"}`,
+	)
+	writeTestFile(t, appDir, "main.go", `//go:build js && wasm
+
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return gf.Fragment(SignextView(), SatconvView())
+}
+
+func main() {
+	done := make(chan struct{})
+	gf.Mount("root", App)
+	<-done
+}
+`)
+	writeTestFile(t, appDir, "feature_signext.go", `//go:build wasm.signext
+
+package main
+
+const authoredSignext = "signext"
+`)
+	writeTestFile(t, appDir, "feature_satconv.go", `//go:build wasm.satconv
+
+package main
+
+const authoredSatconv = "satconv"
+`)
+	writeTestFile(t, appDir, "signext.gox", `//go:build wasm.signext
+
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func SignextView() gf.Node {
+	return <span>{authoredSignext}</span>
+}
+`)
+	writeTestFile(t, appDir, "satconv.gox", `//go:build wasm.satconv
+
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func SatconvView() gf.Node {
+	return <span>{authoredSatconv}</span>
+}
+`)
+	return appDir
 }
 
 func TestStandaloneGenerationSourceSelectionParity(t *testing.T) {
