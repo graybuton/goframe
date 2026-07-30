@@ -2,33 +2,22 @@
 
 ## Summary
 
-This audit exists because an attempted keyed-reorder LIS optimization was
-blocked by the local WASM size gate. The local gate failed even after the
-runtime changes were removed, which made the local size result unsuitable for
-deciding whether the LIS implementation itself was too large.
+This document began with a toolchain-sensitive dashboard size investigation.
+The historical Go `1.24.4` and Go `1.22.12` results remain below for context.
 
-Current `main` at `587c06d1345415960cd9100d42fa81df360fc1a0` behaves
-differently across toolchains:
-
-- Local Go `1.24.4` plus TinyGo `0.41.1` fails the dashboard raw budget.
-- A clean containerized Go `1.22.12` plus TinyGo `0.41.1` reproduction passes
-  the full size-budget workflow.
-
-The dashboard result is still tight under the CI-like toolchain:
-
-- Local current toolchain: `169789 B / 168960 B`, over by `829 B`.
-- CI-like Go `1.22.12`: `168907 B / 168960 B`, under by `53 B`.
-
-Top recommendation: keep budgets unchanged, keep CI Go `1.22.x` as the release
-size source of truth for now, and recover at least 1-4 KB of dashboard raw
-headroom before retrying LIS or updating the size workflow to a newer Go
-toolchain.
+The current supported release-size source of truth is Go `1.26.5` plus TinyGo
+`0.41.1` on Linux amd64. The 2026-07-30 migration reproduced the frozen base
+twice with isolated workspaces and caches. Both runs produced identical raw,
+gzip, Brotli, and Zstandard outputs for all eleven applications. Three measured
+cells exceeded their previous limits, so only those cells were aligned to the
+new baseline. No runtime, example, compression-ratio, or package behavior
+changed.
 
 ## Source of Truth
 
 - Workflow: `.github/workflows/ci-wasm-size.yml`
 - Budget script: `scripts/size-budget.sh`
-- CI Go version: `1.22.x`
+- CI Go version: `1.26.5`
 - CI TinyGo version: `0.41.1`
 
 The workflow installs `goxc`, generates and packages every listed example with
@@ -52,14 +41,54 @@ If no match exists, it reports the default missing path
 | counter | 97280 B | 40960 B | 56320 B | 49152 B |
 | components | 107520 B | 43008 B | 56320 B | 49152 B |
 | todo | 122880 B | 40960 B | 56320 B | 49152 B |
-| dashboard | 168960 B | 53248 B | 71680 B | 61440 B |
+| dashboard | 171008 B | 53248 B | 71680 B | 61440 B |
 | context | 116736 B | 36864 B | 46080 B | 40960 B |
 | virtualized | 124928 B | 40960 B | 49152 B | 44032 B |
 | multipackage | 110592 B | 43008 B | 56320 B | 49152 B |
 | cmdapp | 110592 B | 43008 B | 56320 B | 49152 B |
 | router | 116736 B | 45056 B | 58368 B | 51200 B |
-| router-dashboard | 233472 B | 77824 B | 94208 B | 81920 B |
-| resource | 156672 B | 57344 B | 68608 B | 61440 B |
+| router-dashboard | 233472 B | 77824 B | 94208 B | 82944 B |
+| resource | 156672 B | 58368 B | 68608 B | 61440 B |
+
+## Supported Toolchain Baseline Migration - 2026-07-30
+
+The frozen base is `ed88c68328ca0c969c816c2191732751f9af10dd`.
+Measurements use Go `1.26.5`, TinyGo `0.41.1` with LLVM `20.1.1`, Linux
+amd64, gzip `1.13`, Brotli `1.1.0`, and Zstandard `1.5.7`. Each isolated run
+installed its own `goxc`, generated and packaged all eleven applications, and
+then repeated packaging with `--asset-hash --preload --compress=gzip,br`.
+
+Two frozen-base runs with separate workspaces, Go caches, module caches, TinyGo
+caches, and output directories were byte-identical. Repeating the package
+sequence on the final workflow and budget state produced the same artifacts.
+
+| app | raw | gzip | br | zstd | raw WASM SHA-256 (base and final) |
+| --- | ---: | ---: | ---: | ---: | --- |
+| counter | 84536 B | 34007 B | 28303 B | 30571 B | `c503b7d0d8c11a3a11123626f972bb494b6acad1835c014c892d6427931d1d29` |
+| components | 90176 B | 35788 B | 29714 B | 31968 B | `c6e2a7076a3a638f15d73ec8bd3e7fa5d9b21ffcaea0c20b38e0b06deeffb0b0` |
+| todo | 119423 B | 46237 B | 38222 B | 41269 B | `54419f7df8c972241639453557c481da264ba35b45c96e1e2b8b5b3769379d22` |
+| dashboard | 169794 B | 63522 B | 51527 B | 55534 B | `ccf1115134115770a3d2e18b3eb141394090c5e27e972021ef6fc88eec407cd2` |
+| context | 116313 B | 43907 B | 35932 B | 38714 B | `74343c753dd9dfb36f3743856069c33d67b53990ee1d0ce0ceda29165015023d` |
+| virtualized | 123248 B | 47631 B | 38998 B | 42209 B | `7265158603003d6ef0bb15034e48047cb757066689abac23c8497252d8383930` |
+| multipackage | 95340 B | 37501 B | 31020 B | 33510 B | `a908e6fbe0b0efdffe7d50dcb9a606b46d951866794640f10212d9d15aeecdbd` |
+| cmdapp | 95358 B | 37516 B | 31121 B | 33494 B | `5ec1dcb73d0e4c85abe9d6549cd8305934914ae034c2fa0dc97798429a5865d9` |
+| router | 116602 B | 44598 B | 36780 B | 39614 B | `64008632fe639c1c6851ecfa1517f5294b8feeb715b779b200a8a35e7a7dd5e0` |
+| router-dashboard | 233415 B | 93591 B | 77001 B | 82143 B | `24a53d9c4546d3dbb6354cd414048787edf2143b14d0a9ca97167f4c6b091f14` |
+| resource | 156239 B | 68172 B | 57464 B | 61009 B | `5075f6dd01b1ee7e78a0c96c576827805fd1f7c059c5aec3cd61426b96c4fcde` |
+
+All base-to-final raw, gzip, Brotli, and Zstandard sizes and SHA-256 values are
+unchanged. The three-cell budget decision is:
+
+| app/format | measured | old budget | overage | new budget | headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dashboard raw | 169794 B | 168960 B | 834 B | 171008 B | 1214 B |
+| router-dashboard zstd | 82143 B | 81920 B | 223 B | 82944 B | 801 B |
+| resource br | 57464 B | 57344 B | 120 B | 58368 B | 904 B |
+
+Every other raw and compressed budget remains unchanged. Compression ratio
+limits remain gzip `52.00%`, Brotli `38.00%`, and Zstandard `46.00%`.
+This evidence-backed migration is the only supersession of the older Go
+`1.22.12` toolchain source-of-truth recommendation.
 
 ## Targeted ErrorBoundary Correctness Rebaseline — 2026-07-28
 
@@ -91,15 +120,18 @@ remain byte-identical at the raw WASM SHA-256 boundary; their compressed sizes
 are also unchanged. The final compression ratios remain within the existing
 limits: gzip `52.00%`, Brotli `38.00%`, and Zstandard `46.00%`.
 
-The earlier recommendation to keep budgets unchanged is superseded only for
-this accepted ErrorBoundary correctness guarantee. Raw budgets increase by
-3 KiB for `router-dashboard` and `resource`. Resource gzip increases by 1 KiB
-under the aligned compressed-budget rule; the other compressed budgets remain
-unchanged because their final artifacts fit. No workflow or ratio limit
-changes, no unrelated application budget changes, and no general runtime
-headroom are authorized by this rebaseline.
+At that historical stage, the earlier recommendation to keep budgets unchanged
+was superseded only for this accepted ErrorBoundary correctness guarantee. Raw
+budgets increased by 3 KiB for `router-dashboard` and `resource`. Resource gzip
+increased by 1 KiB under the aligned compressed-budget rule; the other
+compressed budgets remained unchanged because their final artifacts fit. No
+workflow or ratio limit changes, no unrelated application budget changes, and
+no general runtime headroom were authorized by this rebaseline.
 
-## Toolchain Matrix
+## Historical Toolchain Matrix
+
+This matrix records the original audit environment. The supported baseline
+migration above supersedes it as current CI guidance.
 
 | environment | Go version | TinyGo version | goxc version | reproduction method | status |
 | --- | --- | --- | --- | --- | --- |
@@ -274,7 +306,12 @@ The first follow-up should target dashboard-linked code and should measure size
 after each production change. Test-only and benchmark-only changes do not help
 the dashboard WASM size.
 
-## Recommendation
+## Historical Recommendation (Superseded 2026-07-30)
+
+The following recommendation records the earlier Go `1.22.12` source-of-truth
+decision. The evidence-backed supported toolchain migration above is the only
+supersession of its toolchain source-of-truth guidance; it does not alter the
+historical runtime cleanup observations.
 
 - Do not update the size workflow to Go `1.24` yet. The local Go `1.24.4`
   reproduction fails the dashboard raw budget by `829 B`.
@@ -408,5 +445,7 @@ dashboard    raw     168907 B /   168960 B
 - The CI-like reproduction used Docker and cloned from GitHub inside the
   container because host `/tmp` bind mounts were not visible inside the Docker
   daemon namespace.
-- The audit does not change runtime code, size budgets, workflows, examples, or
-  generated artifacts.
+- The original audit did not change runtime code, size budgets, workflows,
+  examples, or generated artifacts. The later supported-toolchain migration
+  changes only workflow versions and the three measured budget cells documented
+  above.
