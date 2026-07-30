@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -121,7 +122,10 @@ func TestBrowserAuthoredSourceSelectionExcludesHostArchitectureFeature(t *testin
 	t.Setenv("GOWASM", "")
 	for _, compiler := range []string{"go", "tinygo"} {
 		t.Run(compiler, func(t *testing.T) {
-			selection, err := browserGenerationSourceSelection(compiler)
+			selection, err := browserGenerationSourceSelection(
+				compiler,
+				t.TempDir(),
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -218,8 +222,9 @@ func TestBrowserBuildContextNormalizesTargetToolTags(t *testing.T) {
 					}
 				}
 			}
-			if !reflect.DeepEqual(first.ReleaseTags, firstBase.ReleaseTags) {
-				t.Fatalf("ReleaseTags = %v, want %v", first.ReleaseTags, firstBase.ReleaseTags)
+			wantReleaseTags := testReleaseTagsThrough(25)
+			if !reflect.DeepEqual(first.ReleaseTags, wantReleaseTags) {
+				t.Fatalf("ReleaseTags = %v, want %v", first.ReleaseTags, wantReleaseTags)
 			}
 		})
 	}
@@ -427,9 +432,11 @@ func TestBrowserSelectedToolchainOverridesBuildToolchainTags(t *testing.T) {
 				"go",
 				base,
 				environment,
+				t.TempDir(),
 				func(
 					compiler string,
 					observedEnvironment []string,
+					_ string,
 				) (browserToolchainObservation, error) {
 					observations++
 					if compiler != "go" {
@@ -480,6 +487,147 @@ func TestBrowserSelectedToolchainOverridesBuildToolchainTags(t *testing.T) {
 	}
 }
 
+func TestBrowserSelectedReleaseTagsControlAuthoredAndGOXSelection(t *testing.T) {
+	tests := []struct {
+		name              string
+		buildReleaseTags  []string
+		selectedGoVersion string
+		wantReleaseMinor  int
+		constraints       map[string]bool
+	}{
+		{
+			name:              "selected Go 1.26 overrides Go 1.25 build context",
+			buildReleaseTags:  testReleaseTagsThrough(25),
+			selectedGoVersion: "go1.26.5",
+			wantReleaseMinor:  26,
+			constraints: map[string]bool{
+				"go1.25": true,
+				"go1.26": true,
+				"go1.27": false,
+			},
+		},
+		{
+			name:              "selected Go 1.25 overrides Go 1.26 build context",
+			buildReleaseTags:  testReleaseTagsThrough(26),
+			selectedGoVersion: "go1.25.12",
+			wantReleaseMinor:  25,
+			constraints: map[string]bool{
+				"go1.25": true,
+				"go1.26": false,
+			},
+		},
+		{
+			name:              "selected Go 1.26 beta",
+			buildReleaseTags:  testReleaseTagsThrough(25),
+			selectedGoVersion: "go1.26beta1",
+			wantReleaseMinor:  26,
+			constraints: map[string]bool{
+				"go1.26": true,
+				"go1.27": false,
+			},
+		},
+		{
+			name:              "selected Go 1.26 release candidate",
+			buildReleaseTags:  testReleaseTagsThrough(25),
+			selectedGoVersion: "go1.26rc1",
+			wantReleaseMinor:  26,
+			constraints: map[string]bool{
+				"go1.26": true,
+				"go1.27": false,
+			},
+		},
+		{
+			name:              "selected Go 1.22",
+			buildReleaseTags:  testReleaseTagsThrough(26),
+			selectedGoVersion: "go1.22.12",
+			wantReleaseMinor:  22,
+			constraints: map[string]bool{
+				"go1.22": true,
+				"go1.23": false,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := build.Context{
+				GOOS:        "linux",
+				GOARCH:      "amd64",
+				Compiler:    "gc",
+				ReleaseTags: append([]string(nil), test.buildReleaseTags...),
+			}
+			selection, err := browserGenerationSourceSelectionWith(
+				"go",
+				base,
+				[]string{"GOWASM="},
+				t.TempDir(),
+				func(
+					string,
+					[]string,
+					string,
+				) (browserToolchainObservation, error) {
+					return browserToolchainObservation{
+						goVersion: test.selectedGoVersion,
+					}, nil
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantReleaseTags := testReleaseTagsThrough(test.wantReleaseMinor)
+			if !reflect.DeepEqual(
+				selection.buildContext.ReleaseTags,
+				wantReleaseTags,
+			) {
+				t.Fatalf(
+					"ReleaseTags = %v, want %v",
+					selection.buildContext.ReleaseTags,
+					wantReleaseTags,
+				)
+			}
+
+			packageDir := t.TempDir()
+			for constraint, want := range test.constraints {
+				source := []byte(
+					"//go:build " + constraint + "\n\npackage app\n",
+				)
+				authored, err := selection.matchAuthoredGo(
+					packageDir,
+					"source.go",
+					source,
+				)
+				if err != nil {
+					t.Fatalf("match authored %s: %v", constraint, err)
+				}
+				if authored != want {
+					t.Fatalf(
+						"authored %s match = %t, want %t",
+						constraint,
+						authored,
+						want,
+					)
+				}
+				goxSource, err := selection.matchGOX(
+					packageDir,
+					"source.gox",
+					source,
+				)
+				if err != nil {
+					t.Fatalf("match GOX %s: %v", constraint, err)
+				}
+				if goxSource != want {
+					t.Fatalf(
+						"GOX %s match = %t, want %t",
+						constraint,
+						goxSource,
+						want,
+					)
+				}
+			}
+		})
+	}
+}
+
 func TestBrowserToolchainObservationOccursOncePerGeneration(t *testing.T) {
 	sourceRoot := t.TempDir()
 	writeTestFile(t, sourceRoot, "root.go", "package app\n")
@@ -505,11 +653,13 @@ func Child() gf.Node {
 	err := generateIntoDirectoryForCompilerWithObserver(
 		sourceRoot,
 		destination,
+		destination,
 		true,
 		"go",
 		func(
 			string,
 			[]string,
+			string,
 		) (browserToolchainObservation, error) {
 			observations++
 			return browserToolchainObservation{goVersion: "go1.26.5"}, nil
@@ -537,6 +687,7 @@ func TestBrowserToolchainObservationIsNotGloballyCached(t *testing.T) {
 	observe := func(
 		string,
 		[]string,
+		string,
 	) (browserToolchainObservation, error) {
 		version := versions[observations]
 		observations++
@@ -552,6 +703,7 @@ func TestBrowserToolchainObservationIsNotGloballyCached(t *testing.T) {
 		"go",
 		base,
 		[]string{"GOWASM="},
+		t.TempDir(),
 		observe,
 	)
 	if err != nil {
@@ -561,6 +713,7 @@ func TestBrowserToolchainObservationIsNotGloballyCached(t *testing.T) {
 		"go",
 		base,
 		[]string{"GOWASM="},
+		t.TempDir(),
 		observe,
 	)
 	if err != nil {
@@ -589,11 +742,13 @@ func TestBrowserToolchainObservationFailurePublishesNothing(t *testing.T) {
 	err := generateIntoDirectoryForCompilerWithObserver(
 		sourceRoot,
 		destination,
+		destination,
 		true,
 		"tinygo",
 		func(
 			string,
 			[]string,
+			string,
 		) (browserToolchainObservation, error) {
 			return browserToolchainObservation{}, errors.New("probe failed")
 		},
@@ -627,11 +782,14 @@ func TestBrowserToolchainObservationFailurePublishesNothing(t *testing.T) {
 
 func TestPackageSourceSelectionUsesObservedCompilerTargets(t *testing.T) {
 	t.Setenv("GOWASM", "")
-	goSelection, err := browserGenerationSourceSelection("go")
+	goSelection, err := browserGenerationSourceSelection("go", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	tinySelection, err := browserGenerationSourceSelection("tinygo")
+	tinySelection, err := browserGenerationSourceSelection(
+		"tinygo",
+		t.TempDir(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1011,7 +1169,10 @@ func View() gf.Node {
 		{compiler: "tinygo", want: true},
 	} {
 		t.Run(test.compiler, func(t *testing.T) {
-			selection, err := browserGenerationSourceSelection(test.compiler)
+			selection, err := browserGenerationSourceSelection(
+				test.compiler,
+				t.TempDir(),
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1642,9 +1803,11 @@ func TestFeatureTaggedTinyGoBuild(t *testing.T) {
 
 func runFeatureTaggedCompilerBuild(t *testing.T, compiler string) {
 	t.Helper()
+	appDir := newFeatureTaggedCompilerFixture(t, compiler)
 	observation, err := observeSelectedBrowserToolchain(
 		compiler,
 		os.Environ(),
+		appDir,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1658,7 +1821,7 @@ func runFeatureTaggedCompilerBuild(t *testing.T, compiler string) {
 		t.Setenv("GOWASM", "satconv,signext")
 	}
 
-	selection, err := browserGenerationSourceSelection(compiler)
+	selection, err := browserGenerationSourceSelection(compiler, appDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1674,7 +1837,6 @@ func runFeatureTaggedCompilerBuild(t *testing.T, compiler string) {
 		}
 	}
 
-	appDir := newFeatureTaggedCompilerFixture(t, compiler)
 	selected, err := authoredPackageSources(appDir, selection)
 	if err != nil {
 		t.Fatal(err)
@@ -1868,7 +2030,10 @@ func TestBrowserCompilerSourceSelectionParity(t *testing.T) {
 							t.Skip("tinygo is not installed")
 						}
 					}
-					selection, err := browserGenerationSourceSelection(compiler)
+					selection, err := browserGenerationSourceSelection(
+						compiler,
+						root,
+					)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1932,7 +2097,10 @@ func TestBrowserGOXSourceSelectionParity(t *testing.T) {
 							t.Skip("tinygo is not installed")
 						}
 					}
-					selection, err := browserGenerationSourceSelection(compiler)
+					selection, err := browserGenerationSourceSelection(
+						compiler,
+						root,
+					)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -2048,6 +2216,8 @@ func newSourceSelectionFixture(t *testing.T) string {
 		{name: "tag_not_tinygo.go", constraint: "!tinygo"},
 		{name: "tag_cgo.go", constraint: "cgo"},
 		{name: "tag_go122.go", constraint: "go1.22"},
+		{name: "tag_go125.go", constraint: "go1.25"},
+		{name: "tag_go126.go", constraint: "go1.26"},
 		{name: "tag_go1999.go", constraint: "go1.999"},
 		{name: "tag_tinygowasm.go", constraint: "tinygo.wasm"},
 		{name: "tag_purego.go", constraint: "purego"},
@@ -2100,6 +2270,8 @@ func newGOXSourceSelectionFixture(t *testing.T) (string, []string) {
 		{filename: "tag_gc.gox", constraint: "gc"},
 		{filename: "tag_tinygo.gox", constraint: "tinygo"},
 		{filename: "tag_cgo.gox", constraint: "cgo"},
+		{filename: "tag_go125.gox", constraint: "go1.25"},
+		{filename: "tag_go126.gox", constraint: "go1.26"},
 		{filename: "tag_future.gox", constraint: "go1.999"},
 		{filename: "tag_amd64.gox", constraint: "amd64.v1"},
 		{filename: "tag_satconv.gox", constraint: "wasm.satconv"},
@@ -2246,9 +2418,11 @@ func browserGenerationSourceSelectionForVersion(
 		compiler,
 		build.Default,
 		environment,
+		t.TempDir(),
 		func(
 			string,
 			[]string,
+			string,
 		) (browserToolchainObservation, error) {
 			return browserToolchainObservation{goVersion: goVersion}, nil
 		},
@@ -2273,4 +2447,12 @@ func cloneBuildContextTagSlices(context build.Context) build.Context {
 	context.ToolTags = append([]string(nil), context.ToolTags...)
 	context.ReleaseTags = append([]string(nil), context.ReleaseTags...)
 	return context
+}
+
+func testReleaseTagsThrough(minor int) []string {
+	tags := make([]string, 0, minor)
+	for release := 1; release <= minor; release++ {
+		tags = append(tags, "go1."+strconv.Itoa(release))
+	}
+	return tags
 }

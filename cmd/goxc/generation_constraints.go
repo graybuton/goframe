@@ -28,6 +28,7 @@ type browserToolchainObservation struct {
 type browserToolchainObserver func(
 	compiler string,
 	environment []string,
+	workingDirectory string,
 ) (browserToolchainObservation, error)
 
 func defaultGenerationSourceSelection() generationSourceSelection {
@@ -38,11 +39,15 @@ func defaultGenerationSourceSelection() generationSourceSelection {
 	}
 }
 
-func browserGenerationSourceSelection(compiler string) (generationSourceSelection, error) {
+func browserGenerationSourceSelection(
+	compiler,
+	workingDirectory string,
+) (generationSourceSelection, error) {
 	return browserGenerationSourceSelectionWith(
 		compiler,
 		build.Default,
 		os.Environ(),
+		workingDirectory,
 		observeSelectedBrowserToolchain,
 	)
 }
@@ -51,6 +56,7 @@ func browserGenerationSourceSelectionWith(
 	compiler string,
 	base build.Context,
 	environment []string,
+	workingDirectory string,
 	observe browserToolchainObserver,
 ) (generationSourceSelection, error) {
 	if err := validateCompiler(compiler); err != nil {
@@ -59,7 +65,7 @@ func browserGenerationSourceSelectionWith(
 	if _, err := browserWASMFeatures(environment); err != nil {
 		return generationSourceSelection{}, err
 	}
-	observation, err := observe(compiler, environment)
+	observation, err := observe(compiler, environment, workingDirectory)
 	if err != nil {
 		return generationSourceSelection{}, fmt.Errorf(
 			"observe selected Go toolchain for %s browser source selection: %w",
@@ -101,11 +107,19 @@ func browserBuildContext(
 	context.GOARCH = "wasm"
 	context.Compiler = "gc"
 	context.BuildTags = nil
-	context.ReleaseTags = append([]string(nil), context.ReleaseTags...)
-	toolTags, err := browserTargetToolTags(
+	languageVersion, err := selectedGoLanguageVersion(selectedGoVersion)
+	if err != nil {
+		return build.Context{}, err
+	}
+	releaseTags, err := selectedGoReleaseTags(languageVersion)
+	if err != nil {
+		return build.Context{}, err
+	}
+	context.ReleaseTags = releaseTags
+	toolTags, err := browserTargetToolTagsForLanguage(
 		base.ToolTags,
 		environment,
-		selectedGoVersion,
+		languageVersion,
 	)
 	if err != nil {
 		return build.Context{}, err
@@ -144,6 +158,18 @@ func browserTargetToolTags(
 	if err != nil {
 		return nil, err
 	}
+	return browserTargetToolTagsForLanguage(
+		base,
+		environment,
+		languageVersion,
+	)
+}
+
+func browserTargetToolTagsForLanguage(
+	base []string,
+	environment []string,
+	languageVersion string,
+) ([]string, error) {
 	tags := make([]string, 0, len(base)+2)
 	for _, tag := range base {
 		if !architectureFeatureToolTag(tag) {
@@ -197,9 +223,32 @@ func selectedGoLanguageVersion(raw string) (string, error) {
 	return language, nil
 }
 
+func selectedGoReleaseTags(languageVersion string) ([]string, error) {
+	minorText, ok := strings.CutPrefix(languageVersion, "go1.")
+	if !ok {
+		return nil, fmt.Errorf(
+			"selected Go language version %q is not a supported Go 1.x version",
+			languageVersion,
+		)
+	}
+	minor, err := strconv.Atoi(minorText)
+	if err != nil || minor < 1 {
+		return nil, fmt.Errorf(
+			"selected Go language version %q is not a supported Go 1.x version",
+			languageVersion,
+		)
+	}
+	tags := make([]string, 0, minor)
+	for release := 1; release <= minor; release++ {
+		tags = append(tags, "go1."+strconv.Itoa(release))
+	}
+	return tags, nil
+}
+
 func observeSelectedBrowserToolchain(
 	compiler string,
 	environment []string,
+	workingDirectory string,
 ) (browserToolchainObservation, error) {
 	goPath, err := exec.LookPath("go")
 	if err != nil {
@@ -215,7 +264,7 @@ func observeSelectedBrowserToolchain(
 		compilerEnvironmentOptions{
 			Compiler:         "go",
 			Invocation:       compilerInvocationEmbedDiscovery,
-			WorkingDirectory: ".",
+			WorkingDirectory: workingDirectory,
 			GoFlags:          workspaceCompilerBaseGoFlags,
 		},
 	)
