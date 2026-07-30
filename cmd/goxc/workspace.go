@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"go/build"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,18 @@ type buildWorkspaceResult struct {
 }
 
 func prepareBuildWorkspaceResult(layout BuildLayout, manifest projectManifest) (buildWorkspaceResult, error) {
+	return prepareBuildWorkspaceResultWithObserver(
+		layout,
+		manifest,
+		observeSelectedBrowserToolchain,
+	)
+}
+
+func prepareBuildWorkspaceResultWithObserver(
+	layout BuildLayout,
+	manifest projectManifest,
+	observe browserToolchainObserver,
+) (buildWorkspaceResult, error) {
 	var result buildWorkspaceResult
 	if err := validateWorkspaceRoot(layout); err != nil {
 		return result, err
@@ -45,14 +58,31 @@ func prepareBuildWorkspaceResult(layout BuildLayout, manifest projectManifest) (
 	}
 	config := workspaceModuleConfigForApp(layout.AppDir)
 	appWorkDir := filepath.Join(layout.WorkDir, filepath.FromSlash(config.AppRel))
+	entryRelative, err := filepath.Rel(layout.AppDir, entry)
+	if err != nil {
+		return result, fmt.Errorf("resolve entry workspace path: %w", err)
+	}
+	result.EntryPath = filepath.Join(appWorkDir, entryRelative)
 	if err := copyAuthoredGoFiles(layout.AppDir, appWorkDir); err != nil {
 		return result, err
 	}
-	if err := generateIntoDirectoryForCompiler(
+	if err := mkdirAllBelowRoot(
+		layout.WorkDir,
+		result.EntryPath,
+		"workspace compiler context",
+	); err != nil {
+		return result, err
+	}
+	if err := writeWorkspaceGoMod(layout.WorkDir, layout.AppDir); err != nil {
+		return result, err
+	}
+	if err := generateIntoDirectoryForCompilerWithObserver(
 		layout.AppDir,
 		appWorkDir,
+		result.EntryPath,
 		false,
 		layout.Compiler,
+		observe,
 	); err != nil {
 		return result, err
 	}
@@ -61,14 +91,6 @@ func prepareBuildWorkspaceResult(layout BuildLayout, manifest projectManifest) (
 			return result, err
 		}
 	}
-	if err := writeWorkspaceGoMod(layout.WorkDir, layout.AppDir); err != nil {
-		return result, err
-	}
-	entryRelative, err := filepath.Rel(layout.AppDir, entry)
-	if err != nil {
-		return result, fmt.Errorf("resolve entry workspace path: %w", err)
-	}
-	result.EntryPath = filepath.Join(appWorkDir, entryRelative)
 	result.EmbedPlan, err = discoverAndMaterializeEmbedInputs(layout, appWorkDir, result.EntryPath)
 	if err != nil {
 		return result, err
@@ -206,7 +228,31 @@ func generateIntoDirectoryForCompiler(
 	requireFiles bool,
 	compiler string,
 ) error {
-	selection, err := browserGenerationSourceSelection(compiler)
+	return generateIntoDirectoryForCompilerWithObserver(
+		sourceRoot,
+		destinationRoot,
+		destinationRoot,
+		requireFiles,
+		compiler,
+		observeSelectedBrowserToolchain,
+	)
+}
+
+func generateIntoDirectoryForCompilerWithObserver(
+	sourceRoot,
+	destinationRoot,
+	compilerContextDirectory string,
+	requireFiles bool,
+	compiler string,
+	observe browserToolchainObserver,
+) error {
+	selection, err := browserGenerationSourceSelectionWith(
+		compiler,
+		build.Default,
+		os.Environ(),
+		compilerContextDirectory,
+		observe,
+	)
 	if err != nil {
 		return err
 	}

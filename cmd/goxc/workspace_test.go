@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"go/ast"
 	"go/build"
 	"go/parser"
@@ -884,6 +885,272 @@ func Layout() gf.Node {
 	}
 }
 
+func TestPrepareBuildWorkspaceUsesGeneratedCompilerContext(t *testing.T) {
+	root := t.TempDir()
+	callerDir := filepath.Join(root, "caller")
+	writeTestFile(t, callerDir, "go.mod", `module example.com/caller
+
+go 1.25
+
+toolchain go1.25.12
+`)
+	t.Setenv("PWD", callerDir)
+
+	appDir := filepath.Join(root, "app")
+	authoredGoMod := "module example.com/app\n\ngo 1.22\n"
+	writeTestFile(t, appDir, "go.mod", authoredGoMod)
+	writeTestFile(t, appDir, "cmd/app/main.go", "package main\n")
+	writeTestFile(t, appDir, "cmd/app/app.gox", `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <main>generated context</main>
+}
+`)
+
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    appDir,
+		workspace: filepath.Join(root, "workspace"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := workspaceModuleConfigForApp(appDir)
+	appWorkDir := filepath.Join(
+		layout.WorkDir,
+		filepath.FromSlash(config.AppRel),
+	)
+	wantEntry := filepath.Join(appWorkDir, "cmd", "app")
+	wantGoMod := filepath.Join(layout.WorkDir, "go.mod")
+	observations := 0
+	var observedGoMod string
+
+	result, err := prepareBuildWorkspaceResultWithObserver(
+		layout,
+		projectManifest{Entry: "cmd/app"},
+		func(
+			compiler string,
+			environment []string,
+			workingDirectory string,
+		) (browserToolchainObservation, error) {
+			observations++
+			if compiler != "go" {
+				t.Fatalf("compiler = %q, want go", compiler)
+			}
+			if got, ok := environmentValue(environment, "PWD"); !ok ||
+				filepath.Clean(got) != filepath.Clean(callerDir) {
+				t.Fatalf(
+					"caller PWD = %q, present=%t, want %q",
+					got,
+					ok,
+					callerDir,
+				)
+			}
+			if filepath.Clean(workingDirectory) != filepath.Clean(wantEntry) {
+				t.Fatalf(
+					"observer directory = %q, want compiler entry %q",
+					workingDirectory,
+					wantEntry,
+				)
+			}
+			if filepath.Clean(workingDirectory) == filepath.Clean(callerDir) {
+				t.Fatal("observer used the caller module directory")
+			}
+			info, err := os.Stat(workingDirectory)
+			if err != nil {
+				t.Fatalf("stat observer directory: %v", err)
+			}
+			if !info.IsDir() {
+				t.Fatalf("observer path mode = %s, want directory", info.Mode())
+			}
+			nearest, err := nearestGoModForTest(workingDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Clean(nearest) != filepath.Clean(wantGoMod) {
+				t.Fatalf(
+					"nearest observer go.mod = %q, want %q",
+					nearest,
+					wantGoMod,
+				)
+			}
+			content, err := os.ReadFile(nearest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observedGoMod = string(content)
+			if !strings.Contains(observedGoMod, "\ngo 1.22\n") {
+				t.Fatalf("generated go.mod has unexpected language version:\n%s", content)
+			}
+			if strings.Contains(observedGoMod, "toolchain go1.25.12") {
+				t.Fatalf("generated go.mod inherited caller toolchain:\n%s", content)
+			}
+			return browserToolchainObservation{goVersion: "go1.26.5"}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResultWithObserver() error: %v", err)
+	}
+	if observations != 1 {
+		t.Fatalf("toolchain observations = %d, want 1", observations)
+	}
+	if filepath.Clean(result.EntryPath) != filepath.Clean(wantEntry) {
+		t.Fatalf("compiler entry = %q, want %q", result.EntryPath, wantEntry)
+	}
+	finalGoMod, err := os.ReadFile(wantGoMod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(finalGoMod) != observedGoMod {
+		t.Fatalf(
+			"workspace go.mod changed after observation:\nobserved:\n%s\nfinal:\n%s",
+			observedGoMod,
+			finalGoMod,
+		)
+	}
+	assertTestFileUnchanged(t, filepath.Join(appDir, "go.mod"), authoredGoMod)
+}
+
+func TestPrepareBuildWorkspaceObservesGOXOnlyChildEntry(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	writeTestFile(t, appDir, "go.mod", "module example.com/gox-only\n\ngo 1.22\n")
+	writeTestFile(t, appDir, "cmd/app/app.gox", `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <main>GOX only</main>
+}
+`)
+
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    appDir,
+		workspace: filepath.Join(root, "workspace"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := workspaceModuleConfigForApp(appDir)
+	wantEntry := filepath.Join(
+		layout.WorkDir,
+		filepath.FromSlash(config.AppRel),
+		"cmd",
+		"app",
+	)
+	observations := 0
+	result, err := prepareBuildWorkspaceResultWithObserver(
+		layout,
+		projectManifest{Entry: "cmd/app"},
+		func(
+			_ string,
+			_ []string,
+			workingDirectory string,
+		) (browserToolchainObservation, error) {
+			observations++
+			if filepath.Clean(workingDirectory) != filepath.Clean(wantEntry) {
+				t.Fatalf(
+					"observer directory = %q, want %q",
+					workingDirectory,
+					wantEntry,
+				)
+			}
+			info, err := os.Stat(workingDirectory)
+			if err != nil {
+				t.Fatalf("stat GOX-only observer directory: %v", err)
+			}
+			if !info.IsDir() {
+				t.Fatalf("GOX-only observer mode = %s, want directory", info.Mode())
+			}
+			if _, err := os.Stat(filepath.Join(layout.WorkDir, "go.mod")); err != nil {
+				t.Fatalf("workspace go.mod missing before observation: %v", err)
+			}
+			return browserToolchainObservation{goVersion: "go1.26.5"}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareBuildWorkspaceResultWithObserver() error: %v", err)
+	}
+	if observations != 1 {
+		t.Fatalf("toolchain observations = %d, want 1", observations)
+	}
+	if filepath.Clean(result.EntryPath) != filepath.Clean(wantEntry) {
+		t.Fatalf("entry = %q, want %q", result.EntryPath, wantEntry)
+	}
+	if _, err := os.Stat(filepath.Join(wantEntry, "app.gox.go")); err != nil {
+		t.Fatalf("GOX-only generated output missing: %v", err)
+	}
+}
+
+func TestPrepareBuildWorkspaceObservationFailureAfterModuleMaterialization(
+	t *testing.T,
+) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	authoredGoMod := "module example.com/observation-failure\n\ngo 1.22\n"
+	authoredGOX := `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+	return <main>failure</main>
+}
+`
+	writeTestFile(t, appDir, "go.mod", authoredGoMod)
+	writeTestFile(t, appDir, "main.go", "package main\n")
+	writeTestFile(t, appDir, "app.gox", authoredGOX)
+
+	layout, err := newBuildLayout(layoutOptions{
+		appDir:    appDir,
+		workspace: filepath.Join(root, "workspace"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations := 0
+	_, err = prepareBuildWorkspaceResultWithObserver(
+		layout,
+		projectManifest{Entry: "."},
+		func(
+			_ string,
+			_ []string,
+			workingDirectory string,
+		) (browserToolchainObservation, error) {
+			observations++
+			if _, err := os.Stat(workingDirectory); err != nil {
+				t.Fatalf("observer directory missing: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(layout.WorkDir, "go.mod")); err != nil {
+				t.Fatalf("workspace go.mod missing before observation: %v", err)
+			}
+			return browserToolchainObservation{}, errors.New("probe failed")
+		},
+	)
+	if err == nil {
+		t.Fatal("prepareBuildWorkspaceResultWithObserver() succeeded")
+	}
+	for _, want := range []string{"observe selected Go toolchain", "probe failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+	if observations != 1 {
+		t.Fatalf("toolchain observations = %d, want 1", observations)
+	}
+	config := workspaceModuleConfigForApp(appDir)
+	generated := filepath.Join(
+		layout.WorkDir,
+		filepath.FromSlash(config.AppRel),
+		"app.gox.go",
+	)
+	if _, err := os.Stat(generated); !os.IsNotExist(err) {
+		t.Fatalf("generated output exists after observation failure: %v", err)
+	}
+	assertTestFileUnchanged(t, filepath.Join(appDir, "go.mod"), authoredGoMod)
+	assertTestFileUnchanged(t, filepath.Join(appDir, "app.gox"), authoredGOX)
+}
+
 func TestPrepareBuildWorkspaceAcceptsGenericSrcEntry(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "go.mod", "module github.com/example/root\n\ngo 1.22\n")
@@ -1000,6 +1267,21 @@ func assertGeneratedFileContains(t *testing.T, path string, wants ...string) {
 		if !strings.Contains(string(content), want) {
 			t.Fatalf("generated file %s missing %q:\n%s", path, want, content)
 		}
+	}
+}
+
+func nearestGoModForTest(directory string) (string, error) {
+	current := filepath.Clean(directory)
+	for {
+		path := filepath.Join(current, "go.mod")
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			return path, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", errors.New("no go.mod found")
+		}
+		current = parent
 	}
 }
 
