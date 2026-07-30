@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"go/build"
 	"os"
 	"path/filepath"
 	"sort"
@@ -206,7 +207,28 @@ func generateIntoDirectoryForCompiler(
 	requireFiles bool,
 	compiler string,
 ) error {
-	selection, err := browserGenerationSourceSelection(compiler)
+	return generateIntoDirectoryForCompilerWithObserver(
+		sourceRoot,
+		destinationRoot,
+		requireFiles,
+		compiler,
+		observeSelectedBrowserToolchain,
+	)
+}
+
+func generateIntoDirectoryForCompilerWithObserver(
+	sourceRoot,
+	destinationRoot string,
+	requireFiles bool,
+	compiler string,
+	observe browserToolchainObserver,
+) error {
+	selection, err := browserGenerationSourceSelectionWith(
+		compiler,
+		build.Default,
+		os.Environ(),
+		observe,
+	)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"go/build"
 	"os"
 	"os/exec"
@@ -76,10 +77,12 @@ func TestAuthoredSourceConstraintsMatchBrowserTargets(t *testing.T) {
 		}},
 	} {
 		t.Run(compiler.name, func(t *testing.T) {
-			selection, err := browserGenerationSourceSelection(compiler.name)
-			if err != nil {
-				t.Fatal(err)
-			}
+			selection := browserGenerationSourceSelectionForVersion(
+				t,
+				compiler.name,
+				"go1.25.12",
+				[]string{"GOWASM="},
+			)
 			for _, test := range tests {
 				t.Run(test.name, func(t *testing.T) {
 					source := "package app\n"
@@ -161,11 +164,21 @@ func TestBrowserBuildContextNormalizesTargetToolTags(t *testing.T) {
 
 	for _, compiler := range []string{"go", "tinygo"} {
 		t.Run(compiler, func(t *testing.T) {
-			first, err := browserBuildContext(compiler, firstBase, firstEnvironment)
+			first, err := browserBuildContext(
+				compiler,
+				firstBase,
+				firstEnvironment,
+				"go1.25.12",
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := browserBuildContext(compiler, secondBase, secondEnvironment)
+			second, err := browserBuildContext(
+				compiler,
+				secondBase,
+				secondEnvironment,
+				"go1.25.12",
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -229,6 +242,7 @@ func TestBrowserBuildContextRejectsInvalidGOWASM(t *testing.T) {
 		"go",
 		build.Default,
 		[]string{"GOWASM=satconv,unknown"},
+		"go1.25.12",
 	)
 	if err == nil {
 		t.Fatal("browserBuildContext() accepted invalid GOWASM")
@@ -236,6 +250,378 @@ func TestBrowserBuildContextRejectsInvalidGOWASM(t *testing.T) {
 	if !strings.Contains(err.Error(), `invalid GOWASM feature "unknown"`) {
 		t.Fatalf("error %q does not identify invalid GOWASM feature", err)
 	}
+}
+
+func TestBrowserFeatureToolTagsUseSelectedGoVersion(t *testing.T) {
+	base := []string{
+		"amd64.v1",
+		"arm64.v8.0",
+		"custom.tool",
+		"wasm.signext",
+		"custom.tool",
+	}
+	baseBefore := append([]string(nil), base...)
+	tests := []struct {
+		name      string
+		goVersion string
+		goWASM    string
+		want      []string
+		wantError string
+	}{
+		{
+			name:      "Go 1.25 default",
+			goVersion: "go1.25.12",
+			want:      []string{"custom.tool"},
+		},
+		{
+			name:      "Go 1.25 satconv",
+			goVersion: "go1.25.12",
+			goWASM:    "satconv",
+			want:      []string{"custom.tool", "wasm.satconv"},
+		},
+		{
+			name:      "Go 1.25 signext",
+			goVersion: "go1.25.12",
+			goWASM:    "signext",
+			want:      []string{"custom.tool", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.25 both",
+			goVersion: "go1.25.12",
+			goWASM:    "satconv,signext",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.25 reverse order",
+			goVersion: "go1.25.12",
+			goWASM:    "signext,satconv",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.25 duplicates",
+			goVersion: "go1.25.12",
+			goWASM:    "satconv,signext,satconv",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.26 default",
+			goVersion: "go1.26.5",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.26 explicit old feature",
+			goVersion: "go1.26.5",
+			goWASM:    "satconv",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.26 duplicates",
+			goVersion: "go1.26",
+			goWASM:    "signext,signext",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.26 beta",
+			goVersion: "go1.26beta1",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.26 release candidate",
+			goVersion: "go1.26rc1",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "invalid GOWASM",
+			goVersion: "go1.25.12",
+			goWASM:    "satconv,unknown",
+			wantError: `invalid GOWASM feature "unknown"`,
+		},
+		{
+			name:      "malformed selected version",
+			goVersion: "1.26.5",
+			wantError: `unsupported version "1.26.5"`,
+		},
+		{
+			name:      "development selected version",
+			goVersion: "devel go1.27-deadbeef",
+			wantError: `unsupported version "devel go1.27-deadbeef"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			environment := []string{
+				"SENTINEL=preserved",
+				"GOWASM=" + test.goWASM,
+			}
+			environmentBefore := append([]string(nil), environment...)
+			got, err := browserTargetToolTags(
+				base,
+				environment,
+				test.goVersion,
+			)
+			if test.wantError != "" {
+				if err == nil {
+					t.Fatal("browserTargetToolTags() succeeded")
+				}
+				if !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("error %q does not contain %q", err, test.wantError)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, test.want) {
+					t.Fatalf("ToolTags = %v, want %v", got, test.want)
+				}
+			}
+			if !reflect.DeepEqual(environment, environmentBefore) {
+				t.Fatalf("environment mutated: %v", environment)
+			}
+		})
+	}
+	if !reflect.DeepEqual(base, baseBefore) {
+		t.Fatalf("base ToolTags mutated: %v", base)
+	}
+}
+
+func TestBrowserSelectedToolchainOverridesBuildToolchainTags(t *testing.T) {
+	tests := []struct {
+		name              string
+		buildReleaseTags  []string
+		buildToolTags     []string
+		selectedGoVersion string
+		wantFeatures      bool
+	}{
+		{
+			name:              "selected Go 1.26 overrides Go 1.25 build context",
+			buildReleaseTags:  []string{"go1.1", "go1.25"},
+			selectedGoVersion: "go1.26.5",
+			wantFeatures:      true,
+		},
+		{
+			name:             "selected Go 1.25 overrides Go 1.26 build context",
+			buildReleaseTags: []string{"go1.1", "go1.26"},
+			buildToolTags: []string{
+				"wasm.satconv",
+				"wasm.signext",
+			},
+			selectedGoVersion: "go1.25.12",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := build.Context{
+				GOOS:        "linux",
+				GOARCH:      "amd64",
+				Compiler:    "gc",
+				ToolTags:    append([]string(nil), test.buildToolTags...),
+				ReleaseTags: append([]string(nil), test.buildReleaseTags...),
+			}
+			environment := []string{"GOWASM=", "SENTINEL=preserved"}
+			environmentBefore := append([]string(nil), environment...)
+			observations := 0
+			selection, err := browserGenerationSourceSelectionWith(
+				"go",
+				base,
+				environment,
+				func(
+					compiler string,
+					observedEnvironment []string,
+				) (browserToolchainObservation, error) {
+					observations++
+					if compiler != "go" {
+						t.Fatalf("compiler = %q, want go", compiler)
+					}
+					if !reflect.DeepEqual(
+						observedEnvironment,
+						environment,
+					) {
+						t.Fatalf(
+							"observer environment = %v, want %v",
+							observedEnvironment,
+							environment,
+						)
+					}
+					return browserToolchainObservation{
+						goVersion: test.selectedGoVersion,
+					}, nil
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, feature := range []string{
+				"wasm.satconv",
+				"wasm.signext",
+			} {
+				if got := containsString(
+					selection.buildContext.ToolTags,
+					feature,
+				); got != test.wantFeatures {
+					t.Fatalf(
+						"ToolTags %v contain %q = %t, want %t",
+						selection.buildContext.ToolTags,
+						feature,
+						got,
+						test.wantFeatures,
+					)
+				}
+			}
+			if observations != 1 {
+				t.Fatalf("toolchain observations = %d, want 1", observations)
+			}
+			if !reflect.DeepEqual(environment, environmentBefore) {
+				t.Fatalf("environment mutated: %v", environment)
+			}
+		})
+	}
+}
+
+func TestBrowserToolchainObservationOccursOncePerGeneration(t *testing.T) {
+	sourceRoot := t.TempDir()
+	writeTestFile(t, sourceRoot, "root.go", "package app\n")
+	writeTestFile(t, sourceRoot, "root.gox", `package app
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Root() gf.Node {
+	return <main>root</main>
+}
+`)
+	writeTestFile(t, sourceRoot, "child/child.go", "package child\n")
+	writeTestFile(t, sourceRoot, "child/child.gox", `package child
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func Child() gf.Node {
+	return <main>child</main>
+}
+`)
+	destination := t.TempDir()
+	observations := 0
+	err := generateIntoDirectoryForCompilerWithObserver(
+		sourceRoot,
+		destination,
+		true,
+		"go",
+		func(
+			string,
+			[]string,
+		) (browserToolchainObservation, error) {
+			observations++
+			return browserToolchainObservation{goVersion: "go1.26.5"}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observations != 1 {
+		t.Fatalf("toolchain observations = %d, want 1", observations)
+	}
+	for _, output := range []string{
+		"root.gox.go",
+		"child/child.gox.go",
+	} {
+		if _, err := os.Stat(filepath.Join(destination, output)); err != nil {
+			t.Fatalf("generated output %s missing: %v", output, err)
+		}
+	}
+}
+
+func TestBrowserToolchainObservationIsNotGloballyCached(t *testing.T) {
+	versions := []string{"go1.25.12", "go1.26.5"}
+	observations := 0
+	observe := func(
+		string,
+		[]string,
+	) (browserToolchainObservation, error) {
+		version := versions[observations]
+		observations++
+		return browserToolchainObservation{goVersion: version}, nil
+	}
+	base := build.Context{
+		GOOS:        "linux",
+		GOARCH:      "amd64",
+		Compiler:    "gc",
+		ReleaseTags: []string{"go1.1", "go1.26"},
+	}
+	first, err := browserGenerationSourceSelectionWith(
+		"go",
+		base,
+		[]string{"GOWASM="},
+		observe,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := browserGenerationSourceSelectionWith(
+		"go",
+		base,
+		[]string{"GOWASM="},
+		observe,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsString(first.buildContext.ToolTags, "wasm.satconv") {
+		t.Fatalf("Go 1.25 ToolTags = %v", first.buildContext.ToolTags)
+	}
+	for _, feature := range []string{"wasm.satconv", "wasm.signext"} {
+		if !containsString(second.buildContext.ToolTags, feature) {
+			t.Fatalf("Go 1.26 ToolTags %v do not contain %q", second.buildContext.ToolTags, feature)
+		}
+	}
+	if observations != 2 {
+		t.Fatalf("toolchain observations = %d, want 2", observations)
+	}
+}
+
+func TestBrowserToolchainObservationFailurePublishesNothing(t *testing.T) {
+	sourceRoot := t.TempDir()
+	source := "package app\n\nconst Authored = true\n"
+	writeTestFile(t, sourceRoot, "view.gox", source)
+	destination := t.TempDir()
+	writeTestFile(t, destination, "sentinel.txt", "preserved")
+
+	err := generateIntoDirectoryForCompilerWithObserver(
+		sourceRoot,
+		destination,
+		true,
+		"tinygo",
+		func(
+			string,
+			[]string,
+		) (browserToolchainObservation, error) {
+			return browserToolchainObservation{}, errors.New("probe failed")
+		},
+	)
+	if err == nil {
+		t.Fatal("generation succeeded")
+	}
+	for _, want := range []string{
+		"observe selected Go toolchain",
+		"tinygo",
+		"probe failed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(destination, "view.gox.go")); !os.IsNotExist(err) {
+		t.Fatalf("generated output exists after observation failure: %v", err)
+	}
+	assertTestFileUnchanged(
+		t,
+		filepath.Join(sourceRoot, "view.gox"),
+		source,
+	)
+	assertTestFileUnchanged(
+		t,
+		filepath.Join(destination, "sentinel.txt"),
+		"preserved",
+	)
 }
 
 func TestPackageSourceSelectionUsesObservedCompilerTargets(t *testing.T) {
@@ -1274,7 +1660,10 @@ func TestBrowserCompilerSourceSelectionParity(t *testing.T) {
 		gowasm string
 	}{
 		{name: "default"},
+		{name: "satconv", gowasm: "satconv"},
+		{name: "signext", gowasm: "signext"},
 		{name: "wasm features", gowasm: "satconv,signext"},
+		{name: "wasm features reverse order", gowasm: "signext,satconv"},
 	} {
 		t.Run(target.name, func(t *testing.T) {
 			t.Setenv("GOWASM", target.gowasm)
@@ -1335,7 +1724,10 @@ func TestBrowserGOXSourceSelectionParity(t *testing.T) {
 		gowasm string
 	}{
 		{name: "default"},
+		{name: "satconv", gowasm: "satconv"},
+		{name: "signext", gowasm: "signext"},
 		{name: "wasm features", gowasm: "satconv,signext"},
+		{name: "wasm features reverse order", gowasm: "signext,satconv"},
 	} {
 		t.Run(target.name, func(t *testing.T) {
 			t.Setenv("GOWASM", target.gowasm)
@@ -1647,6 +2039,30 @@ func realCurrentGoSourceSelection(t *testing.T, root string) []string {
 	files := append(packageInfo.GoFiles, packageInfo.CgoFiles...)
 	sort.Strings(files)
 	return files
+}
+
+func browserGenerationSourceSelectionForVersion(
+	t *testing.T,
+	compiler,
+	goVersion string,
+	environment []string,
+) generationSourceSelection {
+	t.Helper()
+	selection, err := browserGenerationSourceSelectionWith(
+		compiler,
+		build.Default,
+		environment,
+		func(
+			string,
+			[]string,
+		) (browserToolchainObservation, error) {
+			return browserToolchainObservation{goVersion: goVersion}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return selection
 }
 
 func containsString(values []string, want string) bool {
