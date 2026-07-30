@@ -24,9 +24,9 @@ Labels:
 
 | Host | Status | Evidence |
 |---|---|---|
-| Linux amd64 | CI-tested | GitHub Actions and local validation run Go, TinyGo, Node, Chrome, size, smoke, and DOM pressure gates. |
-| macOS | CI-tested (minimal, Intel runner) | Core Go/toolchain gates run in CI on `macos-15-intel`: `go fmt`, `go test ./...`, `go vet`, `go test -tags=goframe_debug`, and selected GOX golden tests. TinyGo/browser smoke remain Linux-first checks. |
-| Windows | CI-tested (minimal) | Core Go/toolchain gates run in CI: `go fmt`, `go test ./...`, `go vet`, `go test -tags=goframe_debug`, and selected GOX golden tests. TinyGo/browser smoke remain Linux-first checks. |
+| Linux amd64 | CI-tested | Core runs Go `1.22.12`, `1.25.12`, and `1.26.5`. The supported Go entries run full correctness gates; Go `1.26.5` also owns the TinyGo size and Chrome browser baselines. |
+| macOS | CI-tested (minimal, Intel runner) | Core runs Go `1.26.5` on `macos-15-intel`: formatting, ordinary tests, vet, debug-tag tests, and selected GOX golden tests. TinyGo/browser smoke remain Linux-only checks. |
+| Windows | CI-tested (minimal) | Core runs Go `1.26.5`: formatting, ordinary tests, vet, debug-tag tests, and selected GOX golden tests. TinyGo/browser smoke remain Linux-only checks. |
 
 Symlink safety tests skip when `os.Symlink` is unavailable or restricted.
 
@@ -34,12 +34,15 @@ Symlink safety tests skip when `os.Symlink` is unavailable or restricted.
 
 | Compiler target | Status | Notes |
 |---|---|---|
-| Go/WASM | CI-tested for selected smoke fixtures | Used for recover-capable runtime error and Error Boundary scenarios. Larger bundle size is expected. |
-| TinyGo/WASM | CI-tested for packaging, size, and most browser smoke | Preferred size-oriented path. Current CI uses TinyGo `0.41.1`. Default package path uses `-panic=trap`. |
+| Go/WASM | CI-tested for selected smoke fixtures | Current heavy browser baseline uses Go `1.26.5`. It covers recover-capable runtime error and Error Boundary scenarios. Larger bundle size is expected. |
+| TinyGo/WASM | CI-tested for packaging, size, and most browser smoke | Current heavy baseline uses Go `1.26.5` with TinyGo `0.41.1`. Focused source-selection parity also runs under Go `1.25.12`. Default package path uses `-panic=trap`. |
 | Native Go runtime | CI-tested for pure tests | Pure runtime/compiler/tooling tests run with normal Go. Browser runtime requires `js/wasm`. |
 
-Minimum module declaration is `go 1.22`. Current local/CI baselines use newer Go
-toolchains.
+Minimum module declaration is `go 1.22`, with Go `1.22.12` in Core CI as the
+minimum-version check. Go `1.25.12` and `1.26.5` are the supported full Core
+toolchains. The browser and size workflows use Go `1.26.5`, TinyGo `0.41.1`,
+and Node.js `24.18.1`; Go `1.25.12` does not currently have a separate heavy
+browser or size lane.
 
 ## Browser Targets
 

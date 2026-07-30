@@ -4,6 +4,9 @@
 
 ### Added
 
+- Supported CI baselines for Go `1.22.12`, `1.25.12`, and `1.26.5`, Node.js
+  `24.18.1`, and the Go `1.26.5`/TinyGo `0.41.1` browser and WASM-size lanes,
+  with three reproducibly measured size-budget cells aligned to that baseline.
 - Watched `goxc dev` workflow with serialized full-package rebuilds, effective
   authored-input polling, quiet-period debounce, verified process-private
   generation serving, last-successful-generation failure preservation,

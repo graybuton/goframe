@@ -11,17 +11,31 @@ permissions:
 
 jobs:
   go:
-    name: Go and GOX checks
+    name: Go and GOX checks (${{ matrix.os }}, Go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            go: '1.22.12'
+            tier: minimum
+            full: false
+          - os: ubuntu-latest
+            go: '1.25.12'
+            tier: supported
+            full: true
+          - os: ubuntu-latest
+            go: '1.26.5'
+            tier: supported
             full: true
           - os: macos-15-intel
+            go: '1.26.5'
+            tier: host
             full: false
           - os: windows-latest
+            go: '1.26.5'
+            tier: host
             full: false
 
     steps:
@@ -31,14 +45,14 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.22.x'
+          go-version: ${{ matrix.go }}
           cache: true
 
       - name: Setup Node.js
         if: matrix.full
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24.18.1'
 
       - name: Artifact gate
         if: matrix.full
@@ -72,3 +86,39 @@ jobs:
 
       - name: GOX golden tests
         run: go test ./pkg/gox -run 'TestGolden|TestErrorGolden'
+
+  tinygo-parity:
+    name: TinyGo source selection (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go:
+          - '1.25.12'
+          - '1.26.5'
+
+    env:
+      TINYGO_VERSION: 0.41.1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Install TinyGo
+        run: |
+          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"
+          sudo apt-get install -y /tmp/tinygo.deb
+          tinygo version
+
+      - name: TinyGo source-selection parity
+        run: |
+          go test ./cmd/goxc \
+            -run 'TestBrowser(Compiler|GOX)SourceSelectionParity|TestFeatureTaggedTinyGoBuild' \
+            -count=1 \
+            -v
