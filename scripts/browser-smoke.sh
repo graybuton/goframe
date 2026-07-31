@@ -10,6 +10,7 @@ TODO_SMOKE_URL_BASE="${GOFRAME_TODO_SMOKE_URL:-http://127.0.0.1}"
 DUPLICATE_SMOKE_URL_BASE="${GOFRAME_DUPLICATE_KEY_SMOKE_URL:-http://127.0.0.1}"
 RUNTIME_ERRORS_SMOKE_URL_BASE="${GOFRAME_RUNTIME_ERRORS_SMOKE_URL:-http://127.0.0.1}"
 ERROR_BOUNDARY_SMOKE_URL_BASE="${GOFRAME_ERROR_BOUNDARY_SMOKE_URL:-http://127.0.0.1}"
+CONTROLLED_SELECT_SMOKE_URL_BASE="${GOFRAME_CONTROLLED_SELECT_SMOKE_URL:-http://127.0.0.1}"
 DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
 VIRTUALIZED_SMOKE_URL_BASE="${GOFRAME_VIRTUALIZED_SMOKE_URL:-http://127.0.0.1}"
@@ -102,6 +103,11 @@ build_runtime_errors_smoke_url() {
 build_error_boundary_smoke_url() {
 	local port="$1"
 	echo "${ERROR_BOUNDARY_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_controlled_select_smoke_url() {
+	local port="$1"
+	echo "${CONTROLLED_SELECT_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 build_dashboard_smoke_url() {
@@ -202,6 +208,12 @@ run_with_server() {
 	return "$status"
 }
 
+run_controlled_select_browser() {
+	local compiler="$1"
+	local url="$2"
+	node --experimental-websocket scripts/controlled-select-browser-smoke.mjs "$url" "$compiler"
+}
+
 if [[ -z "$GOXC" ]]; then
 	GOBIN="$BIN_DIR" go install ./cmd/goxc
 	GOXC="$BIN_DIR/goxc"
@@ -261,6 +273,26 @@ export GOFRAME_ERROR_BOUNDARY_CHROME_DEBUG_PORT="${GOFRAME_ERROR_BOUNDARY_CHROME
 ERROR_BOUNDARY_URL="$(build_error_boundary_smoke_url "$ERROR_BOUNDARY_PORT")"
 run_with_server ./scripts/fixtures/error-boundary "$ERROR_BOUNDARY_PORT" "$ERROR_BOUNDARY_URL" \
 	node --experimental-websocket scripts/error-boundary-browser-smoke.mjs
+
+echo
+echo "== Controlled select browser smoke (TinyGo) =="
+"$GOXC" package ./scripts/fixtures/controlled-select --compiler=tinygo
+
+CONTROLLED_SELECT_TINYGO_PORT="$(resolve_port "${GOFRAME_CONTROLLED_SELECT_TINYGO_SMOKE_PORT:-}")"
+export GOFRAME_CONTROLLED_SELECT_CHROME_DEBUG_PORT="$(pick_free_port)"
+CONTROLLED_SELECT_TINYGO_URL="$(build_controlled_select_smoke_url "$CONTROLLED_SELECT_TINYGO_PORT")"
+run_with_server ./scripts/fixtures/controlled-select "$CONTROLLED_SELECT_TINYGO_PORT" "$CONTROLLED_SELECT_TINYGO_URL" \
+	run_controlled_select_browser tinygo
+
+echo
+echo "== Controlled select browser smoke (standard Go) =="
+"$GOXC" package ./scripts/fixtures/controlled-select --compiler=go
+
+CONTROLLED_SELECT_GO_PORT="$(resolve_port "${GOFRAME_CONTROLLED_SELECT_GO_SMOKE_PORT:-}")"
+export GOFRAME_CONTROLLED_SELECT_CHROME_DEBUG_PORT="$(pick_free_port)"
+CONTROLLED_SELECT_GO_URL="$(build_controlled_select_smoke_url "$CONTROLLED_SELECT_GO_PORT")"
+run_with_server ./scripts/fixtures/controlled-select "$CONTROLLED_SELECT_GO_PORT" "$CONTROLLED_SELECT_GO_URL" \
+	run_controlled_select_browser go
 
 echo
 echo "== Dashboard debug browser smoke =="

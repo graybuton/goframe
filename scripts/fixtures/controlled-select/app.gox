@@ -1,0 +1,215 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+var (
+	setStatefulOptionsPhase   func(int)
+	descendantParentRenders  int
+	descendantOptionsRenders int
+)
+
+func App() gf.Node {
+	phase, setPhase := gf.UseState(0)
+	inputCount, setInputCount := gf.UseState(0)
+	changeCount, setChangeCount := gf.UseState(0)
+	uncontrolledRenders, setUncontrolledRenders := gf.UseState(0)
+	uncontrolledExtended, setUncontrolledExtended := gf.UseState(false)
+	descendantValue, setDescendantValue := gf.UseState("b")
+	descendantInputCount, setDescendantInputCount := gf.UseState(0)
+	descendantChangeCount, setDescendantChangeCount := gf.UseState(0)
+
+	value := controlledValue(phase)
+	descendantParentRenders++
+
+	return (
+		<main data-testid="controlled-select-fixture">
+			<h1>Controlled select reconciliation</h1>
+			<p data-testid="controlled-phase">{controlledPhase(phase)}</p>
+			<p data-testid="controlled-input-count">{inputCount}</p>
+			<p data-testid="controlled-change-count">{changeCount}</p>
+			<p data-testid="uncontrolled-rerender-count">{uncontrolledRenders}</p>
+			<p data-testid="descendant-parent-render-count">{descendantParentRenders}</p>
+			<p data-testid="descendant-input-count">{descendantInputCount}</p>
+			<p data-testid="descendant-change-count">{descendantChangeCount}</p>
+
+			<label>
+				Controlled
+				<select
+					data-testid="controlled-select"
+					data-authored-value={value}
+					Value={value}
+					OnInput={func() {
+						setInputCount(inputCount + 1)
+					}}
+					OnChange={func() {
+						setChangeCount(changeCount + 1)
+					}}
+				>
+					{controlledOptions(phase)}
+				</select>
+			</label>
+
+			<label>
+				Stateful descendant controlled
+				<select
+					data-testid="descendant-controlled-select"
+					data-authored-value={descendantValue}
+					Value={descendantValue}
+					OnInput={func() {
+						setDescendantInputCount(descendantInputCount + 1)
+					}}
+					OnChange={func() {
+						setDescendantChangeCount(descendantChangeCount + 1)
+					}}
+				>
+					<StatefulOptions />
+				</select>
+			</label>
+
+			<label>
+				Uncontrolled
+				<select data-testid="uncontrolled-select">
+					<option Key="a" Value="a">a</option>
+					<option Key="b" Value="b">b</option>
+					{uncontrolledExtended && (
+						<option Key="c" Value="c">c</option>
+					)}
+				</select>
+			</label>
+
+			<button data-testid="select-add-match" OnClick={func() {
+				setPhase(1)
+			}}>Add matching option</button>
+			<button data-testid="select-change-value" OnClick={func() {
+				setPhase(2)
+			}}>Change value and options</button>
+			<button data-testid="select-remove-match" OnClick={func() {
+				setPhase(3)
+			}}>Remove matching option</button>
+			<button data-testid="select-restore-match" OnClick={func() {
+				setPhase(4)
+			}}>Restore matching option</button>
+			<button data-testid="select-reorder" OnClick={func() {
+				setPhase(5)
+			}}>Reorder options</button>
+			<button data-testid="select-rerender-uncontrolled" OnClick={func() {
+				setUncontrolledRenders(uncontrolledRenders + 1)
+			}}>Rerender uncontrolled select</button>
+			<button data-testid="select-extend-uncontrolled" OnClick={func() {
+				setUncontrolledExtended(true)
+			}}>Extend uncontrolled options</button>
+			<button data-testid="descendant-add-match" OnClick={func() {
+				setStatefulOptionsPhase(1)
+			}}>Add descendant matching option</button>
+			<button data-testid="descendant-remove-match" OnClick={func() {
+				setStatefulOptionsPhase(0)
+			}}>Remove descendant matching option</button>
+			<button data-testid="descendant-restore-match" OnClick={func() {
+				setStatefulOptionsPhase(1)
+			}}>Restore descendant matching option</button>
+			<button data-testid="descendant-change-value" OnClick={func() {
+				setDescendantValue("c")
+			}}>Change descendant select value</button>
+			<button data-testid="descendant-add-current" OnClick={func() {
+				setStatefulOptionsPhase(2)
+			}}>Add current descendant option</button>
+			<button data-testid="descendant-reorder" OnClick={func() {
+				setStatefulOptionsPhase(3)
+			}}>Reorder descendant options</button>
+		</main>
+	)
+}
+
+type StatefulOptionsProps struct{}
+
+func StatefulOptions(StatefulOptionsProps) gf.Node {
+	phase, setPhase := gf.UseState(0)
+	setStatefulOptionsPhase = setPhase
+	descendantOptionsRenders++
+
+	return (
+		<optgroup
+			data-testid="stateful-options"
+			data-phase={statefulOptionsPhase(phase)}
+			data-render-count={descendantOptionsRenders}
+			label="Stateful options"
+		>
+			{gf.Map(statefulOptionValues(phase), func(value string) gf.Node {
+				return <option Key={value} Value={value}>{value}</option>
+			})}
+		</optgroup>
+	)
+}
+
+func statefulOptionsPhase(phase int) string {
+	switch phase {
+	case 0:
+		return "only-a"
+	case 1:
+		return "a-and-b"
+	case 2:
+		return "a-b-and-c"
+	default:
+		return "c-a-and-b"
+	}
+}
+
+func statefulOptionValues(phase int) []string {
+	switch phase {
+	case 0:
+		return []string{"a"}
+	case 1:
+		return []string{"a", "b"}
+	case 2:
+		return []string{"a", "b", "c"}
+	default:
+		return []string{"c", "a", "b"}
+	}
+}
+
+func controlledValue(phase int) string {
+	if phase < 2 {
+		return "b"
+	}
+	return "c"
+}
+
+func controlledPhase(phase int) string {
+	switch phase {
+	case 0:
+		return "initial-no-match"
+	case 1:
+		return "matching-option-added"
+	case 2:
+		return "value-and-options-changed"
+	case 3:
+		return "matching-option-removed"
+	case 4:
+		return "matching-option-restored"
+	case 5:
+		return "options-reordered"
+	default:
+		return "unknown"
+	}
+}
+
+func controlledOptions(phase int) []gf.Node {
+	var values []string
+	switch phase {
+	case 0:
+		values = []string{"a"}
+	case 1:
+		values = []string{"a", "b"}
+	case 2:
+		values = []string{"a", "c"}
+	case 3:
+		values = []string{"a", "b"}
+	case 4:
+		values = []string{"a", "b", "c"}
+	default:
+		values = []string{"c", "a", "b"}
+	}
+	return gf.Map(values, func(value string) gf.Node {
+		return <option Key={value} Value={value}>{value}</option>
+	})
+}

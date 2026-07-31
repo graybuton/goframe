@@ -41,6 +41,23 @@ Go callback during patching. Reducer dispatch is the preferred pattern when
 callbacks may be retained by memoized children, because dispatch reads the
 latest state slot at event time.
 
+### Controlled Selects
+
+A controlled single-value `<select>` is driven by its `value` prop. The runtime
+reapplies that value after reconciling the option children, so dynamically
+added, removed, restored, or reordered options are resolved before selection
+is synchronized. When no option matches the authored value, no option is
+selected.
+
+The parent select's current committed `value` remains authoritative when an
+independently updating stateful descendant component produces the option
+nodes. Child-only option reconciliation resynchronizes the nearest mounted
+select from that current value; it does not reuse a value captured during an
+earlier render.
+
+A `<select>` without a `value` prop remains browser-owned. This contract does
+not add a form framework or a multi-select value abstraction.
+
 ## Submit Handling
 
 Use `OnSubmit` on the `<form>` and prevent the browser's default navigation:
