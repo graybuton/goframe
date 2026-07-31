@@ -10,8 +10,14 @@ The current supported release-size source of truth is Go `1.26.5` plus TinyGo
 twice with isolated workspaces and caches. Both runs produced identical raw,
 gzip, Brotli, and Zstandard outputs for all eleven applications. Three measured
 cells exceeded their previous limits, so only those cells were aligned to the
-new baseline. No runtime, example, compression-ratio, or package behavior
-changed.
+new baseline.
+
+The controlled-select correctness correction later added a measured shared raw
+runtime cost of `514 B` to `526 B`. The 2026-07-31 closeout reproduced the base
+and behavior-correct head twice, evaluated four bounded compactness candidates,
+and aligned only four raw ceilings by one KiB. No compressed ceiling, ratio,
+runtime behavior, application code, or package behavior changed in that
+closeout.
 
 ## Source of Truth
 
@@ -42,13 +48,13 @@ If no match exists, it reports the default missing path
 | components | 107520 B | 43008 B | 56320 B | 49152 B |
 | todo | 122880 B | 40960 B | 56320 B | 49152 B |
 | dashboard | 171008 B | 53248 B | 71680 B | 61440 B |
-| context | 116736 B | 36864 B | 46080 B | 40960 B |
+| context | 117760 B | 36864 B | 46080 B | 40960 B |
 | virtualized | 124928 B | 40960 B | 49152 B | 44032 B |
 | multipackage | 110592 B | 43008 B | 56320 B | 49152 B |
 | cmdapp | 110592 B | 43008 B | 56320 B | 49152 B |
-| router | 116736 B | 45056 B | 58368 B | 51200 B |
-| router-dashboard | 233472 B | 77824 B | 94208 B | 82944 B |
-| resource | 156672 B | 58368 B | 68608 B | 61440 B |
+| router | 117760 B | 45056 B | 58368 B | 51200 B |
+| router-dashboard | 234496 B | 77824 B | 94208 B | 82944 B |
+| resource | 157696 B | 58368 B | 68608 B | 61440 B |
 
 ## Supported Toolchain Baseline Migration - 2026-07-30
 
@@ -89,6 +95,83 @@ Every other raw and compressed budget remains unchanged. Compression ratio
 limits remain gzip `52.00%`, Brotli `38.00%`, and Zstandard `46.00%`.
 This evidence-backed migration is the only supersession of the older Go
 `1.22.12` toolchain source-of-truth recommendation.
+
+## Controlled Select Correctness Rebaseline — 2026-07-31
+
+The frozen base is `6bcbde2318099f92f940b817a69c2e1f52ad4058`.
+The behavior-correct branch head is
+`9531d48ae64fd0db966dad4e03c7f67575e6ed27`. Measurements use Go `1.26.5`,
+TinyGo `0.41.1`, Linux amd64, gzip `1.14`, Brotli `1.2.0`, and Zstandard
+`1.5.7`.
+
+The accepted runtime guarantee restores a controlled single-value select's
+current value after option reconciliation. It preserves browser ownership for
+uncontrolled selects, stable select DOM identity, and the absence of synthetic
+`input` or `change` events. Dedicated Chrome evidence passes under both
+standard Go and TinyGo.
+
+Two isolated frozen-base builds and two isolated behavior-correct-head builds
+were byte-identical within each ref for raw, gzip, Brotli, and Zstandard
+outputs. The resulting raw matrix is:
+
+| app | frozen base | reviewed head | delta | reviewed raw SHA-256 | old raw budget result |
+| --- | ---: | ---: | ---: | --- | --- |
+| counter | 84536 B | 85052 B | +516 B | `33f72247577f8f2b6f5d6ee889e267d48548236e1cdca0208d9c46efdfbb91b1` | pass |
+| components | 90176 B | 90691 B | +515 B | `8a94c41998279827c415d6f4e3fa16c4c74389f43f62d57a1e85a7278858c66c` | pass |
+| todo | 119423 B | 119938 B | +515 B | `54b7308666ddb090bf5ae3a93120e1158a7fa218b0f8698ab78a5462b06e1664` | pass |
+| dashboard | 169794 B | 170308 B | +514 B | `bc59482b4746f5a9100e8072769289d6e34d99fc57121c7358bce8e44afa2aa9` | pass |
+| context | 116313 B | 116828 B | +515 B | `f4d4c19c691aa91a568fa361dc0fd017812fe1cb81c040443611627346168e8a` | fail by 92 B |
+| virtualized | 123248 B | 123762 B | +514 B | `1c36299671986e8aef8c2203ccd6a5bb2159a2246677a1189483c3dd0efa5378` | pass |
+| multipackage | 95340 B | 95854 B | +514 B | `83f3402aae1b8a0bd358616810e0574e0a6cf02ff3ef197cca47c5f38c78c3f0` | pass |
+| cmdapp | 95358 B | 95872 B | +514 B | `f0ae215386be33e6b9f35b4e62a19a32cabca8d11c7aaa9689a0e5e5b66fcbae` | pass |
+| router | 116602 B | 117117 B | +515 B | `f49b180f0a523a2ec5e3d5e9cf8152f799c3f8ffbcdf312e73516844c2792978` | fail by 381 B |
+| router-dashboard | 233415 B | 233941 B | +526 B | `9dd248b23ebc527037eb53e504e9f90fd5bfa52cbcc94e45ea23943b8ed578d8` | fail by 469 B |
+| resource | 156239 B | 156764 B | +525 B | `03f7f32e9c9e422a78b7aa8bf131d8575c4b0a8471be106adc1062d7703a2aa1` | fail by 92 B |
+
+Deterministic compression used gzip `-n -9`, Brotli quality 11, and
+Zstandard level 19. Every compressed size remained within its existing ceiling
+and every gzip `52.00%`, Brotli `38.00%`, and Zstandard `46.00%` ratio limit
+passed.
+
+| app | gzip | br | zstd | result |
+| --- | ---: | ---: | ---: | --- |
+| counter | 34008 B | 28491 B | 30675 B | pass |
+| components | 35899 B | 29739 B | 32074 B | pass |
+| todo | 46336 B | 38399 B | 41370 B | pass |
+| dashboard | 63874 B | 51504 B | 55609 B | pass |
+| context | 44024 B | 35925 B | 38825 B | pass |
+| virtualized | 47750 B | 39062 B | 42290 B | pass |
+| multipackage | 37642 B | 31123 B | 33610 B | pass |
+| cmdapp | 37651 B | 31289 B | 33610 B | pass |
+| router | 44739 B | 36877 B | 39773 B | pass |
+| router-dashboard | 93747 B | 77105 B | 82271 B | pass |
+| resource | 68351 B | 57508 B | 61140 B | pass |
+
+Four bounded private renderer shapes preserved the browser contract but failed
+at least one mandatory raw sentinel ceiling:
+
+| candidate | shape | counter | context | router | router-dashboard | resource | rejection |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| A | return and reuse normalized DOM props | 85013 B | 116789 B | 117087 B | 233877 B | 156700 B | four blockers remained |
+| B | mount-only helper plus local patch synchronization | 84813 B | 116590 B | 116892 B | 233689 B | 156513 B | router cells remained over |
+| C1 | compact value/presence handoff with local synchronization | 84715 B | 116492 B | 116788 B | 233584 B | 156408 B | router by 52 B; router-dashboard by 112 B |
+| C2 | compact handoff plus shared synchronization | 84920 B | 116690 B | 116994 B | 233797 B | 156626 B | router cells remained over |
+
+The decision is to preserve the simpler shared post-children runtime
+implementation instead of adopting compiler-shaped Candidate C1 solely for a
+smaller binary. The measured correctness cost is accepted through four aligned
+one-KiB raw ceiling increases:
+
+| app | measured | old ceiling | new ceiling | headroom |
+| --- | ---: | ---: | ---: | ---: |
+| context | 116828 B | 116736 B | 117760 B | 932 B |
+| router | 117117 B | 116736 B | 117760 B | 643 B |
+| router-dashboard | 233941 B | 233472 B | 234496 B | 555 B |
+| resource | 156764 B | 156672 B | 157696 B | 932 B |
+
+This rebaseline does not authorize general renderer optimization, compressed
+budget changes, ratio changes, workflow changes, or unrelated application
+headroom. No compressed ceiling or compression command changed.
 
 ## Targeted ErrorBoundary Correctness Rebaseline — 2026-07-28
 
