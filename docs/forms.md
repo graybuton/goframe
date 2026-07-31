@@ -49,6 +49,12 @@ added, removed, restored, or reordered options are resolved before selection
 is synchronized. When no option matches the authored value, no option is
 selected.
 
+The parent select's current committed `value` remains authoritative when an
+independently updating stateful descendant component produces the option
+nodes. Child-only option reconciliation resynchronizes the nearest mounted
+select from that current value; it does not reuse a value captured during an
+earlier render.
+
 A `<select>` without a `value` prop remains browser-owned. This contract does
 not add a form framework or a multi-select value abstraction.
 
