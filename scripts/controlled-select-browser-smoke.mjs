@@ -46,6 +46,8 @@ try {
             document.querySelector("[data-testid='controlled-select']");
         window.__uncontrolledSelectNode =
             document.querySelector("[data-testid='uncontrolled-select']");
+        window.__descendantControlledSelectNode =
+            document.querySelector("[data-testid='descendant-controlled-select']");
         return true;
     })()`);
 
@@ -206,6 +208,153 @@ try {
         changeCount: 1,
     }));
 
+    evidence.push(await assertSnapshot(client, "descendant initial no-match", {
+        descendantPhase: "only-a",
+        descendantAuthoredValue: "b",
+        descendantOptionValues: ["a"],
+        descendantActualValue: "",
+        descendantSelectedIndex: -1,
+        descendantSame: true,
+        descendantParentRenderCount: 9,
+        descendantChildRenderCount: 9,
+        descendantInputCount: 0,
+        descendantChangeCount: 0,
+    }));
+
+    await clickAndWait(
+        client,
+        "[data-testid='descendant-add-match']",
+        (state) => state.descendantPhase === "a-and-b",
+        "descendant matching option insertion",
+    );
+    evidence.push(await assertSnapshot(client, "descendant add matching option", {
+        descendantPhase: "a-and-b",
+        descendantAuthoredValue: "b",
+        descendantOptionValues: ["a", "b"],
+        descendantActualValue: "b",
+        descendantSelectedIndex: 1,
+        descendantSame: true,
+        descendantParentRenderCount: 9,
+        descendantChildRenderCount: 10,
+        descendantInputCount: 0,
+        descendantChangeCount: 0,
+    }));
+
+    await clickAndWait(
+        client,
+        "[data-testid='descendant-remove-match']",
+        (state) => state.descendantPhase === "only-a",
+        "descendant matching option removal",
+    );
+    evidence.push(await assertSnapshot(client, "descendant remove matching option", {
+        descendantPhase: "only-a",
+        descendantAuthoredValue: "b",
+        descendantOptionValues: ["a"],
+        descendantActualValue: "",
+        descendantSelectedIndex: -1,
+        descendantSame: true,
+        descendantParentRenderCount: 9,
+        descendantChildRenderCount: 11,
+        descendantInputCount: 0,
+        descendantChangeCount: 0,
+    }));
+
+    await clickAndWait(
+        client,
+        "[data-testid='descendant-restore-match']",
+        (state) => state.descendantPhase === "a-and-b",
+        "descendant matching option restoration",
+    );
+    evidence.push(await assertSnapshot(client, "descendant restore matching option", {
+        descendantPhase: "a-and-b",
+        descendantAuthoredValue: "b",
+        descendantOptionValues: ["a", "b"],
+        descendantActualValue: "b",
+        descendantSelectedIndex: 1,
+        descendantSame: true,
+        descendantParentRenderCount: 9,
+        descendantChildRenderCount: 12,
+        descendantInputCount: 0,
+        descendantChangeCount: 0,
+    }));
+
+    await clickAndWait(
+        client,
+        "[data-testid='descendant-change-value']",
+        (state) => state.descendantAuthoredValue === "c",
+        "descendant parent value change",
+    );
+    evidence.push(await assertSnapshot(client, "descendant change current value", {
+        descendantPhase: "a-and-b",
+        descendantAuthoredValue: "c",
+        descendantOptionValues: ["a", "b"],
+        descendantActualValue: "",
+        descendantSelectedIndex: -1,
+        descendantSame: true,
+        descendantParentRenderCount: 10,
+        descendantChildRenderCount: 13,
+        descendantInputCount: 0,
+        descendantChangeCount: 0,
+    }));
+
+    await clickAndWait(
+        client,
+        "[data-testid='descendant-add-current']",
+        (state) => state.descendantPhase === "a-b-and-c",
+        "descendant current option insertion",
+    );
+    evidence.push(await assertSnapshot(client, "descendant add current option", {
+        descendantPhase: "a-b-and-c",
+        descendantAuthoredValue: "c",
+        descendantOptionValues: ["a", "b", "c"],
+        descendantActualValue: "c",
+        descendantSelectedIndex: 2,
+        descendantSame: true,
+        descendantParentRenderCount: 10,
+        descendantChildRenderCount: 14,
+        descendantInputCount: 0,
+        descendantChangeCount: 0,
+    }));
+
+    await clickAndWait(
+        client,
+        "[data-testid='descendant-reorder']",
+        (state) => state.descendantPhase === "c-a-and-b",
+        "descendant option reorder",
+    );
+    evidence.push(await assertSnapshot(client, "descendant reorder options", {
+        descendantPhase: "c-a-and-b",
+        descendantAuthoredValue: "c",
+        descendantOptionValues: ["c", "a", "b"],
+        descendantActualValue: "c",
+        descendantSelectedIndex: 0,
+        descendantSame: true,
+        descendantParentRenderCount: 10,
+        descendantChildRenderCount: 15,
+        descendantInputCount: 0,
+        descendantChangeCount: 0,
+    }));
+
+    await client.evaluate(`(() => {
+        document.querySelector("[data-testid='descendant-controlled-select']")
+            .dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+    })()`);
+    await waitForState(
+        client,
+        (state) => state.descendantChangeCount === 1,
+        "explicit descendant change callback",
+    );
+    evidence.push(await assertSnapshot(client, "descendant explicit event liveness", {
+        descendantActualValue: "c",
+        descendantSelectedIndex: 0,
+        descendantSame: true,
+        descendantParentRenderCount: 11,
+        descendantChildRenderCount: 16,
+        descendantInputCount: 0,
+        descendantChangeCount: 1,
+    }));
+
     console.log(`controlled select evidence (${compiler}): ${JSON.stringify(evidence)}`);
     client.close();
     console.log(`Controlled select browser smoke (${compiler}): ok`);
@@ -263,6 +412,10 @@ async function selectState(client) {
             document.querySelector("[data-testid='controlled-select']");
         const uncontrolled =
             document.querySelector("[data-testid='uncontrolled-select']");
+        const descendant =
+            document.querySelector("[data-testid='descendant-controlled-select']");
+        const statefulOptions =
+            document.querySelector("[data-testid='stateful-options']");
         const number = (selector) =>
             Number(document.querySelector(selector)?.textContent.trim() ?? "0");
         return {
@@ -286,6 +439,23 @@ async function selectState(client) {
             uncontrolledSame: uncontrolled === window.__uncontrolledSelectNode,
             uncontrolledRenderCount:
                 number("[data-testid='uncontrolled-rerender-count']"),
+            descendantPhase: statefulOptions?.dataset.phase ?? "",
+            descendantAuthoredValue: descendant?.dataset.authoredValue ?? "",
+            descendantOptionValues: descendant
+                ? Array.from(descendant.options, (option) => option.value)
+                : [],
+            descendantActualValue: descendant?.value ?? "",
+            descendantSelectedIndex: descendant?.selectedIndex ?? -2,
+            descendantSame:
+                descendant === window.__descendantControlledSelectNode,
+            descendantParentRenderCount:
+                number("[data-testid='descendant-parent-render-count']"),
+            descendantChildRenderCount:
+                Number(statefulOptions?.dataset.renderCount ?? "0"),
+            descendantInputCount:
+                number("[data-testid='descendant-input-count']"),
+            descendantChangeCount:
+                number("[data-testid='descendant-change-count']"),
         };
     })()`);
 }

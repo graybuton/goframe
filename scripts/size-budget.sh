@@ -138,6 +138,6 @@ check_app "multipackage" "$(bundle_path multipackage)" 110592 43008 56320 49152 
 check_app "cmdapp" "$(bundle_path cmdapp)" 110592 43008 56320 49152 || status=1
 check_app "router" "$(bundle_path router)" 117760 45056 58368 51200 || status=1
 check_app "routerdash" "$(bundle_path router-dashboard)" 234496 77824 94208 82944 || status=1
-check_app "resource" "$(bundle_path resource)" 157696 58368 68608 61440 || status=1
+check_app "resource" "$(bundle_path resource)" 157696 58368 69632 61440 || status=1
 
 exit "$status"

@@ -24,9 +24,14 @@ type mountedNode struct {
 	events         map[string]*mountedEvent
 	component      *componentInstance
 	componentChild *mountedNode
+	selectOwner    *mountedNode
 }
 
 func mountNode(document js.Value, node Node, owner *componentInstance) *mountedNode {
+	return mountNodeBelow(document, node, owner, nil)
+}
+
+func mountNodeBelow(document js.Value, node Node, owner *componentInstance, selectOwner *mountedNode) *mountedNode {
 	key, node := unwrapNode(node)
 	mounted := &mountedNode{
 		node:    node,
@@ -41,7 +46,10 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 		mounted.last = element
 		mounted.pending = element
 		patchProps(element, mounted, nil, node.Props, owner)
-		mounted.children = mountChildren(document, element, node.Children, js.Null(), owner)
+		if node.Tag == "select" {
+			selectOwner = mounted
+		}
+		mounted.children = mountChildren(document, element, node.Children, js.Null(), owner, selectOwner)
 		applyPostChildrenProps(element, node)
 	case TextNode:
 		text := document.Call("createTextNode", node.Value)
@@ -53,7 +61,7 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 		end := document.Call("createComment", "/goframe-fragment")
 		fragment := document.Call("createDocumentFragment")
 		fragment.Call("appendChild", start)
-		mounted.children = mountChildren(document, fragment, node.Children, js.Null(), owner)
+		mounted.children = mountChildren(document, fragment, node.Children, js.Null(), owner, selectOwner)
 		fragment.Call("appendChild", end)
 		mounted.first = start
 		mounted.last = end
@@ -64,7 +72,7 @@ func mountNode(document js.Value, node Node, owner *componentInstance) *mountedN
 		mounted.last = comment
 		mounted.pending = comment
 	case ComponentNode:
-		mountComponent(document, mounted, node, owner)
+		mountComponent(document, mounted, node, owner, selectOwner)
 	default:
 		panic("goframe: unsupported node type")
 	}
@@ -81,21 +89,31 @@ func applyPostChildrenProps(element js.Value, node VNode) {
 	}
 }
 
-func mountChildren(document, parent js.Value, nodes []Node, boundary js.Value, owner *componentInstance) []*mountedNode {
+func applyMountedSelectProps(mounted *mountedNode) {
+	if mounted == nil {
+		return
+	}
+	node, ok := mounted.node.(VNode)
+	if ok {
+		applyPostChildrenProps(mounted.first, node)
+	}
+}
+
+func mountChildren(document, parent js.Value, nodes []Node, boundary js.Value, owner *componentInstance, selectOwner *mountedNode) []*mountedNode {
 	reportDuplicateSiblingNodeKeys(nodes, ownerDebugName(owner))
 	children := make([]*mountedNode, 0, len(nodes))
 	for _, node := range nodes {
-		child := mountNode(document, node, owner)
+		child := mountNodeBelow(document, node, owner, selectOwner)
 		placeMountedBefore(parent, child, boundary)
 		children = append(children, child)
 	}
 	return children
 }
 
-func patchMounted(document, parent js.Value, mounted *mountedNode, newNode Node, owner *componentInstance) *mountedNode {
+func patchMounted(document, parent js.Value, mounted *mountedNode, newNode Node, owner *componentInstance, selectOwner *mountedNode) *mountedNode {
 	newKey, newNode := unwrapNode(newNode)
 	if mounted.key != newKey || !sameNodeIdentity(mounted.node, newNode) {
-		replacement := mountNode(document, Key(newKey, newNode), owner)
+		replacement := mountNodeBelow(document, Key(newKey, newNode), owner, selectOwner)
 		placeMountedBefore(parent, replacement, mounted.first)
 		removeMounted(parent, mounted)
 		return replacement
@@ -105,7 +123,10 @@ func patchMounted(document, parent js.Value, mounted *mountedNode, newNode Node,
 	case VNode:
 		newNode := newNode.(VNode)
 		patchProps(mounted.first, mounted, oldNode.Props, newNode.Props, owner)
-		mounted.children = patchChildren(document, mounted.first, mounted.children, newNode.Children, js.Null(), owner)
+		if newNode.Tag == "select" {
+			selectOwner = mounted
+		}
+		mounted.children = patchChildren(document, mounted.first, mounted.children, newNode.Children, js.Null(), owner, selectOwner)
 		applyPostChildrenProps(mounted.first, newNode)
 	case TextNode:
 		newNode := newNode.(TextNode)
@@ -114,9 +135,10 @@ func patchMounted(document, parent js.Value, mounted *mountedNode, newNode Node,
 		}
 	case FragmentNode:
 		newNode := newNode.(FragmentNode)
-		mounted.children = patchChildren(document, parent, mounted.children, newNode.Children, mounted.last, owner)
+		mounted.children = patchChildren(document, parent, mounted.children, newNode.Children, mounted.last, owner, selectOwner)
 	case EmptyNode:
 	case ComponentNode:
+		mounted.selectOwner = selectOwner
 		patchComponent(document, parent, mounted, newNode.(ComponentNode), owner)
 	}
 	mounted.node = newNode
@@ -124,9 +146,10 @@ func patchMounted(document, parent js.Value, mounted *mountedNode, newNode Node,
 	return mounted
 }
 
-func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode, owner *componentInstance) {
+func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode, owner *componentInstance, selectOwner *mountedNode) {
 	instance := newComponentInstance(node, mounted.key, owner, queueDirtyComponent)
 	mounted.component = instance
+	mounted.selectOwner = selectOwner
 
 	start := document.Call("createComment", "goframe-component")
 	end := document.Call("createComment", "/goframe-component")
@@ -136,7 +159,7 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 	if state := instance.errorBoundary; state != nil {
 		defer finishProtectedLifecycle(state, beginProtectedLifecycle(state))
 	}
-	child := mountNode(document, rendered, instance)
+	child := mountNodeBelow(document, rendered, instance, selectOwner)
 	placeMountedBefore(fragment, child, js.Null())
 	fragment.Call("appendChild", end)
 	mounted.componentChild = child
@@ -167,6 +190,7 @@ func mountComponent(document js.Value, mounted *mountedNode, node ComponentNode,
 			}
 		}
 		patchComponent(document, parent, mounted, instance.node, instance.parent)
+		applyMountedSelectProps(mounted.selectOwner)
 	}
 }
 
@@ -186,10 +210,10 @@ func patchComponent(document, parent js.Value, mounted *mountedNode, newNode Com
 		state.phase == errorBoundaryProtected {
 		defer finishProtectedLifecycle(state, beginProtectedLifecycle(state))
 	}
-	mounted.componentChild = patchMounted(document, parent, mounted.componentChild, rendered, instance)
+	mounted.componentChild = patchMounted(document, parent, mounted.componentChild, rendered, instance, mounted.selectOwner)
 }
 
-func patchChildren(document, parent js.Value, oldChildren []*mountedNode, newNodes []Node, boundary js.Value, owner *componentInstance) []*mountedNode {
+func patchChildren(document, parent js.Value, oldChildren []*mountedNode, newNodes []Node, boundary js.Value, owner *componentInstance, selectOwner *mountedNode) []*mountedNode {
 	oldKeys := make([]string, len(oldChildren))
 	for index, child := range oldChildren {
 		oldKeys[index] = child.key
@@ -206,11 +230,11 @@ func patchChildren(document, parent js.Value, oldChildren []*mountedNode, newNod
 	for index, node := range newNodes {
 		oldIndex := matches[index]
 		if oldIndex == noChildMatch {
-			children[index] = mountNode(document, node, owner)
+			children[index] = mountNodeBelow(document, node, owner, selectOwner)
 			continue
 		}
 		used[oldIndex] = true
-		children[index] = patchMounted(document, parent, oldChildren[oldIndex], node, owner)
+		children[index] = patchMounted(document, parent, oldChildren[oldIndex], node, owner, selectOwner)
 	}
 	for index, child := range oldChildren {
 		if !used[index] {
@@ -271,6 +295,7 @@ func releaseMounted(mounted *mountedNode) {
 		return
 	}
 	if mounted.component != nil {
+		mounted.selectOwner = nil
 		releaseMounted(mounted.componentChild)
 		deactivateComponent(mounted.component)
 		mounted.component = nil
