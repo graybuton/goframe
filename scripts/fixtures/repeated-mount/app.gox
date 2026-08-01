@@ -1,0 +1,123 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type AppAProps struct {
+	Instance int
+}
+
+type AppBProps struct {
+	Instance int
+}
+
+type AppCProps struct {
+	Instance int
+}
+
+func AppA(props AppAProps) gf.Node {
+	value, setValue := gf.UseState(0)
+	appASetter = setValue
+	appAValue = value
+	appARenderCount++
+
+	gf.UseEffect(func() gf.Cleanup {
+		appAEffectSetups[props.Instance]++
+		return func() {
+			recordAppAEffectCleanup(props.Instance)
+		}
+	})
+	gf.UseEffect(func() gf.Cleanup {
+		appAEffectVersions = append(
+			appAEffectVersions,
+			gf.ToString(props.Instance)+":"+gf.ToString(value),
+		)
+		return nil
+	}, gf.Deps(value))
+	gf.UseUnmount(func() {
+		recordAppAUnmount(props.Instance)
+	})
+
+	return (
+		<section
+			id={appElementID("app-a", props.Instance)}
+			data-testid="app-a"
+			data-instance={props.Instance}
+			data-state={value}
+		>
+			<h1>Application A</h1>
+			<p data-testid="app-a-state">{value}</p>
+			<button
+				id={appElementID("app-a-event", props.Instance)}
+				data-testid="app-a-event"
+				OnClick={func() {
+					appAHandlerCount++
+					setValue(value + 1)
+				}}
+			>Update A</button>
+		</section>
+	)
+}
+
+func AppB(props AppBProps) gf.Node {
+	value, setValue := gf.UseState(0)
+	appBValue = value
+	appBRenderCount++
+
+	gf.UseEffect(func() gf.Cleanup {
+		appBScheduledUpdateCount++
+		setValue(1)
+		return nil
+	})
+	gf.UseUnmount(func() {
+		appBCleanups[props.Instance]++
+	})
+
+	return (
+		<section
+			id={appElementID("app-b", props.Instance)}
+			data-testid="app-b"
+			data-instance={props.Instance}
+			data-state={value}
+		>
+			<h1>Application B</h1>
+			<p data-testid="app-b-state">{value}</p>
+			<button
+				id={appElementID("app-b-event", props.Instance)}
+				data-testid="app-b-event"
+				OnClick={func() {
+					appBHandlerCount++
+					setValue(value + 1)
+				}}
+			>Update B</button>
+		</section>
+	)
+}
+
+func AppC(props AppCProps) gf.Node {
+	value, setValue := gf.UseState(0)
+	appCRenderCount++
+
+	gf.UseUnmount(func() {
+		appCCleanups[props.Instance]++
+	})
+
+	return (
+		<section
+			id={appElementID("app-c", props.Instance)}
+			data-testid="app-c"
+			data-instance={props.Instance}
+			data-state={value}
+		>
+			<h1>Application C</h1>
+			<p data-testid="app-c-state">{value}</p>
+			<button
+				id={appElementID("app-c-event", props.Instance)}
+				data-testid="app-c-event"
+				OnClick={func() {
+					appCHandlerCount++
+					setValue(value + 1)
+				}}
+			>Update C</button>
+		</section>
+	)
+}

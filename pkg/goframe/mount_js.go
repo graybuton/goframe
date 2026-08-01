@@ -33,7 +33,7 @@ func Mount(rootID string, app func() Node) {
 		panic("goframe: root element not found: " + rootID)
 	}
 	if mountedApp.tree != nil {
-		releaseMounted(mountedApp.tree)
+		removeMounted(mountedApp.root, mountedApp.tree)
 	}
 
 	mountedApp.root = root
