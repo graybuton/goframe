@@ -110,6 +110,14 @@ Unmount cleanups run while the DOM range still exists, but applications should
 not depend on this detail. Treat cleanup as the place to release timers,
 external event listeners, subscriptions, and retained browser resources.
 
+Replacing the active application through `gf.Mount` follows the same cleanup
+contract for same-root and different-root replacement. Each previous cleanup
+runs once while that application's mounted range still exists; the runtime then
+removes the range before mounting the replacement. Effects queued by the
+released application do not run afterward. The DOM visibility during cleanup
+is an implementation detail, not an API for reading or transferring old DOM
+state.
+
 If an effect body panics, the runtime reports `gf.ErrorPhaseEffect` through the
 installed runtime error handler and does not register a cleanup for that failed
 effect run. If an effect cleanup panics, the runtime reports

@@ -230,6 +230,34 @@ cursor position. Stable-ID focus restoration remains a replacement fallback.
 its required reference. It calls `insertBefore` only when an actual move is
 needed.
 
+## Replacing the mounted application
+
+`gf.Mount` owns one active application. A later successful `Mount` call
+replaces that application whether the new target is the same DOM root or a
+different root. The runtime resolves the requested target first, so a missing
+target panics before disturbing the currently mounted application.
+
+After the next target is resolved, replacement follows this order:
+
+```text
+release the previous component tree
+  -> run lifecycle and resource cleanup
+  -> remove the exact previous GoFrame-owned DOM range
+  -> clear the next target root
+  -> mount the next application
+```
+
+Cleanup therefore runs while the previous mounted range still exists. The
+range removal preserves host-owned siblings outside that range when ownership
+moves to a different root. If the same root is reused, the subsequent target
+clearing keeps the existing `Mount` contract that the target root is wholly
+replaced. Setters and queued updates retained from the released application are
+inert and cannot mutate the replacement.
+
+This is replacement ownership, not simultaneous multi-root mounting. There is
+no public unmount handle, root registry, or rollback guarantee after the
+previous application has been released and rendering the replacement begins.
+
 ## Virtualized collections
 
 `gf.VirtualList` and `gf.VirtualTable` are framework-level fixed-height
