@@ -331,10 +331,10 @@ func refreshContextSubscription(slot *contextSubscription) {
 	if provider != nil {
 		value = provider.value
 	}
+	setContextSubscriptionProvider(slot, provider)
 	if _, ok := updateContextSubscription(slot, value); !ok {
 		return
 	}
-	setContextSubscriptionProvider(slot, provider)
 	markComponentDirty(slot.owner)
 }
 
