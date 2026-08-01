@@ -145,6 +145,16 @@ subscription already has a previous selected value. The runtime reports
 `ErrorPhaseContext`, keeps the previous selected value, and does not mark the
 consumer dirty from that failed selector evaluation.
 
+Provider topology refresh separates structural ownership from selected-value
+commit. The subscription first binds to the new nearest provider, or detaches
+when the context default becomes nearest. If selector evaluation then fails, the
+new structural binding remains, the previous selection remains committed, and
+the consumer remains clean. The old or shadowed provider can no longer notify
+the subscription; a later safe update from the new provider retries the
+selector. Ordinary same-provider notification failures keep the existing
+provider binding and the same selected-value containment behavior. These
+failures report operation `UseContextSelector`.
+
 ### Virtualized Item/Row Render
 
 `VirtualList.RenderItem`, `VirtualTable.Header`, `VirtualTable.RenderRow`, and
@@ -221,11 +231,14 @@ lifecycle warnings remain separate.
 Browser smoke verifies that recoverable event and cleanup failures do not
 unmount the app or leak listeners. A separate Error Boundary fixture verifies
 render fallback, retry, `ResetKey`, nested boundaries, and cleanup behavior.
+The context selector topology fixture verifies failed outer/inner provider
+transitions, old-provider isolation, and later new-provider recovery.
 
-Both fixtures use Go-compiled WASM because the current TinyGo package path uses
-trap-style panic lowering, where panics do not return to Go `recover`.
+These panic-containment fixtures use Go-compiled WASM because the current
+TinyGo package path uses trap-style panic lowering, where panics do not return
+to Go `recover`.
 
-It should not use timing gates for runtime error behavior.
+Browser smoke should not use timing gates for runtime error behavior.
 
 ## TinyGo Panic Mode Note
 

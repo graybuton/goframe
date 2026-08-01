@@ -287,6 +287,66 @@ all compressed sizes reproduced. All 44 cells pass. The only ceiling change is
 Raw, Brotli, and Zstandard ceilings are unchanged, as are gzip `52.00%`,
 Brotli `38.00%`, and Zstandard `46.00%` ratio limits and the WASM workflow.
 
+## Context Topology Recovery — 2026-08-01
+
+This measurement compares frozen base
+`195ccf8b9bf3300b7bd86bbcea07ae9dbd727c2a` with measured implementation head
+`9cc93493b619bd570041fe5512f9ef81e2eeb063`. The documentation closeout is the
+commit containing this section; it does not change runtime or package inputs.
+The runtime correction rebinds a context subscription before evaluating a
+selector against a newly nearest provider.
+
+Measurements use Go `1.26.5`, TinyGo `0.41.1`, Linux amd64, gzip `1.14`,
+Brotli `1.2.0`, and Zstandard `1.5.7`. Both refs were built sequentially in the
+same extraction path with the CI package order and shared task-owned caches.
+Compression uses the unchanged budget commands: gzip level 9, Brotli quality
+11, and Zstandard level 19. SHA comparison fixes the source mtime for comparable
+gzip container metadata; the compression command and measured byte count are
+unchanged.
+
+| app | raw base → final | gzip base → final | br base → final | zstd base → final |
+| --- | ---: | ---: | ---: | ---: |
+| counter | 85439 → 85439 B (0 B) | 34348 → 34348 B (0 B) | 28633 → 28633 B (0 B) | 30823 → 30823 B (0 B) |
+| components | 91078 → 91078 B (0 B) | 36113 → 36113 B (0 B) | 29845 → 29845 B (0 B) | 32261 → 32261 B (0 B) |
+| todo | 120344 → 120344 B (0 B) | 46580 → 46580 B (0 B) | 38506 → 38506 B (0 B) | 41514 → 41514 B (0 B) |
+| dashboard | 170706 → 170706 B (0 B) | 64135 → 64135 B (0 B) | 51645 → 51645 B (0 B) | 55772 → 55772 B (0 B) |
+| context | 117215 → 117209 B (-6 B) | 44241 → 44252 B (+11 B) | 36098 → 36066 B (-32 B) | 38961 → 38957 B (-4 B) |
+| virtualized | 124160 → 124160 B (0 B) | 47995 → 47995 B (0 B) | 39122 → 39122 B (0 B) | 42422 → 42422 B (0 B) |
+| multipackage | 96260 → 96260 B (0 B) | 37865 → 37865 B (0 B) | 31354 → 31354 B (0 B) | 33783 → 33783 B (0 B) |
+| cmdapp | 96278 → 96278 B (0 B) | 37870 → 37870 B (0 B) | 31394 → 31394 B (0 B) | 33797 → 33797 B (0 B) |
+| router | 117523 → 117523 B (0 B) | 44980 → 44980 B (0 B) | 37005 → 37005 B (0 B) | 39933 → 39933 B (0 B) |
+| router-dashboard | 234357 → 234351 B (-6 B) | 94004 → 94011 B (+7 B) | 77381 → 77333 B (-48 B) | 82523 → 82516 B (-7 B) |
+| resource | 157180 → 157180 B (0 B) | 68645 → 68645 B (0 B) | 57823 → 57823 B (0 B) | 61371 → 61371 B (0 B) |
+
+Final ceilings and byte headroom remain:
+
+| app | raw final / ceiling (headroom) | gzip final / ceiling (headroom) | br final / ceiling (headroom) | zstd final / ceiling (headroom) |
+| --- | ---: | ---: | ---: | ---: |
+| counter | 85439 / 97280 B (11841 B) | 34348 / 56320 B (21972 B) | 28633 / 40960 B (12327 B) | 30823 / 49152 B (18329 B) |
+| components | 91078 / 107520 B (16442 B) | 36113 / 56320 B (20207 B) | 29845 / 43008 B (13163 B) | 32261 / 49152 B (16891 B) |
+| todo | 120344 / 122880 B (2536 B) | 46580 / 56320 B (9740 B) | 38506 / 40960 B (2454 B) | 41514 / 49152 B (7638 B) |
+| dashboard | 170706 / 171008 B (302 B) | 64135 / 71680 B (7545 B) | 51645 / 53248 B (1603 B) | 55772 / 61440 B (5668 B) |
+| context | 117209 / 117760 B (551 B) | 44252 / 46080 B (1828 B) | 36066 / 36864 B (798 B) | 38957 / 40960 B (2003 B) |
+| virtualized | 124160 / 124928 B (768 B) | 47995 / 49152 B (1157 B) | 39122 / 40960 B (1838 B) | 42422 / 44032 B (1610 B) |
+| multipackage | 96260 / 110592 B (14332 B) | 37865 / 56320 B (18455 B) | 31354 / 43008 B (11654 B) | 33783 / 49152 B (15369 B) |
+| cmdapp | 96278 / 110592 B (14314 B) | 37870 / 56320 B (18450 B) | 31394 / 43008 B (11614 B) | 33797 / 49152 B (15355 B) |
+| router | 117523 / 117760 B (237 B) | 44980 / 58368 B (13388 B) | 37005 / 45056 B (8051 B) | 39933 / 51200 B (11267 B) |
+| router-dashboard | 234351 / 234496 B (145 B) | 94011 / 94208 B (197 B) | 77333 / 77824 B (491 B) | 82516 / 82944 B (428 B) |
+| resource | 157180 / 157696 B (516 B) | 68645 / 69632 B (987 B) | 57823 / 58368 B (545 B) | 61371 / 61440 B (69 B) |
+
+Nine applications have identical raw, gzip, Brotli, and Zstandard SHA-256
+values across the comparison. The two changed streams are:
+
+| app | base raw / gzip / br / zstd SHA-256 | final raw / gzip / br / zstd SHA-256 |
+| --- | --- | --- |
+| context | `a7a0691659447a67cbbdf183f198107b86a09be25e99d4b589a0c4ef811f2067` / `fb11ea8f199d8636557e9ab80ed38f11d5e7fc5b3561363095442e7981ad9a0e` / `e04340ff513e8e1a9d4088e7e9dbb8ae8472085b3b58811f3f83356f921a3493` / `b94940a80d59510b3f3677becfbc15de4bd5a57586cb50c87845a776ed639b5b` | `547722e8a94f126cf5f21944b9b120e31aae023e2cb40fbbced1fccf9796c626` / `b885e8372bd6373b07c5862f797eb801bb6192496a6804b0cb6f1d9cbe358b72` / `504a2b1ec41b988dbad31915260ff5c6d6e09dd539dfa77b78e8b47b26b98822` / `1213d9c6fa431403291a36babd86b7e70d9bd8e7edae60775c43bf46ae29461e` |
+| router-dashboard | `4ca08e0be2db602601306e1b7c7f2ad48454f39c57b7cd798f2268df4cc0ae97` / `c69dad8280b65b1bccd1111c5fd7586d03922f240a9b722504c8ff9df9fd9a1b` / `9734a0d25a87000a92161f230fa85b5f612f0dbf41f1f0448b5d9e859a9baa35` / `327781d1ca426e1d0d36a60ddde288894823f83b8ca3289463e99afc0a8ad3a5` | `b00e2dcf4cdf997f7240c6b7efe475f6a8920715cfdbecbabe7105ba830c03d0` / `aa144e4726f4052fcac6e112bd5bb154f6ff0b102ea43ffff4ae274c16f52220` / `1f17b59c8157df476ce6214acf365001ed741f533f1840dfeb8cc0e4ef4e5b4d` / `305feb072e7b2a72d6b856b52d9de59fa008f29f011f223c9dcfcdc393ac6881` |
+
+All 44 cells and all ratio limits pass. Gzip remains capped at `52.00%`,
+Brotli at `38.00%`, and Zstandard at `46.00%`. No ceiling, ratio, compression
+command, size workflow, or budget-matrix membership changed; the private
+standard-Go browser fixture is not part of the size matrix.
+
 ## Targeted ErrorBoundary Correctness Rebaseline — 2026-07-28
 
 This targeted rebaseline covers complete mounted-subtree teardown ownership
