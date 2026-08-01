@@ -24,6 +24,12 @@ over that closeout. Every raw, Brotli, and Zstandard cell remains within its
 existing ceiling. The only old-ceiling failure is `resource` gzip at `68636 B`,
 so that one ceiling is aligned from `68608 B` to `69632 B`.
 
+The repeated-Mount nested-target guard adds `216 B` to `235 B` of raw WASM over
+the reviewed repeated-Mount head. Exactly three old-ceiling cells fail:
+`router` raw by `40 B`, `router-dashboard` raw by `134 B`, and `resource`
+Zstandard by `74 B`. Those three ceilings increase by `1024 B`; every other
+absolute ceiling and all ratio limits remain unchanged.
+
 ## Source of Truth
 
 - Workflow: `.github/workflows/ci-wasm-size.yml`
@@ -57,9 +63,9 @@ If no match exists, it reports the default missing path
 | virtualized | 124928 B | 40960 B | 49152 B | 44032 B |
 | multipackage | 110592 B | 43008 B | 56320 B | 49152 B |
 | cmdapp | 110592 B | 43008 B | 56320 B | 49152 B |
-| router | 117760 B | 45056 B | 58368 B | 51200 B |
-| router-dashboard | 234496 B | 77824 B | 94208 B | 82944 B |
-| resource | 157696 B | 58368 B | 69632 B | 61440 B |
+| router | 118784 B | 45056 B | 58368 B | 51200 B |
+| router-dashboard | 235520 B | 77824 B | 94208 B | 82944 B |
+| resource | 157696 B | 58368 B | 69632 B | 62464 B |
 
 ## Supported Toolchain Baseline Migration - 2026-07-30
 
@@ -415,6 +421,107 @@ All 44 cells and all ratio limits pass. Gzip remains capped at `52.00%`,
 Brotli at `38.00%`, and Zstandard at `46.00%`. No ceiling, ratio, compression
 command, size workflow, or budget-matrix membership changed; the private
 repeated-mount browser fixture is not part of the size matrix.
+
+## Repeated Mount Nested-Target Guard — 2026-08-02
+
+This closeout compares reviewed repeated-Mount head
+`d9c59a7b2e065cd9265108460579f028a8c7c02f` with package-input commit
+`5ab337cc35bcdf5d4bd1ec9fc11e22581b9bb4f2`. At the reviewed head, mounting
+into a descendant rendered by the active application destroyed App A, ran its
+cleanups, mounted App B into a target that had become disconnected, and left no
+document-visible active application. A host-owned descendant appended inside
+the current root had the same ownership defect.
+
+Four bounded implementations were measured. Candidate A traversed the mounted
+range and added about `472 B` to `490 B` raw; Candidate B reduced ancestry to
+direct children but added about `620 B` to `637 B` raw. Candidate C1 used the
+whole current root inline and added about `251 B` to `256 B` raw. Candidate C2
+moved the same whole-root condition into a private helper and added `216 B` to
+`235 B` raw. C2 was selected because it is behaviorally complete, smaller than
+C1, and does not change renderer, scheduler, teardown, or mounted-node
+representation.
+
+The selected condition is:
+
+```go
+mountedApp.tree != nil &&
+	!root.Equal(mountedApp.root) &&
+	mountedApp.root.Call("contains", root).Bool()
+```
+
+It runs after successful target lookup and before application teardown. The
+current root and roots outside its subtree remain valid. A different
+application-owned or host-owned descendant is rejected with
+`goframe: cannot mount inside current root` while the current application is
+still active. Standard-Go Chrome evidence covers both rejections, preserved DOM
+identity and cleanup counts, and post-rejection interaction. TinyGo `0.41.1`
+uses trap-style panic lowering, so the missing-root and descendant-panic cases
+are not invoked there; all non-panic replacement and isolation scenarios pass
+under TinyGo.
+
+Measurements use Go `1.26.5`, TinyGo `0.41.1` with LLVM `20.1.1`, Linux amd64,
+gzip `1.14`, Brotli `1.2.0`, and Zstandard `1.5.7`. Both refs were built
+sequentially from the same absolute extraction path with the CI application
+order and shared task-owned caches. Compression uses gzip level 9, Brotli
+quality 11, and Zstandard level 19. Hash comparison uses the same
+`bundle.00000000.wasm` source basename and a fixed 2000-01-01 source mtime;
+these preserve the normative budget byte counts while removing path and mtime
+differences from compressed-stream identity.
+
+| app | raw reviewed → final | gzip reviewed → final | br reviewed → final | zstd reviewed → final |
+| --- | ---: | ---: | ---: | ---: |
+| counter | 85481 → 85716 B (+235 B) | 34300 → 34400 B (+100 B) | 28650 → 28747 B (+97 B) | 30793 → 30901 B (+108 B) |
+| components | 91120 → 91355 B (+235 B) | 36045 → 36147 B (+102 B) | 29966 → 29989 B (+23 B) | 32253 → 32343 B (+90 B) |
+| todo | 120386 → 120621 B (+235 B) | 46537 → 46725 B (+188 B) | 38568 → 38617 B (+49 B) | 41485 → 41587 B (+102 B) |
+| dashboard | 170748 → 170964 B (+216 B) | 64068 → 64174 B (+106 B) | 51669 → 51777 B (+108 B) | 55755 → 55881 B (+126 B) |
+| context | 117251 → 117486 B (+235 B) | 44187 → 44295 B (+108 B) | 36107 → 36184 B (+77 B) | 38934 → 39047 B (+113 B) |
+| virtualized | 124202 → 124418 B (+216 B) | 47963 → 48053 B (+90 B) | 39277 → 39226 B (-51 B) | 42412 → 42489 B (+77 B) |
+| multipackage | 96302 → 96537 B (+235 B) | 37792 → 37893 B (+101 B) | 31414 → 31412 B (-2 B) | 33798 → 33881 B (+83 B) |
+| cmdapp | 96320 → 96555 B (+235 B) | 37798 → 37900 B (+102 B) | 31383 → 31428 B (+45 B) | 33749 → 33877 B (+128 B) |
+| router | 117565 → 117800 B (+235 B) | 44935 → 45038 B (+103 B) | 36992 → 37057 B (+65 B) | 39915 → 40010 B (+95 B) |
+| router-dashboard | 234395 → 234630 B (+235 B) | 93964 → 94041 B (+77 B) | 77318 → 77404 B (+86 B) | 82494 → 82605 B (+111 B) |
+| resource | 157224 → 157459 B (+235 B) | 68565 → 68688 B (+123 B) | 57768 → 57813 B (+45 B) | 61404 → 61514 B (+110 B) |
+
+Final ceilings and headroom are:
+
+| app | raw final / ceiling (headroom) | gzip final / ceiling (headroom) | br final / ceiling (headroom) | zstd final / ceiling (headroom) |
+| --- | ---: | ---: | ---: | ---: |
+| counter | 85716 / 97280 B (11564 B) | 34400 / 56320 B (21920 B) | 28747 / 40960 B (12213 B) | 30901 / 49152 B (18251 B) |
+| components | 91355 / 107520 B (16165 B) | 36147 / 56320 B (20173 B) | 29989 / 43008 B (13019 B) | 32343 / 49152 B (16809 B) |
+| todo | 120621 / 122880 B (2259 B) | 46725 / 56320 B (9595 B) | 38617 / 40960 B (2343 B) | 41587 / 49152 B (7565 B) |
+| dashboard | 170964 / 171008 B (44 B) | 64174 / 71680 B (7506 B) | 51777 / 53248 B (1471 B) | 55881 / 61440 B (5559 B) |
+| context | 117486 / 117760 B (274 B) | 44295 / 46080 B (1785 B) | 36184 / 36864 B (680 B) | 39047 / 40960 B (1913 B) |
+| virtualized | 124418 / 124928 B (510 B) | 48053 / 49152 B (1099 B) | 39226 / 40960 B (1734 B) | 42489 / 44032 B (1543 B) |
+| multipackage | 96537 / 110592 B (14055 B) | 37893 / 56320 B (18427 B) | 31412 / 43008 B (11596 B) | 33881 / 49152 B (15271 B) |
+| cmdapp | 96555 / 110592 B (14037 B) | 37900 / 56320 B (18420 B) | 31428 / 43008 B (11580 B) | 33877 / 49152 B (15275 B) |
+| router | 117800 / 118784 B (984 B) | 45038 / 58368 B (13330 B) | 37057 / 45056 B (7999 B) | 40010 / 51200 B (11190 B) |
+| router-dashboard | 234630 / 235520 B (890 B) | 94041 / 94208 B (167 B) | 77404 / 77824 B (420 B) | 82605 / 82944 B (339 B) |
+| resource | 157459 / 157696 B (237 B) | 68688 / 69632 B (944 B) | 57813 / 58368 B (555 B) | 61514 / 62464 B (950 B) |
+
+SHA-256 values identify every reviewed and final stream:
+
+| app | reviewed raw / gzip / br / zstd SHA-256 | final raw / gzip / br / zstd SHA-256 |
+| --- | --- | --- |
+| counter | `1b4496b361964f115673be69193569e00c8f0783e4ffb0246192c956b5896457` / `ffa59e987bb5c96ad98f7dcaf3d3a593cdb239a2129c2c3cc8786ae49a48cf15` / `63d3868c49fca10129296cd0c948eec7100d9bc09355676a6326e93ce4ab6d58` / `0c7ebba2ac9804b1098d8bc3b2d54d252cb449f19e1a43ecc66f24aca55b1177` | `b2e0c0c44ba1a92a1aea4a5b24546e0babb01dca7819c839aece9a7c638fb03d` / `473585bde053c9c4902798dea12ce84e5552ed3fd4703d2cbbf7bb1d77483b43` / `ae5a5058606273bf2c93e591441f4588943521718f49520d0d996b4788922f90` / `9684c3b6b9c98a5386c2755d65356aab8103b468ad171d08fc154820c1249cba` |
+| components | `287c9c495fbefbeb9bc7b11712d9baedef80b6d92c43ed5669be8602d8392c99` / `612a10723f323c7d496d0ce194ed1062cc9869dc3a5947f9cbc6840ac5a86944` / `a7c0ecacbd442fee675d520e4523b2aab11582cb10053ec635530845cad5bac5` / `190a851c4c070dac803b73498f82f25c8090584673473440217822ad9c76eed2` | `1784f025971927bc697f9d231185b00e5e94ebf7622207f03d42ea9ce947e3fe` / `8b0beb560773f20a7a0f2311ab564e2f93e620c00f95a1feac47223a3b78db01` / `cd59fc6b2f6108caf1aa0ab0826fded8271dab97e925b16cd57dc69a760d054f` / `87908961c33bae16290d5bef79fc7c928f4559570e290a725b4e1dd564dda42c` |
+| todo | `132c288a9b0b418a378df200918e06500a8b8a3a29f84d68bf0311c624006d14` / `77dae4f05240c61db033ca6a239bdac956074cd6ac485351aa855215bf711108` / `b64e8508907a3a620e4bd19831162a20b8c06f5f3243b0cc73821e0bde796398` / `a4a1dad9e3da988c71825919692941ef50d283c11ddcbd7a87155d79859c0eb2` | `1a50a9b5ea1070aa2402d0ff2bccea5eaded4fef4a982f5fb7b76c139b002c1c` / `9aef5b284fe326d793f94628068d9d6ae9659641a7d4f02d2411d6c746ebf125` / `e3a620fd684cbf54c51696fac4003c360c3a41a5ec43607cdf23664ee1485b28` / `28ee84a5685ce253656ad78ceda6547a14bc03f70c404409197fdf970246479e` |
+| dashboard | `03637d8cf568577acecc09012a13a37c74e948ef9238dec08221f209f7d2440d` / `ec2de8966b56c957fd4c689e49c0d1383ebe325cb68e6b22429021c7434fdef9` / `b3eaf0e24d5332de95d76c3d6f0bd88222cc47f097dcff59862d95f5a09a3d22` / `f5b0913a58e714432ef54b58b89494fdbadb22a4ef33621792e4cf25c56db320` | `1f8bae2c8b3a702626c5e021feff3ff58082e475331d385cf9fba652c9384779` / `21a4fde75886508b3fa151818a08325b6743e90aea47aee373ce00d4ea4bfaf8` / `f3bf6dbb038cc833269b31c097abd7c17189f66e7fc73aa2ecc4ebd1b9d7d837` / `7fd8208d1c336ebbdf2c5dd053e3b59ed4659a6d88110801e1337e4cab73d5ad` |
+| context | `cf35b1eea5b6e4269326eea4948e21f6415643aa7265777bc84526b322e31fcd` / `7437eef051d0f521842c40cde485169e3dc820c9b6e9469135a2e9dd750f0861` / `397eb36a67c47dc1b93376d821551c880c22ee76e92e8bc464793177e9efabdb` / `b532e9fc3b4e6d078c8b476ec95ef8e2fd4fba89ce0e5cda247746f6097bee23` | `49d859d5e725438b1501f2356b609c77a950b06a0b12ec097d7185f6d75b9091` / `be5c89f0e06f778da15eb7305e4031be03b1f9331c87bb082375428e1ae45568` / `4c7e6ee5e3db933305e0dcd1ed5c578b165887752f444b24bcf14982b97dabfa` / `0ad2a4d85d30e7026870d58420ffc8157e64bafc32e54163c2b77261eec249b7` |
+| virtualized | `01899b2c6ac85fe4421299921b3f960de8aa581698a9d5b9c6d8e7d5c105c92b` / `3cbb62348c76385ab69f6a823e6085ff29e849795a26802f3d77025d67bddb50` / `b7cfd6a391e4d273ba726af3c76c41c19ed0fd78c2ab22522335c3829e090592` / `304690e8391b4e63e68654283296cc554f886380344e1e470412496c0e9f0754` | `c581dfeda10e3f231b225dddbaf50d4d51bcde74ba9e9db8f0ffb579d1b0331d` / `eed6369e61fd88b8147e1a9bf918fed251d347e6532b5476bf1fae5efa27aa5d` / `02280681aea54fdc3fd69e15082a49989f543796b19dc27ab8a43fc731f8aa6c` / `89c245ea519728b1c4d88568638c80b1932225eff73fc2249505c79ce78ef2f7` |
+| multipackage | `40616cedda7a2f644cf80c5b17b883bee56632be8e4842699c56d7651f2199ba` / `5e852872876ce689e2f243e2efd26d191dba45342f73a8b88005aa8c6c78a2c9` / `e40bc2c465e3f64db1a0e99f2138d5e3221aa7001ce927d8b1dd3e5aea71a946` / `51453d580001c593059068056207d9c4fbdb14f36867861f1f3f3a0f7f036b22` | `ce1131d527e2af8ad557696f5ac0c29c0fc4108a95158848d5e5fb3123a9001f` / `ddf75ad44bd78b1c422868f0d0780fc6b125cbf1961a546727aa8c07ccef7b25` / `ae59ce973fd63fda26ef0464500cb424586b9ff31b08c53ca0eb253cd1af3ff3` / `c9fd085f0537ac86015a77b527f8c368794a0b2377dc0e8915eac09d3fcd24d7` |
+| cmdapp | `4ee342784b97bb2e50cf1830959bfa45ba8304155c2c384ececce22f11181eb7` / `756a548ef19365ecf27605d1041a327a8be26d77324f4463e96d44259154df35` / `61fff06eeaa56f852a9e082e85b7acf5ac49fa51839b1a92c0d88332de9e13e2` / `981549f73bfcfa587a3a050e653f85e69922f73d3b6826fad3fa62324d1dba7d` | `8b389fe2a06d0a2ae4aa2543c0c5b874ad40f3026a33d98a97469f7ef9e0385c` / `7adbf071d48e61375cb0e29766b31016d86b9425f2a678708119ef048698c239` / `6c52bb7f63563f0f98b696c0c31db8cb7eb68591b92aae07c42cf9289c4a3589` / `e87f96f306fe32581d3531db004aa2afb6a6dccc87afe5b93ca8861e41556d89` |
+| router | `df159357d037b5242b0bd297aa3b8819080d3b14e6ec3926fed97c7d51c3ce99` / `6014712186e295844c1b3bba44be15a7a6b9e1ba385fbec6f26383cd31d09183` / `2a2742d8b30a38d9db438e26ec64569ed995f3badd72c9a02271a12fc3cf7315` / `43e7f3e522df944f16254e913260dbc8699c1c310303930dd0e917d20ca82758` | `95c88f56b1fa40054a1008d4813ad5455710076742a06fb26be801765076b293` / `df4cb1e4323fed7ce168c4860a7623addfcd66178df42603a19d2603d9d2b25a` / `466c10552774f166a67a409e43381cca5c2a2661b3534a4ec9774b028eb7dd1d` / `a29fa10c1cb630d1e29a988a570e07ef6957aa6fd1d941659c909720152a14c4` |
+| router-dashboard | `8cf8e96b377c9108404f36b8fe2bfa9216df428fb2ac34037262656902496892` / `090c912909f9ad6ce90c4b619c69b30c72b24b8bd2cea5ae26e9d1d57a26179a` / `25cb0da315951534908265225993d1346ffefa09355f2785c4cd4d1390144be1` / `3c3529f718bcc2992438a335d3bdbef49c2437ce1d72093d6c15c4963239848c` | `ca32baf21d6575699d0de00d2e3af46587794393509c04a053d650a3b56dbcef` / `da7796caf4c12a364c28440e86070aaaeea4f0c979aff6ec5fda587d87502506` / `10ff8380d1863414099cce7ca4922a621318d80eaa0323321f5f5fd405dbd8de` / `aa47210fd11563e2378b024ced6f7ed692a5db070816ee7b17c5599be819de9d` |
+| resource | `5827b43710546eb152e8430b22579053064ab4f9c2395b1122212f740e0e405a` / `13d18c2c42094170328c6dabe61db9379deee8b44695d45c938acbead12912a8` / `2e9de7a76a7d403d99e2df9f24152e42f13467a7bccb2bb67535961b06788db5` / `e7758fb4623f32d04facd20148c4cdb2e07e02af1323c8384f66ad94a6b73720` | `422d330c2d804f65c16ca67dff6d0d3feba81d1d5d55e0b48d0b766a7d04d301` / `66c705aa25e02c39a6e5f50f2b0c73f0e06082e4594109a0b9c79ecbd2e476e7` / `5599eb5bc7ab488444e99257d62050c32d89ad8d26d87ca9ae2b5df79544060f` / `b1d9c57aead2dbaf0eb2e440b6c059c14a3a9d406ad0cf94bf40f8c0294b023c` |
+
+The old ceilings failed only at `router` raw (`117800 / 117760 B`),
+`router-dashboard` raw (`234630 / 234496 B`), and `resource` Zstandard
+(`61514 / 61440 B`). Their new ceilings are `118784 B`, `235520 B`, and
+`62464 B`, respectively, each exactly `1024 B` higher and leaving `984 B`,
+`890 B`, and `950 B` headroom. All 44 final cells and all ratio limits pass.
+No other ceiling, ratio, compression command, workflow, or matrix membership
+changed. This is an accepted root-ownership correctness cost; the private
+repeated-Mount fixture remains outside the size matrix.
 
 ## Targeted ErrorBoundary Correctness Rebaseline — 2026-07-28
 

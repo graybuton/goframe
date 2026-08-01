@@ -132,9 +132,12 @@ roots, exact removal of the old mounted range while preserving unrelated host
 siblings, one-time effect and unmount cleanup, released event listeners and
 stale setters, ignored queued work from the previous application, working
 updates in the replacement, and repeated root transfers. The recover-capable
-standard Go mode also verifies that an unknown target fails before the active
-application is destroyed; TinyGo's trap-style panic path does not make that
-nonfatal assertion.
+standard Go mode also verifies that missing, application-owned descendant, and
+host-owned descendant targets fail before the active application is destroyed.
+Those checks retain the active DOM identity and cleanup counts and prove a
+post-rejection interaction. TinyGo exercises every non-panic replacement and
+isolation scenario; its trap-style panic path makes the three recover-based
+validation cases not applicable.
 The suite also runs a focused `goxc dev` reload lifecycle against a temporary
 standard-Go browser/WASM application. It verifies the initial non-reloading
 connection, GOX, Go, and asset rebuild reloads, burst coalescing, failure

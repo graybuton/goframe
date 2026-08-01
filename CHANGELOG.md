@@ -192,9 +192,11 @@
 
 ### Fixed
 
-- Repeated `gf.Mount` calls now release the previous application and remove its
-  exact mounted DOM range before mounting into the same or a different root,
-  without removing unrelated host siblings from an inactive root.
+- Valid repeated `gf.Mount` calls now release the previous application and
+  remove its exact mounted DOM range before mounting into the same or an
+  independent root, without removing unrelated host siblings from an inactive
+  root. A different target inside the current root is rejected before the
+  current application is destroyed.
 - Context selector subscriptions now rebind to the new nearest provider during
   topology refresh even when selector evaluation fails, preserving the previous
   selected value while allowing safe updates from the new provider to recover.

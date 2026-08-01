@@ -118,6 +118,13 @@ released application do not run afterward. The DOM visibility during cleanup
 is an implementation detail, not an API for reading or transferring old DOM
 state.
 
+`Mount` validates a missing target and a different target nested inside the
+current root before effect cleanup, `UseUnmount` cleanup, application release,
+mounted-range removal, or pending-work reset. A validation panic therefore
+leaves the current application's effects and cleanup ownership intact. This is
+an ordering guarantee for target validation; it does not make panic recovery a
+portable TinyGo behavior.
+
 If an effect body panics, the runtime reports `gf.ErrorPhaseEffect` through the
 installed runtime error handler and does not register a cleanup for that failed
 effect run. If an effect cleanup panics, the runtime reports
