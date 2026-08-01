@@ -10,6 +10,7 @@ TODO_SMOKE_URL_BASE="${GOFRAME_TODO_SMOKE_URL:-http://127.0.0.1}"
 DUPLICATE_SMOKE_URL_BASE="${GOFRAME_DUPLICATE_KEY_SMOKE_URL:-http://127.0.0.1}"
 RUNTIME_ERRORS_SMOKE_URL_BASE="${GOFRAME_RUNTIME_ERRORS_SMOKE_URL:-http://127.0.0.1}"
 ERROR_BOUNDARY_SMOKE_URL_BASE="${GOFRAME_ERROR_BOUNDARY_SMOKE_URL:-http://127.0.0.1}"
+CONTEXT_SELECTOR_TOPOLOGY_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SELECTOR_TOPOLOGY_SMOKE_URL:-http://127.0.0.1}"
 CONTROLLED_SELECT_SMOKE_URL_BASE="${GOFRAME_CONTROLLED_SELECT_SMOKE_URL:-http://127.0.0.1}"
 DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
@@ -103,6 +104,11 @@ build_runtime_errors_smoke_url() {
 build_error_boundary_smoke_url() {
 	local port="$1"
 	echo "${ERROR_BOUNDARY_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_context_selector_topology_smoke_url() {
+	local port="$1"
+	echo "${CONTEXT_SELECTOR_TOPOLOGY_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 build_controlled_select_smoke_url() {
@@ -273,6 +279,16 @@ export GOFRAME_ERROR_BOUNDARY_CHROME_DEBUG_PORT="${GOFRAME_ERROR_BOUNDARY_CHROME
 ERROR_BOUNDARY_URL="$(build_error_boundary_smoke_url "$ERROR_BOUNDARY_PORT")"
 run_with_server ./scripts/fixtures/error-boundary "$ERROR_BOUNDARY_PORT" "$ERROR_BOUNDARY_URL" \
 	node --experimental-websocket scripts/error-boundary-browser-smoke.mjs
+
+echo
+echo "== Context selector topology browser smoke (standard Go) =="
+"$GOXC" package ./scripts/fixtures/context-selector-topology --compiler=go
+
+CONTEXT_SELECTOR_TOPOLOGY_PORT="$(resolve_port "${GOFRAME_CONTEXT_SELECTOR_TOPOLOGY_SMOKE_PORT:-}")"
+export GOFRAME_CONTEXT_SELECTOR_TOPOLOGY_CHROME_DEBUG_PORT="${GOFRAME_CONTEXT_SELECTOR_TOPOLOGY_CHROME_DEBUG_PORT:-$(pick_free_port)}"
+CONTEXT_SELECTOR_TOPOLOGY_URL="$(build_context_selector_topology_smoke_url "$CONTEXT_SELECTOR_TOPOLOGY_PORT")"
+run_with_server ./scripts/fixtures/context-selector-topology "$CONTEXT_SELECTOR_TOPOLOGY_PORT" "$CONTEXT_SELECTOR_TOPOLOGY_URL" \
+	node --experimental-websocket scripts/context-selector-topology-browser-smoke.mjs
 
 echo
 echo "== Controlled select browser smoke (TinyGo) =="

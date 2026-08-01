@@ -1,0 +1,168 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type topologyContextValue struct {
+	Source      string
+	Payload     string
+	PanicSelect bool
+}
+
+type topologySelection struct {
+	Source  string
+	Payload string
+}
+
+type innerTopologyState struct {
+	Active bool
+	Value  topologyContextValue
+}
+
+type OuterProviderProps struct{}
+
+type InnerScopeProps struct{}
+
+func (InnerScopeProps) MemoEqual(InnerScopeProps) bool {
+	return true
+}
+
+type SelectorConsumerProps struct{}
+
+func (SelectorConsumerProps) MemoEqual(SelectorConsumerProps) bool {
+	return true
+}
+
+var topologyContext = gf.CreateContext(topologyContextValue{
+	Source:  "default",
+	Payload: "default-safe",
+})
+
+var (
+	setOuterTopologyValue func(topologyContextValue)
+	setInnerTopologyState func(innerTopologyState)
+	appRenderCount         int
+	outerRenderCount       int
+	innerRenderCount       int
+	consumerRenderCount    int
+)
+
+func App() gf.Node {
+	appRenderCount++
+
+	return (
+		<main id="context-selector-topology-fixture" data-app-render-count={appRenderCount}>
+			<h1>Context selector topology recovery</h1>
+			<button id="show-failing-inner" OnClick={func() {
+				setInnerTopologyState(innerTopologyState{
+					Active: true,
+					Value: topologyContextValue{
+						Source:      "inner",
+						Payload:     "inner-failing",
+						PanicSelect: true,
+					},
+				})
+			}}>Show failing inner provider</button>
+			<button id="update-shadowed-outer" OnClick={func() {
+				setOuterTopologyValue(topologyContextValue{
+					Source:  "outer",
+					Payload: "outer-shadowed",
+				})
+			}}>Update shadowed outer provider</button>
+			<button id="make-inner-safe" OnClick={func() {
+				setInnerTopologyState(innerTopologyState{
+					Active: true,
+					Value: topologyContextValue{
+						Source:  "inner",
+						Payload: "inner-safe",
+					},
+				})
+			}}>Make inner provider safe</button>
+			<button id="make-outer-failing" OnClick={func() {
+				setOuterTopologyValue(topologyContextValue{
+					Source:      "outer",
+					Payload:     "outer-failing",
+					PanicSelect: true,
+				})
+			}}>Make shadowed outer provider fail</button>
+			<button id="remove-inner" OnClick={func() {
+				setInnerTopologyState(innerTopologyState{})
+			}}>Remove inner provider</button>
+			<button id="make-outer-safe" OnClick={func() {
+				setOuterTopologyValue(topologyContextValue{
+					Source:  "outer",
+					Payload: "outer-safe-recovered",
+				})
+			}}>Make outer provider safe</button>
+			<OuterProvider />
+		</main>
+	)
+}
+
+func OuterProvider(OuterProviderProps) gf.Node {
+	value, setValue := gf.UseState(topologyContextValue{
+		Source:  "outer",
+		Payload: "outer-safe",
+	})
+	setOuterTopologyValue = setValue
+	outerRenderCount++
+	gf.ProvideContext(topologyContext, value)
+
+	return (
+		<section id="outer-provider" data-render-count={outerRenderCount}>
+			<p id="outer-provider-payload">{value.Payload}</p>
+			<InnerScope />
+		</section>
+	)
+}
+
+func InnerScope(InnerScopeProps) gf.Node {
+	state, setState := gf.UseState(innerTopologyState{})
+	setInnerTopologyState = setState
+	innerRenderCount++
+	if state.Active {
+		gf.ProvideContext(topologyContext, state.Value)
+	}
+
+	return (
+		<section id="inner-scope" data-render-count={innerRenderCount}>
+			<p id="active-provider">{activeTopologyProvider(state.Active)}</p>
+			<p id="inner-provider-payload">{innerTopologyPayload(state)}</p>
+			<SelectorConsumer />
+		</section>
+	)
+}
+
+func SelectorConsumer(SelectorConsumerProps) gf.Node {
+	selected := gf.UseContextSelector(topologyContext, func(value topologyContextValue) topologySelection {
+		recordContextTopologySelectorCall()
+		if value.PanicSelect {
+			panic(value.Source + " selector boom")
+		}
+		return topologySelection{
+			Source:  value.Source,
+			Payload: value.Payload,
+		}
+	})
+	consumerRenderCount++
+
+	return (
+		<article id="selector-consumer" data-render-count={consumerRenderCount}>
+			<p id="selected-source">{selected.Source}</p>
+			<p id="selected-payload">{selected.Payload}</p>
+		</article>
+	)
+}
+
+func activeTopologyProvider(innerActive bool) string {
+	if innerActive {
+		return "inner"
+	}
+	return "outer"
+}
+
+func innerTopologyPayload(state innerTopologyState) string {
+	if !state.Active {
+		return "inactive"
+	}
+	return state.Value.Payload
+}
