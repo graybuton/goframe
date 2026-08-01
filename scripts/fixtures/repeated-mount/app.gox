@@ -54,6 +54,10 @@ func AppA(props AppAProps) gf.Node {
 					setValue(value + 1)
 				}}
 			>Update A</button>
+			<div
+				id="owned-nested-root"
+				data-testid="owned-nested-root"
+			></div>
 		</section>
 	)
 }

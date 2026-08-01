@@ -60,6 +60,7 @@ try {
         appAEffectCleanups: [0],
         appAUnmounts: [0],
         appAEffectVersions: ["1:0"],
+        nestedTargetPanicCount: 0,
         runtimeErrorCount: 0,
     }, "initial App A evidence");
     assertRoot(state.rootA, { appA: 1, appB: 0, appC: 0, goframeComments: 2 }, "initial root A");
@@ -235,9 +236,123 @@ try {
 
     if (compiler === "go") {
         await client.evaluate(`(() => {
+            window.__repeatedMountNestedRootA = document.querySelector("#root-a");
+            window.__repeatedMountBeforeNested = document.querySelector("[data-testid='app-a']");
+            window.__repeatedMountOwnedNested = document.querySelector("#owned-nested-root");
+            return true;
+        })()`);
+        const ownedBefore = {
+            activeApplication: state.activeApplication,
+            appARenders: state.appARenders,
+            appBRenders: state.appBRenders,
+            appAHandlers: state.appAHandlers,
+            appAValue: state.appAValue,
+            nestedTargetPanicCount: state.nestedTargetPanicCount,
+            runtimeErrorCount: state.runtimeErrorCount,
+            cleanups: JSON.stringify({
+                effects: state.appAEffectCleanups,
+                unmounts: state.appAUnmounts,
+            }),
+        };
+        await runControl(client, "goframeRepeatedMountAttemptOwnedNestedRoot");
+        state = await repeatedMountState(client);
+        assertSubset(state, {
+            activeApplication: ownedBefore.activeApplication,
+            appARenders: ownedBefore.appARenders,
+            appBRenders: ownedBefore.appBRenders,
+            appAHandlers: ownedBefore.appAHandlers,
+            appAValue: ownedBefore.appAValue,
+            nestedTargetPanicCount: ownedBefore.nestedTargetPanicCount + 1,
+            nestedTargetPanicText: "goframe: cannot mount inside current root",
+            runtimeErrorCount: ownedBefore.runtimeErrorCount,
+            nestedRootASameAfterAttempt: true,
+            currentAMarkerSameAfterNested: true,
+            ownedNestedSameAfterAttempt: true,
+            ownedNestedConnected: true,
+            ownedNestedChildren: 0,
+            documentAppB: 0,
+        }, "owned-descendant rejection");
+        assertRoot(state.rootA, { appA: 1, appB: 0, appC: 0, goframeComments: 2 }, "owned-descendant root A");
+        const ownedCleanupsAfter = JSON.stringify({
+            effects: state.appAEffectCleanups,
+            unmounts: state.appAUnmounts,
+        });
+        if (ownedCleanupsAfter !== ownedBefore.cleanups) {
+            throw new Error(
+                `APP FAILURE: owned-descendant mount changed cleanup counts: ` +
+                `before=${ownedBefore.cleanups}, after=${ownedCleanupsAfter}`,
+            );
+        }
+        await click(client, "[data-testid='app-a-event']");
+        state = await waitForState(client, "post-owned-rejection App A interaction", (next) =>
+            next.appAHandlers === ownedBefore.appAHandlers + 1 &&
+            next.appAValue === ownedBefore.appAValue + 1);
+        console.log("owned-descendant rejection (go): ok");
+
+        await client.evaluate(`(() => {
+            const target = document.createElement("div");
+            target.id = "host-owned-subroot";
+            window.__repeatedMountNestedRootA.appendChild(target);
+            window.__repeatedMountHostNested = target;
+            window.__repeatedMountBeforeHostNested = document.querySelector("[data-testid='app-a']");
+            return true;
+        })()`);
+        state = await repeatedMountState(client);
+        const hostBefore = {
+            activeApplication: state.activeApplication,
+            appARenders: state.appARenders,
+            appBRenders: state.appBRenders,
+            appAHandlers: state.appAHandlers,
+            appAValue: state.appAValue,
+            nestedTargetPanicCount: state.nestedTargetPanicCount,
+            runtimeErrorCount: state.runtimeErrorCount,
+            cleanups: JSON.stringify({
+                effects: state.appAEffectCleanups,
+                unmounts: state.appAUnmounts,
+            }),
+        };
+        await runControl(client, "goframeRepeatedMountAttemptHostNestedRoot");
+        state = await repeatedMountState(client);
+        assertSubset(state, {
+            activeApplication: hostBefore.activeApplication,
+            appARenders: hostBefore.appARenders,
+            appBRenders: hostBefore.appBRenders,
+            appAHandlers: hostBefore.appAHandlers,
+            appAValue: hostBefore.appAValue,
+            nestedTargetPanicCount: hostBefore.nestedTargetPanicCount + 1,
+            nestedTargetPanicText: "goframe: cannot mount inside current root",
+            runtimeErrorCount: hostBefore.runtimeErrorCount,
+            nestedRootASameAfterAttempt: true,
+            currentAMarkerSameAfterHostNested: true,
+            hostNestedSameAfterAttempt: true,
+            hostNestedConnected: true,
+            hostNestedChildren: 0,
+            hostNestedText: "",
+            documentAppB: 0,
+        }, "host-descendant rejection");
+        assertRoot(state.rootA, { appA: 1, appB: 0, appC: 0, goframeComments: 2 }, "host-descendant root A");
+        const hostCleanupsAfter = JSON.stringify({
+            effects: state.appAEffectCleanups,
+            unmounts: state.appAUnmounts,
+        });
+        if (hostCleanupsAfter !== hostBefore.cleanups) {
+            throw new Error(
+                `APP FAILURE: host-descendant mount changed cleanup counts: ` +
+                `before=${hostBefore.cleanups}, after=${hostCleanupsAfter}`,
+            );
+        }
+        await click(client, "[data-testid='app-a-event']");
+        state = await waitForState(client, "post-host-rejection App A interaction", (next) =>
+            next.appAHandlers === hostBefore.appAHandlers + 1 &&
+            next.appAValue === hostBefore.appAValue + 1);
+        console.log("host-descendant rejection (go): ok");
+
+        await client.evaluate(`(() => {
             window.__repeatedMountBeforeMissing = document.querySelector("[data-testid='app-a']");
             return true;
         })()`);
+        const handlersBeforeMissing = state.appAHandlers;
+        const valueBeforeMissing = state.appAValue;
         const cleanupBeforeMissing = JSON.stringify({
             effects: state.appAEffectCleanups,
             unmounts: state.appAUnmounts,
@@ -260,9 +375,18 @@ try {
         }
         await click(client, "[data-testid='app-a-event']");
         state = await waitForState(client, "post-panic App A interaction", (next) =>
-            next.appAHandlers === 3 && next.appAValue === 2);
+            next.appAHandlers === handlersBeforeMissing + 1 &&
+            next.appAValue === valueBeforeMissing + 1);
         console.log("missing-root preservation (go): ok");
     } else if (compiler === "tinygo") {
+        console.log(
+            "owned-descendant rejection (tinygo): NOT APPLICABLE - normal TinyGo " +
+            "trap-mode build does not provide recover-based panic containment",
+        );
+        console.log(
+            "host-descendant rejection (tinygo): NOT APPLICABLE - normal TinyGo " +
+            "trap-mode build does not provide recover-based panic containment",
+        );
         console.log(
             "missing-root preservation (tinygo): NOT APPLICABLE - normal TinyGo " +
             "trap-mode build does not provide recover-based panic containment",
@@ -341,6 +465,24 @@ async function repeatedMountState(client) {
             currentAMarkerSameAfterMissing:
                 window.__repeatedMountBeforeMissing ===
                 document.querySelector("[data-testid='app-a']"),
+            nestedRootASameAfterAttempt:
+                window.__repeatedMountNestedRootA === document.querySelector("#root-a"),
+            currentAMarkerSameAfterNested:
+                window.__repeatedMountBeforeNested ===
+                document.querySelector("[data-testid='app-a']"),
+            ownedNestedSameAfterAttempt:
+                window.__repeatedMountOwnedNested === document.querySelector("#owned-nested-root"),
+            ownedNestedConnected: Boolean(window.__repeatedMountOwnedNested?.isConnected),
+            ownedNestedChildren: window.__repeatedMountOwnedNested?.childNodes.length ?? -1,
+            currentAMarkerSameAfterHostNested:
+                window.__repeatedMountBeforeHostNested ===
+                document.querySelector("[data-testid='app-a']"),
+            hostNestedSameAfterAttempt:
+                window.__repeatedMountHostNested === document.querySelector("#host-owned-subroot"),
+            hostNestedConnected: Boolean(window.__repeatedMountHostNested?.isConnected),
+            hostNestedChildren: window.__repeatedMountHostNested?.childNodes.length ?? -1,
+            hostNestedText: window.__repeatedMountHostNested?.textContent ?? null,
+            documentAppB: document.querySelectorAll("[data-testid='app-b']").length,
             currentAppState: Number(currentMarker?.dataset.state ?? "-1"),
             duplicateIDs,
         };

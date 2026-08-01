@@ -37,9 +37,11 @@ var (
 	appCHandlerCount int
 	appCCleanups     = make(map[int]int)
 
-	missingRootPanicCount int
-	missingRootPanicText  string
-	runtimeErrorCount     int
+	missingRootPanicCount  int
+	missingRootPanicText   string
+	nestedTargetPanicCount int
+	nestedTargetPanicText  string
+	runtimeErrorCount      int
 )
 
 func main() {
@@ -107,6 +109,12 @@ func exportFixtureControls() {
 		appASetter(appAValue + 1)
 	})
 	exportFixtureControl("goframeRepeatedMountAttemptMissingRoot", attemptMissingRoot)
+	exportFixtureControl("goframeRepeatedMountAttemptOwnedNestedRoot", func() {
+		attemptMount("owned-nested-root", &nestedTargetPanicCount, &nestedTargetPanicText)
+	})
+	exportFixtureControl("goframeRepeatedMountAttemptHostNestedRoot", func() {
+		attemptMount("host-owned-subroot", &nestedTargetPanicCount, &nestedTargetPanicText)
+	})
 
 	read := js.FuncOf(func(js.Value, []js.Value) any {
 		return repeatedMountEvidence()
@@ -125,13 +133,17 @@ func exportFixtureControl(name string, control func()) {
 }
 
 func attemptMissingRoot() {
+	attemptMount("missing-root", &missingRootPanicCount, &missingRootPanicText)
+}
+
+func attemptMount(rootID string, panicCount *int, panicText *string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			missingRootPanicCount++
-			missingRootPanicText = gf.ToString(recovered)
+			*panicCount++
+			*panicText = gf.ToString(recovered)
 		}
 	}()
-	mountAppB("missing-root")
+	mountAppB(rootID)
 }
 
 func repeatedMountEvidence() js.Value {
@@ -156,6 +168,8 @@ func repeatedMountEvidence() js.Value {
 	result.Set("appCCleanups", integerEvidence(appCCleanups, nextAppCInstance))
 	result.Set("missingRootPanicCount", missingRootPanicCount)
 	result.Set("missingRootPanicText", missingRootPanicText)
+	result.Set("nestedTargetPanicCount", nestedTargetPanicCount)
+	result.Set("nestedTargetPanicText", nestedTargetPanicText)
 	result.Set("runtimeErrorCount", runtimeErrorCount)
 	return result
 }
