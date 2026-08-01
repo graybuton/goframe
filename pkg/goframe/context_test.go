@@ -7,6 +7,15 @@ type contextValueFixture struct {
 	Accent string
 }
 
+type contextTopologyValueFixture struct {
+	Count       int
+	PanicSelect bool
+}
+
+type contextSelectorPanicFixture struct {
+	name string
+}
+
 type contextMemoPropsFixture struct {
 	ID int
 }
@@ -392,6 +401,369 @@ func TestContextInnerProviderRemovalRebindsConsumerToOuterProvider(t *testing.T)
 	}
 }
 
+func TestContextSelectorTopologyPanicRebindsDefaultToProvider(t *testing.T) {
+	isolateContextSubscriptions(t)
+	errors := captureRuntimeErrors(t)
+	panicValue := &contextSelectorPanicFixture{name: "default-to-provider"}
+	ctx := CreateContext(contextTopologyValueFixture{Count: 1})
+	providing := false
+	provided := contextTopologyValueFixture{}
+	provider := contextTestInstance("Provider", nil, func() {
+		if providing {
+			ProvideContext(ctx, provided)
+		}
+	})
+	renderComponentInstance(provider)
+
+	selectorCalls := 0
+	selected := -1
+	consumer := contextTestInstance("Consumer", provider, func() {
+		selected = UseContextSelector(ctx, contextTopologySelector(
+			&selectorCalls,
+			panicValue,
+		))
+	})
+	renderComponentInstance(consumer)
+	slot := consumer.contextSlots[0]
+	if slot.provider != nil {
+		t.Fatalf("initial provider = %#v, want default", slot.provider)
+	}
+
+	providing = true
+	provided = contextTopologyValueFixture{Count: 2, PanicSelect: true}
+	renderComponentInstance(provider)
+	newProvider := provider.contextProviders[ctx.id]
+
+	assertFailedContextTopologyRefresh(t, contextTopologyFailureExpectation{
+		errors:           errors(),
+		panicValue:       panicValue,
+		slot:             slot,
+		provider:         newProvider,
+		previous:         nil,
+		selected:         1,
+		consumer:         consumer,
+		ancestors:        []*componentInstance{provider},
+		selectorCalls:    selectorCalls,
+		wantSelectorCall: 2,
+	})
+
+	provided = contextTopologyValueFixture{Count: 2}
+	renderComponentInstance(provider)
+	assertRecoveredContextSelection(t, slot, consumer, 2, selectorCalls, 3)
+	if provider.dirtyDescendants != 1 {
+		t.Fatalf("provider dirty descendants after recovery = %d, want 1", provider.dirtyDescendants)
+	}
+	renderComponentInstance(consumer)
+	if selected != 2 {
+		t.Fatalf("rendered selection after recovery = %d, want 2", selected)
+	}
+
+	deactivateComponent(consumer)
+	deactivateComponent(provider)
+}
+
+func TestContextSelectorTopologyPanicRebindsOuterToInnerProvider(t *testing.T) {
+	isolateContextSubscriptions(t)
+	errors := captureRuntimeErrors(t)
+	panicValue := &contextSelectorPanicFixture{name: "outer-to-inner"}
+	ctx := CreateContext(contextTopologyValueFixture{})
+	outer := contextProviderInstance("Outer", nil, ctx, contextTopologyValueFixture{Count: 1})
+	renderComponentInstance(outer)
+	outerProvider := outer.contextProviders[ctx.id]
+
+	innerProviding := false
+	innerValue := contextTopologyValueFixture{}
+	inner := contextTestInstance("Inner", outer, func() {
+		if innerProviding {
+			ProvideContext(ctx, innerValue)
+		}
+	})
+	renderComponentInstance(inner)
+
+	selectorCalls := 0
+	selected := -1
+	consumer := contextTestInstance("Consumer", inner, func() {
+		selected = UseContextSelector(ctx, contextTopologySelector(
+			&selectorCalls,
+			panicValue,
+		))
+	})
+	renderComponentInstance(consumer)
+	slot := consumer.contextSlots[0]
+
+	innerProviding = true
+	innerValue = contextTopologyValueFixture{Count: 2, PanicSelect: true}
+	renderComponentInstance(inner)
+	innerProvider := inner.contextProviders[ctx.id]
+
+	assertFailedContextTopologyRefresh(t, contextTopologyFailureExpectation{
+		errors:           errors(),
+		panicValue:       panicValue,
+		slot:             slot,
+		provider:         innerProvider,
+		previous:         outerProvider,
+		selected:         1,
+		consumer:         consumer,
+		ancestors:        []*componentInstance{inner, outer},
+		selectorCalls:    selectorCalls,
+		wantSelectorCall: 2,
+	})
+
+	updateContextProvider(outer, ctx, contextTopologyValueFixture{Count: 9})
+	if selectorCalls != 2 {
+		t.Fatalf("selector calls after shadowed outer update = %d, want 2", selectorCalls)
+	}
+	if slot.selected != 1 || consumer.dirty {
+		t.Fatalf("state after shadowed outer update = selected %#v dirty %t, want 1 false", slot.selected, consumer.dirty)
+	}
+
+	innerValue = contextTopologyValueFixture{Count: 2}
+	renderComponentInstance(inner)
+	assertRecoveredContextSelection(t, slot, consumer, 2, selectorCalls, 3)
+	if inner.dirtyDescendants != 1 || outer.dirtyDescendants != 1 {
+		t.Fatalf("dirty descendants after inner recovery = inner %d outer %d, want 1 each",
+			inner.dirtyDescendants, outer.dirtyDescendants)
+	}
+	renderComponentInstance(consumer)
+	if selected != 2 {
+		t.Fatalf("rendered selection after inner recovery = %d, want 2", selected)
+	}
+
+	deactivateComponent(consumer)
+	deactivateComponent(inner)
+	deactivateComponent(outer)
+}
+
+func TestContextSelectorTopologyPanicRebindsInnerToOuterProvider(t *testing.T) {
+	isolateContextSubscriptions(t)
+	errors := captureRuntimeErrors(t)
+	panicValue := &contextSelectorPanicFixture{name: "inner-to-outer"}
+	ctx := CreateContext(contextTopologyValueFixture{})
+	outer := contextProviderInstance("Outer", nil, ctx, contextTopologyValueFixture{
+		Count:       3,
+		PanicSelect: true,
+	})
+	renderComponentInstance(outer)
+	outerProvider := outer.contextProviders[ctx.id]
+
+	innerProviding := true
+	innerValue := contextTopologyValueFixture{Count: 2}
+	inner := contextTestInstance("Inner", outer, func() {
+		if innerProviding {
+			ProvideContext(ctx, innerValue)
+		}
+	})
+	renderComponentInstance(inner)
+	innerProvider := inner.contextProviders[ctx.id]
+
+	selectorCalls := 0
+	selected := -1
+	consumer := contextTestInstance("Consumer", inner, func() {
+		selected = UseContextSelector(ctx, contextTopologySelector(
+			&selectorCalls,
+			panicValue,
+		))
+	})
+	renderComponentInstance(consumer)
+	slot := consumer.contextSlots[0]
+
+	innerProviding = false
+	renderComponentInstance(inner)
+
+	assertFailedContextTopologyRefresh(t, contextTopologyFailureExpectation{
+		errors:           errors(),
+		panicValue:       panicValue,
+		slot:             slot,
+		provider:         outerProvider,
+		previous:         innerProvider,
+		selected:         2,
+		consumer:         consumer,
+		ancestors:        []*componentInstance{inner, outer},
+		selectorCalls:    selectorCalls,
+		wantSelectorCall: 2,
+	})
+
+	notifyContextSubscribers(innerProvider, contextTopologyValueFixture{Count: 8})
+	if selectorCalls != 2 {
+		t.Fatalf("selector calls after removed inner update = %d, want 2", selectorCalls)
+	}
+
+	updateContextProvider(outer, ctx, contextTopologyValueFixture{Count: 3})
+	assertRecoveredContextSelection(t, slot, consumer, 3, selectorCalls, 3)
+	renderComponentInstance(consumer)
+	if selected != 3 {
+		t.Fatalf("rendered selection after outer recovery = %d, want 3", selected)
+	}
+
+	deactivateComponent(consumer)
+	deactivateComponent(inner)
+	deactivateComponent(outer)
+}
+
+func TestContextSelectorTopologyPanicRebindsProviderToDefault(t *testing.T) {
+	isolateContextSubscriptions(t)
+	errors := captureRuntimeErrors(t)
+	panicValue := &contextSelectorPanicFixture{name: "provider-to-default"}
+	ctx := CreateContext(contextTopologyValueFixture{
+		Count:       0,
+		PanicSelect: true,
+	})
+	providing := true
+	providerValue := contextTopologyValueFixture{Count: 2}
+	provider := contextTestInstance("Provider", nil, func() {
+		if providing {
+			ProvideContext(ctx, providerValue)
+		}
+	})
+	renderComponentInstance(provider)
+	removedProvider := provider.contextProviders[ctx.id]
+
+	selectorCalls := 0
+	selected := -1
+	consumer := contextTestInstance("Consumer", provider, func() {
+		selected = UseContextSelector(ctx, contextTopologySelector(
+			&selectorCalls,
+			panicValue,
+		))
+	})
+	renderComponentInstance(consumer)
+	slot := consumer.contextSlots[0]
+
+	providing = false
+	renderComponentInstance(provider)
+
+	assertFailedContextTopologyRefresh(t, contextTopologyFailureExpectation{
+		errors:           errors(),
+		panicValue:       panicValue,
+		slot:             slot,
+		provider:         nil,
+		previous:         removedProvider,
+		selected:         2,
+		consumer:         consumer,
+		ancestors:        []*componentInstance{provider},
+		selectorCalls:    selectorCalls,
+		wantSelectorCall: 2,
+	})
+
+	notifyContextSubscribers(removedProvider, contextTopologyValueFixture{Count: 8})
+	if selectorCalls != 2 {
+		t.Fatalf("selector calls after detached provider update = %d, want 2", selectorCalls)
+	}
+
+	providerValue = contextTopologyValueFixture{Count: 4}
+	providing = true
+	renderComponentInstance(provider)
+	newProvider := provider.contextProviders[ctx.id]
+	if slot.provider != newProvider {
+		t.Fatalf("provider after safe appearance = %#v, want %#v", slot.provider, newProvider)
+	}
+	assertRecoveredContextSelection(t, slot, consumer, 4, selectorCalls, 3)
+	renderComponentInstance(consumer)
+	if selected != 4 {
+		t.Fatalf("rendered selection after new provider recovery = %d, want 4", selected)
+	}
+
+	deactivateComponent(consumer)
+	deactivateComponent(provider)
+}
+
+func TestContextSelectorSameProviderPanicKeepsBindingAndRecovers(t *testing.T) {
+	isolateContextSubscriptions(t)
+	errors := captureRuntimeErrors(t)
+	panicValue := &contextSelectorPanicFixture{name: "same-provider"}
+	ctx := CreateContext(contextTopologyValueFixture{})
+	provider := contextProviderInstance("Provider", nil, ctx, contextTopologyValueFixture{Count: 1})
+	renderComponentInstance(provider)
+	providerSlot := provider.contextProviders[ctx.id]
+
+	selectorCalls := 0
+	consumer := contextSelectorConsumer(provider, ctx, contextTopologySelector(
+		&selectorCalls,
+		panicValue,
+	))
+	renderComponentInstance(consumer)
+	slot := consumer.contextSlots[0]
+
+	updateContextProvider(provider, ctx, contextTopologyValueFixture{
+		Count:       2,
+		PanicSelect: true,
+	})
+
+	if slot.provider != providerSlot {
+		t.Fatalf("provider after same-provider panic = %#v, want %#v", slot.provider, providerSlot)
+	}
+	if !providerSlot.subscribers[slot] {
+		t.Fatal("same provider lost subscription after selector panic")
+	}
+	if slot.selected != 1 || consumer.dirty || provider.dirtyDescendants != 0 {
+		t.Fatalf("state after same-provider panic = selected %#v dirty %t descendants %d, want 1 false 0",
+			slot.selected, consumer.dirty, provider.dirtyDescendants)
+	}
+	if selectorCalls != 2 {
+		t.Fatalf("selector calls after same-provider panic = %d, want 2", selectorCalls)
+	}
+	assertSingleContextSelectorError(t, errors(), panicValue)
+
+	updateContextProvider(provider, ctx, contextTopologyValueFixture{Count: 2})
+	assertRecoveredContextSelection(t, slot, consumer, 2, selectorCalls, 3)
+
+	deactivateComponent(consumer)
+	deactivateComponent(provider)
+}
+
+func TestContextSelectorTopologyPanicRebindUnmountReleasesSubscription(t *testing.T) {
+	isolateContextSubscriptions(t)
+	errors := captureRuntimeErrors(t)
+	panicValue := &contextSelectorPanicFixture{name: "unmount-after-rebind"}
+	ctx := CreateContext(contextTopologyValueFixture{})
+	outer := contextProviderInstance("Outer", nil, ctx, contextTopologyValueFixture{Count: 1})
+	renderComponentInstance(outer)
+
+	innerProviding := false
+	inner := contextTestInstance("Inner", outer, func() {
+		if innerProviding {
+			ProvideContext(ctx, contextTopologyValueFixture{Count: 2, PanicSelect: true})
+		}
+	})
+	renderComponentInstance(inner)
+
+	selectorCalls := 0
+	consumer := contextSelectorConsumer(inner, ctx, contextTopologySelector(
+		&selectorCalls,
+		panicValue,
+	))
+	renderComponentInstance(consumer)
+	slot := consumer.contextSlots[0]
+
+	innerProviding = true
+	renderComponentInstance(inner)
+	innerProvider := inner.contextProviders[ctx.id]
+	if slot.provider != innerProvider {
+		t.Fatalf("provider after failed topology refresh = %#v, want inner %#v", slot.provider, innerProvider)
+	}
+	assertSingleContextSelectorError(t, errors(), panicValue)
+
+	deactivateComponent(consumer)
+	if slot.provider != nil {
+		t.Fatalf("provider after unmount = %#v, want nil", slot.provider)
+	}
+	if innerProvider.subscribers[slot] {
+		t.Fatal("inner provider retained inactive subscription")
+	}
+	if slots := contextSubscriptionsByID[ctx.id]; slots[slot] || len(slots) != 0 {
+		t.Fatalf("global subscriptions after unmount = %#v, want none", slots)
+	}
+	selectorCallsBeforeUpdate := selectorCalls
+	notifyContextSubscribers(innerProvider, contextTopologyValueFixture{Count: 3})
+	if selectorCalls != selectorCallsBeforeUpdate || consumer.dirty {
+		t.Fatalf("inactive consumer after provider update = calls %d dirty %t, want %d false",
+			selectorCalls, consumer.dirty, selectorCallsBeforeUpdate)
+	}
+
+	deactivateComponent(inner)
+	deactivateComponent(outer)
+}
+
 func TestContextDirtyConsumerPreventsMemoAncestorSkip(t *testing.T) {
 	ctx := CreateContext(contextValueFixture{})
 	provider := contextProviderInstance("Provider", nil, ctx, contextValueFixture{Count: 1})
@@ -486,4 +858,104 @@ func updateContextProvider[T any](instance *componentInstance, ctx *Context[T], 
 		return Empty()
 	}).(ComponentNode)
 	renderComponentInstance(instance)
+}
+
+type contextTopologyFailureExpectation struct {
+	errors           []ErrorInfo
+	panicValue       any
+	slot             *contextSubscription
+	provider         *contextProvider
+	previous         *contextProvider
+	selected         int
+	consumer         *componentInstance
+	ancestors        []*componentInstance
+	selectorCalls    int
+	wantSelectorCall int
+}
+
+func isolateContextSubscriptions(t *testing.T) {
+	t.Helper()
+	previous := contextSubscriptionsByID
+	contextSubscriptionsByID = nil
+	t.Cleanup(func() {
+		contextSubscriptionsByID = previous
+	})
+}
+
+func contextTopologySelector(
+	calls *int,
+	panicValue any,
+) func(contextTopologyValueFixture) int {
+	return func(value contextTopologyValueFixture) int {
+		(*calls)++
+		if value.PanicSelect {
+			panic(panicValue)
+		}
+		return value.Count
+	}
+}
+
+func assertFailedContextTopologyRefresh(t *testing.T, want contextTopologyFailureExpectation) {
+	t.Helper()
+	if want.slot.selected != want.selected {
+		t.Fatalf("selected after failed topology refresh = %#v, want previous %d", want.slot.selected, want.selected)
+	}
+	if want.consumer.dirty {
+		t.Fatal("consumer should remain clean after failed topology selector evaluation")
+	}
+	for _, ancestor := range want.ancestors {
+		if ancestor.dirtyDescendants != 0 {
+			t.Fatalf("%s dirty descendants after failed topology refresh = %d, want 0",
+				ancestor.name, ancestor.dirtyDescendants)
+		}
+	}
+	if want.selectorCalls != want.wantSelectorCall {
+		t.Fatalf("selector calls after failed topology refresh = %d, want %d",
+			want.selectorCalls, want.wantSelectorCall)
+	}
+	assertSingleContextSelectorError(t, want.errors, want.panicValue)
+	if want.slot.provider != want.provider {
+		t.Fatalf("provider after failed topology refresh = %#v, want %#v", want.slot.provider, want.provider)
+	}
+	if want.previous != nil && want.previous.subscribers[want.slot] {
+		t.Fatal("previous provider retained subscription after failed topology refresh")
+	}
+	if want.provider != nil && !want.provider.subscribers[want.slot] {
+		t.Fatal("new provider is missing subscription after failed topology refresh")
+	}
+}
+
+func assertSingleContextSelectorError(t *testing.T, errors []ErrorInfo, panicValue any) {
+	t.Helper()
+	if len(errors) != 1 {
+		t.Fatalf("context errors = %#v, want exactly one", errors)
+	}
+	info := errors[0]
+	if info.Phase != ErrorPhaseContext ||
+		info.Component != "Consumer" ||
+		info.Operation != "UseContextSelector" ||
+		info.Panic != panicValue {
+		t.Fatalf("context error = %#v, want phase context component Consumer operation UseContextSelector panic %#v",
+			info, panicValue)
+	}
+}
+
+func assertRecoveredContextSelection(
+	t *testing.T,
+	slot *contextSubscription,
+	consumer *componentInstance,
+	wantSelected int,
+	selectorCalls int,
+	wantSelectorCalls int,
+) {
+	t.Helper()
+	if slot.selected != wantSelected {
+		t.Fatalf("selected after safe provider update = %#v, want %d", slot.selected, wantSelected)
+	}
+	if !consumer.dirty {
+		t.Fatal("consumer should be dirty after safe provider update")
+	}
+	if selectorCalls != wantSelectorCalls {
+		t.Fatalf("selector calls after safe provider update = %d, want %d", selectorCalls, wantSelectorCalls)
+	}
 }

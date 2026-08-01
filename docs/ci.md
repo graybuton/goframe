@@ -120,6 +120,12 @@ an unchanged parent render count during child-only updates, a changed current
 parent value, uncontrolled selection ownership, stable DOM identity, and the
 absence of runtime-synthesized input or change events under both standard Go
 and TinyGo on the current Chrome/Linux heavy baseline.
+The private context-selector-topology fixture runs with standard Go/WASM. It
+verifies an outer-to-inner selector failure rebind, an ignored update from the
+old outer provider, recovery from a later safe inner update, removal of the
+inner provider while a failing outer provider is revealed, safe outer recovery,
+and live `ErrorPhaseContext` / `UseContextSelector` reporting without remounting
+the application.
 The suite also runs a focused `goxc dev` reload lifecycle against a temporary
 standard-Go browser/WASM application. It verifies the initial non-reloading
 connection, GOX, Go, and asset rebuild reloads, burst coalescing, failure
@@ -134,11 +140,11 @@ a small form-driven request. The same smoke covers a controlled backend failure
 state, delayed stale request no-overwrite behavior, and recovery after a later
 valid form submission. This does not add a GoFrame server API.
 
-The runtime error containment fixture, Error Boundary fixture, and
-router-dashboard reference-app smoke are compiled with the Go WASM compiler
-where recover-based render containment is being asserted. The size-oriented
-TinyGo package path uses trap-style panic behavior, which is documented as a
-runtime error containment limitation.
+The runtime error containment fixture, Error Boundary fixture, context selector
+topology fixture, and router-dashboard reference-app smoke are compiled with
+the Go WASM compiler where recover-based render containment is being asserted.
+The size-oriented TinyGo package path uses trap-style panic behavior, which is
+documented as a runtime error containment limitation.
 
 GOX diagnostic golden tests intentionally assert filenames, line/column
 prefixes, specific unsupported-syntax messages, and source snippets. They are

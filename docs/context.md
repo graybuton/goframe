@@ -72,6 +72,14 @@ component render error handling. A nearest scoped `gf.ErrorBoundary` can catch
 that initial render-path failure, but it does not catch later provider
 notification failures.
 
+During a provider topology refresh, structural subscription ownership advances
+to the new nearest provider even when its selector evaluation fails. The old or
+shadowed provider no longer notifies that subscription, while a later safe
+update from the new provider retries the selector and can recover the consumer.
+When the context default becomes nearest, the subscription detaches from its
+previous provider. The previous selected value remains committed and the
+consumer remains clean until a selector evaluation succeeds.
+
 ## Broad Consumers
 
 `UseContext(ctx)` returns the full nearest value. Because the runtime cannot
@@ -98,9 +106,11 @@ subscribers.
 
 Provider topology changes are observable. If a provider appears above an
 existing consumer, disappears, or a nearer nested provider appears between an
-outer provider and a consumer, affected consumers are marked dirty and resubscribe
-to the new nearest provider on their next render. This happens even when a
-selector's comparable result is equal, because the provider scope itself changed.
+outer provider and a consumer, affected subscriptions rebind to the new nearest
+provider. A successful selector evaluation marks the consumer dirty even when
+the comparable result is equal, because the provider scope itself changed. A
+failed selector evaluation leaves the previous selection committed and does not
+dirty the consumer, while keeping the new structural provider binding.
 
 ## Memoization Interaction
 
@@ -110,10 +120,10 @@ If a parent/provider rerenders, clean memoized descendants may skip. A context
 consumer whose selected value changed is marked dirty, so memoized ancestors
 above it cannot skip over the update.
 
-Memoized ancestors also cannot hide context topology changes. When a provider
-appears, is removed, or a nearer nested provider takes over, the runtime marks
-affected consumers dirty and updates dirty descendant accounting through any
-memoized wrappers above them.
+Memoized ancestors also cannot hide successful context topology changes. When a
+provider appears, is removed, or a nearer nested provider takes over and its
+selector succeeds, the runtime marks affected consumers dirty and updates dirty
+descendant accounting through any memoized wrappers above them.
 
 This means selector consumers should usually be component boundaries, and clean
 structural wrappers can use explicit `MemoEqual` where useful.
