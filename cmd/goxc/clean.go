@@ -124,19 +124,6 @@ func cleanLegacyArtifacts(appDir string) error {
 	return nil
 }
 
-func removeDirectoryIfExists(directory string) error {
-	if _, err := os.Stat(directory); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("inspect %s: %w", directory, err)
-	}
-	if err := os.RemoveAll(directory); err != nil {
-		return fmt.Errorf("remove %s: %w", directory, err)
-	}
-	fmt.Printf("removed %s\n", directory)
-	return nil
-}
-
 func removeDirectoryIfExistsBelowRoot(root, directory string) error {
 	if err := validatePathBelowRoot(root, filepath.Dir(directory), "cleanup parent", false); err != nil {
 		return err

@@ -112,11 +112,6 @@ func samePath(first, second string) bool {
 	return firstErr == nil && secondErr == nil && firstPath == secondPath
 }
 
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
 func rejectSymlinkPath(path string, description string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {

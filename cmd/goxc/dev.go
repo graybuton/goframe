@@ -305,10 +305,6 @@ func newDevServer(packageDir string, port int, dependencies devDependencies) (*d
 	}, nil
 }
 
-func (server *devServer) activatePackage() (uint64, error) {
-	return server.activatePackageWithCommit(nil)
-}
-
 func (server *devServer) activatePackageWithCommit(commit func()) (uint64, error) {
 	notify := server.started()
 	generation, err := server.generations.activatePackage(server.packageDir)
