@@ -192,12 +192,16 @@
 
 ### Fixed
 
-- GOX now rejects duplicate DOM attributes and component props with authored
-  source diagnostics before code generation can emit duplicate Go map keys or
-  struct fields.
+- GOX now rejects duplicate DOM attributes and component props, normalized DOM
+  attribute or event collisions, and explicit `Children` combined with nested
+  renderable children. Authored diagnostics are reported before generation can
+  emit duplicate Go fields or ambiguous runtime destinations, and direct
+  codegen validates manually constructed ASTs defensively.
 - `goxc clean --generated` and `--legacy` now verify adjacent `.gox.go`
-  ownership before cleanup, preserving unmarked or unsafe files instead of
-  deleting them by filename alone.
+  ownership before cleanup, retain filesystem identity and content fingerprints,
+  and revalidate the complete set plus each file immediately before removal.
+  Unmarked, replaced, modified, or unsafe files are preserved instead of being
+  deleted by filename or stale preflight evidence.
 - Valid repeated `gf.Mount` calls now release the previous application and
   remove its exact mounted DOM range before mounting into the same or an
   independent root, without removing unrelated host siblings from an inactive

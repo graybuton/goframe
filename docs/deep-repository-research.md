@@ -74,8 +74,8 @@ scratch sources and generated package trees remain outside version control.
 
 | ID | Provenance | Severity | Subsystem | Contract | Reproduction | Root cause | Disposition |
 |---|---|---|---|---|---|---|---|
-| DR-01 | `INDEPENDENT_DISCOVERY` | Medium | `pkg/gox`, `cmd/goxc check` | Accepted GOX should not emit Go that fails for duplicate literal entries. | Duplicate DOM `class` attributes and duplicate component `Label` props passed generation and check, then failed Go compilation. | The parser tracked duplicate `Key` only; codegen emitted every other repeated name into a map or struct literal. | Fixed in `54a22a65b5e4d2fc1bd0322a2c74cd950d7569bd`. |
-| DR-02 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc clean` | Cleanup may remove adjacent output only after proving it is goxc-owned. | `clean --generated` deleted an authored, unmarked `app.gox.go` and returned success. | Adjacent cleanup inferred ownership from the `.gox.go` filename and called `os.Remove` after workspace mutation. | Fixed in `cdeb83c871ea76d36fda887889f2164a40434da0`. |
+| DR-01 | `INDEPENDENT_DISCOVERY` | Medium | `pkg/gox`, `cmd/goxc check` | Accepted GOX should not emit duplicate Go fields or ambiguous runtime destinations. | Raw duplicates passed the original baseline; the first correction still accepted explicit-plus-nested `Children`, `class` plus `className`, and `onClick` plus `onclick`. | Raw spelling is not the effective destination: component children add a synthetic field, while the runtime normalizes known DOM aliases and event names. | Fixed in `54a22a65b5e4d2fc1bd0322a2c74cd950d7569bd` and completed in `9777620b0faa4798559f7af71ed256c176c6c302`. |
+| DR-02 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc clean` | Cleanup may unlink only the adjacent file whose goxc ownership was validated. | The original baseline deleted an unmarked output; after the first correction, replacing or modifying a planned file before deletion still caused the replacement to be removed. | The first plan retained only paths, so deletion could not compare the current file's identity or content with the validated object. | Fixed in `cdeb83c871ea76d36fda887889f2164a40434da0` and completed in `1bbb319ccfd8c3839862bf75ff9790957c7f1c64`. |
 | DR-03 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc` generation publication | A coordinated package generation should not expose a partial new source set after a write failure. | With valid `a.gox` and `z.gox` and a directory at `z.gox.go`, generation returned an error after publishing `a.gox.go`. | Generation computes all bytes first but performs independent atomic file replacements and removals without a package transaction or rollback. | Separate bounded stage. |
 | DR-04 | `INDEPENDENT_DISCOVERY` | High | `pkg/goframe` render transaction | A failed render must not commit newly observed state slots or reducer closures. | A failed initial render retained its initial state on retry; a failed reducer rerender changed what an old dispatch closure executed. | `useStateSlot` appends directly to committed `stateSlots`, and `setReducer` replaces the committed reducer during render. | Separate bounded stage. |
 
@@ -95,13 +95,25 @@ a general parser or fixture failure. History showed that duplicate checking was
 introduced specifically for `Key`; it never established uniqueness for the
 rest of the attribute sequence.
 
-The parser now enforces raw name uniqueness per element while retaining the
-existing exact duplicate-`Key` diagnostic. DOM and component cases report
-authored-source diagnostics respectively:
+The first correction enforced raw name uniqueness per element while retaining
+the existing exact duplicate-`Key` diagnostic. Review follow-up showed that raw
+spelling was not the complete destination contract: explicit `Children` plus
+renderable nested children emitted two Go fields, while `class`/`className` and
+`onClick`/`onclick` reached the same runtime attribute or event.
+
+Parser and codegen now share one private effective-destination model. Component
+fields remain case-sensitive Go names. DOM aliases and known case-normalized
+names match the current runtime contract, event prefixes are case-insensitive
+with lowercase suffixes, and unrelated custom attributes retain their authored
+case. Direct `Codegen` rejects the same invalid manually constructed ASTs.
+Authored-source diagnostics include:
 
 ```text
 gox: duplicate attribute "class"
 gox: duplicate component prop "Label"
+gox: explicit Children prop cannot be combined with nested children
+gox: attribute "className" conflicts with "class" after normalization
+gox: event prop "onclick" conflicts with "onClick" after normalization
 ```
 
 The JSON check regression verifies schema, source path, authored line and
@@ -115,11 +127,19 @@ removed the requested workspace by the time it reached that adjacent file. A
 marked file using the current generated header was the negative control and was
 removed as intended.
 
-Cleanup now plans every requested adjacent removal before any mutation. Each
-candidate must remain below the application root, be a no-follow regular file,
-and begin with the goxc generated-file header. An unmarked file, symlink, or
-directory rejects the operation. A later unowned candidate also preserves all
-earlier managed candidates and the workspace.
+The first correction planned every requested adjacent removal before mutation.
+Review follow-up replaced a planned file before the private deletion phase. The
+old loop removed an unowned replacement, an in-place modification, a different
+file with identical generated bytes, a symlink, and an empty directory. When a
+later plan entry changed, an earlier valid entry was removed first.
+
+Each plan entry now retains its path, `os.FileInfo` identity, and SHA-256 content
+fingerprint. The complete planned set is revalidated before adjacent deletion,
+then each entry repeats containment, `Lstat` regular-file checks, generated
+header validation, `os.SameFile` identity comparison, and digest comparison
+immediately before `os.Remove`. A disappeared entry remains a no-op. This is a
+portable narrowing of the mutation window, not an atomic filesystem transaction:
+a replacement after the final check can still race the unlink.
 
 ### DR-03: partial generated-source publication
 
@@ -202,10 +222,19 @@ independent discovery.
 validation, direct generator regressions, a read-only JSON `goxc check`
 regression, language-contract wording, and a changelog entry.
 
+`9777620b0faa4798559f7af71ed256c176c6c302` completes DR-01 with effective
+component/DOM/event destination validation, defensive direct-codegen checks,
+package-generation and JSON diagnostics, and valid parse/type-check/build
+controls.
+
 `cdeb83c871ea76d36fda887889f2164a40434da0` moves adjacent generated-file
 ownership validation ahead of cleanup mutation, tests unmarked/symlinked/
 irregular and all-or-nothing preflight cases, and updates the cleanup and
 symlink contracts.
+
+`1bbb319ccfd8c3839862bf75ff9790957c7f1c64` completes DR-02 by retaining
+filesystem identity and SHA-256 evidence, revalidating the complete plan before
+adjacent deletion, and revalidating each entry immediately before unlink.
 
 Neither fix changes a public Go API, GOX output for accepted non-collision
 sources, CLI schema, dependencies, workflows, package format, or budgets.
@@ -308,9 +337,11 @@ production edits. The new generator/check tests and cleanup tests then failed
 for those exact reasons and passed after their respective fixes; no deliberately
 red commit was created.
 
-- Duplicate attribute/prop and cleanup regressions passed 100 repetitions and
-  20 race repetitions. Nearby generation/check/clean/path/symlink suites passed
-  under Go 1.22.12, 1.25.12, and 1.26.5.
+- Raw and effective attribute/prop collision regressions and cleanup ownership
+  revalidation passed 100 repetitions and 20 race repetitions. Nearby
+  generation/check/clean/path/symlink suites passed under Go 1.22.12, 1.25.12,
+  and 1.26.5. Valid effective-destination controls parsed, type-checked, and
+  built as a complete generated package.
 - Full ordinary and `goframe_debug` tests and vet passed under Go 1.22.12,
   1.25.12, and 1.26.5. Race tests for `./pkg/... ./cmd/...` passed under Go
   1.25.12 and 1.26.5.

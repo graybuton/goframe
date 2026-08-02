@@ -146,7 +146,12 @@ that overwrite is intentional.
 
 `--generated` also removes `.goframe/gen` and legacy adjacent `*.gox.go` files
 that retain the goxc generated-file header. Unmarked, symlinked, or irregular
-adjacent outputs are rejected before cleanup mutates requested output.
+adjacent outputs are rejected before cleanup mutates requested output. The
+adjacent cleanup plan records filesystem identity and a SHA-256 content
+fingerprint. The complete plan is revalidated before adjacent deletion, and
+each entry is revalidated again immediately before its own unlink. Replacement
+or in-place modification after planning is refused; disappearance remains a
+no-op.
 
 `--legacy` helps migrate old layouts. It removes legacy `build/` and adjacent
 generated `.gox.go` files under the same ownership check. It removes legacy
@@ -269,7 +274,10 @@ The policy is designed for static repository trees and ordinary user mistakes.
 It does not attempt to sandbox a hostile local process that concurrently
 replaces paths between validation and an operation. Obvious final symlink
 write-through and cleanup traversal cases are still checked immediately at the
-operation boundary, but full adversarial filesystem mutation is out of scope.
+operation boundary. Adjacent generated cleanup checks ownership during planning,
+for the complete set before deletion, and immediately before each unlink, but a
+mutation after that final check remains outside the portable guarantee. Full
+adversarial filesystem mutation is out of scope.
 
 ## Current Limitations
 
