@@ -11,6 +11,7 @@ DUPLICATE_SMOKE_URL_BASE="${GOFRAME_DUPLICATE_KEY_SMOKE_URL:-http://127.0.0.1}"
 RUNTIME_ERRORS_SMOKE_URL_BASE="${GOFRAME_RUNTIME_ERRORS_SMOKE_URL:-http://127.0.0.1}"
 ERROR_BOUNDARY_SMOKE_URL_BASE="${GOFRAME_ERROR_BOUNDARY_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SELECTOR_TOPOLOGY_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SELECTOR_TOPOLOGY_SMOKE_URL:-http://127.0.0.1}"
+REPEATED_MOUNT_SMOKE_URL_BASE="${GOFRAME_REPEATED_MOUNT_SMOKE_URL:-http://127.0.0.1}"
 CONTROLLED_SELECT_SMOKE_URL_BASE="${GOFRAME_CONTROLLED_SELECT_SMOKE_URL:-http://127.0.0.1}"
 DASHBOARD_SMOKE_URL_BASE="${GOFRAME_DASHBOARD_SMOKE_URL:-http://127.0.0.1}"
 CONTEXT_SMOKE_URL_BASE="${GOFRAME_CONTEXT_SMOKE_URL:-http://127.0.0.1}"
@@ -109,6 +110,11 @@ build_error_boundary_smoke_url() {
 build_context_selector_topology_smoke_url() {
 	local port="$1"
 	echo "${CONTEXT_SELECTOR_TOPOLOGY_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
+}
+
+build_repeated_mount_smoke_url() {
+	local port="$1"
+	echo "${REPEATED_MOUNT_SMOKE_URL_BASE}:${port}/?smoke=$(date +%s%N)"
 }
 
 build_controlled_select_smoke_url() {
@@ -220,6 +226,12 @@ run_controlled_select_browser() {
 	node --experimental-websocket scripts/controlled-select-browser-smoke.mjs "$url" "$compiler"
 }
 
+run_repeated_mount_browser() {
+	local compiler="$1"
+	local url="$2"
+	CHROME="$CHROME_BIN" node --experimental-websocket scripts/repeated-mount-browser-smoke.mjs "$url" "$compiler"
+}
+
 if [[ -z "$GOXC" ]]; then
 	GOBIN="$BIN_DIR" go install ./cmd/goxc
 	GOXC="$BIN_DIR/goxc"
@@ -289,6 +301,26 @@ export GOFRAME_CONTEXT_SELECTOR_TOPOLOGY_CHROME_DEBUG_PORT="${GOFRAME_CONTEXT_SE
 CONTEXT_SELECTOR_TOPOLOGY_URL="$(build_context_selector_topology_smoke_url "$CONTEXT_SELECTOR_TOPOLOGY_PORT")"
 run_with_server ./scripts/fixtures/context-selector-topology "$CONTEXT_SELECTOR_TOPOLOGY_PORT" "$CONTEXT_SELECTOR_TOPOLOGY_URL" \
 	node --experimental-websocket scripts/context-selector-topology-browser-smoke.mjs
+
+echo
+echo "== Repeated mount browser smoke (standard Go) =="
+"$GOXC" package ./scripts/fixtures/repeated-mount --compiler=go
+
+REPEATED_MOUNT_GO_PORT="$(resolve_port "${GOFRAME_REPEATED_MOUNT_GO_SMOKE_PORT:-}")"
+export GOFRAME_REPEATED_MOUNT_CHROME_DEBUG_PORT="$(pick_free_port)"
+REPEATED_MOUNT_GO_URL="$(build_repeated_mount_smoke_url "$REPEATED_MOUNT_GO_PORT")"
+run_with_server ./scripts/fixtures/repeated-mount "$REPEATED_MOUNT_GO_PORT" "$REPEATED_MOUNT_GO_URL" \
+	run_repeated_mount_browser go
+
+echo
+echo "== Repeated mount browser smoke (TinyGo) =="
+"$GOXC" package ./scripts/fixtures/repeated-mount --compiler=tinygo
+
+REPEATED_MOUNT_TINYGO_PORT="$(resolve_port "${GOFRAME_REPEATED_MOUNT_TINYGO_SMOKE_PORT:-}")"
+export GOFRAME_REPEATED_MOUNT_CHROME_DEBUG_PORT="$(pick_free_port)"
+REPEATED_MOUNT_TINYGO_URL="$(build_repeated_mount_smoke_url "$REPEATED_MOUNT_TINYGO_PORT")"
+run_with_server ./scripts/fixtures/repeated-mount "$REPEATED_MOUNT_TINYGO_PORT" "$REPEATED_MOUNT_TINYGO_URL" \
+	run_repeated_mount_browser tinygo
 
 echo
 echo "== Controlled select browser smoke (TinyGo) =="

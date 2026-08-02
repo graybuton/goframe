@@ -32,8 +32,11 @@ func Mount(rootID string, app func() Node) {
 	if root.IsUndefined() || root.IsNull() {
 		panic("goframe: root element not found: " + rootID)
 	}
+	if mountTargetInsideCurrentRoot(root) {
+		panic("goframe: cannot mount inside current root")
+	}
 	if mountedApp.tree != nil {
-		releaseMounted(mountedApp.tree)
+		removeMounted(mountedApp.root, mountedApp.tree)
 	}
 
 	mountedApp.root = root
@@ -48,6 +51,12 @@ func Mount(rootID string, app func() Node) {
 	pendingEffects = nil
 
 	mountApplication(document)
+}
+
+func mountTargetInsideCurrentRoot(root js.Value) bool {
+	return mountedApp.tree != nil &&
+		!root.Equal(mountedApp.root) &&
+		mountedApp.root.Call("contains", root).Bool()
 }
 
 func mountApplication(document js.Value) {

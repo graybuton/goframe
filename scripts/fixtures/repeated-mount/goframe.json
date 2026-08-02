@@ -1,0 +1,10 @@
+{
+  "name": "repeated-mount",
+  "entry": ".",
+  "output": "dist",
+  "compiler": "go",
+  "wasm": "bundle.wasm",
+  "assets": [
+    "index.html"
+  ]
+}
