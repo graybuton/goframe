@@ -10,10 +10,10 @@ committed.
 
 The first pass removed `generateFileSafely` and recorded a broad inventory.
 The continuation revisited every strong finding instead of treating the audit
-document as a substitute for cleanup. It removes three more obsolete helpers,
-resolves all confirmed `nilness`, `writestring`, and `unusedparams` findings in
-`cmd/goxc`, attributes the `useState` experiment at the WASM-section level,
-and records the remaining findings with concrete evidence.
+document as a substitute for cleanup. It removes four more obsolete private
+declarations, resolves all confirmed `nilness`, `writestring`, and
+`unusedparams` findings in `cmd/goxc`, attributes and removes `useState` at the
+WASM-section level, and records the remaining findings with concrete evidence.
 
 ## Scope
 
@@ -96,52 +96,55 @@ The mandatory final check contains no `nilness`, `unusedparams`, `writestring`,
 or `unusedfunc` diagnostic for F003-F009. Its remaining 13 output lines are
 three multiline `runtime.GOROOT` deprecation diagnostics and one
 `sort.Slice` modernization suggestion. The report SHA-256 is
-`4d8f8a9246e4455894d119664b693edfce2d7e62acfe27849cf99fbfea8ee728`.
+`05a60855aad4558600fe10af5d57c0513fce0f1f6541a8cdba5b45a0e0fa214b`.
 
 The repository-wide report has 163 lines and SHA-256
-`a67c1022521223b224da5e46148184cea8c72dedee7b30e3c8d31fa8810f0113`.
+`8bc2d6a1d3a1d96c3da2d51aceb7ed6ce0dabc71a5ac779f7a9c1b9a6ae74083`.
 It also records generated-GOX loading gaps, host/browser stub selection,
-example and fixture declarations, and Go-version modernization hints.
+example and fixture declarations, and Go-version modernization hints. It does
+not report the removed `useState` declaration.
 
 ### Staticcheck
 
-| Context | `S*` | `ST*` | `U1000` | Total |
-|---|---:|---:|---:|---:|
-| H1 tests included | 1 | 56 | 91 | 148 |
-| H1 tests excluded | 1 | 56 | 230 | 287 |
-| H2 tests included | 1 | 56 | 91 | 148 |
-| H2 tests excluded | 1 | 56 | 230 | 287 |
-| H3 tests included | 0 | 10 | 0 | 10 |
-| H3 tests excluded | 0 | 10 | 12 | 22 |
-| W1 production | 2 | 22 | 5 | 29 |
-| W2 production | 2 | 22 | 5 | 29 |
+| Context | `S*` | `ST*` | `U1000` | Total | Report SHA-256 |
+|---|---:|---:|---:|---:|---|
+| H1 tests included | 1 | 56 | 90 | 147 | `6cd74686a52975a5ceb534d1c1ae07f08e4002a21cd22d2b0bccf2ee5b6cb848` |
+| H1 tests excluded | 1 | 56 | 229 | 286 | `dd6e4ecf7809126a35638227018644c5566a8fe7079956ff86cef5110421d586` |
+| H2 tests included | 1 | 56 | 90 | 147 | `fddc76a382076854e6a9d618dc83baddf7de0d56ba139356404f1b2b3bfeb506` |
+| H2 tests excluded | 1 | 56 | 229 | 286 | `ed529d0888646036e287c4975fa21c0a6051b8d50b526d63d2caf27622c4696a` |
+| H3 tests included | 0 | 10 | 0 | 10 | `957969271a177647f5d382657fbc69796da6005ea10984d8251a1ed35e2d5591` |
+| H3 tests excluded | 0 | 10 | 12 | 22 | `71f802be28f4753735107f7047af076f0d762112fca9a5ba0cda6f178bc81c6b` |
+| W1 production | 2 | 22 | 4 | 28 | `813a57f532d4837f42ced421946f01e36581cf33c6f51699f632f41baa7a2848` |
+| W2 production | 2 | 22 | 4 | 28 | `72ac39e2acecd949210d4f501a792429455adff464939381bc65309ed266675e` |
 
 There are no `SA*` findings. The two runtime `S*` suggestions are evaluated
 under F013. `ST1000` package-comment and `ST1005` diagnostic-capitalization
 signals do not establish dead or incorrect behavior; changing exact CLI error
-text is forbidden in this cleanup.
+text is forbidden in this cleanup. Each applicable runtime context has exactly
+one fewer `U1000` finding after removing `useState`; no new diagnostic appears.
 
 ### Deadcode
 
-| Context | Production functions | Test-inclusive functions |
-|---|---:|---:|
-| H1 | 272 | 23 |
-| H2 | 272 | 23 |
-| H3 | 20 | 3 |
-| W1 | 134 | not applicable |
-| W2 | 134 | not applicable |
+| Context | Production functions | Test-inclusive functions | Production report SHA-256 | Test report SHA-256 |
+|---|---:|---:|---|---|
+| H1 | 271 | 22 | `2a0522b579d56f601e5d2e7aa4c480cdefd702f0e6b5e6fd824a9e9245c430d4` | `de3004347b014702f7cdb8ba4ef1caa7f81b7e007e07ffeec29393d409b488b4` |
+| H2 | 271 | 22 | `81fff5cf0e1886f1867d2667c44df5d4ca91b6f89c5b89864878d124000f0e0e` | `63fe9a71dd60164deb1fa991517761e65f829d3157d3304033649c6a865561f2` |
+| H3 | 20 | 3 | `1efc09588e4b61d1892d643f81279a0cddb7e64b35897784a211fbf17af66ac9` | `408940b07ecfdf7bc1173843bff3fbf32848c12932243d07ab11eecc538ccdd2` |
+| W1 | 133 | not applicable | `ea34c62cd5aee13bfd4b11af59fc1203bcbbb68dc88640dd3aec98842ce811bd` | not applicable |
+| W2 | 133 | not applicable | `ea34c62cd5aee13bfd4b11af59fc1203bcbbb68dc88640dd3aec98842ce811bd` | not applicable |
 
 The large production counts include exported package surfaces and features not
 reached by the selected executables. Test-inclusive H1/H2 reduces the closed
-set to debug stubs, exported compatibility surfaces, and `useState`; it does
-not report the removed F001, F003, F004, or F005 declarations.
+set to debug stubs and exported compatibility surfaces; it does not report the
+removed F001-F005 declarations. H1, H2, W1, and W2 each have exactly one fewer
+unreachable function after the removal; H3 is unchanged.
 
 ## Mandatory Finding Resolution
 
 | ID | Finding | Decision | Evidence and result |
 |---|---|---|---|
 | F001 | `generateFileSafely` | `FIX_NOW`, complete | It remains removed in `172ee5bc8e011849c3b158129403667c17f6a889`; package-coordinated generation superseded it. |
-| F002 | `useState` | `PRESERVE_WITH_PROOF` | No caller or compatibility role exists, but the fully attributed standard-Go removal grows Brotli by 300 bytes. Details are below. |
+| F002 | `useState` | `FIX_NOW`, complete | No caller or compatibility role exists. Removed in `9748b6e01bc8d9b40ac0bdeec2004ccc3f13abbf`; the attributed standard-Go Brotli trade-off is accepted below. |
 | F003 | `fileExists` | `FIX_NOW` | Declaration-only reference; structured metadata checks replaced its export-ownership callers. Removed in `f4958fd06c8f3eb7e7cecdad4517396827ae85e1`. |
 | F004 | `removeDirectoryIfExists` | `FIX_NOW` | Declaration-only reference; all cleanup callers use root-aware `removeDirectoryIfExistsBelowRoot`. Removed in `f4958fd06c8f3eb7e7cecdad4517396827ae85e1`. |
 | F005 | `(*devServer).activatePackage` | `FIX_NOW` | No method expression, interface, callback, or test caller; `activatePackageWithCommit` superseded it. Removed in `f4958fd06c8f3eb7e7cecdad4517396827ae85e1`. |
@@ -219,19 +222,19 @@ S1021 kept the size at 2,654,439 bytes but changed the complete artifact hash
 without adding correctness, reachability, or allocation value. S1021 is
 style-only; S1017 violates the no-growth boundary.
 
-## `useState` WASM Attribution
+## `useState` WASM Attribution And Removal
 
-`useState` has no direct or indirect caller in the inspected source and is
+`useState` had no direct or indirect caller in the inspected source and was
 reported by Staticcheck and deadcode in every applicable runtime context. Its
 history shows that `UseState` began calling `useStateSlot` directly when
-reducer support was introduced. The function was nevertheless restored after
-the required output attribution, rather than after a complete-hash comparison
-alone.
+reducer support was introduced. It is removed in
+`9748b6e01bc8d9b40ac0bdeec2004ccc3f13abbf` without changing `UseState`,
+`UseReducer`, `useStateSlot`, state setters, or public declarations.
 
-For the standard-Go counter package, alternating restored and removed builds
-are deterministic:
+For the standard-Go counter package, two wrapper-present builds and two
+wrapper-removed builds are deterministic:
 
-| Evidence | Restored | Removed | Delta |
+| Evidence | Wrapper present | Wrapper removed | Delta |
 |---|---:|---:|---:|
 | raw | 2,192,823 | 2,192,823 | 0 |
 | gzip | 642,700 | 642,695 | -5 |
@@ -254,12 +257,33 @@ to
 Extracted strings are identical. Goxc intentionally links with an empty Go
 build ID, so no build-ID payload is available to attribute.
 
+The import, function, and export counts remain 20, 1,521, and 4. Deterministic
+stream hashes change from
+`f21f1ce0b8dbaff965032b71f429fdb6343f4a778978dc7ef67b7e397352806a`
+to
+`0998484a8033d84ecda18aa852273ceb14c930b0c6b17bf148edbcfe59a06deb`
+for gzip, from
+`3b727ecdd4ce3ac9e12d8683756a3381a2ec0538b598e2eae2a6043ad463b898`
+to
+`53c2c8ee18f02764410c39d1222e51f27b017431bb81b9e9253d97fd5a778ec8`
+for Brotli, and from
+`77f5a4d4e3b7ad9e14c49efc2ad81e3511d85643d5bd2224b6cb3ace69780e2d`
+to
+`1a8b7facc31674326b03f426a08c9c81272bdd6bd0e1f1da8bbff894c036bead`
+for Zstandard.
+
 All 44 TinyGo raw, gzip, Brotli, and Zstandard streams across the eleven
-budgeted applications remain byte-identical after temporary removal. Every
-budget and ratio passes. Aggregate browser phases using standard Go and TinyGo
-also preserve behavior. The removal is rejected solely because its
-reproducible Brotli output grows, which fails this task's explicit acceptance
-boundary.
+budgeted applications remain byte-identical after removal. Every budget and
+ratio passes. Focused and aggregate browser phases using standard Go and
+TinyGo preserve behavior. State, reducer, stale-setter, render-time-set,
+hook-order, and slot diagnostics remain green across the supported Go
+toolchains.
+
+The complete standard-Go artifact hash changes because of a bounded data
+layout difference. No code-section, behavior, API, TinyGo budget, or current
+size-budget change results from the removal. The reproducible 300-byte Brotli
+increase is an accepted non-budgeted compression-layout trade-off, not a
+runtime compatibility reason to retain unreachable source.
 
 ## Separate Behavioral Stage
 
@@ -307,12 +331,12 @@ The generated workspace `go.mod` SHA-256 is
 The fixed CLI package bundle SHA-256 is
 `2bc7a85314fdf0d6ef1411e9800547ceae4687e81a709b3eb47b98e6db2bd1a0`.
 
-With the final runtime source restored, all eleven TinyGo applications and all
-44 deterministic compression streams remain byte-identical to the starting
-head. The baseline hash-manifest SHA-256 is
+With the obsolete runtime wrapper removed, all eleven TinyGo applications and
+all 44 deterministic compression streams remain byte-identical to the
+starting head. The baseline hash-manifest SHA-256 is
 `c5a566ba572082ed9aadf08d887003846f97d71203cf557053b67379dd0a6211`.
-No runtime, GOX, example, fixture, dependency, workflow, lockfile, or budget is
-changed by the cleanup commits.
+No runtime behavior, GOX, example, fixture, dependency, workflow, lockfile, or
+budget is changed by the cleanup commits.
 
 ## Cleanup Commits
 
@@ -323,9 +347,14 @@ changed by the cleanup commits.
 - `1ac9dd68a8dfd01e3f68895705c87a2e2346377b` resolves the two
   tautologies, all confirmed builder-write allocations, and the unused embed
   parameter.
+- `9748b6e01bc8d9b40ac0bdeec2004ccc3f13abbf` removes the obsolete private
+  `useState` wrapper.
 
-Each cleanup commit is signed. The final documentation commit records the
-completed finding set without altering package inputs.
+Five confirmed obsolete declarations are removed across the cleanup commits.
+Each cleanup commit is signed. The runtime follow-up changes only
+`pkg/goframe/state.go`; this audit is the only accompanying documentation
+change. Tests, scripts, examples, package inputs, workflows, dependencies,
+lockfiles, generated artifacts, and budgets remain unchanged.
 
 ## Limitations
 
