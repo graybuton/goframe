@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	gotoken "go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -907,6 +908,330 @@ func View() any {
 				t.Fatalf("diagnostic location = %s:%d:%d", diagnostic.Diagnostic.Filename, diagnostic.Diagnostic.Line, diagnostic.Diagnostic.Column)
 			}
 		})
+	}
+}
+
+func TestGenerateRejectsEffectivePropCollisions(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+	}{
+		{
+			name: "component Children",
+			source: `package main
+
+func View() any {
+	return <Panel Children={nil}>nested child</Panel>
+}
+`,
+			message: "gox: explicit Children prop cannot be combined with nested children",
+		},
+		{
+			name: "DOM alias",
+			source: `package main
+
+func View() any {
+	return <div class="first" className="second" />
+}
+`,
+			message: `gox: attribute "className" conflicts with "class" after normalization`,
+		},
+		{
+			name: "known DOM attribute case",
+			source: `package main
+
+func View() any {
+	return <input TYPE="text" type="button" />
+}
+`,
+			message: `gox: attribute "type" conflicts with "TYPE" after normalization`,
+		},
+		{
+			name: "label alias",
+			source: `package main
+
+func View() any {
+	return <label htmlFor="first" for="second" />
+}
+`,
+			message: `gox: attribute "for" conflicts with "htmlFor" after normalization`,
+		},
+		{
+			name: "event case",
+			source: `package main
+
+func View() any {
+	return <button onClick={first} onclick={second} />
+}
+`,
+			message: `gox: event prop "onclick" conflicts with "onClick" after normalization`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			generators := []struct {
+				name     string
+				generate func() error
+			}{
+				{
+					name: "GenerateNamed",
+					generate: func() error {
+						_, err := GenerateNamed("collision.gox", []byte(test.source))
+						return err
+					},
+				},
+				{
+					name: "GeneratePackageWithOptions",
+					generate: func() error {
+						_, err := GeneratePackageWithOptions([]PackageSource{{
+							Filename: "collision.gox",
+							Source:   []byte(test.source),
+						}}, PackageGenerateOptions{})
+						return err
+					},
+				},
+			}
+			for _, generator := range generators {
+				t.Run(generator.name, func(t *testing.T) {
+					err := generator.generate()
+					if err == nil {
+						t.Fatal("generation returned nil error")
+					}
+					var diagnostic DiagnosticError
+					if !errors.As(err, &diagnostic) {
+						t.Fatalf("error %T is not DiagnosticError: %v", err, err)
+					}
+					if diagnostic.Diagnostic.Message != test.message {
+						t.Fatalf("diagnostic message = %q, want %q", diagnostic.Diagnostic.Message, test.message)
+					}
+					if diagnostic.Diagnostic.Filename != "collision.gox" || diagnostic.Diagnostic.Line != 4 || diagnostic.Diagnostic.Column == 0 {
+						t.Fatalf("diagnostic location = %s:%d:%d", diagnostic.Diagnostic.Filename, diagnostic.Diagnostic.Line, diagnostic.Diagnostic.Column)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestCodegenRejectsEffectivePropCollisions(t *testing.T) {
+	stringAttribute := func(name, value string) Attribute {
+		return Attribute{Name: name, Value: StringValue{Value: value}}
+	}
+	expressionAttribute := func(name, code string) Attribute {
+		return Attribute{Name: name, Value: ExpressionValue{Code: code}}
+	}
+	tests := []struct {
+		name    string
+		node    *Element
+		message string
+	}{
+		{
+			name: "duplicate DOM attribute",
+			node: &Element{Tag: "div", Attributes: []Attribute{
+				stringAttribute("class", "first"),
+				stringAttribute("class", "second"),
+			}},
+			message: `gox: duplicate attribute "class"`,
+		},
+		{
+			name: "duplicate component prop",
+			node: &Element{Tag: "Panel", Attributes: []Attribute{
+				stringAttribute("Label", "first"),
+				stringAttribute("Label", "second"),
+			}},
+			message: `gox: duplicate component prop "Label"`,
+		},
+		{
+			name: "duplicate Key",
+			node: &Element{Tag: "Panel", Attributes: []Attribute{
+				stringAttribute("Key", "first"),
+				stringAttribute("Key", "second"),
+			}},
+			message: "gox: duplicate Key prop",
+		},
+		{
+			name: "component Children",
+			node: &Element{
+				Tag:        "Panel",
+				Attributes: []Attribute{expressionAttribute("Children", "nil")},
+				Children:   []Node{&Text{Value: "nested child"}},
+			},
+			message: "gox: explicit Children prop cannot be combined with nested children",
+		},
+		{
+			name: "DOM alias",
+			node: &Element{Tag: "div", Attributes: []Attribute{
+				stringAttribute("class", "first"),
+				stringAttribute("className", "second"),
+			}},
+			message: `gox: attribute "className" conflicts with "class" after normalization`,
+		},
+		{
+			name: "known DOM attribute case",
+			node: &Element{Tag: "input", Attributes: []Attribute{
+				stringAttribute("TYPE", "text"),
+				stringAttribute("type", "button"),
+			}},
+			message: `gox: attribute "type" conflicts with "TYPE" after normalization`,
+		},
+		{
+			name: "label alias",
+			node: &Element{Tag: "label", Attributes: []Attribute{
+				stringAttribute("htmlFor", "first"),
+				stringAttribute("for", "second"),
+			}},
+			message: `gox: attribute "for" conflicts with "htmlFor" after normalization`,
+		},
+		{
+			name: "event case",
+			node: &Element{Tag: "button", Attributes: []Attribute{
+				expressionAttribute("onClick", "first"),
+				expressionAttribute("onclick", "second"),
+			}},
+			message: `gox: event prop "onclick" conflicts with "onClick" after normalization`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Codegen(test.node)
+			if err == nil || err.Error() != test.message {
+				t.Fatalf("Codegen() error = %v, want %q", err, test.message)
+			}
+		})
+	}
+}
+
+func TestGenerateAllowsDistinctEffectivePropDestinations(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "self-closing explicit Children",
+			source: `package main
+
+func View() any {
+	return <Panel Children={nil} />
+}
+`,
+		},
+		{
+			name: "explicit Children with whitespace",
+			source: `package main
+
+func View() any {
+	return <Panel Children={nil}>
+</Panel>
+}
+`,
+		},
+		{
+			name: "custom attribute",
+			source: `package main
+
+func View() any {
+	return <div class="first" data-class="second" />
+}
+`,
+		},
+		{
+			name: "distinct events",
+			source: `package main
+
+func View() any {
+	return <button onClick={first} onInput={second} />
+}
+`,
+		},
+		{
+			name: "single normalized destinations",
+			source: `package main
+
+func View() any {
+	return <label className="field" htmlFor="value" OnClick={first} />
+}
+`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			generated, err := GenerateNamed("valid.gox", []byte(test.source))
+			if err != nil {
+				t.Fatalf("GenerateNamed() error: %v", err)
+			}
+			if _, err := parser.ParseFile(gotoken.NewFileSet(), "valid.gox.go", generated, parser.AllErrors); err != nil {
+				t.Fatalf("generated Go does not parse: %v\n%s", err, generated)
+			}
+		})
+	}
+}
+
+func TestEffectivePropDestinationControlsBuild(t *testing.T) {
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	module := "module example.com/effective-props\n\ngo 1.22\n\n" +
+		"require github.com/graybuton/goframe v0.0.0\n\n" +
+		"replace github.com/graybuton/goframe => " + filepath.ToSlash(repositoryRoot) + "\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`package app
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type PanelProps struct {
+	Children []gf.Node
+}
+
+func Panel(props PanelProps) gf.Node {
+	return gf.Fragment(props.Children...)
+}
+
+func SelfClosing() gf.Node {
+	return <Panel Children={nil} />
+}
+
+func WhitespaceOnly() gf.Node {
+	return <Panel Children={nil}>
+</Panel>
+}
+
+func DistinctDOMProps() gf.Node {
+	return <label class="field" data-class="custom" htmlFor="value" onClick={func() {}} onInput={func() {}} />
+}
+`)
+	generated, err := GenerateNamed("view.gox", source)
+	if err != nil {
+		t.Fatalf("GenerateNamed() error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "view.gox.go"), generated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.Command("go", "test", "./...")
+	command.Dir = root
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "GOWORK=") ||
+			strings.HasPrefix(entry, "GOTOOLCHAIN=") ||
+			strings.HasPrefix(entry, "GOCACHE=") {
+			continue
+		}
+		command.Env = append(command.Env, entry)
+	}
+	command.Env = append(command.Env,
+		"GOWORK=off",
+		"GOTOOLCHAIN=local",
+		"GOCACHE="+filepath.Join(root, "go-cache"),
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("go test generated control package: %v\n%s\n%s", err, output, generated)
 	}
 }
 

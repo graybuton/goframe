@@ -33,6 +33,47 @@ func App() any {
 }
 `
 
+var effectiveCollisionCheckSources = []struct {
+	name    string
+	source  string
+	message string
+	line    string
+}{
+	{
+		name: "Children",
+		source: `package main
+
+func App() any {
+	return <Panel Children={nil}>nested child</Panel>
+}
+`,
+		message: "gox: explicit Children prop cannot be combined with nested children",
+		line:    `<Panel Children={nil}>nested child</Panel>`,
+	},
+	{
+		name: "DOM alias",
+		source: `package main
+
+func App() any {
+	return <main class="first" className="second">Hello</main>
+}
+`,
+		message: `gox: attribute "className" conflicts with "class" after normalization`,
+		line:    `<main class="first" className="second">Hello</main>`,
+	},
+	{
+		name: "event case",
+		source: `package main
+
+func App() any {
+	return <button onClick={first} onclick={second}>Hello</button>
+}
+`,
+		message: `gox: event prop "onclick" conflicts with "onClick" after normalization`,
+		line:    `<button onClick={first} onclick={second}>Hello</button>`,
+	},
+}
+
 func TestParseCheckOptions(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -203,6 +244,39 @@ func TestCheckReportsDuplicateAttribute(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 	assertCheckTreeUnchanged(t, root, before)
+}
+
+func TestCheckReportsEffectivePropCollisions(t *testing.T) {
+	for _, test := range effectiveCollisionCheckSources {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeCheckSource(t, root, "app.gox", test.source)
+			before := snapshotCheckTree(t, root)
+
+			stdout, stderr, err := runCheckForTest([]string{path, "--format=json"})
+			if !errors.Is(err, errCheckDiagnostics) {
+				t.Fatalf("runCheckCommand() error = %v, want errCheckDiagnostics", err)
+			}
+			report := decodeCheckReport(t, stdout)
+			if report.SchemaVersion != 1 || report.OK || report.FilesChecked != 1 || len(report.Diagnostics) != 1 {
+				t.Fatalf("report = %+v", report)
+			}
+			diagnostic := report.Diagnostics[0]
+			if diagnostic.File != path || diagnostic.Line != 4 || diagnostic.Column == 0 {
+				t.Fatalf("diagnostic location = %s:%d:%d", diagnostic.File, diagnostic.Line, diagnostic.Column)
+			}
+			if diagnostic.Message != test.message {
+				t.Fatalf("diagnostic message = %q, want %q", diagnostic.Message, test.message)
+			}
+			if diagnostic.Source != test.line {
+				t.Fatalf("diagnostic source = %q, want %q", diagnostic.Source, test.line)
+			}
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+			assertCheckTreeUnchanged(t, root, before)
+		})
+	}
 }
 
 func TestCheckCollectsDiagnosticsFromMultipleFiles(t *testing.T) {

@@ -88,7 +88,8 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 
 	element := &Element{Tag: name.value}
 	parser.positions[element] = name.offset
-	seenAttributes := map[string]struct{}{}
+	seenAttributes := make(elementAttributeDestinations)
+	childrenAttributeOffset := -1
 	for {
 		next, err := parser.lexer.next()
 		if err != nil {
@@ -101,6 +102,12 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 			if err != nil {
 				return nil, err
 			}
+			if component && childrenAttributeOffset >= 0 && hasRenderableChildren(children) {
+				return nil, parser.lexer.errorAt(
+					childrenAttributeOffset,
+					"gox: explicit Children prop cannot be combined with nested children",
+				)
+			}
 			element.Children = children
 			return element, nil
 		case tokenSelfClose:
@@ -109,17 +116,12 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 			if component && next.value != "Key" && !validGoIdentifier(next.value) {
 				return nil, parser.lexer.errorAt(next.offset, "component prop %q is not a valid Go field name", next.value)
 			}
-			if _, exists := seenAttributes[next.value]; exists {
-				switch {
-				case next.value == "Key":
-					return nil, parser.lexer.errorAt(next.offset, "gox: duplicate Key prop")
-				case component:
-					return nil, parser.lexer.errorAt(next.offset, "gox: duplicate component prop %q", next.value)
-				default:
-					return nil, parser.lexer.errorAt(next.offset, "gox: duplicate attribute %q", next.value)
-				}
+			if err := seenAttributes.add(next.value, component); err != nil {
+				return nil, parser.lexer.errorAt(next.offset, "%s", err)
 			}
-			seenAttributes[next.value] = struct{}{}
+			if component && next.value == "Children" {
+				childrenAttributeOffset = next.offset
+			}
 			attribute, err := parser.parseAttribute(next)
 			if err != nil {
 				return nil, err
@@ -134,6 +136,102 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 			return nil, parser.unexpected(next, "attribute, >, or />")
 		}
 	}
+}
+
+type elementAttributeDestinationKind uint8
+
+const (
+	elementAttributeKey elementAttributeDestinationKind = iota
+	elementAttributeComponentProp
+	elementAttributeDOMAttribute
+	elementAttributeDOMEvent
+)
+
+type elementAttributeDestination struct {
+	kind elementAttributeDestinationKind
+	name string
+}
+
+type elementAttributeDestinations map[elementAttributeDestination]string
+
+func (destinations elementAttributeDestinations) add(name string, component bool) error {
+	destination := effectiveElementAttributeDestination(name, component)
+	previous, exists := destinations[destination]
+	if !exists {
+		destinations[destination] = name
+		return nil
+	}
+	if previous == name {
+		switch {
+		case name == "Key":
+			return fmt.Errorf("gox: duplicate Key prop")
+		case component:
+			return fmt.Errorf("gox: duplicate component prop %q", name)
+		default:
+			return fmt.Errorf("gox: duplicate attribute %q", name)
+		}
+	}
+	if destination.kind == elementAttributeDOMEvent {
+		return fmt.Errorf("gox: event prop %q conflicts with %q after normalization", name, previous)
+	}
+	return fmt.Errorf("gox: attribute %q conflicts with %q after normalization", name, previous)
+}
+
+func effectiveElementAttributeDestination(name string, component bool) elementAttributeDestination {
+	if name == "Key" {
+		return elementAttributeDestination{kind: elementAttributeKey, name: name}
+	}
+	if component {
+		return elementAttributeDestination{kind: elementAttributeComponentProp, name: name}
+	}
+	if event, ok := effectiveDOMEventName(name); ok {
+		return elementAttributeDestination{kind: elementAttributeDOMEvent, name: event}
+	}
+	return elementAttributeDestination{kind: elementAttributeDOMAttribute, name: effectiveDOMAttributeName(name)}
+}
+
+func effectiveDOMEventName(name string) (string, bool) {
+	if len(name) <= 2 {
+		return "", false
+	}
+	first, second := name[0], name[1]
+	if (first != 'o' && first != 'O') || (second != 'n' && second != 'N') {
+		return "", false
+	}
+	return strings.ToLower(name[2:]), true
+}
+
+func effectiveDOMAttributeName(name string) string {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "class", "id", "value", "type", "placeholder", "name", "disabled",
+		"checked", "selected", "href", "src", "alt", "title", "role":
+		return lower
+	case "classname":
+		return "class"
+	case "htmlfor":
+		return "for"
+	default:
+		return name
+	}
+}
+
+func validateElementAttributeDestinations(element *Element, component bool) error {
+	destinations := make(elementAttributeDestinations)
+	for _, attribute := range element.Attributes {
+		if err := destinations.add(attribute.Name, component); err != nil {
+			return err
+		}
+	}
+	if component && hasRenderableChildren(element.Children) {
+		if _, hasExplicitChildren := destinations[elementAttributeDestination{
+			kind: elementAttributeComponentProp,
+			name: "Children",
+		}]; hasExplicitChildren {
+			return fmt.Errorf("gox: explicit Children prop cannot be combined with nested children")
+		}
+	}
+	return nil
 }
 
 func (parser *Parser) parseAttribute(name token) (Attribute, error) {
