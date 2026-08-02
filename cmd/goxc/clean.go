@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,17 @@ type cleanOptions struct {
 	workspace string
 	generated bool
 	legacy    bool
+}
+
+type adjacentGeneratedFileCleanup struct {
+	path   string
+	info   os.FileInfo
+	digest [sha256.Size]byte
+}
+
+type adjacentGeneratedFileCleanupPlan struct {
+	root  string
+	files []adjacentGeneratedFileCleanup
 }
 
 func cleanCommand(args []string) error {
@@ -66,7 +78,7 @@ func cleanApp(options cleanOptions) error {
 	if err := validateWorkspaceRoot(layout); err != nil {
 		return err
 	}
-	var adjacentGeneratedFiles []string
+	var adjacentGeneratedFiles adjacentGeneratedFileCleanupPlan
 	if options.generated || options.legacy {
 		adjacentGeneratedFiles, err = planAdjacentGeneratedFileCleanup(options.appDir)
 		if err != nil {
@@ -101,45 +113,113 @@ func cleanApp(options cleanOptions) error {
 	return nil
 }
 
-func planAdjacentGeneratedFileCleanup(appDir string) ([]string, error) {
+func planAdjacentGeneratedFileCleanup(appDir string) (adjacentGeneratedFileCleanupPlan, error) {
 	files, err := findGOXFiles(appDir)
 	if err != nil {
-		return nil, err
+		return adjacentGeneratedFileCleanupPlan{}, err
 	}
-	generatedFiles := make([]string, 0, len(files))
+	plan := adjacentGeneratedFileCleanupPlan{
+		root:  appDir,
+		files: make([]adjacentGeneratedFileCleanup, 0, len(files)),
+	}
 	for _, file := range files {
 		generated := file + ".go"
-		if err := validatePathBelowRoot(appDir, generated, "adjacent generated output", true); err != nil {
-			return nil, err
-		}
-		if _, err := os.Lstat(generated); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return nil, fmt.Errorf("inspect adjacent generated output %s: %w", generated, err)
-		}
-		content, err := readGenerationSource(generated, "adjacent generated output")
+		entry, exists, err := inspectAdjacentGeneratedFile(appDir, generated)
 		if err != nil {
-			return nil, err
+			return adjacentGeneratedFileCleanupPlan{}, err
 		}
-		if !bytes.HasPrefix(content, []byte(generatedGOXFileHeader)) {
-			return nil, fmt.Errorf(
-				"refuse to remove adjacent generated output %s: file is not managed by goxc",
-				generated,
-			)
+		if !exists {
+			continue
 		}
-		generatedFiles = append(generatedFiles, generated)
+		plan.files = append(plan.files, entry)
 	}
-	return generatedFiles, nil
+	return plan, nil
 }
 
-func cleanAdjacentGeneratedFiles(files []string) error {
-	for _, generated := range files {
-		if err := os.Remove(generated); errors.Is(err, os.ErrNotExist) {
+func inspectAdjacentGeneratedFile(root, path string) (adjacentGeneratedFileCleanup, bool, error) {
+	if err := validatePathBelowRoot(root, path, "adjacent generated output", true); err != nil {
+		return adjacentGeneratedFileCleanup{}, false, err
+	}
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return adjacentGeneratedFileCleanup{}, false, nil
+	} else if err != nil {
+		return adjacentGeneratedFileCleanup{}, false, fmt.Errorf("inspect adjacent generated output %s: %w", path, err)
+	}
+
+	info, err := regularFileNoFollow(path, "adjacent generated output")
+	if err != nil {
+		return adjacentGeneratedFileCleanup{}, false, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return adjacentGeneratedFileCleanup{}, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	verifiedInfo, err := regularFileNoFollow(path, "adjacent generated output")
+	if errors.Is(err, os.ErrNotExist) {
+		return adjacentGeneratedFileCleanup{}, false, nil
+	}
+	if err != nil {
+		return adjacentGeneratedFileCleanup{}, false, err
+	}
+	if !os.SameFile(info, verifiedInfo) {
+		return adjacentGeneratedFileCleanup{}, false, fmt.Errorf(
+			"refuse to remove adjacent generated output %s: file identity changed while validating cleanup ownership",
+			path,
+		)
+	}
+	if !bytes.HasPrefix(content, []byte(generatedGOXFileHeader)) {
+		return adjacentGeneratedFileCleanup{}, false, fmt.Errorf(
+			"refuse to remove adjacent generated output %s: file is not managed by goxc",
+			path,
+		)
+	}
+	return adjacentGeneratedFileCleanup{
+		path:   path,
+		info:   verifiedInfo,
+		digest: sha256.Sum256(content),
+	}, true, nil
+}
+
+func revalidateAdjacentGeneratedFile(root string, planned adjacentGeneratedFileCleanup) (bool, error) {
+	current, exists, err := inspectAdjacentGeneratedFile(root, planned.path)
+	if err != nil || !exists {
+		return exists, err
+	}
+	if !os.SameFile(planned.info, current.info) {
+		return false, fmt.Errorf(
+			"refuse to remove adjacent generated output %s: file identity changed after cleanup planning",
+			planned.path,
+		)
+	}
+	if planned.digest != current.digest {
+		return false, fmt.Errorf(
+			"refuse to remove adjacent generated output %s: file content changed after cleanup planning",
+			planned.path,
+		)
+	}
+	return true, nil
+}
+
+func cleanAdjacentGeneratedFiles(plan adjacentGeneratedFileCleanupPlan) error {
+	for _, planned := range plan.files {
+		if _, err := revalidateAdjacentGeneratedFile(plan.root, planned); err != nil {
+			return err
+		}
+	}
+	for _, planned := range plan.files {
+		exists, err := revalidateAdjacentGeneratedFile(plan.root, planned)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		if err := os.Remove(planned.path); errors.Is(err, os.ErrNotExist) {
 			continue
 		} else if err != nil {
-			return fmt.Errorf("remove %s: %w", generated, err)
+			return fmt.Errorf("remove %s: %w", planned.path, err)
 		}
-		fmt.Printf("removed %s\n", generated)
+		fmt.Printf("removed %s\n", planned.path)
 	}
 	return nil
 }
