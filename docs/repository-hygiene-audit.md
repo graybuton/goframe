@@ -333,8 +333,13 @@ The fixed CLI package bundle SHA-256 is
 
 With the obsolete runtime wrapper removed, all eleven TinyGo applications and
 all 44 deterministic compression streams remain byte-identical to the
-starting head. The baseline hash-manifest SHA-256 is
-`c5a566ba572082ed9aadf08d887003846f97d71203cf557053b67379dd0a6211`.
+starting head. The final sorted relative-path manifests for the starting head
+and wrapper-removed tree each have SHA-256
+`d9ba42bfedd5da2d093b855b9c280bf2cef913a80cc33f37ef6170ebd783b602`.
+The earlier baseline-only manifest includes task-local absolute paths and has
+SHA-256
+`c5a566ba572082ed9aadf08d887003846f97d71203cf557053b67379dd0a6211`;
+it is a different serialization, not the final cross-revision manifest.
 No runtime behavior, GOX, example, fixture, dependency, workflow, lockfile, or
 budget is changed by the cleanup commits.
 
@@ -353,8 +358,9 @@ budget is changed by the cleanup commits.
 Five confirmed obsolete declarations are removed across the cleanup commits.
 Each cleanup commit is signed. The runtime follow-up changes only
 `pkg/goframe/state.go`; this audit is the only accompanying documentation
-change. Tests, scripts, examples, package inputs, workflows, dependencies,
-lockfiles, generated artifacts, and budgets remain unchanged.
+change. No package input other than the intentional `pkg/goframe/state.go`
+cleanup changed. Tests, scripts, examples, workflows, dependencies, lockfiles,
+generated artifacts, and budgets remain unchanged.
 
 ## Limitations
 
