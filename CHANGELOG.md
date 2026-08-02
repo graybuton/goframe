@@ -192,6 +192,9 @@
 
 ### Fixed
 
+- GOX now rejects duplicate DOM attributes and component props with authored
+  source diagnostics before code generation can emit duplicate Go map keys or
+  struct fields.
 - Valid repeated `gf.Mount` calls now release the previous application and
   remove its exact mounted DOM range before mounting into the same or an
   independent root, without removing unrelated host siblings from an inactive

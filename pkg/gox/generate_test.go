@@ -852,6 +852,64 @@ func View() any {
 	}
 }
 
+func TestGenerateRejectsDuplicateAttributesAndProps(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+	}{
+		{
+			name: "DOM attribute",
+			source: `package main
+
+func View() any {
+	return <div class="first" class="second"></div>
+}
+`,
+			message: `gox: duplicate attribute "class"`,
+		},
+		{
+			name: "component prop",
+			source: `package main
+
+func View() any {
+	return <Button Label="first" Label="second" />
+}
+`,
+			message: `gox: duplicate component prop "Label"`,
+		},
+		{
+			name: "Key prop",
+			source: `package main
+
+func View() any {
+	return <Button Key="first" Key="second" />
+}
+`,
+			message: "gox: duplicate Key prop",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := GenerateNamed("duplicate.gox", []byte(test.source))
+			if err == nil {
+				t.Fatal("GenerateNamed() returned nil error")
+			}
+			var diagnostic DiagnosticError
+			if !errors.As(err, &diagnostic) {
+				t.Fatalf("error %T is not DiagnosticError: %v", err, err)
+			}
+			if diagnostic.Diagnostic.Message != test.message {
+				t.Fatalf("diagnostic message = %q, want %q", diagnostic.Diagnostic.Message, test.message)
+			}
+			if diagnostic.Diagnostic.Filename != "duplicate.gox" || diagnostic.Diagnostic.Line != 4 || diagnostic.Diagnostic.Column == 0 {
+				t.Fatalf("diagnostic location = %s:%d:%d", diagnostic.Diagnostic.Filename, diagnostic.Diagnostic.Line, diagnostic.Diagnostic.Column)
+			}
+		})
+	}
+}
+
 func TestGenerateAllowsDOMTypeAttributeAndComponentPseudoProps(t *testing.T) {
 	source := []byte(`package main
 

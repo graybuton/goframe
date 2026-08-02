@@ -29,8 +29,9 @@ gf.El("main", gf.Props{
 )
 ```
 
-HTML attributes become keys in `gf.Props`. Event props such as `onClick` are
-handled by the browser runtime.
+HTML attributes become keys in `gf.Props`. Attribute names must be unique
+within an element. Event props such as `onClick` are handled by the browser
+runtime.
 
 ## Function components
 
@@ -78,8 +79,9 @@ without attributes:
 gf.ComponentT(_goxComponent_app_Status, StatusProps{}, Status)
 ```
 
-Component prop names must be valid Go field names. Go's type checker reports
-unknown fields and incompatible prop values after generation.
+Component prop names must be valid Go field names and unique within one
+component invocation. Go's type checker reports unknown fields and incompatible
+prop values after generation.
 
 The boundary gives the runtime a component instance, scoped state slots, and a
 mounted subtree that can be updated independently of ancestors and siblings.
@@ -493,12 +495,12 @@ continues through all later files instead of stopping at the first failing
 file. Operational failures do not produce a completed or partial JSON report.
 
 GOX also reports focused diagnostics for unclosed tags, invalid component
-names, invalid component prop names, empty child/attribute expressions,
-duplicate or valueless `Key` pseudo-props, spread props, XML-style namespace
-syntax, unknown package aliases, lowercase qualified component selectors, and
-nested selector chains. Nested GOX markup inside callback return expressions is
-also reported against the original `.gox` file rather than only the generated
-`.goframe/work` output.
+names, invalid component prop names, duplicate attributes and component props,
+empty child/attribute expressions, duplicate or valueless `Key` pseudo-props,
+spread props, XML-style namespace syntax, unknown package aliases, lowercase
+qualified component selectors, and nested selector chains. Nested GOX markup
+inside callback return expressions is also reported against the original
+`.gox` file rather than only the generated `.goframe/work` output.
 
 Package-qualified tags require an import alias. Unknown aliases get a focused
 diagnostic:

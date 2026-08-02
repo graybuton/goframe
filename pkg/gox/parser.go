@@ -88,7 +88,7 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 
 	element := &Element{Tag: name.value}
 	parser.positions[element] = name.offset
-	seenKey := false
+	seenAttributes := map[string]struct{}{}
 	for {
 		next, err := parser.lexer.next()
 		if err != nil {
@@ -109,12 +109,17 @@ func (parser *Parser) parseOpenedNode() (Node, error) {
 			if component && next.value != "Key" && !validGoIdentifier(next.value) {
 				return nil, parser.lexer.errorAt(next.offset, "component prop %q is not a valid Go field name", next.value)
 			}
-			if next.value == "Key" {
-				if seenKey {
+			if _, exists := seenAttributes[next.value]; exists {
+				switch {
+				case next.value == "Key":
 					return nil, parser.lexer.errorAt(next.offset, "gox: duplicate Key prop")
+				case component:
+					return nil, parser.lexer.errorAt(next.offset, "gox: duplicate component prop %q", next.value)
+				default:
+					return nil, parser.lexer.errorAt(next.offset, "gox: duplicate attribute %q", next.value)
 				}
-				seenKey = true
 			}
+			seenAttributes[next.value] = struct{}{}
 			attribute, err := parser.parseAttribute(next)
 			if err != nil {
 				return nil, err

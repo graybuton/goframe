@@ -26,6 +26,13 @@ func App() any {
 }
 `
 
+const duplicateAttributeCheckSource = `package main
+
+func App() any {
+	return <main class="first" class="second">Hello</main>
+}
+`
+
 func TestParseCheckOptions(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -165,6 +172,35 @@ func TestCheckInvalidSourceJSON(t *testing.T) {
 	}
 	if strings.Contains(stdout, `\u003c`) || strings.Contains(stdout, `\u003e`) {
 		t.Fatalf("JSON escaped GOX markup as HTML: %q", stdout)
+	}
+	assertCheckTreeUnchanged(t, root, before)
+}
+
+func TestCheckReportsDuplicateAttribute(t *testing.T) {
+	root := t.TempDir()
+	path := writeCheckSource(t, root, "app.gox", duplicateAttributeCheckSource)
+	before := snapshotCheckTree(t, root)
+
+	stdout, stderr, err := runCheckForTest([]string{path, "--format=json"})
+	if !errors.Is(err, errCheckDiagnostics) {
+		t.Fatalf("runCheckCommand() error = %v, want errCheckDiagnostics", err)
+	}
+	report := decodeCheckReport(t, stdout)
+	if report.SchemaVersion != 1 || report.OK || report.FilesChecked != 1 || len(report.Diagnostics) != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+	diagnostic := report.Diagnostics[0]
+	if diagnostic.File != path || diagnostic.Line != 4 || diagnostic.Column == 0 {
+		t.Fatalf("diagnostic location = %s:%d:%d", diagnostic.File, diagnostic.Line, diagnostic.Column)
+	}
+	if diagnostic.Message != `gox: duplicate attribute "class"` {
+		t.Fatalf("diagnostic message = %q", diagnostic.Message)
+	}
+	if diagnostic.Source != `<main class="first" class="second">Hello</main>` {
+		t.Fatalf("diagnostic source = %q", diagnostic.Source)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 	assertCheckTreeUnchanged(t, root, before)
 }
