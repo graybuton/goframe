@@ -173,7 +173,7 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryConte
 		if err != nil {
 			return fmt.Errorf("resolve embed candidate %s: %w", sourcePath, err)
 		}
-		if shouldSkipEmbedCandidate(relative, entry) {
+		if shouldSkipEmbedCandidate(relative) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -267,7 +267,7 @@ func createEmbedDiscoveryOverlay(appDir, appWorkDir string) (embedDiscoveryConte
 	}, nil
 }
 
-func shouldSkipEmbedCandidate(relative string, entry os.DirEntry) bool {
+func shouldSkipEmbedCandidate(relative string) bool {
 	parts := strings.Split(filepath.ToSlash(relative), "/")
 	if len(parts) == 0 {
 		return false
@@ -750,7 +750,7 @@ func embedWatchTreeFingerprint(appDir, root string) (string, error) {
 			if err != nil {
 				return fmt.Errorf("resolve embed watch input %s: %w", current, err)
 			}
-			if shouldSkipEmbedCandidate(relativeToApp, entry) {
+			if shouldSkipEmbedCandidate(relativeToApp) {
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
