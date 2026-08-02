@@ -427,10 +427,13 @@ repeated-mount browser fixture is not part of the size matrix.
 This closeout compares reviewed repeated-Mount head
 `d9c59a7b2e065cd9265108460579f028a8c7c02f` with package-input commit
 `5ab337cc35bcdf5d4bd1ec9fc11e22581b9bb4f2`. At the reviewed head, mounting
-into a descendant rendered by the active application destroyed App A, ran its
-cleanups, mounted App B into a target that had become disconnected, and left no
-document-visible active application. A host-owned descendant appended inside
-the current root had the same ownership defect.
+into an application-owned descendant destroyed App A, ran its cleanups, removed
+the target from the document, and mounted App B into the retained but
+disconnected element. A host-owned descendant appended inside the current root
+but outside the GoFrame-mounted range remained connected and could host the
+replacement. The final contract intentionally rejects every different
+descendant of the current root to keep the ownership rule simple, reviewable,
+size-bounded, and independent of mounted-range traversal.
 
 Four bounded implementations were measured. Candidate A traversed the mounted
 range and added about `472 B` to `490 B` raw; Candidate B reduced ancestry to
