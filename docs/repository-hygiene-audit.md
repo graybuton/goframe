@@ -1,296 +1,341 @@
-# Repository Hygiene Audit I — Go Dead and Obsolete Code
+# Repository Hygiene Audit I - Deep Go Cleanup
 
 ## Frozen Snapshot
 
-This audit uses commit `b71af16cb49a38a5c764b41721b6d719a1c36f0a`
-on 2026-08-02. The repository, `origin/main`, and the local audit branch all
-pointed to that commit before analysis. The worktree was clean, the remote
-audit branch did not exist, and the task preserved the existing ignored VS
-Code extension package, dependency, and output directories.
+This audit uses merge base `b71af16cb49a38a5c764b41721b6d719a1c36f0a`
+on 2026-08-02. The cleanup branch began with a clean worktree and preserved
+the ignored VS Code extension package, dependency, and output directories.
+No analyzer binary, raw report, generated package, or comparison artifact is
+committed.
 
-The task-owned declaration inventory contains 3,356 Go declarations plus its
-header. Its SHA-256 is
-`e941fd1067e5af7e54fb4a4bfdc0c09d5fe98e5880f203376190cf99d5fbcc89`.
-The selected-file inventory contains 171 records plus its header and has
-SHA-256
-`c4792c3e5255af0c6bb5db241916614f297d06c803b1d0beb3b945b7917e16d8`.
-Neither inventory nor any raw analyzer report is committed.
+The first pass removed `generateFileSafely` and recorded a broad inventory.
+The continuation revisited every strong finding instead of treating the audit
+document as a substitute for cleanup. It removes three more obsolete helpers,
+resolves all confirmed `nilness`, `writestring`, and `unusedparams` findings in
+`cmd/goxc`, attributes the `useState` experiment at the WASM-section level,
+and records the remaining findings with concrete evidence.
 
 ## Scope
 
-The cleanup scope is unexported Go declarations in `cmd/goxc`, `pkg/gox`, and
-`pkg/goframe`. The audit also reads first-party executables, tests, examples,
-fixtures, generated-code boundaries, build tags, history, callbacks, and
-interfaces to determine whether an analyzer signal represents removable code.
+Code cleanup is limited to private Go declarations and expressions under
+`cmd/goxc`, `pkg/gox`, and `pkg/goframe`. First-party Go code under `cmd`,
+`pkg`, `examples`, and `scripts/fixtures` is included in the diagnostic
+inventory. Examples and fixtures are evidence inputs and are not edited.
 
-JavaScript, TypeScript, shell, CSS, assets, workflows, generated `.gox.go`
-files, `.goframe` output, dependencies, public APIs, size budgets, and
-unrelated refactors are outside the cleanup scope.
+Public APIs, CLI behavior, generated Go format, examples, browser fixtures,
+workflows, dependencies, lockfiles, size budgets, and non-Go code are outside
+the cleanup boundary.
 
 ## Tool Versions
 
-- Staticcheck 2026.1 (`v0.7.0`).
+- Gopls `v0.23.0`, built with Go 1.26.5.
+- Staticcheck 2026.1 (`v0.7.0`), built with Go 1.26.5.
 - `deadcode` from `golang.org/x/tools v0.48.0`, built with Go 1.26.5.
 - Go 1.22.12, Go 1.25.12, and Go 1.26.5 for validation.
-- TinyGo 0.41.1 with LLVM 20.1.1 for source selection and WASM output.
-- actionlint 1.7.12, built with Go 1.26.5.
-- Node.js 24.18.1 and npm 11.16.0 for documentation and extension checks.
+- TinyGo 0.41.1 with LLVM 20.1.1 for browser and WASM evidence.
+
+All task-owned tools and caches are outside the repository.
 
 ## Build And Target Contexts
 
-| Context | Target and tags | Packages | Tests |
-|---|---|---|---|
-| H1 | Linux/amd64, ordinary | `./...` | included and excluded |
-| H2 | Linux/amd64, `goframe_debug` | `./...` | included and excluded |
-| H3 | Windows/amd64, ordinary | `./cmd/goxc`, `./pkg/gox` | included and excluded |
-| W1 | js/wasm, ordinary | `./pkg/goframe` | production only |
-| W2 | js/wasm, `goframe_debug` | `./pkg/goframe` | production only |
+| Context | Target and tags | Staticcheck packages | deadcode roots | Tests |
+|---|---|---|---|---|
+| H1 | Linux/amd64, ordinary | `./...` | all loadable first-party executables | included and excluded |
+| H2 | Linux/amd64, `goframe_debug` | `./...` | all loadable first-party executables | included and excluded |
+| H3 | Windows/amd64, ordinary | `./cmd/goxc`, `./pkg/gox` | `cmd/goxc`; test roots also include `pkg/gox` | included and excluded |
+| W1 | js/wasm, ordinary | `./pkg/goframe` | `duplicate-keys`, `runtime-errors` | production only |
+| W2 | js/wasm, `goframe_debug` | `./pkg/goframe` | `duplicate-keys`, `runtime-errors` | production only |
 
-H3 intentionally excludes `pkg/goframe`: the repository's supported Windows
-selection for this audit is the toolchain and compiler packages. W1 and W2
-test-inclusive analysis are not applicable because the protected teardown
-tests select host-only helpers incorrectly under js/wasm. Production W1 and W2
-type-check successfully.
+This corrects the earlier H3 wording. The Windows production deadcode run does
+not use `./...` or treat a library package as an executable root. Its real
+production root is `cmd/goxc`; with `-test`, the `cmd/goxc` and `pkg/gox` test
+executables are real additional roots.
+
+The W1 and W2 test suites are not valid analyzer roots because
+`protected_teardown_test.go` selects host-only test helpers under js/wasm.
+Production W1 and W2 type-check successfully. Most browser applications also
+need generated GOX declarations before they load, so the two pure-Go fixture
+executables provide bounded runtime reachability evidence rather than a claim
+of whole-browser-program coverage.
 
 ## Method
 
-The inventory parser records declaration kind, visibility, receiver, source
-location, build constraints, selected contexts, and test-file status. Each
-analyzer signal is then checked against direct references, selectors, function
-values, interfaces, registrations, callbacks, reflection, `js.Func` use,
-templates, generated references, string dispatch, `//go:linkname`, history,
-tests, and build-tag alternatives.
+Gopls first checked the five mandatory files with hint diagnostics enabled,
+then checked all 222 tracked first-party, non-generated Go files in bounded
+batches. Staticcheck ran `-checks=all`, with tests both included and excluded
+where applicable. Findings were grouped as `SA*`, `S*`, `U1000`, `ST*`, and
+`QF*`; no `SA*` finding was present. Ordinary and debug `go vet` runs passed.
 
-Staticcheck ran with `GOTOOLCHAIN=go1.26.5`, task-owned `GOCACHE` and
-`XDG_CACHE_HOME`, and these exact analyzer arguments:
+Deadcode used real executable and test roots. Its display filter restricts
+reported packages to `cmd/goxc`, `pkg/gox`, and `pkg/goframe`; it does not
+create roots. Direct references, selectors, method expressions, callbacks,
+interfaces, reflection, `js.FuncOf`, generated references, build tags,
+`//go:linkname`, tests, and history were inspected before classifying a
+declaration. No suspicious live declaration lacked a direct caller, so no
+`-whylive` query was needed to explain an indirect edge.
 
-```bash
-staticcheck -checks=U1000 -tests=true ./...
-staticcheck -checks=U1000 -tests=false ./...
-staticcheck -checks=U1000 -tests=true -tags=goframe_debug ./...
-staticcheck -checks=U1000 -tests=false -tags=goframe_debug ./...
-GOOS=windows GOARCH=amd64 staticcheck -checks=U1000 -tests=true ./cmd/goxc ./pkg/gox
-GOOS=windows GOARCH=amd64 staticcheck -checks=U1000 -tests=false ./cmd/goxc ./pkg/gox
-GOOS=js GOARCH=wasm staticcheck -checks=U1000 -tests=false ./pkg/goframe
-GOOS=js GOARCH=wasm staticcheck -checks=U1000 -tests=false -tags=goframe_debug ./pkg/goframe
-```
+## Finding States
 
-`deadcode` used this display filter:
+- `FIX_NOW`: private and mechanically removable or simplifiable with preserved
+  contracts and output.
+- `PRESERVE_WITH_PROOF`: retained because a named caller, target role, test
+  seam, compatibility contract, or measured output boundary exists.
+- `SEPARATE_BEHAVIORAL_STAGE`: changing the finding requires a distinct
+  behavioral contract and executable evidence.
+- `EVIDENCE_GAP`: an identified target or generated-source limitation prevents
+  a complete conclusion.
 
-```text
-^github\.com/graybuton/goframe/(cmd/goxc|pkg/gox|pkg/goframe)(/.*)?$
-```
+Style-only modernizations are recorded but are not treated as correctness or
+reachability defects.
 
-The exact host analyzer arguments were:
+## Final Analyzer Inventory
 
-```bash
-deadcode -json -filter="$FILTER" ./...
-deadcode -test -json -filter="$FILTER" ./...
-GOFLAGS='-tags=goframe_debug' deadcode -json -filter="$FILTER" ./...
-GOFLAGS='-tags=goframe_debug' deadcode -test -json -filter="$FILTER" ./...
-GOOS=windows GOARCH=amd64 deadcode -json -filter="$FILTER" ./...
-GOOS=windows GOARCH=amd64 deadcode -test -json -filter="$FILTER" ./...
-```
+### Gopls
 
-The filter restricts displayed declarations; it does not create reachability
-roots. All loadable first-party packages supplied the host executable roots.
-The js/wasm commands used the two loadable pure-Go executable roots that reach
-the runtime:
+The mandatory final check contains no `nilness`, `unusedparams`, `writestring`,
+or `unusedfunc` diagnostic for F003-F009. Its remaining 13 output lines are
+three multiline `runtime.GOROOT` deprecation diagnostics and one
+`sort.Slice` modernization suggestion. The report SHA-256 is
+`4d8f8a9246e4455894d119664b693edfce2d7e62acfe27849cf99fbfea8ee728`.
 
-```bash
-GOOS=js GOARCH=wasm deadcode -json -filter="$FILTER" \
-  github.com/graybuton/goframe/scripts/fixtures/duplicate-keys \
-  github.com/graybuton/goframe/scripts/fixtures/runtime-errors
+The repository-wide report has 163 lines and SHA-256
+`a67c1022521223b224da5e46148184cea8c72dedee7b30e3c8d31fa8810f0113`.
+It also records generated-GOX loading gaps, host/browser stub selection,
+example and fixture declarations, and Go-version modernization hints.
 
-GOOS=js GOARCH=wasm GOFLAGS='-tags=goframe_debug' \
-  deadcode -json -filter="$FILTER" \
-  github.com/graybuton/goframe/scripts/fixtures/duplicate-keys \
-  github.com/graybuton/goframe/scripts/fixtures/runtime-errors
-```
+### Staticcheck
 
-## Staticcheck Test Inclusion
+| Context | `S*` | `ST*` | `U1000` | Total |
+|---|---:|---:|---:|---:|
+| H1 tests included | 1 | 56 | 91 | 148 |
+| H1 tests excluded | 1 | 56 | 230 | 287 |
+| H2 tests included | 1 | 56 | 91 | 148 |
+| H2 tests excluded | 1 | 56 | 230 | 287 |
+| H3 tests included | 0 | 10 | 0 | 10 |
+| H3 tests excluded | 0 | 10 | 12 | 22 |
+| W1 production | 2 | 22 | 5 | 29 |
+| W2 production | 2 | 22 | 5 | 29 |
 
-Staticcheck finding exits are audit results, not passing test exits. Every
-applicable final command reported U1000 findings without a load, type-check,
-internal, or cache error. Empty stderr files all have SHA-256
-`e3b0c44298fc1c149afbf4a4bfdc8996fb92427ae41e4649b934ca495991b7852b855`.
+There are no `SA*` findings. The two runtime `S*` suggestions are evaluated
+under F013. `ST1000` package-comment and `ST1005` diagnostic-capitalization
+signals do not establish dead or incorrect behavior; changing exact CLI error
+text is forbidden in this cleanup.
 
-| Context | Staticcheck tests=true | Staticcheck tests=false | deadcode tests | deadcode production |
-|---|---|---|---|---|
-| H1 | 94, `917b2b066ef64bf2e378c2c95ce31c7d7d607549ae18ccd082f946630f532a22` | 233, `0d7a3ec8bdd7af16097e03a3a87646ad645916fee62a72d15213930672460368` | 26, `98edf318c17da840827d5af947db03c94970a9d9a4729f21bdb69d8cb35468f3` | 275, `3f7df1acfd1aa1128d55d1e61c340cd9e00784603937bbdd6331728ce5d92c23` |
-| H2 | 94, `d551eb55ca9b400690f473fe4e0a294423e8eed65647db766df1c44edbb87097` | 233, `56e9b1fc1c0bf3929e1914087baf883d78577af77e58577a403fdfeb67f259a7` | 26, `98edf318c17da840827d5af947db03c94970a9d9a4729f21bdb69d8cb35468f3` | 275, `3f7df1acfd1aa1128d55d1e61c340cd9e00784603937bbdd6331728ce5d92c23` |
-| H3 | 3, `08e1cc3af630422859507291033d7865707cf691d98cfc601df61496272e3dd4` | 15, `6bab4dba9b874f2222e10e2b71a2e0b2252953bb78359c19a4f61a3a1e4bd019` | 26, `98edf318c17da840827d5af947db03c94970a9d9a4729f21bdb69d8cb35468f3` | 275, `3f7df1acfd1aa1128d55d1e61c340cd9e00784603937bbdd6331728ce5d92c23` |
-| W1 | not applicable | 5, `81023a6d6077ba91e81fc0355f5df73189d7649d4ea19fd7bb5f99dbe72f253d` | not applicable | 134, `6a71fed1a6f00b37df85451dab890c9764204468962d9954da09b60e99d19ad7` |
-| W2 | not applicable | 5, `81023a6d6077ba91e81fc0355f5df73189d7649d4ea19fd7bb5f99dbe72f253d` | not applicable | 134, `6a71fed1a6f00b37df85451dab890c9764204468962d9954da09b60e99d19ad7` |
+### Deadcode
 
-Compared with the frozen snapshot, every applicable H1, H2, and H3 report has
-exactly one fewer finding. W1 and W2 are unchanged because the removed command
-helper is not selected in the browser runtime package. No new U1000 or
-deadcode finding appeared.
+| Context | Production functions | Test-inclusive functions |
+|---|---:|---:|
+| H1 | 272 | 23 |
+| H2 | 272 | 23 |
+| H3 | 20 | 3 |
+| W1 | 134 | not applicable |
+| W2 | 134 | not applicable |
 
-## Deadcode Reachability Roots
+The large production counts include exported package surfaces and features not
+reached by the selected executables. Test-inclusive H1/H2 reduces the closed
+set to debug stubs, exported compatibility surfaces, and `useState`; it does
+not report the removed F001, F003, F004, or F005 declarations.
 
-Host production analysis starts from all loadable first-party `main` packages;
-`-test` adds their test executables. The same roots are loaded under ordinary,
-debug, and Windows contexts. The H1, H2, and H3 result sets happen to have the
-same counts and hashes, but they remain separate target observations.
+## Mandatory Finding Resolution
 
-The repository has 24 js/wasm `main` packages in ordinary and debug selection.
-Most require generated GOX declarations before they type-check. The audit does
-not fabricate those declarations or treat a failed load as reachability
-evidence. W1 and W2 therefore use the two pure-Go fixture roots named above.
+| ID | Finding | Decision | Evidence and result |
+|---|---|---|---|
+| F001 | `generateFileSafely` | `FIX_NOW`, complete | It remains removed in `172ee5bc8e011849c3b158129403667c17f6a889`; package-coordinated generation superseded it. |
+| F002 | `useState` | `PRESERVE_WITH_PROOF` | No caller or compatibility role exists, but the fully attributed standard-Go removal grows Brotli by 300 bytes. Details are below. |
+| F003 | `fileExists` | `FIX_NOW` | Declaration-only reference; structured metadata checks replaced its export-ownership callers. Removed in `f4958fd06c8f3eb7e7cecdad4517396827ae85e1`. |
+| F004 | `removeDirectoryIfExists` | `FIX_NOW` | Declaration-only reference; all cleanup callers use root-aware `removeDirectoryIfExistsBelowRoot`. Removed in `f4958fd06c8f3eb7e7cecdad4517396827ae85e1`. |
+| F005 | `(*devServer).activatePackage` | `FIX_NOW` | No method expression, interface, callback, or test caller; `activatePackageWithCommit` superseded it. Removed in `f4958fd06c8f3eb7e7cecdad4517396827ae85e1`. |
+| F006 | redundant `err != nil` after failed `Lstat` | `FIX_NOW` | The `else` branch already proves non-nil. Simplified without changing the symlink or error path in `1ac9dd68a8dfd01e3f68895705c87a2e2346377b`. |
+| F007 | redundant `err == nil` after early return | `FIX_NOW` | `pathsOverlap` now returns `relation != "separate"`; path and symlink tests preserve behavior. Fixed in `1ac9dd68a8dfd01e3f68895705c87a2e2346377b`. |
+| F008 | concatenated `WriteString` calls | `FIX_NOW` | Every confirmed `writeWorkspaceGoMod` occurrence is split into sequential writes. Generated `go.mod` is byte-identical. Fixed in `1ac9dd68a8dfd01e3f68895705c87a2e2346377b`. |
+| F009 | unused `entry` parameter | `FIX_NOW` | Both callers now pass only the relative path; embed discovery, unsafe-entry rejection, and overlay bytes are unchanged. Fixed in `1ac9dd68a8dfd01e3f68895705c87a2e2346377b`. |
 
-## Classification Rules
+The full Gopls pass found one additional `writestring` allocation in
+`writePackageGoMod`. It is fixed in `1ac9dd68a8dfd01e3f68895705c87a2e2346377b`
+with sequential writes, preserving exact generated bytes.
 
-- `REMOVE_NOW`: private, analyzer-confirmed, unreferenced in every applicable
-  context, historically superseded, and output-identical when removed.
-- `TEST_ONLY_SEAM`: production declaration directly exercised by repository
-  tests or test parity checks.
-- `TARGET_OR_TAG_SPECIFIC`: selected or reached through another GOOS, GOARCH,
-  or build-tag implementation.
-- `EXPORTED_OR_COMPATIBILITY_SURFACE`: exported callable surface; limited
-  executable roots do not establish removability.
-- `OBSOLETE_BUT_SEPARATE`: apparently superseded, but subsystem boundaries or
-  output evidence require a separate decision.
-- `TEST_CONTEXT_MISMATCH`: analyzer loading is invalid because a test and its
-  helper select different target contexts.
-- `EVIDENCE_GAP`: the tool cannot construct an applicable executable graph.
-- `OUT_OF_SCOPE`: finding is outside cleanup-authorized paths.
+## Complete Grouped Inventory
 
-No declaration is removed from analyzer output alone.
+| ID | Finding group | Decision | Concrete basis |
+|---|---|---|---|
+| F010 | `writePackageGoMod` builder allocation | `FIX_NOW` | Gopls `writestring`; fixed with byte-identical output in `1ac9dd68a8dfd01e3f68895705c87a2e2346377b`. |
+| F011 | command helpers reported only without tests | `PRESERVE_WITH_PROOF` | Direct callers exist in generation, workspace, dev, reload, source-selection, package, path, and symlink tests. |
+| F012 | runtime placement, teardown, and virtual-range helpers | `PRESERVE_WITH_PROOF` | Direct host test or non-js bridge callers exist; browser roots use the decomposed production paths. |
+| F013 | router S1017 and S1021 suggestions | `PRESERVE_WITH_PROOF` | S1017 grows standard-Go WASM by 47 bytes; S1021 is output-active style-only churn. |
+| F014 | `runtime.GOROOT` deprecation | `SEPARATE_BEHAVIORAL_STAGE` | Replacement changes compiler discovery and doctor behavior and needs relocated-binary evidence. |
+| F015 | `slices`, `strings.Cut`, range, `max`, and switch modernizations | `PRESERVE_WITH_PROOF` | No correctness or reachability defect; applying style-only changes would violate the narrow output-preserving cleanup boundary. |
+| F016 | generated-GOX application load failures | `EVIDENCE_GAP` | Analyzers cannot type-check missing generated `App`, props, and helper declarations before goxc materialization. |
+| F017 | example and browser-fixture U1000 findings | `PRESERVE_WITH_PROOF` | Generated GOX, target-specific code, and successful package/browser executions establish current evidence roles; these paths are read-only here. |
+| F018 | exported runtime and GOX declarations reported by deadcode | `PRESERVE_WITH_PROOF` | Closed-world executable roots do not supersede exported compatibility contracts. |
 
-## Confirmed Removals
+## Preserved Findings With Proof
 
-| ID | Declaration | Package/path | Static evidence | Reference evidence | Historical role | Output evidence | Cleanup commit |
-|---|---|---|---|---|---|---|---|
-| F001 | `generateFileSafely` | `cmd/goxc/workspace.go` | U1000 in H1/H2/H3 with and without tests; deadcode in H1/H2/H3 production and test roots | Declaration only; no interface, callback, registration, reflection, linkname, generated, tagged, or string-dispatch caller | Added in `ac311fa8` for per-file safe generation; callers moved to package-coordinated generation in `22f46532` and that pipeline expanded in `cb5ce576` | CLI, generated Go, standard-Go package, and all 44 TinyGo output streams remain byte-identical | `172ee5bc8e011849c3b158129403667c17f6a889` |
+### Command test seams
 
-The removal deletes one declaration and 18 Go lines. The current path remains:
-source selection, package grouping, authored-source reservation,
-`GeneratePackageWithOptions`, sibling verification, atomic publication, and
-inactive-output cleanup. The public single-file generation APIs remain live.
+The following private command declarations are reported only when tests are
+excluded. Direct repository test callers preserve them as intentional seams:
 
-## Preserved Findings
+- `devSnapshot.paths` in `dev_test.go`;
+- `devGenerationManager.activeID` and `devGenerationHandler` in
+  `dev_generation_test.go`;
+- `devReloadBroker.subscriberCount` in `dev_reload_test.go`;
+- `browserGenerationSourceSelection` and `browserTargetToolTags` in
+  `generation_constraints_test.go`;
+- `resolvePackageAssetSource` in `symlink_test.go`;
+- `prepareBuildWorkspace` in `workspace_test.go` and
+  `filesystem_safety_test.go`;
+- `generateIntoDirectory`, `generateIntoDirectoryForCompiler`,
+  `generateFilesIntoDirectory`, and
+  `generateFilesIntoDirectoryWithSelection` in generation and workspace tests.
 
-| ID | Declaration | Tool signal | Final classification | Evidence for preservation |
-|---|---|---|---|---|
-| F002 | `useState` | U1000 and deadcode in applicable host/browser contexts | `OBSOLETE_BUT_SEPARATE` | Removal preserved all TinyGo streams but changed the representative standard-Go `bundle.wasm` SHA-256 from `b832d74221f7476303ee685fdbb4c2dc1eeb1644d937823261d2859ec0f1f010` to `b819abad55c6e0bc8d62d844f452ae86d23d91497570a003521521d5b885704b`; it was restored |
-| F003-F005 | `removeDirectoryIfExists`, `(*devServer).activatePackage`, `fileExists` | U1000 and deadcode in host contexts | `OBSOLETE_BUT_SEPARATE` | Each belongs to a separate cleanup, dev-lifecycle, or filesystem-helper review; this audit does not combine unrelated subsystems |
-| F006-F017 | command generation, dev, reload, source-selection, package, and workspace inspection helpers | U1000 only when tests are excluded | `TEST_ONLY_SEAM` | Direct repository test callers establish their current role |
-| F018-F020 | stable placement, protected teardown finalization, and virtual range helpers | browser production U1000/deadcode or host production deadcode | `TEST_ONLY_SEAM` | Host tests call them directly or through the non-js teardown bridge |
-| F021-F022 | host/debug diagnostic stubs and host-only runtime graph | context-dependent U1000 | `TARGET_OR_TAG_SPECIFIC` | js/wasm implementations and browser call sites are selected in other contexts |
-| F023-F024 | exported runtime and GOX helpers | deadcode from limited roots | `EXPORTED_OR_COMPATIBILITY_SURFACE` | Executable-root reachability does not supersede exported API compatibility |
-| F025 | protected teardown test/helper selection | W1/W2 test-inclusive type-check failure | `TEST_CONTEXT_MISMATCH` | The js/wasm test selects host-only helper references; no production failure is demonstrated |
-| F026 | generated-GOX js/wasm main packages | deadcode load failures before materialization | `EVIDENCE_GAP` | The analyzer cannot type-check generated `App` and props declarations without the goxc generation stage |
-| F027 | example and script-fixture declarations | H1/H2 U1000 | `OUT_OF_SCOPE` | These are evidence/application paths and are not cleanup-authorized |
+With tests included, `cmd/goxc` has no U1000 finding. `pkg/gox` also has no
+U1000 finding with tests included.
 
-## Test Context Mismatches
+### Runtime target and test roles
 
-| Context | File/package | Failure | Production impact demonstrated | Audit treatment |
-|---|---|---|---|---|
-| W1 tests | `pkg/goframe/protected_teardown_test.go` | Undefined host-only teardown helpers under js/wasm | No; production W1 type-checks and reports normally | `NOT APPLICABLE`, preserved as F025 |
-| W2 tests | `pkg/goframe/protected_teardown_test.go` with `goframe_debug` | Same helper-selection mismatch | No; production W2 type-checks and reports normally | `NOT APPLICABLE`, preserved as F025 |
+Ordinary and debug host stub functions are selected to satisfy the same
+private call surface as the js/wasm implementations. Their apparent U1000
+status in one context is offset by the alternate target implementation and
+browser call sites.
 
-The mismatch is not repaired in this audit and contributes no removal
-evidence.
+`stableChildPlacementStart` is called by the keyed-reorder tests.
+`finalizePendingProtectedSubtreeTeardown` is called by the non-js teardown
+bridge. `validateVirtualRangeDimensions` and `calculateVirtualRange` are called
+by virtual-range tests, while their browser production decomposition uses the
+lower-level helpers. These are concrete target/test roles rather than inferred
+future uses.
 
-## False Positives And Indirect Entrypoints
+Deadcode reports exported runtime and GOX functions when the selected
+executables do not call them. Exported compatibility surfaces are not removed
+from a closed-world executable graph.
 
-Staticcheck production-only reports include deliberate test seams. Host
-analysis reports runtime declarations whose browser call graph is excluded;
-browser analysis reports host-tested helpers that are absent from production
-WASM roots. `deadcode` also reports exported declarations that its selected
-executables do not call. These are context limits, not proofs of obsolescence.
+### Staticcheck runtime simplifications
 
-The reference audit checked method expressions, selectors, callback storage,
-`js.FuncOf`, registration tables, interfaces, reflection, generated code,
-template/string references, build tags, and `//go:linkname`. No hidden caller
-was found for F001. Those checks preserve indirect entrypoints elsewhere.
+Staticcheck suggests unconditional `strings.TrimPrefix` in
+`normalizeRouteTarget` (S1017) and merging a `js.Func` declaration with its
+assignment (S1021). Both were tested independently and restored. S1017 grew
+the standard-Go router-dashboard WASM from 2,654,439 to 2,654,486 bytes.
+S1021 kept the size at 2,654,439 bytes but changed the complete artifact hash
+without adding correctness, reachability, or allocation value. S1021 is
+style-only; S1017 violates the no-growth boundary.
 
-## Evidence Gaps
+## `useState` WASM Attribution
 
-- Test-inclusive js/wasm Staticcheck and deadcode are not applicable while the
-  protected teardown test-context mismatch exists.
-- Full js/wasm deadcode cannot load GOX applications before their generated Go
-  files are materialized. The two pure-Go roots provide bounded runtime
-  evidence, not whole-program coverage for every browser app.
-- TinyGo reachability is established by source-selection parity, feature-tagged
-  builds, real packaging, Browser Smoke, and byte comparison, not by host
-  Staticcheck or `deadcode`.
-- Dynamic third-party use of exported APIs is outside closed-world analyzer
-  reachability and is preserved.
+`useState` has no direct or indirect caller in the inspected source and is
+reported by Staticcheck and deadcode in every applicable runtime context. Its
+history shows that `UseState` began calling `useStateSlot` directly when
+reducer support was introduced. The function was nevertheless restored after
+the required output attribution, rather than after a complete-hash comparison
+alone.
+
+For the standard-Go counter package, alternating restored and removed builds
+are deterministic:
+
+| Evidence | Restored | Removed | Delta |
+|---|---:|---:|---:|
+| raw | 2,192,823 | 2,192,823 | 0 |
+| gzip | 642,700 | 642,695 | -5 |
+| Brotli | 494,467 | 494,767 | +300 |
+| Zstandard | 523,295 | 523,295 | 0 |
+
+The complete SHA-256 changes from
+`01153ff699ca1c06297670f5a72a1a13b4b160abc122456bfe951cd8b2633c6f`
+to
+`b10c788f52d9b6735c1f6a90bc3f139b331b4b324afe5f0c00b94f4bd45eaa2f`.
+Section IDs, lengths, and counts are identical. The code-section payload hash
+remains
+`2dc6cde2ac71a11fbd62217ddded24a589da5a32783b96ab3fffadeff7b3f69a`;
+the custom `producers` section remains
+`0c1b39ac92c76e8b5a75b57d492e9a58bd894bfa2787e6def3e2b8f7b7336f48`.
+Only 28 bytes change, all in the data section, whose payload hash changes from
+`24459ba7c0dbd4a69dc6f68482463d0d7771ef5f73aa17b25405d5075706ba3b`
+to
+`a287489142997c773fbff216cbff9c0bd81c5eae690393a57d38f6c7f9f8822e`.
+Extracted strings are identical. Goxc intentionally links with an empty Go
+build ID, so no build-ID payload is available to attribute.
+
+All 44 TinyGo raw, gzip, Brotli, and Zstandard streams across the eleven
+budgeted applications remain byte-identical after temporary removal. Every
+budget and ratio passes. Aggregate browser phases using standard Go and TinyGo
+also preserve behavior. The removal is rejected solely because its
+reproducible Brotli output grows, which fails this task's explicit acceptance
+boundary.
+
+## Separate Behavioral Stage
+
+Gopls deprecates `runtime.GOROOT` use in `cmd/goxc/helpers.go` and
+`cmd/goxc/doctor.go`. Replacing it changes how goxc locates the Go executable
+and reports GOROOT after a built binary is relocated. That is a compiler
+discovery contract, not a dead-code edit. A separate
+`fix/goxc-goroot-discovery` branch would need executable tests for relocated
+binaries, `PATH` precedence, explicit `GOROOT`, Go/TinyGo selection, doctor
+output, and exact failure diagnostics before changing those files.
+
+No other strong finding requires a separate behavioral stage. Modernization
+hints for `slices`, `strings.Cut`, range-over-int, `max`, and tagged switches
+are style or minimum-Go-version changes without a demonstrated defect.
+
+## Evidence Gaps And Read-Only Findings
+
+- Test-inclusive js/wasm analysis remains invalid while the protected teardown
+  tests select host-only helpers.
+- GOX applications do not type-check before generated declarations are
+  materialized. Their analyzer errors do not prove the authored helpers dead.
+- Example and fixture U1000 findings are frequently references from generated
+  GOX, js-only implementations, or browser evidence. These paths are read-only
+  in this cleanup and their successful package/browser execution is preserved.
+- TinyGo reachability is established through real source selection, packaging,
+  byte comparison, size gates, and browser execution; host analyzers do not
+  model the TinyGo linker.
+- Dynamic third-party use of exported APIs is outside closed-world deadcode
+  analysis.
 
 ## Behavior And Output Identity
 
-The base and final code were extracted and built sequentially from the same
-absolute path. The CLI comparison covers directory, single-file, and in-place
-generation; text and JSON check output; package output; and doctor output.
-Exit status, stdout, stderr, generated filenames, generated Go bytes, and
-managed package artifacts are byte-identical. Both CLI I/O manifests have
-SHA-256
-`491236bcad9c764f7bf5dcfb771a0a2a34854d0f1433e7a7c5304515dd3f2801`.
+The starting-head and cleanup `goxc` binaries were exercised against the same
+fixed-path fixture. Directory, single-file, and in-place generation each
+produce the same 409-byte output with SHA-256
+`c3135e3aa47f59e2464018af8e7d6398fa587991c8a8c748affaea7f60abb973`.
+Text and JSON check output, doctor output, exit status, stdout, stderr,
+generated filenames, generated `go.mod`, embed selection, managed package
+output, and package bytes are identical. The timestamp-bearing package
+metadata differs only in `generatedAt`; removing that volatile field produces
+an identical document.
 
-The generated Go hashes are:
+The generated workspace `go.mod` SHA-256 is
+`acfb7d984d87252705eda22e8828b2a882ba835a2f200140b8698577df467e1f`.
+The fixed CLI package bundle SHA-256 is
+`2bc7a85314fdf0d6ef1411e9800547ceae4687e81a709b3eb47b98e6db2bd1a0`.
 
-- directory output: 409 bytes,
-  `c3135e3aa47f59e2464018af8e7d6398fa587991c8a8c748affaea7f60abb973`;
-- single-file and in-place output: 329 bytes,
-  `9da63d42ff2dccdccfcfa6999527866840da4e15df2818f8673840f4ec3ae540`.
+With the final runtime source restored, all eleven TinyGo applications and all
+44 deterministic compression streams remain byte-identical to the starting
+head. The baseline hash-manifest SHA-256 is
+`c5a566ba572082ed9aadf08d887003846f97d71203cf557053b67379dd0a6211`.
+No runtime, GOX, example, fixture, dependency, workflow, lockfile, or budget is
+changed by the cleanup commits.
 
-The representative standard-Go package is also byte-identical, including its
-2,192,869-byte WASM file with SHA-256
-`b832d74221f7476303ee685fdbb4c2dc1eeb1644d937823261d2859ec0f1f010`.
-The timestamp-bearing metadata was compared from base and final builds that
-completed in the same RFC3339 second.
+## Cleanup Commits
 
-With Go 1.26.5 and TinyGo 0.41.1, all raw, gzip, Brotli, and Zstandard streams
-for `counter`, `components`, `todo`, `dashboard`, `context`, `virtualized`,
-`multipackage`, `cmdapp`, `router`, `router-dashboard`, and `resource` are
-byte-identical. The 44-stream manifest SHA-256 is
-`1fe7d11780482ca77b04bba33f9453d93917456f54d80165f534245f9517428b`.
-The unchanged size-budget output has SHA-256
-`5a8854eb1e68af0bbb9362244bb3c1b45fab22348442a06be0cc63281db15523`
-and every current budget passes.
+- `172ee5bc8e011849c3b158129403667c17f6a889` removes
+  `generateFileSafely`.
+- `f4958fd06c8f3eb7e7cecdad4517396827ae85e1` removes `fileExists`,
+  `removeDirectoryIfExists`, and `(*devServer).activatePackage`.
+- `1ac9dd68a8dfd01e3f68895705c87a2e2346377b` resolves the two
+  tautologies, all confirmed builder-write allocations, and the unused embed
+  parameter.
 
-## Validation
-
-- Focused `cmd/goxc` tests pass on Go 1.22.12, 1.25.12, and 1.26.5.
-- The generation/workspace/package/source-selection/check group passes 20
-  repetitions; Go 1.25 and 1.26 race runs and the Go 1.26 debug run pass.
-- Full ordinary and debug suites plus vet pass on Go 1.22.12, 1.25.12, and
-  1.26.5. Required race suites pass on Go 1.25.12 and 1.26.5.
-- TinyGo source-selection parity and the feature-tagged TinyGo build pass.
-- `scripts/check.sh`, artifact, module-path, documentation, diff, and actionlint
-  gates pass.
-- Two complete Browser Smoke runs pass with Chrome 149 and the exact Go 1.26.5
-  binary. An earlier setup-only attempt used `/usr/bin/go` with
-  `GOTOOLCHAIN=go1.26.5` and `GOSUMDB=off`; it failed before an app build while
-  Go tried to verify the cached toolchain. Pinning the exact binary removed the
-  host-bootstrap ambiguity.
-- VS Code extension install and tests pass with Node.js 24.18.1 and npm 11.16.0;
-  `package-lock.json` is unchanged.
-- Windows/amd64 `cmd/goxc` test compilation passes.
-- Final Staticcheck and deadcode reports contain no F001 occurrence and no new
-  finding.
+Each cleanup commit is signed. The final documentation commit records the
+completed finding set without altering package inputs.
 
 ## Limitations
 
-This is a bounded snapshot, not a permanent proof that every retained private
-declaration is necessary. Closed-world analyzers cannot establish third-party
-API use, and the js/wasm limitations above remain explicit. Output identity
-applies to the recorded fixtures, package command, and 11 budgeted
-applications under the recorded toolchains.
+This is a bounded repository snapshot, not a permanent proof that every
+retained private declaration is necessary. Closed-world analysis cannot prove
+third-party API use, and generated/target-specific limitations remain explicit.
+Output identity applies to the recorded CLI fixture, package workflow, browser
+evidence, and eleven budgeted applications under the recorded toolchains.
 
-The audit installs no permanent Staticcheck or deadcode CI gate. Raw reports,
-inventories, tool binaries, caches, generated packages, browser profiles, and
-comparison workspaces remain task-owned temporary evidence and are not
-committed.
-
-## Non-Goals
-
-This audit does not redesign APIs, remove exported declarations, repair the
-protected teardown test selection, materialize GOX applications for analyzer
-convenience, change runtime behavior, alter generated output, rebaseline WASM,
-change dependencies or workflows, or clean examples and non-Go code. Findings
-classified as `OBSOLETE_BUT_SEPARATE` require their own bounded evidence and
-are not authorized for removal here.
+The audit installs no permanent analyzer gate. It does not redesign APIs,
+change runtime behavior, rewrite generated output, alter exact diagnostics,
+modify examples, rebaseline WASM, or begin the separate GOROOT discovery
+contract.
