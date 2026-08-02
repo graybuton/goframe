@@ -716,24 +716,6 @@ func generationFailureSource(targets []goxGenerationTarget, err error) string {
 	return targets[0].source
 }
 
-func generateFileSafely(file, output string, options gox.GenerateOptions) error {
-	content, err := readGenerationSource(file, "GOX source file")
-	if err != nil {
-		return err
-	}
-	generated, err := gox.GenerateWithOptions(content, options)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
-		return fmt.Errorf("create generated directory for %s: %w", output, err)
-	}
-	if err := writeFileAtomic(output, generated, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", output, err)
-	}
-	return nil
-}
-
 func writeWorkspaceGoMod(workDir, appDir string) error {
 	config := workspaceModuleConfigForApp(appDir)
 	appModule, err := readWorkspaceModuleDirectives(config.ModuleRoot)
