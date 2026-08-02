@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -65,6 +66,13 @@ func cleanApp(options cleanOptions) error {
 	if err := validateWorkspaceRoot(layout); err != nil {
 		return err
 	}
+	var adjacentGeneratedFiles []string
+	if options.generated || options.legacy {
+		adjacentGeneratedFiles, err = planAdjacentGeneratedFileCleanup(options.appDir)
+		if err != nil {
+			return err
+		}
+	}
 	for _, directory := range []string{
 		filepath.Join(layout.WorkspaceRoot, "work"),
 		filepath.Join(layout.WorkspaceRoot, "build"),
@@ -80,7 +88,7 @@ func cleanApp(options cleanOptions) error {
 		}
 	}
 	if options.generated || options.legacy {
-		if err := cleanAdjacentGeneratedFiles(options.appDir); err != nil {
+		if err := cleanAdjacentGeneratedFiles(adjacentGeneratedFiles); err != nil {
 			return err
 		}
 	}
@@ -93,13 +101,39 @@ func cleanApp(options cleanOptions) error {
 	return nil
 }
 
-func cleanAdjacentGeneratedFiles(appDir string) error {
+func planAdjacentGeneratedFileCleanup(appDir string) ([]string, error) {
 	files, err := findGOXFiles(appDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	generatedFiles := make([]string, 0, len(files))
 	for _, file := range files {
 		generated := file + ".go"
+		if err := validatePathBelowRoot(appDir, generated, "adjacent generated output", true); err != nil {
+			return nil, err
+		}
+		if _, err := os.Lstat(generated); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, fmt.Errorf("inspect adjacent generated output %s: %w", generated, err)
+		}
+		content, err := readGenerationSource(generated, "adjacent generated output")
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.HasPrefix(content, []byte(generatedGOXFileHeader)) {
+			return nil, fmt.Errorf(
+				"refuse to remove adjacent generated output %s: file is not managed by goxc",
+				generated,
+			)
+		}
+		generatedFiles = append(generatedFiles, generated)
+	}
+	return generatedFiles, nil
+}
+
+func cleanAdjacentGeneratedFiles(files []string) error {
+	for _, generated := range files {
 		if err := os.Remove(generated); errors.Is(err, os.ErrNotExist) {
 			continue
 		} else if err != nil {

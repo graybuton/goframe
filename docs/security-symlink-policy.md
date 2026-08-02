@@ -144,11 +144,14 @@ that overwrite is intentional.
 - `.goframe/build`
 - `.goframe/package`
 
-`--generated` also removes `.goframe/gen` and legacy adjacent `*.gox.go` files.
+`--generated` also removes `.goframe/gen` and legacy adjacent `*.gox.go` files
+that retain the goxc generated-file header. Unmarked, symlinked, or irregular
+adjacent outputs are rejected before cleanup mutates requested output.
 
 `--legacy` helps migrate old layouts. It removes legacy `build/` and adjacent
-generated `.gox.go` files. It removes legacy `dist/` only when that directory
-looks GoFrame-owned. User-owned `dist/` directories are left alone.
+generated `.gox.go` files under the same ownership check. It removes legacy
+`dist/` only when that directory looks GoFrame-owned. User-owned `dist/`
+directories are left alone.
 
 ## Serve
 

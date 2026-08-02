@@ -195,6 +195,9 @@
 - GOX now rejects duplicate DOM attributes and component props with authored
   source diagnostics before code generation can emit duplicate Go map keys or
   struct fields.
+- `goxc clean --generated` and `--legacy` now verify adjacent `.gox.go`
+  ownership before cleanup, preserving unmarked or unsafe files instead of
+  deleting them by filename alone.
 - Valid repeated `gf.Mount` calls now release the previous application and
   remove its exact mounted DOM range before mounting into the same or an
   independent root, without removing unrelated host siblings from an inactive

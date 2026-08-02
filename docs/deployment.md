@@ -265,10 +265,12 @@ should not commit generated `.gox.go`.
 
 `goxc clean <app>` removes `.goframe/work`, `.goframe/build`, and
 `.goframe/package`. `goxc clean <app> --generated` also removes `.goframe/gen`
-and adjacent legacy `.gox.go` files. `goxc clean <app> --legacy` helps migrate
-old workspaces by removing legacy `build/` and adjacent generated `.gox.go`
-files. Legacy `dist/` is removed only if it looks like a GoFrame export; user
-directories are skipped instead of silently deleted.
+and adjacent legacy `.gox.go` files that retain the goxc generated-file header.
+`goxc clean <app> --legacy` helps migrate old workspaces by removing legacy
+`build/` and adjacent generated `.gox.go` files. An adjacent output without the
+generated-file header is treated as user-owned and stops cleanup before any
+requested output is removed. Legacy `dist/` is removed only if it looks like a
+GoFrame export; user directories are skipped instead of silently deleted.
 
 The toolchain rejects symlinked app roots, entry directories, authored source
 files, package assets, package/export roots, and symlinked package sources at
