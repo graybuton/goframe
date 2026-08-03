@@ -20,6 +20,13 @@ var (
 	localTransactionProbe        protectedTransactionProbe
 	nestedFallbackProbe          nestedFallbackTransactionProbe
 	dirtyBatchProbe              capturedDirtyBatchProbe
+	stateTransactionProbe        stateTransactionFailureProbe
+	stateTransactionSuccessProbe stateTransactionSuccessCounters
+	stateTransactionPhase        = "attempt"
+	failedStateSetter            func(int)
+	failedStateDispatch          func(int)
+	committedStateDispatch       func(int)
+	successfulStateDispatch      func(int)
 	setDirtyBatchFailingVersion  func(string)
 	setDirtyBatchLaterVersion    func(string)
 	setDirtyBatchIndependent     func(int)
@@ -102,6 +109,36 @@ type capturedDirtyBatchProbe struct {
 	attemptedBResourceStarts   int
 	attemptedBResourceCleanups int
 	independentOwnerRenders    int
+}
+
+type stateTransactionFailureProbe struct {
+	initialOwnerRenders       int
+	initialFailedRenders      int
+	initialRecoveredRenders   int
+	initialFallbackRenders    int
+	failedClosureInvocations  int
+	currentUpdateInvocations  int
+	reducerOwnerRenders       int
+	reducerFailedRenders      int
+	reducerSuccessfulRenders  int
+	committedDispatchInvokes  int
+	lastCommittedReducerValue int
+}
+
+type stateTransactionSuccessCounters struct {
+	ownerRenders          int
+	renderTimeSetters     int
+	renderTimeDispatches  int
+	stateClicks           int
+	reducerReplaceClicks  int
+	reducerDispatchClicks int
+	resourceStarts        int
+	resourceCleanups      int
+	firstValue            int
+	secondValue           string
+	reducerValue          int
+	resourceStatus        string
+	resourceValue         string
 }
 
 type RiskyPanelProps struct {
@@ -187,6 +224,382 @@ type DirtyBatchIndependentOwnerProps struct{}
 
 type DirtyBatchRiskyDescendantProps struct {
 	Broken bool
+}
+
+type StateTransactionInitialScenarioProps struct{}
+
+type StateTransactionInitialOwnerProps struct{}
+
+type StateTransactionReducerScenarioProps struct{}
+
+type StateTransactionReducerOwnerProps struct {
+	Mode string
+}
+
+type StateTransactionSuccessHostProps struct{}
+
+type StateTransactionSuccessOwnerProps struct{}
+
+func StateTransactionInitialScenario(StateTransactionInitialScenarioProps) gf.Node {
+	started, setStarted := gf.UseState(false)
+	children := []gf.Node{
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-initial-start",
+				"OnClick": func() {
+					stateTransactionPhase = "attempt"
+					setStarted(true)
+				},
+			},
+			gf.Text("Start failed initial state render"),
+		),
+	}
+	if started {
+		children = []gf.Node{
+			gf.El(
+				"button",
+				gf.Props{
+					"data-testid": "eb-state-initial-finish",
+					"OnClick": func() {
+						failedStateSetter = nil
+						failedStateDispatch = nil
+						stateTransactionPhase = "attempt"
+						setStarted(false)
+					},
+				},
+				gf.Text("Finish failed initial state render"),
+			),
+			gf.ErrorBoundary(gf.ErrorBoundaryProps{
+				Fallback: stateTransactionInitialFallback,
+				Children: []gf.Node{
+					gf.Component(
+						"StateTransactionInitialOwner",
+						StateTransactionInitialOwnerProps{},
+						StateTransactionInitialOwner,
+					),
+				},
+			}),
+		}
+	}
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-state-initial-scenario"},
+		children...,
+	)
+}
+
+func StateTransactionInitialOwner(StateTransactionInitialOwnerProps) gf.Node {
+	stateTransactionProbe.initialOwnerRenders++
+	initial := 1
+	if stateTransactionPhase == "retry" {
+		initial = 99
+	}
+	value, setValue := gf.UseState(initial)
+	reduced, dispatch := gf.UseReducer(initial, func(state, action int) int {
+		return state + action
+	})
+	if stateTransactionPhase == "attempt" {
+		failedStateSetter = setValue
+		failedStateDispatch = dispatch
+		stateTransactionProbe.initialFailedRenders++
+		syncBoundaryProbe()
+		panic("failed initial state transaction")
+	}
+
+	stateTransactionProbe.initialRecoveredRenders++
+	syncBoundaryProbe()
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-state-initial-owner"},
+		gf.El("p", gf.Props{"data-testid": "eb-state-initial-value"}, gf.Text(gf.ToString(value))),
+		gf.El("p", gf.Props{"data-testid": "eb-state-initial-reducer"}, gf.Text(gf.ToString(reduced))),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-invoke-failed-closures",
+				"OnClick": func() {
+					stateTransactionProbe.failedClosureInvocations++
+					if failedStateSetter != nil {
+						failedStateSetter(1000)
+					}
+					if failedStateDispatch != nil {
+						failedStateDispatch(1000)
+					}
+					syncBoundaryProbe()
+				},
+			},
+			gf.Text("Invoke discarded state closures"),
+		),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-update-current",
+				"OnClick": func() {
+					stateTransactionProbe.currentUpdateInvocations++
+					setValue(value + 1)
+					dispatch(1)
+					syncBoundaryProbe()
+				},
+			},
+			gf.Text("Update committed state"),
+		),
+	)
+}
+
+func stateTransactionInitialFallback(ctx gf.ErrorBoundaryContext) gf.Node {
+	stateTransactionProbe.initialFallbackRenders++
+	syncBoundaryProbe()
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-state-initial-fallback"},
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-initial-retry",
+				"OnClick": func() {
+					stateTransactionPhase = "retry"
+					ctx.Reset()
+				},
+			},
+			gf.Text("Retry initial state transaction"),
+		),
+	)
+}
+
+func StateTransactionReducerScenario(StateTransactionReducerScenarioProps) gf.Node {
+	mode, setMode := gf.UseState("base")
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-state-reducer-scenario"},
+		gf.El("p", gf.Props{"data-testid": "eb-state-reducer-mode"}, gf.Text(mode)),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-reducer-fail",
+				"OnClick": func() {
+					setMode("failed")
+				},
+			},
+			gf.Text("Fail reducer replacement"),
+		),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-reducer-recover",
+				"OnClick": func() {
+					setMode("base")
+				},
+			},
+			gf.Text("Recover reducer replacement"),
+		),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-reducer-commit",
+				"OnClick": func() {
+					setMode("candidate")
+				},
+			},
+			gf.Text("Commit reducer replacement"),
+		),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-reducer-dispatch",
+				"OnClick": func() {
+					stateTransactionProbe.committedDispatchInvokes++
+					if committedStateDispatch != nil {
+						committedStateDispatch(1)
+					}
+					syncBoundaryProbe()
+				},
+			},
+			gf.Text("Dispatch through committed closure"),
+		),
+		gf.Component(
+			"StateTransactionReducerOwner",
+			StateTransactionReducerOwnerProps{Mode: mode},
+			StateTransactionReducerOwner,
+		),
+	)
+}
+
+func StateTransactionReducerOwner(props StateTransactionReducerOwnerProps) gf.Node {
+	stateTransactionProbe.reducerOwnerRenders++
+	reducer := gf.Reducer[int, int](func(state, action int) int {
+		return state + action
+	})
+	if props.Mode == "failed" || props.Mode == "candidate" {
+		reducer = func(state, action int) int {
+			return state + action*100
+		}
+	}
+	value, dispatch := gf.UseReducer(1, reducer)
+	if committedStateDispatch == nil {
+		committedStateDispatch = dispatch
+	}
+	if props.Mode == "failed" {
+		stateTransactionProbe.reducerFailedRenders++
+		syncBoundaryProbe()
+		panic("failed reducer replacement")
+	}
+	stateTransactionProbe.reducerSuccessfulRenders++
+	stateTransactionProbe.lastCommittedReducerValue = value
+	syncBoundaryProbe()
+	return gf.El(
+		"p",
+		gf.Props{"data-testid": "eb-state-reducer-value"},
+		gf.Text(gf.ToString(value)),
+	)
+}
+
+func StateTransactionSuccessHost(StateTransactionSuccessHostProps) gf.Node {
+	mounted, setMounted := gf.UseState(true)
+	children := []gf.Node{
+		gf.El(
+			"p",
+			gf.Props{"data-testid": "eb-state-success-unmounted"},
+			gf.Text("unmounted"),
+		),
+	}
+	if mounted {
+		children = []gf.Node{
+			gf.Component(
+				"StateTransactionSuccessOwner",
+				StateTransactionSuccessOwnerProps{},
+				StateTransactionSuccessOwner,
+			),
+		}
+	}
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-state-success-host"},
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-success-toggle",
+				"OnClick": func() {
+					if mounted {
+						successfulStateDispatch = nil
+					}
+					setMounted(!mounted)
+				},
+			},
+			gf.Text("Toggle successful state owner"),
+		),
+		gf.Fragment(children...),
+	)
+}
+
+func StateTransactionSuccessOwner(StateTransactionSuccessOwnerProps) gf.Node {
+	stateTransactionSuccessProbe.ownerRenders++
+	first, setFirst := gf.UseState(1)
+	second, _ := gf.UseState("second")
+	candidate, setCandidate := gf.UseState(false)
+	reducer := gf.Reducer[int, int](func(state, action int) int {
+		return state + action
+	})
+	if candidate {
+		reducer = func(state, action int) int {
+			return state + action*100
+		}
+	}
+	reduced, dispatch := gf.UseReducer(10, reducer)
+	if successfulStateDispatch == nil {
+		successfulStateDispatch = dispatch
+	}
+	resource, _ := gf.UseResource("aligned", func(
+		key string,
+		resolve func(string),
+		reject func(error),
+	) gf.Cleanup {
+		stateTransactionSuccessProbe.resourceStarts++
+		syncBoundaryProbe()
+		resolve("ready-" + key)
+		return func() {
+			stateTransactionSuccessProbe.resourceCleanups++
+			syncBoundaryProbe()
+		}
+	})
+
+	if first == 1 {
+		stateTransactionSuccessProbe.renderTimeSetters++
+		setFirst(2)
+	}
+	if reduced == 10 {
+		stateTransactionSuccessProbe.renderTimeDispatches++
+		dispatch(1)
+	}
+	resourceStatus := "loading"
+	resourceValue := ""
+	if resource.Ready() {
+		resourceStatus = "ready"
+		resourceValue = resource.Value
+	} else if resource.Failed() {
+		resourceStatus = "failed"
+	}
+	stateTransactionSuccessProbe.firstValue = first
+	stateTransactionSuccessProbe.secondValue = second
+	stateTransactionSuccessProbe.reducerValue = reduced
+	stateTransactionSuccessProbe.resourceStatus = resourceStatus
+	stateTransactionSuccessProbe.resourceValue = resourceValue
+	syncBoundaryProbe()
+
+	return gf.El(
+		"section",
+		gf.Props{"data-testid": "eb-state-success-owner"},
+		gf.El("p", gf.Props{"data-testid": "eb-state-success-first"}, gf.Text(gf.ToString(first))),
+		gf.El("p", gf.Props{"data-testid": "eb-state-success-second"}, gf.Text(second)),
+		gf.El("p", gf.Props{"data-testid": "eb-state-success-reducer"}, gf.Text(gf.ToString(reduced))),
+		gf.El("p", gf.Props{"data-testid": "eb-state-success-reducer-mode"}, gf.Text(successfulReducerMode(candidate))),
+		gf.El("p", gf.Props{"data-testid": "eb-state-success-resource"}, gf.Text(resourceStatus+":"+resourceValue)),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-success-update",
+				"OnClick": func() {
+					stateTransactionSuccessProbe.stateClicks++
+					setFirst(first + 1)
+					syncBoundaryProbe()
+				},
+			},
+			gf.Text("Update successful state"),
+		),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-success-replace-reducer",
+				"OnClick": func() {
+					stateTransactionSuccessProbe.reducerReplaceClicks++
+					setCandidate(true)
+					syncBoundaryProbe()
+				},
+			},
+			gf.Text("Replace successful reducer"),
+		),
+		gf.El(
+			"button",
+			gf.Props{
+				"data-testid": "eb-state-success-dispatch",
+				"OnClick": func() {
+					stateTransactionSuccessProbe.reducerDispatchClicks++
+					if successfulStateDispatch != nil {
+						successfulStateDispatch(1)
+					}
+					syncBoundaryProbe()
+				},
+			},
+			gf.Text("Dispatch successful reducer"),
+		),
+	)
+}
+
+func successfulReducerMode(candidate bool) string {
+	if candidate {
+		return "candidate"
+	}
+	return "base"
 }
 
 func RiskyPanel(props RiskyPanelProps) gf.Node {
@@ -1047,6 +1460,13 @@ func initBoundaryProbe() {
 	localTransactionProbe = protectedTransactionProbe{}
 	nestedFallbackProbe = nestedFallbackTransactionProbe{}
 	dirtyBatchProbe = capturedDirtyBatchProbe{}
+	stateTransactionProbe = stateTransactionFailureProbe{}
+	stateTransactionSuccessProbe = stateTransactionSuccessCounters{}
+	stateTransactionPhase = "attempt"
+	failedStateSetter = nil
+	failedStateDispatch = nil
+	committedStateDispatch = nil
+	successfulStateDispatch = nil
 	setDirtyBatchFailingVersion = nil
 	setDirtyBatchLaterVersion = nil
 	setDirtyBatchIndependent = nil
@@ -1153,4 +1573,34 @@ func syncBoundaryProbe() {
 	dirtyBatch.Set("attemptedBResourceCleanups", dirtyBatchProbe.attemptedBResourceCleanups)
 	dirtyBatch.Set("independentOwnerRenders", dirtyBatchProbe.independentOwnerRenders)
 	js.Global().Set("goframeCapturedDirtyBatchProbe", dirtyBatch)
+
+	stateTransaction := js.Global().Get("Object").New()
+	stateTransaction.Set("initialOwnerRenders", stateTransactionProbe.initialOwnerRenders)
+	stateTransaction.Set("initialFailedRenders", stateTransactionProbe.initialFailedRenders)
+	stateTransaction.Set("initialRecoveredRenders", stateTransactionProbe.initialRecoveredRenders)
+	stateTransaction.Set("initialFallbackRenders", stateTransactionProbe.initialFallbackRenders)
+	stateTransaction.Set("failedClosureInvocations", stateTransactionProbe.failedClosureInvocations)
+	stateTransaction.Set("currentUpdateInvocations", stateTransactionProbe.currentUpdateInvocations)
+	stateTransaction.Set("reducerOwnerRenders", stateTransactionProbe.reducerOwnerRenders)
+	stateTransaction.Set("reducerFailedRenders", stateTransactionProbe.reducerFailedRenders)
+	stateTransaction.Set("reducerSuccessfulRenders", stateTransactionProbe.reducerSuccessfulRenders)
+	stateTransaction.Set("committedDispatchInvokes", stateTransactionProbe.committedDispatchInvokes)
+	stateTransaction.Set("lastCommittedReducerValue", stateTransactionProbe.lastCommittedReducerValue)
+	js.Global().Set("goframeStateTransactionProbe", stateTransaction)
+
+	stateSuccess := js.Global().Get("Object").New()
+	stateSuccess.Set("ownerRenders", stateTransactionSuccessProbe.ownerRenders)
+	stateSuccess.Set("renderTimeSetters", stateTransactionSuccessProbe.renderTimeSetters)
+	stateSuccess.Set("renderTimeDispatches", stateTransactionSuccessProbe.renderTimeDispatches)
+	stateSuccess.Set("stateClicks", stateTransactionSuccessProbe.stateClicks)
+	stateSuccess.Set("reducerReplaceClicks", stateTransactionSuccessProbe.reducerReplaceClicks)
+	stateSuccess.Set("reducerDispatchClicks", stateTransactionSuccessProbe.reducerDispatchClicks)
+	stateSuccess.Set("resourceStarts", stateTransactionSuccessProbe.resourceStarts)
+	stateSuccess.Set("resourceCleanups", stateTransactionSuccessProbe.resourceCleanups)
+	stateSuccess.Set("firstValue", stateTransactionSuccessProbe.firstValue)
+	stateSuccess.Set("secondValue", stateTransactionSuccessProbe.secondValue)
+	stateSuccess.Set("reducerValue", stateTransactionSuccessProbe.reducerValue)
+	stateSuccess.Set("resourceStatus", stateTransactionSuccessProbe.resourceStatus)
+	stateSuccess.Set("resourceValue", stateTransactionSuccessProbe.resourceValue)
+	js.Global().Set("goframeStateTransactionSuccessProbe", stateSuccess)
 }

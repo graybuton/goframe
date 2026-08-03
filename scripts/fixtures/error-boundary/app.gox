@@ -113,6 +113,10 @@ func App() gf.Node {
 			</gf.ErrorBoundary>
 			<DirtyBatchIndependentOwner />
 
+			<StateTransactionInitialScenario />
+			<StateTransactionReducerScenario />
+			<StateTransactionSuccessHost />
+
 			<button
 				data-testid="eb-trigger-no-boundary-error"
 				OnClick={func() {
