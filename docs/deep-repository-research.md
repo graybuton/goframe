@@ -36,7 +36,7 @@ the nearest ordinary test succeeds:
 | CLI and diagnostics | `cmd/goxc` command handlers | Text/JSON diagnostics, stdout/stderr, and exit status remain command contracts. |
 | Source selection | `cmd/goxc` generation and compiler metadata | Build tags and package membership are selected before package generation. |
 | GOX package generation | `cmd/goxc` plus `gox.GeneratePackageWithOptions` | All GOX and authored Go files in one package participate in identifier reservation and deterministic rendering. |
-| Generated output | `generatePackageTargetsSafely` | Inputs are generated together, but adjacent outputs are written and removed sequentially. |
+| Generated output | `generatePackageTargetsSafely` and the private generated-source publisher | Inputs are generated together, then active writes and managed inactive removals are staged and committed as one recoverable publication plan. |
 | Workspace and package publication | `cmd/goxc` workspace/package layers | Physical containment, authored inputs, embeds, compiler execution, and managed package publication have distinct ownership checks. |
 | Development generations | `cmd/goxc` dev server | A canonical package is verified, activated as an immutable generation, leased by requests, and reloaded or drained. |
 | GOX parser | `pkg/gox` lexer and parser | Markup boundaries, attributes, props, expressions, source positions, and AST shape are accepted or rejected before lowering. |
@@ -76,7 +76,7 @@ scratch sources and generated package trees remain outside version control.
 |---|---|---|---|---|---|---|---|
 | DR-01 | `INDEPENDENT_DISCOVERY` | Medium | `pkg/gox`, `cmd/goxc check` | Accepted GOX should not emit duplicate Go fields or ambiguous runtime destinations. | Raw duplicates passed the original baseline; review follow-ups still accepted collisions through synthetic `Children`, DOM aliases, event case, and HTML attribute case. | Raw spelling is not the effective destination: component children add a synthetic field, events normalize separately, and HTML attribute destinations are ASCII case-insensitive before alias mapping. | Fixed in `54a22a65b5e4d2fc1bd0322a2c74cd950d7569bd`, extended in `9777620b0faa4798559f7af71ed256c176c6c302`, and completed in `ed6c96bab1e63c99009a70cf50695a8008440802`. |
 | DR-02 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc clean` | Cleanup may unlink only the adjacent file whose goxc ownership was validated. | The original baseline deleted an unmarked output; after the first correction, replacing or modifying a planned file before deletion still caused the replacement to be removed. | The first plan retained only paths, so deletion could not compare the current file's identity or content with the validated object. | Fixed in `cdeb83c871ea76d36fda887889f2164a40434da0` and completed in `1bbb319ccfd8c3839862bf75ff9790957c7f1c64`. |
-| DR-03 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc` generation publication | A coordinated package generation should not expose a partial new source set after a write failure. | With valid `a.gox` and `z.gox` and a directory at `z.gox.go`, generation returned an error after publishing `a.gox.go`. | Generation computes all bytes first but performs independent atomic file replacements and removals without a package transaction or rollback. | Separate bounded stage. |
+| DR-03 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc` generation publication | A coordinated package generation should not expose a partial new source set after a write failure. | With valid `a.gox` and `z.gox` and a directory at `z.gox.go`, generation returned an error after publishing `a.gox.go`. | Generation computed all bytes first but performed independent atomic file replacements and removals without a recoverable publication boundary. | Fixed in `fe293dcbf64b798fbd61fb12d09793f7e89435bf` with the complete fault matrix in `b60d249a6fa2846e9c9a6951068d61afd4047cd5`. |
 | DR-04 | `INDEPENDENT_DISCOVERY` | High | `pkg/goframe` render transaction | A failed render must not commit newly observed state slots or reducer closures. | A failed initial render retained its initial state on retry; a failed reducer rerender changed what an old dispatch closure executed. | `useStateSlot` appends directly to committed `stateSlots`, and `setReducer` replaces the committed reducer during render. | Separate bounded stage. |
 
 ### DR-01: duplicate attributes and props
@@ -166,6 +166,24 @@ The negative control with ordinary file destinations published both files.
 This differs from the managed package publisher: the defect is adjacent
 generated-source publication inside `generatePackageTargetsSafely`.
 
+The generated-source publisher now builds a deterministic plan for active
+creations and replacements plus managed inactive removals. It validates every
+destination, records existing bytes, permissions, identity, and content
+fingerprint, creates required directories, and stages every active output
+before visible mutation. Commit revalidates each entry and applies the sorted
+plan. A detected failure restores completed mutations in reverse order,
+removes newly created outputs, retains managed inactive outputs, and reports
+rollback failures together with the primary error. The fault matrix covers
+every staging action, every visible mutation position, multiple package
+directories, retry, and rollback failure.
+
+This is recoverability for failures detected by the running process, not a
+filesystem-wide atomic transaction. Process termination, power loss, hostile
+concurrent mutation, and arbitrary rollback failure remain outside the
+guarantee. Successful no-active-source cleanup remains committed before the
+existing semantic error is returned, and single-file generation still treats
+unpublished sibling outputs as read-only verification inputs.
+
 ### DR-04: speculative state escapes rollback
 
 Two temporary tests were run and removed. In the first, a render created state
@@ -250,27 +268,17 @@ symlink contracts.
 filesystem identity and SHA-256 evidence, revalidating the complete plan before
 adjacent deletion, and revalidating each entry immediately before unlink.
 
+`fe293dcbf64b798fbd61fb12d09793f7e89435bf` completes DR-03 with a private
+generated-source publication plan, complete preflight and staging, deterministic
+commit, reverse-order rollback, and an explicitly passed fault-injection hook.
+`b60d249a6fa2846e9c9a6951068d61afd4047cd5` supplies the complete staging,
+mutation-position, multi-package, retry, no-active-source, single-file, and
+rollback-failure matrix.
+
 These fixes do not change a public Go API, GOX output for accepted non-collision
 sources, CLI schema, dependencies, workflows, package format, or budgets.
 
 ## Separate Bounded Stages
-
-### `fix/goxc-transactional-generated-publication`
-
-- **Goal:** publish all active generated GO files and inactive removals as one
-  recoverable package-source transaction.
-- **Root cause:** `generatePackageTargetsSafely` validates and renders first,
-  then independently replaces each destination and removes inactive outputs.
-- **Acceptance:** an injected failure at every destination leaves the complete
-  prior source set unchanged; successful generation preserves exact bytes,
-  diagnostics, and single-file behavior; symlink and ownership checks remain
-  fail-closed.
-- **Allowed paths:** `cmd/goxc/workspace.go` and nearest generation/filesystem
-  tests and current contract documentation.
-- **Non-goals:** managed release-package publication, runtime changes, or a new
-  public transaction API.
-- **Stop:** require a filesystem-wide atomicity claim, weaken containment, or
-  change generated format.
 
 ### `fix/runtime-state-render-transactions`
 
@@ -344,6 +352,17 @@ was identical at
 
 Every current absolute and ratio budget passed. No budget changed.
 
+The DR-03 continuation compared the frozen merge
+`f61f0bc97467165a21bb15d069f34762321283bb` with the final code head
+`b60d249a6fa2846e9c9a6951068d61afd4047cd5` at fixed absolute paths. Default
+multi-package, explicit-output, in-place, active
+replacement, single-file, and managed inactive-removal results had identical
+filenames, generated bytes, permissions, stdout, stderr, diagnostics, and exit
+status. All eleven raw WASM, reproducible gzip, Brotli, and Zstandard streams
+were byte-identical. GNU gzip's default header initially differed only by the
+source-file mtime; `gzip -n` removed that measurement metadata. The unchanged
+size gate passed all absolute and ratio budgets.
+
 ## Validation
 
 Tests-first baseline probes observed both implemented failures before
@@ -376,6 +395,15 @@ red commit was created.
 - Final Gopls checks were clean for changed Go files. Full Gopls, Staticcheck,
   and deadcode reruns introduced no new strong finding; known nonzero
   Staticcheck output remains classified above and in the parent audit.
+
+The DR-03 continuation passed its focused generation/publication suites under
+Go 1.22.12, 1.25.12, and 1.26.5, 100 high-count repetitions under Go 1.26.5,
+and 20 race repetitions under Go 1.25.12 and 1.26.5. Full ordinary,
+`goframe_debug`, and vet suites passed under all three Go versions; full race
+suites passed under Go 1.25.12 and 1.26.5. `scripts/check.sh`, two complete
+Chrome runs, actionlint, the VS Code extension tests, Windows/amd64 compilation,
+and all repository gates passed. The Chrome dev publication probe observed no
+partial responses during either accepted run.
 
 ## Limitations
 

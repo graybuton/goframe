@@ -192,6 +192,11 @@
 
 ### Fixed
 
+- Coordinated `goxc generate` publication now stages all active outputs and
+  recovers the prior generated-source set when a detected write, replacement,
+  or managed inactive-removal failure occurs. Rollback failures retain the
+  original error, while successful bytes, no-active-source cleanup, and
+  single-file sibling verification remain unchanged.
 - GOX now rejects duplicate DOM attributes and component props, normalized DOM
   attribute or event collisions, and explicit `Children` combined with nested
   renderable children. HTML attribute destinations are ASCII-lowercased before
