@@ -151,9 +151,10 @@ func dispatchReducer[S any, A any](slot *stateSlot, action A) {
 	state := stateHandle[S]{slot: slot}
 	reducerValue := slot.reducer
 	if currentComponent == owner && currentComponent.lifecycleAttempt.active {
-		state := &currentComponent.lifecycleAttempt.state
-		if staged, stagedOK := state.reducerFor(slot); stagedOK {
-			reducerValue = staged
+		if pending := currentComponent.lifecycleAttempt.state; pending != nil {
+			if staged, stagedOK := pending.reducerFor(slot); stagedOK {
+				reducerValue = staged
+			}
 		}
 	}
 	reducer, ok := reducerValue.(Reducer[S, A])

@@ -985,9 +985,14 @@ func TestProtectedSubtreeStateSlotsRollBackAfterDescendantFailure(t *testing.T) 
 		}
 		renderComponentInstance(transactionTestRisky(boundary, "state descendant boom"))
 	})
-	if len(owner.stateSlots) != 0 || owner.lifecycleAttempt.active || owner.lifecycleAttempt.state.attempt != nil {
+	if len(owner.stateSlots) != 0 || owner.lifecycleAttempt.active ||
+		(owner.lifecycleAttempt.state != nil && owner.lifecycleAttempt.state.attempt != nil) {
+		var stateAttempt *renderLifecycleAttempt
+		if owner.lifecycleAttempt.state != nil {
+			stateAttempt = owner.lifecycleAttempt.state.attempt
+		}
 		t.Fatalf("failed protected state retained slots=%d active=%v transaction=%p",
-			len(owner.stateSlots), owner.lifecycleAttempt.active, owner.lifecycleAttempt.state.attempt)
+			len(owner.stateSlots), owner.lifecycleAttempt.active, stateAttempt)
 	}
 
 	clearErrorBoundary(boundary.errorBoundary)

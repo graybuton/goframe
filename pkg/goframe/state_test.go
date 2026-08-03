@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+type stateParticipantMemoProps struct {
+	ID int
+}
+
+func (props stateParticipantMemoProps) MemoEqual(next stateParticipantMemoProps) bool {
+	return props.ID == next.ID
+}
+
 func TestUseStatePersistsWithinComponent(t *testing.T) {
 	var value int
 	var setValue func(int)
@@ -63,6 +71,369 @@ func TestUseStateSupportsMultipleSlots(t *testing.T) {
 
 	if count != 2 || label != "second" {
 		t.Fatalf("slots = %d, %q; want 2, second", count, label)
+	}
+}
+
+func TestStateRenderParticipantStaysNilForHookFreeComponents(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func() *componentInstance
+	}{
+		{
+			name: "plain rendering",
+			new: func() *componentInstance {
+				return testComponentInstance("PlainHookFree", func() Node {
+					return Empty()
+				}, nil)
+			},
+		},
+		{
+			name: "effect only",
+			new: func() *componentInstance {
+				return testComponentInstance("EffectHookFree", func() Node {
+					UseEffect(func() Cleanup { return nil })
+					return Empty()
+				}, nil)
+			},
+		},
+		{
+			name: "unmount only",
+			new: func() *componentInstance {
+				return testComponentInstance("UnmountHookFree", func() Node {
+					UseUnmount(func() {})
+					return Empty()
+				}, nil)
+			},
+		},
+		{
+			name: "context only",
+			new: func() *componentInstance {
+				ctx := CreateContext(1)
+				return testComponentInstance("ContextHookFree", func() Node {
+					_ = UseContext(ctx)
+					return Empty()
+				}, nil)
+			},
+		},
+		{
+			name: "memo only",
+			new: func() *componentInstance {
+				node := Component(
+					"MemoHookFree",
+					stateParticipantMemoProps{ID: 1},
+					func(stateParticipantMemoProps) Node { return Empty() },
+				).(ComponentNode)
+				return newComponentInstance(node, "memo", nil, nil)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			isolateLifecycleTestState(t)
+			instance := test.new()
+			for render := 0; render < 2; render++ {
+				renderComponentInstance(instance)
+				if instance.lifecycleAttempt.state != nil {
+					t.Fatalf("hook-free render %d allocated state participant %p", render+1, instance.lifecycleAttempt.state)
+				}
+				flushPendingEffects()
+			}
+			deactivateComponent(instance)
+			if instance.lifecycleAttempt.state != nil {
+				t.Fatalf("hook-free deactivation retained state participant %p", instance.lifecycleAttempt.state)
+			}
+		})
+	}
+}
+
+func TestStateRenderParticipantStaysNilAfterFailedAndProtectedHookFreeRenders(t *testing.T) {
+	t.Run("failed render", func(t *testing.T) {
+		errorsSeen := captureRuntimeErrors(t)
+		instance := testComponentInstance("FailedHookFree", func() Node {
+			panic("hook-free render failed")
+		}, nil)
+
+		renderComponentInstance(instance)
+		if instance.lifecycleAttempt.state != nil {
+			t.Fatalf("failed hook-free render allocated state participant %p", instance.lifecycleAttempt.state)
+		}
+		requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "FailedHookFree", "component render", "hook-free render failed")
+	})
+
+	t.Run("protected render", func(t *testing.T) {
+		isolateLifecycleTestState(t)
+		boundary := transactionTestBoundary()
+		instance := testComponentInstance("ProtectedHookFree", func() Node {
+			return Empty()
+		}, nil)
+
+		runProtectedSubtreeTestAttempt(boundary, func() {
+			renderComponentInstance(instance)
+			if !instance.lifecycleAttempt.active {
+				t.Fatal("protected hook-free attempt committed before boundary result")
+			}
+			if instance.lifecycleAttempt.state != nil {
+				t.Fatalf("protected hook-free render allocated state participant %p", instance.lifecycleAttempt.state)
+			}
+		})
+		if instance.lifecycleAttempt.active || instance.lifecycleAttempt.state != nil {
+			t.Fatalf("protected hook-free commit active=%v state=%p, want false/nil",
+				instance.lifecycleAttempt.active, instance.lifecycleAttempt.state)
+		}
+		deactivateComponent(instance)
+		deactivateComponent(boundary)
+	})
+}
+
+func TestStateRenderParticipantAllocatesLazilyForStateHooks(t *testing.T) {
+	tests := []struct {
+		name             string
+		render           func()
+		wantParticipants int
+	}{
+		{
+			name: "UseState",
+			render: func() {
+				_, _ = UseState(1)
+			},
+			wantParticipants: 1,
+		},
+		{
+			name: "UseReducer",
+			render: func() {
+				_, _ = UseReducer(1, func(value, action int) int { return value + action })
+			},
+			wantParticipants: 1,
+		},
+		{
+			name: "multiple state hooks",
+			render: func() {
+				_, _ = UseState(1)
+				_, _ = UseReducer(2, func(value, action int) int { return value + action })
+			},
+			wantParticipants: 1,
+		},
+		{
+			name: "UseResource",
+			render: func() {
+				_, _ = UseResource("resource", func(string, func(string), func(error)) Cleanup {
+					return nil
+				})
+			},
+			wantParticipants: 2,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			isolateLifecycleTestState(t)
+			var participant *stateRenderParticipant
+			var registrations int
+			var stateRegisteredFirst bool
+			instance := testComponentInstance("Stateful", func() Node {
+				test.render()
+				participant = currentComponent.lifecycleAttempt.state
+				registrations = len(currentComponent.lifecycleAttempt.participants)
+				stateRegisteredFirst = registrations > 0 &&
+					currentComponent.lifecycleAttempt.participants[0] == participant
+				return Empty()
+			}, nil)
+
+			renderComponentInstance(instance)
+			if participant == nil || instance.lifecycleAttempt.state != participant {
+				t.Fatalf("state hook participant captured=%p retained=%p, want one retained participant",
+					participant, instance.lifecycleAttempt.state)
+			}
+			if registrations != test.wantParticipants {
+				t.Fatalf("render participants = %d, want %d", registrations, test.wantParticipants)
+			}
+			if !stateRegisteredFirst {
+				t.Fatal("state participant was not registered before dependent participants")
+			}
+			if len(instance.lifecycleAttempt.participants) != 0 {
+				t.Fatalf("finished attempt retained %d participant entries", len(instance.lifecycleAttempt.participants))
+			}
+			assertStateRenderParticipantCleared(t, participant)
+			flushPendingEffects()
+			deactivateComponent(instance)
+			if instance.lifecycleAttempt.state != nil {
+				t.Fatalf("deactivation retained state participant %p", instance.lifecycleAttempt.state)
+			}
+		})
+	}
+}
+
+func TestStateRenderParticipantReusesStorageAndClearsReferences(t *testing.T) {
+	errorsSeen := captureRuntimeErrors(t)
+	initial := true
+	fail := false
+	includeTrailing := false
+	var participant *stateRenderParticipant
+	var firstSlotBacking []*stateSlot
+	var reducerBacking []stateReducerRenderUpdate
+	var failedSlotBacking []*stateSlot
+	var failedReducerBacking []stateReducerRenderUpdate
+	var firstParticipantBacking []lifecycleRenderParticipant
+	var failedParticipantBacking []lifecycleRenderParticipant
+	var discarded *stateSlot
+	instance := testComponentInstance("ReusableStateParticipant", func() Node {
+		_, _ = UseState(1)
+		_, _ = UseReducer(2, func(value, action int) int {
+			return value + action
+		})
+		state := currentComponent.lifecycleAttempt.state
+		if participant == nil {
+			participant = state
+		} else if state != participant {
+			panic("state participant was not reused")
+		}
+		if initial {
+			firstSlotBacking = state.slots[:len(state.slots)]
+			firstParticipantBacking = currentComponent.lifecycleAttempt.participants[:len(currentComponent.lifecycleAttempt.participants)]
+		}
+		if !initial && !includeTrailing {
+			reducerBacking = state.reducers[:len(state.reducers)]
+		}
+		if includeTrailing {
+			_, setTrailing := UseState(3)
+			discarded = state.slots[len(state.slots)-1]
+			failedSlotBacking = state.slots[:len(state.slots)]
+			failedReducerBacking = state.reducers[:len(state.reducers)]
+			failedParticipantBacking = currentComponent.lifecycleAttempt.participants[:len(currentComponent.lifecycleAttempt.participants)]
+			if fail {
+				setTrailing(4)
+				panic("state participant rollback")
+			}
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	if instance.lifecycleAttempt.state != participant {
+		t.Fatalf("first commit retained participant %p, want %p", instance.lifecycleAttempt.state, participant)
+	}
+	assertStateRenderParticipantCleared(t, participant)
+	assertStateSlotBackingCleared(t, firstSlotBacking)
+	assertLifecycleParticipantBackingCleared(t, firstParticipantBacking)
+
+	initial = false
+	renderComponentInstance(instance)
+	if instance.lifecycleAttempt.state != participant {
+		t.Fatalf("reducer-only update retained participant %p, want %p", instance.lifecycleAttempt.state, participant)
+	}
+	assertStateRenderParticipantCleared(t, participant)
+	assertStateReducerBackingCleared(t, reducerBacking)
+
+	includeTrailing = true
+	fail = true
+	renderComponentInstance(instance)
+	if instance.lifecycleAttempt.state != participant {
+		t.Fatalf("rollback retained participant %p, want %p", instance.lifecycleAttempt.state, participant)
+	}
+	assertStateRenderParticipantCleared(t, participant)
+	assertStateSlotBackingCleared(t, failedSlotBacking)
+	assertStateReducerBackingCleared(t, failedReducerBacking)
+	assertLifecycleParticipantBackingCleared(t, failedParticipantBacking)
+	if discarded == nil || discarded.owner != nil || discarded.pending != nil || discarded.value != nil || discarded.reducer != nil || discarded.kind != "" {
+		t.Fatalf("discarded slot retained state: %#v", discarded)
+	}
+
+	fail = false
+	renderComponentInstance(instance)
+	if instance.lifecycleAttempt.state != participant || len(instance.stateSlots) != 3 {
+		t.Fatalf("retry participant=%p slots=%d, want %p/3",
+			instance.lifecycleAttempt.state, len(instance.stateSlots), participant)
+	}
+	assertStateRenderParticipantCleared(t, participant)
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "ReusableStateParticipant", "component render", "state participant rollback")
+}
+
+func TestStateRenderParticipantReusesReducerOnlyRenders(t *testing.T) {
+	var first *stateRenderParticipant
+	instance := testComponentInstance("ReducerOnlyParticipant", func() Node {
+		_, _ = UseReducer(0, func(value, action int) int { return value + action })
+		state := currentComponent.lifecycleAttempt.state
+		if first == nil {
+			first = state
+		} else if state != first {
+			panic("reducer-only participant was not reused")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	renderComponentInstance(instance)
+	if instance.lifecycleAttempt.state != first {
+		t.Fatalf("reducer-only participant = %p, want reused %p", instance.lifecycleAttempt.state, first)
+	}
+	assertStateRenderParticipantCleared(t, first)
+}
+
+func TestStateRenderParticipantReleaseDropsPointer(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		release func(*componentInstance)
+	}{
+		{name: "release", release: releaseLifecycleRenderAttempt},
+		{name: "deactivate", release: deactivateComponent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance := testComponentInstance("ReleasedParticipant", func() Node {
+				_, _ = UseState(1)
+				return Empty()
+			}, nil)
+			renderComponentInstance(instance)
+			participant := instance.lifecycleAttempt.state
+			if participant == nil {
+				t.Fatal("stateful render did not allocate a participant")
+			}
+
+			test.release(instance)
+			if instance.lifecycleAttempt.state != nil {
+				t.Fatalf("lifecycle release retained state participant %p", instance.lifecycleAttempt.state)
+			}
+			assertStateRenderParticipantCleared(t, participant)
+		})
+	}
+}
+
+func assertStateRenderParticipantCleared(t *testing.T, state *stateRenderParticipant) {
+	t.Helper()
+	if state == nil {
+		t.Fatal("state participant is nil")
+	}
+	if state.attempt != nil || state.instance != nil || len(state.slots) != 0 || len(state.reducers) != 0 || state.dirty {
+		t.Fatalf("state participant retained attempt=%p instance=%p slots=%d reducers=%d dirty=%v",
+			state.attempt, state.instance, len(state.slots), len(state.reducers), state.dirty)
+	}
+}
+
+func assertStateSlotBackingCleared(t *testing.T, slots []*stateSlot) {
+	t.Helper()
+	for index, slot := range slots {
+		if slot != nil {
+			t.Fatalf("state participant slot backing %d retained %p", index, slot)
+		}
+	}
+}
+
+func assertStateReducerBackingCleared(t *testing.T, reducers []stateReducerRenderUpdate) {
+	t.Helper()
+	for index, update := range reducers {
+		if update.slot != nil || update.reducer != nil {
+			t.Fatalf("state participant reducer backing %d retained slot=%p reducer=%T",
+				index, update.slot, update.reducer)
+		}
+	}
+}
+
+func assertLifecycleParticipantBackingCleared(t *testing.T, participants []lifecycleRenderParticipant) {
+	t.Helper()
+	for index, participant := range participants {
+		if participant != nil {
+			t.Fatalf("lifecycle participant backing %d retained %T", index, participant)
+		}
 	}
 }
 
@@ -280,7 +651,7 @@ func TestPendingStateClosuresAreInvalidatedByLifecycleRelease(t *testing.T) {
 					t.Fatalf("released speculative slot %d retained state: %#v", index, slot)
 				}
 			}
-			if instance.lifecycleAttempt.active || len(instance.lifecycleAttempt.participants) != 0 || instance.lifecycleAttempt.state.attempt != nil {
+			if instance.lifecycleAttempt.active || len(instance.lifecycleAttempt.participants) != 0 || instance.lifecycleAttempt.state != nil {
 				t.Fatalf("released lifecycle attempt retained state: %#v", instance.lifecycleAttempt)
 			}
 			state.set(2)

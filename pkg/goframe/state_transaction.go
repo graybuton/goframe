@@ -15,7 +15,11 @@ type stateRenderParticipant struct {
 
 func requireStateRenderParticipant(instance *componentInstance) *stateRenderParticipant {
 	attempt := requireLifecycleRenderAttempt(instance)
-	state := &attempt.state
+	state := attempt.state
+	if state == nil {
+		state = &stateRenderParticipant{}
+		attempt.state = state
+	}
 	if state.attempt == nil {
 		state.attempt = attempt
 		state.instance = instance
