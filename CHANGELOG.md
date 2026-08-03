@@ -194,9 +194,12 @@
 
 - GOX now rejects duplicate DOM attributes and component props, normalized DOM
   attribute or event collisions, and explicit `Children` combined with nested
-  renderable children. Authored diagnostics are reported before generation can
-  emit duplicate Go fields or ambiguous runtime destinations, and direct
-  codegen validates manually constructed ASTs defensively.
+  renderable children. HTML attribute destinations are ASCII-lowercased before
+  the `className` and `htmlFor` aliases in both GOX validation and runtime prop
+  splitting, including boolean ARIA values. Authored diagnostics are reported
+  before generation can emit duplicate Go fields or ambiguous runtime
+  destinations, and direct codegen validates manually constructed ASTs
+  defensively.
 - `goxc clean --generated` and `--legacy` now verify adjacent `.gox.go`
   ownership before cleanup, retain filesystem identity and content fingerprints,
   and revalidate the complete set plus each file immediately before removal.

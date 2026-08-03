@@ -31,10 +31,10 @@ gf.El("main", gf.Props{
 
 HTML attributes become keys in `gf.Props`. Authored names must be unique within
 an element, and distinct authored names must not target the same runtime
-destination. Known DOM names are case-normalized, `className` maps to `class`,
-`htmlFor` maps to `for`, and event props use a case-insensitive `on` prefix plus
-a lowercase event name. Unrelated custom attribute names are not blanket
-lowercased.
+destination. HTML attribute destinations are ASCII-lowercased, `className` maps
+to `class`, and `htmlFor` maps to `for`. Event props use a separate destination
+with a case-insensitive `on` prefix and lowercase event name. Component prop
+fields remain case-sensitive Go names.
 
 ## Function components
 
@@ -417,7 +417,8 @@ Common DOM props and event names support lowercase and exported-style forms:
 
 Forms that normalize to the same destination cannot be combined in one
 element. For example, `class` conflicts with `className`, `htmlFor` conflicts
-with `for`, and `onClick` conflicts with `onclick`. Distinct custom attributes
+with `FOR`, and `onClick` conflicts with `onclick`. Attribute names that differ
+only in ASCII letter case also conflict; distinct lowercase custom destinations
 and distinct events remain independent.
 
 Handlers may be `func()`, `func(gf.Event)`, or `func(gf.InputEvent)`.

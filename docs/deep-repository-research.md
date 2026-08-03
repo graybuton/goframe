@@ -74,7 +74,7 @@ scratch sources and generated package trees remain outside version control.
 
 | ID | Provenance | Severity | Subsystem | Contract | Reproduction | Root cause | Disposition |
 |---|---|---|---|---|---|---|---|
-| DR-01 | `INDEPENDENT_DISCOVERY` | Medium | `pkg/gox`, `cmd/goxc check` | Accepted GOX should not emit duplicate Go fields or ambiguous runtime destinations. | Raw duplicates passed the original baseline; the first correction still accepted explicit-plus-nested `Children`, `class` plus `className`, and `onClick` plus `onclick`. | Raw spelling is not the effective destination: component children add a synthetic field, while the runtime normalizes known DOM aliases and event names. | Fixed in `54a22a65b5e4d2fc1bd0322a2c74cd950d7569bd` and completed in `9777620b0faa4798559f7af71ed256c176c6c302`. |
+| DR-01 | `INDEPENDENT_DISCOVERY` | Medium | `pkg/gox`, `cmd/goxc check` | Accepted GOX should not emit duplicate Go fields or ambiguous runtime destinations. | Raw duplicates passed the original baseline; review follow-ups still accepted collisions through synthetic `Children`, DOM aliases, event case, and HTML attribute case. | Raw spelling is not the effective destination: component children add a synthetic field, events normalize separately, and HTML attribute destinations are ASCII case-insensitive before alias mapping. | Fixed in `54a22a65b5e4d2fc1bd0322a2c74cd950d7569bd`, extended in `9777620b0faa4798559f7af71ed256c176c6c302`, and completed in `ed6c96bab1e63c99009a70cf50695a8008440802`. |
 | DR-02 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc clean` | Cleanup may unlink only the adjacent file whose goxc ownership was validated. | The original baseline deleted an unmarked output; after the first correction, replacing or modifying a planned file before deletion still caused the replacement to be removed. | The first plan retained only paths, so deletion could not compare the current file's identity or content with the validated object. | Fixed in `cdeb83c871ea76d36fda887889f2164a40434da0` and completed in `1bbb319ccfd8c3839862bf75ff9790957c7f1c64`. |
 | DR-03 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc` generation publication | A coordinated package generation should not expose a partial new source set after a write failure. | With valid `a.gox` and `z.gox` and a directory at `z.gox.go`, generation returned an error after publishing `a.gox.go`. | Generation computes all bytes first but performs independent atomic file replacements and removals without a package transaction or rollback. | Separate bounded stage. |
 | DR-04 | `INDEPENDENT_DISCOVERY` | High | `pkg/goframe` render transaction | A failed render must not commit newly observed state slots or reducer closures. | A failed initial render retained its initial state on retry; a failed reducer rerender changed what an old dispatch closure executed. | `useStateSlot` appends directly to committed `stateSlots`, and `setReducer` replaces the committed reducer during render. | Separate bounded stage. |
@@ -101,11 +101,18 @@ spelling was not the complete destination contract: explicit `Children` plus
 renderable nested children emitted two Go fields, while `class`/`className` and
 `onClick`/`onclick` reached the same runtime attribute or event.
 
-Parser and codegen now share one private effective-destination model. Component
-fields remain case-sensitive Go names. DOM aliases and known case-normalized
-names match the current runtime contract, event prefixes are case-insensitive
-with lowercase suffixes, and unrelated custom attributes retain their authored
-case. Direct `Codegen` rejects the same invalid manually constructed ASTs.
+A second review follow-up found that `htmlFor`/`FOR` still reached the same
+browser destination because compiler and runtime normalization covered only a
+fixed list of known names. The same mismatch applied to differently cased
+custom, `data-*`, and `aria-*` attributes.
+
+Parser and codegen now share one private effective-destination model. Every
+non-event HTML attribute destination is ASCII-lowercased before `classname`
+maps to `class` and `htmlfor` maps to `for`. Event prefixes remain
+case-insensitive with lowercase suffixes, component fields remain
+case-sensitive Go names, and non-ASCII bytes are not case-folded. Runtime prop
+splitting applies the same attribute rule, including boolean ARIA values.
+Direct `Codegen` rejects the same invalid manually constructed ASTs.
 Authored-source diagnostics include:
 
 ```text
@@ -113,6 +120,8 @@ gox: duplicate attribute "class"
 gox: duplicate component prop "Label"
 gox: explicit Children prop cannot be combined with nested children
 gox: attribute "className" conflicts with "class" after normalization
+gox: attribute "FOR" conflicts with "htmlFor" after normalization
+gox: attribute "data-mode" conflicts with "data-Mode" after normalization
 gox: event prop "onclick" conflicts with "onClick" after normalization
 ```
 
@@ -227,6 +236,11 @@ component/DOM/event destination validation, defensive direct-codegen checks,
 package-generation and JSON diagnostics, and valid parse/type-check/build
 controls.
 
+`ed6c96bab1e63c99009a70cf50695a8008440802` completes HTML destination parity
+by ASCII-lowercasing every non-event attribute in both GOX validation and
+runtime prop splitting, retaining the `className` and `htmlFor` aliases, and
+covering boolean ARIA storage under its normalized destination.
+
 `cdeb83c871ea76d36fda887889f2164a40434da0` moves adjacent generated-file
 ownership validation ahead of cleanup mutation, tests unmarked/symlinked/
 irregular and all-or-nothing preflight cases, and updates the cleanup and
@@ -236,7 +250,7 @@ symlink contracts.
 filesystem identity and SHA-256 evidence, revalidating the complete plan before
 adjacent deletion, and revalidating each entry immediately before unlink.
 
-Neither fix changes a public Go API, GOX output for accepted non-collision
+These fixes do not change a public Go API, GOX output for accepted non-collision
 sources, CLI schema, dependencies, workflows, package format, or budgets.
 
 ## Separate Bounded Stages
