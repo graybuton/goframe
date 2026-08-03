@@ -41,7 +41,7 @@ the nearest ordinary test succeeds:
 | Development generations | `cmd/goxc` dev server | A canonical package is verified, activated as an immutable generation, leased by requests, and reloaded or drained. |
 | GOX parser | `pkg/gox` lexer and parser | Markup boundaries, attributes, props, expressions, source positions, and AST shape are accepted or rejected before lowering. |
 | GOX code generation | `pkg/gox` generation plans and codegen | Generated source is parser-safe; a successful package result must also survive Go type checking and compilation. |
-| Runtime render ownership | `pkg/goframe` component and render transaction | Lifecycle and resource work is speculative until commit; component state currently is not part of that transaction. |
+| Runtime render ownership | `pkg/goframe` component and render transaction | Lifecycle, resource, new state-slot, and reducer-replacement work is speculative until commit. |
 | DOM ownership | `pkg/goframe` reconciliation and mount layers | Keyed placement, form state, mounted ranges, and root replacement retain one explicit owner. |
 
 The module floor is Go 1.22. Standard Go 1.22.12, 1.25.12, and 1.26.5,
@@ -77,7 +77,7 @@ scratch sources and generated package trees remain outside version control.
 | DR-01 | `INDEPENDENT_DISCOVERY` | Medium | `pkg/gox`, `cmd/goxc check` | Accepted GOX should not emit duplicate Go fields or ambiguous runtime destinations. | Raw duplicates passed the original baseline; review follow-ups still accepted collisions through synthetic `Children`, DOM aliases, event case, and HTML attribute case. | Raw spelling is not the effective destination: component children add a synthetic field, events normalize separately, and HTML attribute destinations are ASCII case-insensitive before alias mapping. | Fixed in `54a22a65b5e4d2fc1bd0322a2c74cd950d7569bd`, extended in `9777620b0faa4798559f7af71ed256c176c6c302`, and completed in `ed6c96bab1e63c99009a70cf50695a8008440802`. |
 | DR-02 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc clean` | Cleanup may unlink only the adjacent file whose goxc ownership was validated. | The original baseline deleted an unmarked output; after the first correction, replacing or modifying a planned file before deletion still caused the replacement to be removed. | The first plan retained only paths, so deletion could not compare the current file's identity or content with the validated object. | Fixed in `cdeb83c871ea76d36fda887889f2164a40434da0` and completed in `1bbb319ccfd8c3839862bf75ff9790957c7f1c64`. |
 | DR-03 | `INDEPENDENT_DISCOVERY` | High | `cmd/goxc` generation publication | A coordinated package generation should not expose a partial new source set after a write failure. | With valid `a.gox` and `z.gox` and a directory at `z.gox.go`, generation returned an error after publishing `a.gox.go`. | Generation computed all bytes first but performed independent atomic file replacements and removals without a recoverable publication boundary. | Fixed in `fe293dcbf64b798fbd61fb12d09793f7e89435bf` with the complete fault matrix in `b60d249a6fa2846e9c9a6951068d61afd4047cd5`. |
-| DR-04 | `INDEPENDENT_DISCOVERY` | High | `pkg/goframe` render transaction | A failed render must not commit newly observed state slots or reducer closures. | A failed initial render retained its initial state on retry; a failed reducer rerender changed what an old dispatch closure executed. | `useStateSlot` appends directly to committed `stateSlots`, and `setReducer` replaces the committed reducer during render. | Separate bounded stage. |
+| DR-04 | `INDEPENDENT_DISCOVERY` | High | `pkg/goframe` render transaction | A failed render must not commit newly observed state slots or reducer closures. | A failed initial render retained its initial state on retry; a failed reducer rerender changed what an old dispatch closure executed. | `useStateSlot` appended directly to committed `stateSlots`, and `setReducer` replaced the committed reducer during render. | Fixed in `7d0e27b23fd80199cdfe1d260aeb21bede456266`, with browser evidence in `88ff6031360eeb2edd1fdbc2f27855a59342edc6` and the specialized state path in `ea82bf7d1c0e0e46cf9e9cedce813ff57a6597b5`. |
 
 ### DR-01: duplicate attributes and props
 
@@ -186,17 +186,27 @@ unpublished sibling outputs as read-only verification inputs.
 
 ### DR-04: speculative state escapes rollback
 
-Two temporary tests were run and removed. In the first, a render created state
-with initial value `1`, then panicked. A successful retry requesting initial
-value `99` observed `1`, proving that the failed attempt left a ghost slot. In
-the second, a committed reducer added `1`; a failed rerender staged a reducer
-that added `100`. Dispatching through the old committed closure after recovery
-produced `101` rather than `2`.
+The baseline reproduction created state with initial value `1`, then panicked.
+A successful retry requesting initial value `99` observed `1`, proving that the
+failed attempt left a ghost slot. In a second reproduction, a committed reducer
+added `1`; a failed rerender staged a reducer that added `100`. Dispatching
+through the old committed closure after recovery produced `101` rather than
+`2`.
 
-Lifecycle and resource attempts already have explicit commit and rollback.
-State-slot creation and reducer replacement bypass that boundary. This finding
-is behaviorally separate from the protected-subtree lifecycle transaction
-closed before this stage.
+New state slots and reducer replacements now participate in the shared render
+lifecycle boundary. State participation is allocated lazily and finalized
+through a specialized state path before generic resource participants and
+lifecycle hooks. Failed recover-capable renders discard new slots, make their
+new setters and dispatchers inert, and preserve the latest successfully
+committed reducer for existing dispatch closures. Protected ErrorBoundary
+subtrees retain deferred commit/rollback ownership, including nested boundary
+delegation.
+
+Host and standard-Go/WASM failure evidence prove rollback and retry. Standard
+Go and TinyGo/WASM both prove successful-path state semantics. TinyGo's current
+trap-style panic mode still cannot provide recover-based rollback evidence.
+Existing committed state-value updates are not generally rolled back, and this
+stage does not add concurrent rendering or scheduler transactionality.
 
 ## Historical Hypothesis Disposition
 
@@ -275,28 +285,21 @@ commit, reverse-order rollback, and an explicitly passed fault-injection hook.
 mutation-position, multi-package, retry, no-active-source, single-file, and
 rollback-failure matrix.
 
+`7d0e27b23fd80199cdfe1d260aeb21bede456266` makes new state slots and reducer
+replacements speculative, `5b9f26cc1dc507689bf0011ccfa69128f2815a8d` supplies the host transaction
+matrix, and `c9d3f7b978b6087d46282a0c275533b2d2dec82b` keeps state participation lazy.
+`ea82bf7d1c0e0e46cf9e9cedce813ff57a6597b5` finalizes state directly before
+generic resource participants rather than converting state to the generic
+lifecycle interface. `88ff6031360eeb2edd1fdbc2f27855a59342edc6` adds standard-Go failure/retry
+browser evidence, TinyGo successful-path parity, and the measured absolute
+size-ceiling alignment.
+
 These fixes do not change a public Go API, GOX output for accepted non-collision
-sources, CLI schema, dependencies, workflows, package format, or budgets.
+sources, CLI schema, dependencies, workflows, or package format. The completed
+DR-04 stage aligns only its measured absolute WASM ceilings; compression ratios
+remain unchanged.
 
 ## Separate Bounded Stages
-
-### `fix/runtime-state-render-transactions`
-
-- **Goal:** keep new state slots and reducer replacements speculative until a
-  render commits.
-- **Root cause:** state creation and reducer assignment mutate committed slots
-  while lifecycle/resource work uses a separate render attempt.
-- **Acceptance:** failed initial render leaves no ghost slot; failed rerender
-  preserves the committed reducer and state; retry commits in hook order; old
-  setters/dispatchers retain their documented behavior; host/race/debug,
-  standard-Go browser, TinyGo browser, and size evidence pass.
-- **Allowed paths:** `pkg/goframe` component/state/render transaction files,
-  nearest tests, and a focused browser fixture only if host evidence is
-  insufficient.
-- **Non-goals:** scheduler redesign, state API changes, or general concurrent
-  rendering.
-- **Stop:** public API change, unexplained standard-Go/TinyGo divergence, or an
-  unbounded transaction model.
 
 ### Historical follow-up stages
 
@@ -320,7 +323,8 @@ budget change, or an unreviewed public/language contract expansion.
 
 ## Output And Size Evidence
 
-Unaffected generation modes were compared with fixed paths. Directory,
+For the original deep-research layer through DR-03, unaffected generation modes
+were compared with fixed paths. Directory,
 single-file, and in-place output remained byte-identical at 554 bytes with
 SHA-256
 `fec3121e841a23ba10202b3e38ad9b6a78ebf8f79091e8aa55d71c1aa352ec75`.
@@ -350,7 +354,11 @@ was identical at
 | router-dashboard | 234,630 | 94,032 | 77,404 | 82,605 |
 | resource | 157,459 | 68,679 | 57,813 | 61,514 |
 
-Every current absolute and ratio budget passed. No budget changed.
+Every absolute and ratio budget at that checkpoint passed without a budget
+change. The later DR-04 closeout is recorded in
+`docs/wasm-size-headroom-audit.md`: all ratios still pass unchanged, while only
+the fifteen measured absolute cells that remained over their ceilings after
+state-path specialization move to the next one-KiB boundary.
 
 The DR-03 continuation compared the frozen merge
 `f61f0bc97467165a21bb15d069f34762321283bb` with the final code head
@@ -380,6 +388,11 @@ red commit was created.
   1.25.12 and 1.26.5.
 - `scripts/check.sh` passed, including generation, package, doctor, benchmark,
   race, vet, and size checks.
+- State transaction host tests passed high-count, race, and `goframe_debug`
+  runs. Ten fresh standard-Go/WASM runs proved failed-render rollback, retry,
+  inert discarded closures, and committed-reducer ownership. Ten fresh
+  TinyGo/WASM runs proved the successful state/reducer/resource path without
+  intentionally panicking.
 - Two aggregate Chrome runs passed. Their dev publication probes observed
   respectively 18/14 batches, 54/42 complete responses, and zero 404 or partial
   responses. Server-backed, history routing, document ownership, runtime error,
@@ -408,11 +421,11 @@ partial responses during either accepted run.
 ## Limitations
 
 Research ran on Linux/amd64. Windows received compile evidence, not execution.
-The temporary runtime tests for DR-04 establish the host transaction defect;
-the separate stage still requires browser and TinyGo evidence before changing
-runtime code. Confirmed historical grammar and API questions were reproduced
-but were not expanded into public or language decisions here. No remote CI was
-rerun for the unpublished top layer.
+TinyGo successful-path state semantics have browser evidence, but its trap-style
+panic mode does not supply recover-based failed-render rollback evidence.
+Confirmed historical grammar and API questions were reproduced but were not
+expanded into public or language decisions here. No remote CI was rerun for the
+unpublished top layer.
 
 ## Non-Goals
 

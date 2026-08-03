@@ -260,6 +260,7 @@ The MVP runtime currently has:
   plus key and sibling position;
 - component-scoped positional state slots, including the root `App`;
 - reducer dispatch that applies actions to the latest component state slot;
+- lazy render transactions for new state slots and reducer replacements;
 - scoped context providers with selector-based consumer dirtying;
 - component-scoped lifecycle/effect slots;
 - component-scoped explicit-state resources;
@@ -282,6 +283,15 @@ The MVP runtime currently has:
 - debug-only duplicate key warnings compiled only with `goframe_debug`.
 - debug-only lifecycle warnings for Set-after-unmount, Set-during-render, and
   effect update-loop guard trips.
+
+State transactions share the lifecycle render boundary without entering its
+generic participant interface. State commits or rolls back through a dedicated
+path before generic resource participants and lifecycle hooks. This keeps
+hook-free components free of state-transaction allocation and preserves the
+generic participant mechanism for resources. Protected ErrorBoundary subtrees
+defer the same final state decision to the boundary transaction. The model is
+not concurrent rendering, scheduler transactionality, or general rollback of
+updates to already committed state values.
 
 Direct function calls remain possible but do not create a component boundary.
 The single-thread assumption must be revisited before worker-driven updates.

@@ -207,6 +207,7 @@ type renderLifecycleAttempt struct {
 	effects      []effectRenderUpdate
 	unmounts     []Cleanup
 	participants []lifecycleRenderParticipant
+	state        *stateRenderParticipant
 }
 
 var (
@@ -322,6 +323,9 @@ func commitLifecycleRenderAttempt(instance *componentInstance) {
 		return
 	}
 	attempt := requireLifecycleRenderAttempt(instance)
+	if state := attempt.state; state != nil && state.attempt == attempt {
+		state.finishStateRender(attempt, true)
+	}
 	for _, participant := range attempt.participants {
 		participant.finishRender(attempt, true)
 	}
@@ -366,6 +370,9 @@ func rollbackLifecycleRenderAttempt(instance *componentInstance) {
 		return
 	}
 	attempt := &instance.lifecycleAttempt
+	if state := attempt.state; state != nil && state.attempt == attempt {
+		state.finishStateRender(attempt, false)
+	}
 	for _, participant := range attempt.participants {
 		participant.finishRender(attempt, false)
 	}

@@ -232,6 +232,12 @@ run_repeated_mount_browser() {
 	CHROME="$CHROME_BIN" node --experimental-websocket scripts/repeated-mount-browser-smoke.mjs "$url" "$compiler"
 }
 
+run_error_boundary_success_browser() {
+	local url="$1"
+	GOFRAME_ERROR_BOUNDARY_SUCCESS_ONLY=1 \
+		node --experimental-websocket scripts/error-boundary-browser-smoke.mjs "$url"
+}
+
 if [[ -z "$GOXC" ]]; then
 	GOBIN="$BIN_DIR" go install ./cmd/goxc
 	GOXC="$BIN_DIR/goxc"
@@ -291,6 +297,16 @@ export GOFRAME_ERROR_BOUNDARY_CHROME_DEBUG_PORT="${GOFRAME_ERROR_BOUNDARY_CHROME
 ERROR_BOUNDARY_URL="$(build_error_boundary_smoke_url "$ERROR_BOUNDARY_PORT")"
 run_with_server ./scripts/fixtures/error-boundary "$ERROR_BOUNDARY_PORT" "$ERROR_BOUNDARY_URL" \
 	node --experimental-websocket scripts/error-boundary-browser-smoke.mjs
+
+echo
+echo "== State transaction browser smoke (TinyGo successful path) =="
+"$GOXC" package ./scripts/fixtures/error-boundary --compiler=tinygo
+
+ERROR_BOUNDARY_TINYGO_PORT="$(resolve_port "${GOFRAME_ERROR_BOUNDARY_TINYGO_SMOKE_PORT:-}")"
+export GOFRAME_ERROR_BOUNDARY_CHROME_DEBUG_PORT="$(pick_free_port)"
+ERROR_BOUNDARY_TINYGO_URL="$(build_error_boundary_smoke_url "$ERROR_BOUNDARY_TINYGO_PORT")"
+run_with_server ./scripts/fixtures/error-boundary "$ERROR_BOUNDARY_TINYGO_PORT" "$ERROR_BOUNDARY_TINYGO_URL" \
+	run_error_boundary_success_browser
 
 echo
 echo "== Context selector topology browser smoke (standard Go) =="

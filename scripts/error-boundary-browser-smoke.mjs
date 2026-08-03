@@ -8,6 +8,7 @@ if (typeof WebSocket === "undefined") {
 }
 
 const appURL = process.argv[2] ?? process.env.GOFRAME_ERROR_BOUNDARY_SMOKE_URL ?? "http://127.0.0.1:18080/";
+const successfulStateOnly = process.env.GOFRAME_ERROR_BOUNDARY_SUCCESS_ONLY === "1";
 const debugPort = Number(process.env.GOFRAME_ERROR_BOUNDARY_CHROME_DEBUG_PORT ?? "19241");
 const chrome = process.env.CHROME ?? "google-chrome";
 const profile = await mkdtemp(join(tmpdir(), "goframe-error-boundary-smoke-"));
@@ -43,6 +44,12 @@ try {
     await waitForProbe(client, (probe) => probe.effectCount === 1, "initial effect setup");
     await captureShell(client);
     await installListenerAudit(client);
+
+    const stateSuccessEvidence = await exerciseSuccessfulStateTransactions(client);
+    if (successfulStateOnly) {
+        console.log(`State transaction successful-path counters: ${JSON.stringify(stateSuccessEvidence)}`);
+    } else {
+        const stateFailureEvidence = await exerciseFailedStateTransactions(client);
 
     await waitForProbe(client, (current) =>
         current.local.ownerRenders >= 1 &&
@@ -573,18 +580,292 @@ try {
         nestedFallback: nestedFallbackEvidence,
         capturedDirtyBatch: dirtyBatchEvidence,
         protectedTeardown: protectedTeardownEvidence,
+        stateTransactions: stateFailureEvidence,
+        stateSuccess: stateSuccessEvidence,
         boundaryReports: transactionBoundaryReports,
         shellIdentityChanges: finalProbe.shellIdentityChanges,
         listenerAdditions: finalProbe.listenerAudit.add,
         listenerRemovals: finalProbe.listenerAudit.remove,
     })}`);
+    }
     client.close();
-    console.log("Error boundary browser smoke: ok");
+    console.log(successfulStateOnly
+        ? "State transaction TinyGo successful-path browser smoke: ok"
+        : "Error boundary browser smoke: ok");
 } finally {
     const exited = new Promise((resolve) => browser.once("exit", resolve));
     browser.kill("SIGTERM");
     await Promise.race([exited, wait(2000)]);
     await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+async function exerciseSuccessfulStateTransactions(client) {
+    await waitForText(client, "[data-testid='eb-state-success-first']", "2", "successful render-time state update");
+    await waitForText(client, "[data-testid='eb-state-success-second']", "second", "successful second state slot");
+    await waitForText(client, "[data-testid='eb-state-success-reducer']", "11", "successful render-time reducer dispatch");
+    await waitForText(
+        client,
+        "[data-testid='eb-state-success-resource']",
+        "ready:ready-aligned",
+        "successful state resource alignment",
+    );
+    await waitForProbe(client, (current) =>
+        current.stateSuccess.renderTimeSetters === 1 &&
+        current.stateSuccess.renderTimeDispatches === 1 &&
+        current.stateSuccess.resourceStarts === 1 &&
+        current.stateSuccess.resourceCleanups === 0 &&
+        current.stateSuccess.firstValue === 2 &&
+        current.stateSuccess.secondValue === "second" &&
+        current.stateSuccess.reducerValue === 11 &&
+        current.stateSuccess.resourceStatus === "ready" &&
+        current.stateSuccess.resourceValue === "ready-aligned",
+    "initial successful state transaction");
+    await captureIdentity(client, "stateSuccessHost", "[data-testid='eb-state-success-host']");
+    await captureIdentity(client, "stateSuccessOwner", "[data-testid='eb-state-success-owner']");
+
+    const initial = await probe(client);
+    await click(client, "[data-testid='eb-state-success-update']");
+    await waitForText(client, "[data-testid='eb-state-success-first']", "3", "successful ordinary state update");
+    await waitForProbe(client, (current) =>
+        current.stateSuccess.stateClicks === initial.stateSuccess.stateClicks + 1 &&
+        current.stateSuccess.ownerRenders === initial.stateSuccess.ownerRenders + 1 &&
+        current.stateSuccess.resourceStarts === initial.stateSuccess.resourceStarts,
+    "single successful state update");
+    await assertIdentitySame(client, "stateSuccessHost", "[data-testid='eb-state-success-host']", "successful host state update");
+    await assertIdentitySame(client, "stateSuccessOwner", "[data-testid='eb-state-success-owner']", "successful owner state update");
+
+    const beforeReplacement = await probe(client);
+    await click(client, "[data-testid='eb-state-success-replace-reducer']");
+    await waitForText(client, "[data-testid='eb-state-success-reducer-mode']", "candidate", "successful reducer replacement");
+    await waitForProbe(client, (current) =>
+        current.stateSuccess.reducerReplaceClicks === beforeReplacement.stateSuccess.reducerReplaceClicks + 1 &&
+        current.stateSuccess.ownerRenders === beforeReplacement.stateSuccess.ownerRenders + 1 &&
+        current.stateSuccess.reducerValue === 11 &&
+        current.stateSuccess.resourceStarts === beforeReplacement.stateSuccess.resourceStarts,
+    "successful reducer replacement commit");
+    await assertIdentitySame(client, "stateSuccessOwner", "[data-testid='eb-state-success-owner']", "successful reducer replacement");
+
+    const beforeDispatch = await probe(client);
+    await click(client, "[data-testid='eb-state-success-dispatch']");
+    await waitForText(client, "[data-testid='eb-state-success-reducer']", "111", "old dispatch uses successful reducer replacement");
+    await waitForProbe(client, (current) =>
+        current.stateSuccess.reducerDispatchClicks === beforeDispatch.stateSuccess.reducerDispatchClicks + 1 &&
+        current.stateSuccess.ownerRenders === beforeDispatch.stateSuccess.ownerRenders + 1 &&
+        current.stateSuccess.reducerValue === 111,
+    "old dispatch after successful reducer replacement");
+    await assertIdentitySame(client, "stateSuccessOwner", "[data-testid='eb-state-success-owner']", "successful reducer dispatch");
+
+    const beforeUnmount = await probe(client);
+    await click(client, "[data-testid='eb-state-success-toggle']");
+    await waitForAbsent(client, "[data-testid='eb-state-success-owner']", "successful state owner unmount");
+    await waitForText(client, "[data-testid='eb-state-success-unmounted']", "unmounted", "successful state owner unmounted marker");
+    await waitForProbe(client, (current) =>
+        current.stateSuccess.resourceCleanups === beforeUnmount.stateSuccess.resourceCleanups + 1,
+    "successful state resource cleanup");
+    await assertIdentitySame(client, "stateSuccessHost", "[data-testid='eb-state-success-host']", "successful state owner unmount");
+
+    await click(client, "[data-testid='eb-state-success-toggle']");
+    await waitForText(client, "[data-testid='eb-state-success-first']", "2", "successful state owner replacement state");
+    await waitForText(client, "[data-testid='eb-state-success-reducer']", "11", "successful state owner replacement reducer");
+    await waitForText(
+        client,
+        "[data-testid='eb-state-success-resource']",
+        "ready:ready-aligned",
+        "successful state owner replacement resource",
+    );
+    await waitForProbe(client, (current) =>
+        current.stateSuccess.resourceStarts === beforeUnmount.stateSuccess.resourceStarts + 1 &&
+        current.stateSuccess.resourceCleanups === beforeUnmount.stateSuccess.resourceCleanups + 1 &&
+        current.stateSuccess.renderTimeSetters === beforeUnmount.stateSuccess.renderTimeSetters + 1 &&
+        current.stateSuccess.renderTimeDispatches === beforeUnmount.stateSuccess.renderTimeDispatches + 1,
+    "successful state owner replacement lifecycle");
+    await assertIdentitySame(client, "stateSuccessHost", "[data-testid='eb-state-success-host']", "successful state owner replacement host");
+    await assertIdentityChanged(client, "stateSuccessOwner", "[data-testid='eb-state-success-owner']", "successful state owner replacement");
+
+    const beforeReplacementUpdate = await probe(client);
+    await click(client, "[data-testid='eb-state-success-update']");
+    await waitForText(client, "[data-testid='eb-state-success-first']", "3", "replacement state owner update");
+    await waitForProbe(client, (current) =>
+        current.stateSuccess.stateClicks === beforeReplacementUpdate.stateSuccess.stateClicks + 1 &&
+        current.stateSuccess.ownerRenders === beforeReplacementUpdate.stateSuccess.ownerRenders + 1,
+    "single replacement state owner update");
+    await assertIdentitySame(client, "stateSuccessOwner", "[data-testid='eb-state-success-owner']", "replacement state owner update");
+
+    const final = await probe(client);
+    const listenerAdditions = final.listenerAudit.add - initial.listenerAudit.add;
+    const listenerRemovals = final.listenerAudit.remove - initial.listenerAudit.remove;
+    if (listenerAdditions !== listenerRemovals) {
+        throw new Error(
+            `APP FAILURE: successful state listener delta add=${listenerAdditions} remove=${listenerRemovals}`,
+        );
+    }
+    return {
+        ...final.stateSuccess,
+        listenerAdditions,
+        listenerRemovals,
+        hostIdentityChanges: 0,
+        ownerReplacements: 1,
+    };
+}
+
+async function exerciseFailedStateTransactions(client) {
+    await captureIdentity(client, "stateInitialScenario", "[data-testid='eb-state-initial-scenario']");
+    await captureIdentity(client, "stateReducerScenario", "[data-testid='eb-state-reducer-scenario']");
+    await waitForText(client, "[data-testid='eb-state-reducer-value']", "1", "initial committed reducer value");
+    const initial = await probe(client);
+
+    await click(client, "[data-testid='eb-state-initial-start']");
+    await waitForSelector(client, "[data-testid='eb-state-initial-fallback']", "failed initial state fallback");
+    await waitForAbsent(client, "[data-testid='eb-state-initial-owner']", "failed initial state owner absent");
+    await waitForProbe(client, (current) =>
+        current.reports.length === initial.reports.length + 1 &&
+        current.reports.at(-1).component === "StateTransactionInitialOwner" &&
+        current.stateTransactions.initialOwnerRenders === initial.stateTransactions.initialOwnerRenders + 1 &&
+        current.stateTransactions.initialFailedRenders === initial.stateTransactions.initialFailedRenders + 1 &&
+        current.stateTransactions.initialFallbackRenders === initial.stateTransactions.initialFallbackRenders + 1,
+    "failed initial state rollback");
+    await assertIdentitySame(client, "stateInitialScenario", "[data-testid='eb-state-initial-scenario']", "failed initial state fallback");
+
+    const afterInitialFailure = await probe(client);
+    await click(client, "[data-testid='eb-state-initial-retry']");
+    await waitForText(client, "[data-testid='eb-state-initial-value']", "99", "failed initial state retry value");
+    await waitForText(client, "[data-testid='eb-state-initial-reducer']", "99", "failed initial reducer retry value");
+    await waitForProbe(client, (current) =>
+        current.reports.length === afterInitialFailure.reports.length &&
+        current.stateTransactions.initialRecoveredRenders === afterInitialFailure.stateTransactions.initialRecoveredRenders + 1,
+    "failed initial state retry commit");
+    await captureIdentity(client, "stateInitialOwner", "[data-testid='eb-state-initial-owner']");
+
+    const beforeFailedClosures = await probe(client);
+    await click(client, "[data-testid='eb-state-invoke-failed-closures']");
+    await waitForProbe(client, (current) =>
+        current.stateTransactions.failedClosureInvocations ===
+            beforeFailedClosures.stateTransactions.failedClosureInvocations + 1,
+    "discarded state closure invocation");
+    await waitForAnimationFrames(client, 2);
+    const afterFailedClosures = await probe(client);
+    counterDelta(
+        afterFailedClosures.stateTransactions.initialRecoveredRenders,
+        beforeFailedClosures.stateTransactions.initialRecoveredRenders,
+        0,
+        "discarded state closure render",
+    );
+    counterDelta(
+        afterFailedClosures.reports.length,
+        beforeFailedClosures.reports.length,
+        0,
+        "discarded state closure report",
+    );
+    await waitForText(client, "[data-testid='eb-state-initial-value']", "99", "discarded setter remains inert");
+    await waitForText(client, "[data-testid='eb-state-initial-reducer']", "99", "discarded dispatch remains inert");
+    await assertIdentitySame(client, "stateInitialOwner", "[data-testid='eb-state-initial-owner']", "discarded state closures");
+
+    const beforeCurrentUpdate = await probe(client);
+    await click(client, "[data-testid='eb-state-update-current']");
+    await waitForText(client, "[data-testid='eb-state-initial-value']", "100", "committed state setter after retry");
+    await waitForText(client, "[data-testid='eb-state-initial-reducer']", "100", "committed reducer dispatch after retry");
+    await waitForProbe(client, (current) =>
+        current.stateTransactions.currentUpdateInvocations ===
+            beforeCurrentUpdate.stateTransactions.currentUpdateInvocations + 1 &&
+        current.stateTransactions.initialRecoveredRenders ===
+            beforeCurrentUpdate.stateTransactions.initialRecoveredRenders + 1,
+    "committed state closures after retry");
+    await assertIdentitySame(client, "stateInitialOwner", "[data-testid='eb-state-initial-owner']", "committed state closures");
+
+    await click(client, "[data-testid='eb-state-initial-finish']");
+    await waitForSelector(client, "[data-testid='eb-state-initial-start']", "failed initial state scenario reset");
+    await waitForAbsent(client, "[data-testid='eb-state-initial-owner']", "recovered initial state owner unmounted");
+    await waitForAbsent(client, "[data-testid='eb-state-initial-fallback']", "initial state fallback remains cleared");
+    await assertIdentitySame(client, "stateInitialScenario", "[data-testid='eb-state-initial-scenario']", "failed initial state scenario finish");
+
+    const beforeReducerFailure = await probe(client);
+    await click(client, "[data-testid='eb-state-reducer-fail']");
+    await waitForText(client, "[data-testid='eb-state-reducer-mode']", "failed", "failed reducer candidate mode");
+    await waitForAbsent(client, "[data-testid='eb-state-reducer-value']", "failed reducer candidate output");
+    await waitForProbe(client, (current) =>
+        current.reports.length === beforeReducerFailure.reports.length + 1 &&
+        current.reports.at(-1).component === "StateTransactionReducerOwner" &&
+        current.stateTransactions.reducerFailedRenders ===
+            beforeReducerFailure.stateTransactions.reducerFailedRenders + 1,
+    "failed reducer replacement rollback");
+    await assertIdentitySame(client, "stateReducerScenario", "[data-testid='eb-state-reducer-scenario']", "failed reducer replacement");
+
+    const afterReducerFailure = await probe(client);
+    await click(client, "[data-testid='eb-state-reducer-recover']");
+    await waitForText(client, "[data-testid='eb-state-reducer-mode']", "base", "reducer recovery mode");
+    await waitForText(client, "[data-testid='eb-state-reducer-value']", "1", "committed reducer retained after failure");
+    await waitForProbe(client, (current) => current.reports.length === afterReducerFailure.reports.length, "reducer recovery without report");
+    await captureIdentity(client, "stateReducerOwner", "[data-testid='eb-state-reducer-value']");
+
+    await click(client, "[data-testid='eb-state-reducer-dispatch']");
+    await waitForText(client, "[data-testid='eb-state-reducer-value']", "2", "old dispatch uses committed reducer after failure");
+    await assertIdentitySame(client, "stateReducerOwner", "[data-testid='eb-state-reducer-value']", "committed reducer dispatch after failure");
+
+    await click(client, "[data-testid='eb-state-reducer-commit']");
+    await waitForText(client, "[data-testid='eb-state-reducer-mode']", "candidate", "successful reducer candidate mode");
+    await waitForText(client, "[data-testid='eb-state-reducer-value']", "2", "successful reducer replacement retains state");
+    await assertIdentitySame(client, "stateReducerOwner", "[data-testid='eb-state-reducer-value']", "successful reducer replacement");
+
+    await click(client, "[data-testid='eb-state-reducer-dispatch']");
+    await waitForText(client, "[data-testid='eb-state-reducer-value']", "102", "old dispatch uses latest committed reducer");
+    await waitForProbe(client, (current) =>
+        current.stateTransactions.committedDispatchInvokes ===
+            beforeReducerFailure.stateTransactions.committedDispatchInvokes + 2 &&
+        current.stateTransactions.lastCommittedReducerValue === 102,
+    "latest committed reducer dispatch");
+    await assertIdentitySame(client, "stateReducerOwner", "[data-testid='eb-state-reducer-value']", "latest committed reducer dispatch");
+    await assertIdentitySame(client, "stateReducerScenario", "[data-testid='eb-state-reducer-scenario']", "reducer transaction scenario");
+
+    const final = await probe(client);
+    const listenerAdditions = final.listenerAudit.add - initial.listenerAudit.add;
+    const listenerRemovals = final.listenerAudit.remove - initial.listenerAudit.remove;
+    if (listenerAdditions !== listenerRemovals) {
+        throw new Error(
+            `APP FAILURE: failed state listener delta add=${listenerAdditions} remove=${listenerRemovals}`,
+        );
+    }
+    return {
+        ...final.stateTransactions,
+        initialBoundaryReports: afterInitialFailure.reports.length - initial.reports.length,
+        reducerReports: final.reports.length - beforeReducerFailure.reports.length,
+        listenerAdditions,
+        listenerRemovals,
+        scenarioIdentityChanges: 0,
+    };
+}
+
+async function captureIdentity(client, key, selector) {
+    const captured = await client.callFunction(`function(key, selector) {
+        const element = document.querySelector(selector);
+        if (!element) return false;
+        window.__errorBoundaryIdentities ||= {};
+        window.__errorBoundaryIdentities[key] = element;
+        return true;
+    }`, key, selector);
+    if (!captured) {
+        throw new Error(`APP FAILURE: missing ${selector} for ${key} identity capture`);
+    }
+}
+
+async function assertIdentitySame(client, key, selector, label) {
+    const same = await client.callFunction(`function(key, selector) {
+        return window.__errorBoundaryIdentities?.[key] === document.querySelector(selector);
+    }`, key, selector);
+    if (!same) {
+        throw new Error(`APP FAILURE: ${key} identity changed during ${label}`);
+    }
+}
+
+async function assertIdentityChanged(client, key, selector, label) {
+    const changed = await client.callFunction(`function(key, selector) {
+        const element = document.querySelector(selector);
+        if (!element || window.__errorBoundaryIdentities?.[key] === element) return false;
+        window.__errorBoundaryIdentities[key] = element;
+        return true;
+    }`, key, selector);
+    if (!changed) {
+        throw new Error(`APP FAILURE: ${key} identity did not change during ${label}`);
+    }
 }
 
 async function installListenerAudit(client) {
@@ -639,6 +920,8 @@ async function probe(client) {
         nestedFallback: globalThis.goframeNestedFallbackTransactionProbe || {},
         dirtyBatch: globalThis.goframeCapturedDirtyBatchProbe || {},
         teardown: globalThis.goframeProtectedTeardownProbe || {},
+        stateTransactions: globalThis.goframeStateTransactionProbe || {},
+        stateSuccess: globalThis.goframeStateTransactionSuccessProbe || {},
         shellIdentityChanges: globalThis.__errorBoundaryShellIdentityChanges || 0,
         listenerAudit: globalThis.__errorBoundaryListenerAudit || { add: 0, remove: 0 },
     }))()`);
@@ -697,6 +980,29 @@ async function click(client, selector) {
     }`, selector);
     if (!result) {
         throw new Error(`APP FAILURE: missing element for click ${selector}`);
+    }
+}
+
+async function waitForAnimationFrames(client, count = 2) {
+    if (!Number.isInteger(count) || count <= 0) {
+        throw new Error(`HARNESS FAILURE: animation frame count must be a positive integer; got ${count}`);
+    }
+    const completed = await client.callFunction(`function(count) {
+        return new Promise((resolve) => {
+            let remaining = count;
+            const next = () => {
+                remaining--;
+                if (remaining === 0) {
+                    resolve(true);
+                    return;
+                }
+                requestAnimationFrame(next);
+            };
+            requestAnimationFrame(next);
+        });
+    }`, count);
+    if (completed !== true) {
+        throw new Error(`HARNESS FAILURE: did not complete ${count} animation frames`);
     }
 }
 

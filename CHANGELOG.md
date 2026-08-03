@@ -192,6 +192,12 @@
 
 ### Fixed
 
+- Failed recover-capable renders no longer commit newly observed state slots or
+  reducer replacements. State transactions are allocated lazily, commit before
+  generic resource participants, preserve the latest committed reducer for old
+  dispatch closures, and discard new-slot closures on rollback. Standard-Go
+  browser evidence covers failure and retry; standard Go and TinyGo both cover
+  the successful state/reducer/resource path.
 - Coordinated `goxc generate` publication now stages all active outputs and
   recovers the prior generated-source set when a detected write, replacement,
   or managed inactive-removal failure occurs. Rollback failures retain the

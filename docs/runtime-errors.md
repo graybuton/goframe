@@ -88,6 +88,14 @@ deterministically.
 If no boundary exists, the fallback remains the MVP 23 behavior: `gf.Empty()`
 for that render. Future state or parent updates may retry the component.
 
+New state slots and reducer replacements are speculative during render. A
+successful render commits them before generic resource participants and
+lifecycle hooks. A failed recover-capable render discards them, so retry does
+not observe ghost slots and an existing reducer dispatch closure continues to
+use the latest successfully committed reducer. Setters and dispatchers created
+only for discarded slots become inert. This transaction does not generally
+roll back value updates to state slots that were already committed.
+
 ### Event Handlers
 
 An event handler panic is reported as `ErrorPhaseEvent` and contained. The app
@@ -196,6 +204,8 @@ Boundary rules:
 - first error wins until manual reset or `ResetKey` reset;
 - `ctx.Reset()` remounts the protected subtree fresh;
 - changing `ResetKey` while failed clears the incident and remounts children;
+- new state slots and reducer replacements observed in protected children
+  remain speculative until the boundary transaction commits or rolls back;
 - runtime invariant panics whose value starts with `goframe:` bypass boundary
   containment.
 
@@ -231,12 +241,17 @@ lifecycle warnings remain separate.
 Browser smoke verifies that recoverable event and cleanup failures do not
 unmount the app or leak listeners. A separate Error Boundary fixture verifies
 render fallback, retry, `ResetKey`, nested boundaries, and cleanup behavior.
+That fixture also verifies failed state-slot and reducer rollback, retry, inert
+discarded closures, successful reducer replacement, resource ordering, stable
+DOM identity, and balanced listener ownership.
 The context selector topology fixture verifies failed outer/inner provider
 transitions, old-provider isolation, and later new-provider recovery.
 
-These panic-containment fixtures use Go-compiled WASM because the current
-TinyGo package path uses trap-style panic lowering, where panics do not return
-to Go `recover`.
+Failed-render state transaction and other panic-containment scenarios use
+Go-compiled WASM because the current TinyGo package path uses trap-style panic
+lowering, where panics do not return to Go `recover`. A separate TinyGo lane
+verifies the successful state, reducer, resource, and cleanup path without
+claiming panic rollback.
 
 Browser smoke should not use timing gates for runtime error behavior.
 
@@ -260,3 +275,5 @@ the size and behavior tradeoff is acceptable.
 - No production crash reporting integration.
 - Context selector containment during initial render is report + re-panic.
 - TinyGo trap-style panic builds cannot provide recover-based containment.
+- Existing committed state-value updates are not a general render rollback
+  surface.
