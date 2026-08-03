@@ -207,6 +207,7 @@ type renderLifecycleAttempt struct {
 	effects      []effectRenderUpdate
 	unmounts     []Cleanup
 	participants []lifecycleRenderParticipant
+	state        stateRenderParticipant
 }
 
 var (

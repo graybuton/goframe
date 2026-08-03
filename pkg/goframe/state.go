@@ -5,6 +5,7 @@ type stateSlot struct {
 	owner   *componentInstance
 	reducer any
 	kind    string
+	pending *stateRenderParticipant
 }
 
 type stateHandle[T any] struct {
@@ -70,12 +71,24 @@ func useStateSlot[T any](initial T, hookName string) stateHandle[T] {
 
 	index := instance.stateIndex
 	instance.stateIndex++
-	if index == len(instance.stateSlots) {
-		instance.stateSlots = append(instance.stateSlots, &stateSlot{
-			value: initial,
-			owner: instance,
-			kind:  hookName,
-		})
+	state := requireStateRenderParticipant(instance)
+	if index >= len(instance.stateSlots) {
+		pendingIndex := index - len(instance.stateSlots)
+		if pendingIndex == len(state.slots) {
+			state.addSlot(&stateSlot{
+				value: initial,
+				owner: instance,
+				kind:  hookName,
+			})
+		}
+		slot := state.slots[pendingIndex]
+		if slot.kind != hookName {
+			panic("goframe: hook at state slot " + ToString(index) + " changed from " + slot.kind + " to " + hookName)
+		}
+		if _, ok := slotValue[T](slot); !ok {
+			panic("goframe: " + hookName + " state type changed between component renders")
+		}
+		return stateHandle[T]{slot: slot}
 	}
 	slot := instance.stateSlots[index]
 	if slot.kind != hookName {
@@ -108,16 +121,25 @@ func (state stateHandle[T]) set(value T) {
 		return
 	}
 	state.slot.value = value
+	if pending := state.slot.pending; pending != nil {
+		pending.dirty = true
+		return
+	}
 	markComponentDirty(owner)
 }
 
 func setReducer[S any, A any](slot *stateSlot, reducer Reducer[S, A]) {
-	if slot.reducer != nil {
-		if _, ok := slot.reducer.(Reducer[S, A]); !ok {
+	state := requireStateRenderParticipant(currentComponent)
+	currentReducer := slot.reducer
+	if staged, ok := state.reducerFor(slot); ok {
+		currentReducer = staged
+	}
+	if currentReducer != nil {
+		if _, ok := currentReducer.(Reducer[S, A]); !ok {
 			panic("goframe: UseReducer reducer type changed between component renders")
 		}
 	}
-	slot.reducer = reducer
+	state.stageReducer(slot, reducer)
 }
 
 func dispatchReducer[S any, A any](slot *stateSlot, action A) {
@@ -127,7 +149,14 @@ func dispatchReducer[S any, A any](slot *stateSlot, action A) {
 		return
 	}
 	state := stateHandle[S]{slot: slot}
-	reducer, ok := slot.reducer.(Reducer[S, A])
+	reducerValue := slot.reducer
+	if currentComponent == owner && currentComponent.lifecycleAttempt.active {
+		state := &currentComponent.lifecycleAttempt.state
+		if staged, stagedOK := state.reducerFor(slot); stagedOK {
+			reducerValue = staged
+		}
+	}
+	reducer, ok := reducerValue.(Reducer[S, A])
 	if !ok {
 		panic("goframe: UseReducer reducer type changed between component renders")
 	}

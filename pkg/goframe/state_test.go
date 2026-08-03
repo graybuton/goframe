@@ -1,6 +1,9 @@
 package goframe
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestUseStatePersistsWithinComponent(t *testing.T) {
 	var value int
@@ -61,6 +64,44 @@ func TestUseStateSupportsMultipleSlots(t *testing.T) {
 	if count != 2 || label != "second" {
 		t.Fatalf("slots = %d, %q; want 2, second", count, label)
 	}
+}
+
+func TestFailedInitialStateRenderLeavesNoGhostSlot(t *testing.T) {
+	errorsSeen := captureRuntimeErrors(t)
+	initial := 1
+	fail := true
+	observed := 0
+	schedules := 0
+	var failedSetter func(int)
+	instance := testComponentInstance("TransactionalState", func() Node {
+		observed, failedSetter = UseState(initial)
+		if fail {
+			panic("state render failed")
+		}
+		return Empty()
+	}, func(*componentInstance) {
+		schedules++
+	})
+
+	renderComponentInstance(instance)
+	if len(instance.stateSlots) != 0 {
+		t.Errorf("state slots after failed initial render = %d, want 0", len(instance.stateSlots))
+	}
+	failedSetter(7)
+	if instance.dirty || schedules != 0 {
+		t.Errorf("discarded setter dirty=%v schedules=%d, want false/0", instance.dirty, schedules)
+	}
+
+	initial = 99
+	fail = false
+	renderComponentInstance(instance)
+	if observed != 99 {
+		t.Errorf("retry observed state = %d, want 99", observed)
+	}
+	if len(instance.stateSlots) != 1 || instance.stateSlots[0].value != 99 {
+		t.Errorf("committed retry state slots = %#v, want one slot with 99", instance.stateSlots)
+	}
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalState", "component render", "state render failed")
 }
 
 func TestUseStateOutsideComponentPanics(t *testing.T) {
@@ -272,6 +313,57 @@ func TestUseReducerStaleDispatchUsesLatestReducer(t *testing.T) {
 	if value != 11 {
 		t.Fatalf("stale dispatch used wrong reducer, state = %d, want 11", value)
 	}
+}
+
+func TestFailedReducerRenderKeepsCommittedReducer(t *testing.T) {
+	errorsSeen := captureRuntimeErrors(t)
+	useCandidate := false
+	fail := false
+	var firstDispatch func(int)
+	instance := testComponentInstance("TransactionalReducer", func() Node {
+		reducer := Reducer[int, int](func(state, action int) int {
+			return state + action
+		})
+		if useCandidate {
+			reducer = func(state, action int) int {
+				return state + action*100
+			}
+		}
+		_, dispatch := UseReducer(1, reducer)
+		if firstDispatch == nil {
+			firstDispatch = dispatch
+		}
+		if fail {
+			panic("reducer render failed")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	slot := instance.stateSlots[0]
+	committedReducer := reflect.ValueOf(slot.reducer).Pointer()
+
+	useCandidate = true
+	fail = true
+	renderComponentInstance(instance)
+	if instance.stateSlots[0] != slot {
+		t.Fatal("failed reducer render replaced committed slot pointer")
+	}
+	if got := reflect.ValueOf(slot.reducer).Pointer(); got != committedReducer {
+		t.Errorf("failed reducer render changed reducer pointer = %x, want %x", got, committedReducer)
+	}
+	firstDispatch(1)
+	if slot.value != 2 {
+		t.Errorf("old dispatch after failed render produced %v, want 2", slot.value)
+	}
+
+	fail = false
+	renderComponentInstance(instance)
+	firstDispatch(1)
+	if slot.value != 102 {
+		t.Errorf("old dispatch after successful render produced %v, want 102", slot.value)
+	}
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalReducer", "component render", "reducer render failed")
 }
 
 func TestUseReducerStateTypeMismatchPanics(t *testing.T) {

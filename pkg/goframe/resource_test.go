@@ -1028,9 +1028,11 @@ func TestUseResourceInitialFailedRenderStartsNoLoader(t *testing.T) {
 	loader := &resourceTestLoader{}
 	fail := true
 	var resource Resource[string]
+	var failedControl *resourceControl[string]
 	instance := testComponentInstance("InitialResourceTransaction", func() Node {
 		resource, _ = UseResource("initial", loader.load)
 		if fail {
+			failedControl, _ = currentComponent.lifecycleAttempt.state.slots[0].value.(*resourceControl[string])
 			panic("failed render")
 		}
 		return Empty()
@@ -1038,17 +1040,26 @@ func TestUseResourceInitialFailedRenderStartsNoLoader(t *testing.T) {
 
 	renderComponentInstance(instance)
 	flushPendingEffects()
-	control := resourceControlForTest[string](t, instance)
-	if control.committed || control.owner != nil || control.loader != nil || control.key != "" || control.current != nil {
-		t.Fatalf("control after failed initial render = %#v, want no committed lifecycle state", control)
+	if len(instance.stateSlots) != 0 {
+		t.Fatalf("state slots after failed initial resource render = %d, want 0", len(instance.stateSlots))
 	}
-	if control.pending.attempt != nil || len(instance.effectSlots) != 0 || len(loader.starts) != 0 {
+	if failedControl == nil {
+		t.Fatal("failed initial resource render did not expose its speculative control")
+	}
+	if failedControl.committed || failedControl.owner != nil || failedControl.loader != nil || failedControl.key != "" || failedControl.current != nil {
+		t.Fatalf("control after failed initial render = %#v, want no committed lifecycle state", failedControl)
+	}
+	if failedControl.pending.attempt != nil || len(instance.effectSlots) != 0 || len(loader.starts) != 0 {
 		t.Fatalf("failed initial resource pending=%#v effect slots=%d starts=%d, want cleared/0/0",
-			control.pending, len(instance.effectSlots), len(loader.starts))
+			failedControl.pending, len(instance.effectSlots), len(loader.starts))
 	}
 
 	fail = false
 	renderComponentInstance(instance)
+	control := resourceControlForTest[string](t, instance)
+	if control == failedControl {
+		t.Fatal("successful retry reused the discarded resource control")
+	}
 	if !resource.Loading() || !control.committed || control.key != "initial" || control.owner != instance {
 		t.Fatalf("resource/control after successful retry = %#v/%#v, want committed loading initial", resource, control)
 	}
