@@ -512,20 +512,12 @@ func generatePackageTargetsSafely(
 		}
 	}
 
-	for _, generated := range generatedFiles {
-		if err := os.MkdirAll(filepath.Dir(generated.path), 0o755); err != nil {
-			return nil, fmt.Errorf("create generated directory for %s: %w", generated.path, err)
-		}
-		if err := writeFileAtomic(generated.path, generated.content, 0o644); err != nil {
-			return nil, fmt.Errorf("write %s: %w", generated.path, err)
-		}
-	}
-	for _, path := range removals {
-		if err := os.Remove(path); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return nil, fmt.Errorf("remove inactive generated output %s: %w", path, err)
-		}
+	if err := publishGeneratedSourceSet(
+		destinationRoot,
+		generatedFiles,
+		removals,
+	); err != nil {
+		return nil, err
 	}
 	return publishedActiveTargets, nil
 }
