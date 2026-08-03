@@ -73,7 +73,7 @@ func writeStreamAtomic(destinationPath string, source io.Reader, mode os.FileMod
 		if info.IsDir() {
 			return fmt.Errorf("destination %s is a directory", destinationPath)
 		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect destination %s: %w", destinationPath, err)
 	}
 	temp, err := os.CreateTemp(directory, ".goframe-write-*")
@@ -110,11 +110,6 @@ func samePath(first, second string) bool {
 	firstPath, firstErr := canonicalPathForComparison(first)
 	secondPath, secondErr := canonicalPathForComparison(second)
 	return firstErr == nil && secondErr == nil && firstPath == secondPath
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
 }
 
 func rejectSymlinkPath(path string, description string) error {
@@ -278,7 +273,7 @@ func pathsOverlap(first, second string) bool {
 	if err != nil {
 		return true
 	}
-	return err == nil && relation != "separate"
+	return relation != "separate"
 }
 
 func ensureNoPhysicalOverlap(first, second, firstDescription, secondDescription string) error {

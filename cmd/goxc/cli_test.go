@@ -362,7 +362,7 @@ func TestCleanRemovesArtifactsAndGeneratedOnRequest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(appDir, "app.gox"), []byte("<div></div>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "app.gox.go"), []byte("generated"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, "app.gox.go"), []byte(generatedGOXFileHeader+"package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

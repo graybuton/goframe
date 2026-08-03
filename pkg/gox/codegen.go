@@ -314,6 +314,9 @@ func (ctx *codegenContext) writeComponent(output *bytes.Buffer, component *Eleme
 	if err != nil {
 		return err
 	}
+	if err := validateElementAttributeDestinations(component, true); err != nil {
+		return err
+	}
 
 	var body bytes.Buffer
 
@@ -346,6 +349,9 @@ func (ctx *codegenContext) writeComponent(output *bytes.Buffer, component *Eleme
 func (ctx *codegenContext) writeElement(output *bytes.Buffer, element *Element, depth int) error {
 	key, attributes, err := splitKeyAttribute(element.Attributes)
 	if err != nil {
+		return err
+	}
+	if err := validateElementAttributeDestinations(element, false); err != nil {
 		return err
 	}
 

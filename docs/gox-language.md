@@ -29,8 +29,12 @@ gf.El("main", gf.Props{
 )
 ```
 
-HTML attributes become keys in `gf.Props`. Event props such as `onClick` are
-handled by the browser runtime.
+HTML attributes become keys in `gf.Props`. Authored names must be unique within
+an element, and distinct authored names must not target the same runtime
+destination. HTML attribute destinations are ASCII-lowercased, `className` maps
+to `class`, and `htmlFor` maps to `for`. Event props use a separate destination
+with a case-insensitive `on` prefix and lowercase event name. Component prop
+fields remain case-sensitive Go names.
 
 ## Function components
 
@@ -78,7 +82,10 @@ without attributes:
 gf.ComponentT(_goxComponent_app_Status, StatusProps{}, Status)
 ```
 
-Component prop names must be valid Go field names. Go's type checker reports
+Component prop names must be valid Go field names and unique within one
+component invocation. An explicit `Children` prop is valid when the invocation
+has no renderable nested children; combining both would emit the same Go field
+twice and is rejected at the authored `Children` prop. Go's type checker reports
 unknown fields and incompatible prop values after generation.
 
 The boundary gives the runtime a component instance, scoped state slots, and a
@@ -188,6 +195,9 @@ type CardProps struct {
     Children []gf.Node
 }
 ```
+
+Nested markup supplies that field automatically. Use either nested renderable
+children or an explicit `Children` prop for one invocation, not both.
 
 ```gox
 <Card Title="Stats">
@@ -405,6 +415,12 @@ Common DOM props and event names support lowercase and exported-style forms:
 />
 ```
 
+Forms that normalize to the same destination cannot be combined in one
+element. For example, `class` conflicts with `className`, `htmlFor` conflicts
+with `FOR`, and `onClick` conflicts with `onclick`. Attribute names that differ
+only in ASCII letter case also conflict; distinct lowercase custom destinations
+and distinct events remain independent.
+
 Handlers may be `func()`, `func(gf.Event)`, or `func(gf.InputEvent)`.
 `gf.Event` exposes `PreventDefault` and `StopPropagation`.
 
@@ -493,12 +509,14 @@ continues through all later files instead of stopping at the first failing
 file. Operational failures do not produce a completed or partial JSON report.
 
 GOX also reports focused diagnostics for unclosed tags, invalid component
-names, invalid component prop names, empty child/attribute expressions,
-duplicate or valueless `Key` pseudo-props, spread props, XML-style namespace
-syntax, unknown package aliases, lowercase qualified component selectors, and
-nested selector chains. Nested GOX markup inside callback return expressions is
-also reported against the original `.gox` file rather than only the generated
-`.goframe/work` output.
+names, invalid component prop names, duplicate attributes and component props,
+DOM attribute or event names that collide after runtime normalization, explicit
+`Children` combined with nested renderable children, empty child/attribute
+expressions, duplicate or valueless `Key` pseudo-props, spread props, XML-style
+namespace syntax, unknown package aliases, lowercase qualified component
+selectors, and nested selector chains. Nested GOX markup inside callback return
+expressions is also reported against the original `.gox` file rather than only
+the generated `.goframe/work` output.
 
 Package-qualified tags require an import alias. Unknown aliases get a focused
 diagnostic:

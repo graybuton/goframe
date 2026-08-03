@@ -26,6 +26,87 @@ func App() any {
 }
 `
 
+const duplicateAttributeCheckSource = `package main
+
+func App() any {
+	return <main class="first" class="second">Hello</main>
+}
+`
+
+var effectiveCollisionCheckSources = []struct {
+	name    string
+	source  string
+	message string
+	line    string
+}{
+	{
+		name: "Children",
+		source: `package main
+
+func App() any {
+	return <Panel Children={nil}>nested child</Panel>
+}
+`,
+		message: "gox: explicit Children prop cannot be combined with nested children",
+		line:    `<Panel Children={nil}>nested child</Panel>`,
+	},
+	{
+		name: "DOM alias",
+		source: `package main
+
+func App() any {
+	return <main class="first" className="second">Hello</main>
+}
+`,
+		message: `gox: attribute "className" conflicts with "class" after normalization`,
+		line:    `<main class="first" className="second">Hello</main>`,
+	},
+	{
+		name: "label alias uppercase destination",
+		source: `package main
+
+func App() any {
+	return <label htmlFor="first" FOR="second">Hello</label>
+}
+`,
+		message: `gox: attribute "FOR" conflicts with "htmlFor" after normalization`,
+		line:    `<label htmlFor="first" FOR="second">Hello</label>`,
+	},
+	{
+		name: "data attribute case",
+		source: `package main
+
+func App() any {
+	return <main data-Mode="first" data-mode="second">Hello</main>
+}
+`,
+		message: `gox: attribute "data-mode" conflicts with "data-Mode" after normalization`,
+		line:    `<main data-Mode="first" data-mode="second">Hello</main>`,
+	},
+	{
+		name: "ARIA attribute case",
+		source: `package main
+
+func App() any {
+	return <main aria-Label="first" aria-label="second">Hello</main>
+}
+`,
+		message: `gox: attribute "aria-label" conflicts with "aria-Label" after normalization`,
+		line:    `<main aria-Label="first" aria-label="second">Hello</main>`,
+	},
+	{
+		name: "event case",
+		source: `package main
+
+func App() any {
+	return <button onClick={first} onclick={second}>Hello</button>
+}
+`,
+		message: `gox: event prop "onclick" conflicts with "onClick" after normalization`,
+		line:    `<button onClick={first} onclick={second}>Hello</button>`,
+	},
+}
+
 func TestParseCheckOptions(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -167,6 +248,68 @@ func TestCheckInvalidSourceJSON(t *testing.T) {
 		t.Fatalf("JSON escaped GOX markup as HTML: %q", stdout)
 	}
 	assertCheckTreeUnchanged(t, root, before)
+}
+
+func TestCheckReportsDuplicateAttribute(t *testing.T) {
+	root := t.TempDir()
+	path := writeCheckSource(t, root, "app.gox", duplicateAttributeCheckSource)
+	before := snapshotCheckTree(t, root)
+
+	stdout, stderr, err := runCheckForTest([]string{path, "--format=json"})
+	if !errors.Is(err, errCheckDiagnostics) {
+		t.Fatalf("runCheckCommand() error = %v, want errCheckDiagnostics", err)
+	}
+	report := decodeCheckReport(t, stdout)
+	if report.SchemaVersion != 1 || report.OK || report.FilesChecked != 1 || len(report.Diagnostics) != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+	diagnostic := report.Diagnostics[0]
+	if diagnostic.File != path || diagnostic.Line != 4 || diagnostic.Column == 0 {
+		t.Fatalf("diagnostic location = %s:%d:%d", diagnostic.File, diagnostic.Line, diagnostic.Column)
+	}
+	if diagnostic.Message != `gox: duplicate attribute "class"` {
+		t.Fatalf("diagnostic message = %q", diagnostic.Message)
+	}
+	if diagnostic.Source != `<main class="first" class="second">Hello</main>` {
+		t.Fatalf("diagnostic source = %q", diagnostic.Source)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	assertCheckTreeUnchanged(t, root, before)
+}
+
+func TestCheckReportsEffectivePropCollisions(t *testing.T) {
+	for _, test := range effectiveCollisionCheckSources {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeCheckSource(t, root, "app.gox", test.source)
+			before := snapshotCheckTree(t, root)
+
+			stdout, stderr, err := runCheckForTest([]string{path, "--format=json"})
+			if !errors.Is(err, errCheckDiagnostics) {
+				t.Fatalf("runCheckCommand() error = %v, want errCheckDiagnostics", err)
+			}
+			report := decodeCheckReport(t, stdout)
+			if report.SchemaVersion != 1 || report.OK || report.FilesChecked != 1 || len(report.Diagnostics) != 1 {
+				t.Fatalf("report = %+v", report)
+			}
+			diagnostic := report.Diagnostics[0]
+			if diagnostic.File != path || diagnostic.Line != 4 || diagnostic.Column == 0 {
+				t.Fatalf("diagnostic location = %s:%d:%d", diagnostic.File, diagnostic.Line, diagnostic.Column)
+			}
+			if diagnostic.Message != test.message {
+				t.Fatalf("diagnostic message = %q, want %q", diagnostic.Message, test.message)
+			}
+			if diagnostic.Source != test.line {
+				t.Fatalf("diagnostic source = %q, want %q", diagnostic.Source, test.line)
+			}
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+			assertCheckTreeUnchanged(t, root, before)
+		})
+	}
 }
 
 func TestCheckCollectsDiagnosticsFromMultipleFiles(t *testing.T) {

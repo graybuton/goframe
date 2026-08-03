@@ -39,6 +39,13 @@ func TestDOMPropNormalization(t *testing.T) {
 		"Type":        "type",
 		"ClassName":   "class",
 		"htmlFor":     "for",
+		"FOR":         "for",
+		"data-Mode":   "data-mode",
+		"aria-Label":  "aria-label",
+		"CUSTOMFLAG":  "customflag",
+		"HTMLFOR":     "for",
+		"data-Ä":      "data-Ä",
+		"DATA-Ä":      "data-Ä",
 		"data-test":   "data-test",
 	} {
 		if got := normalizeAttributeName(input); got != want {
@@ -61,6 +68,35 @@ func TestDOMPropNormalization(t *testing.T) {
 	}
 	if _, ok := eventNameForProp("class"); ok {
 		t.Fatal("class should not be treated as an event prop")
+	}
+}
+
+func TestSplitPropsNormalizesBooleanARIAName(t *testing.T) {
+	dom, events := splitProps(Props{"ARIA-HIDDEN": true})
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want empty", events)
+	}
+	if len(dom) != 1 {
+		t.Fatalf("dom = %#v, want exactly one prop", dom)
+	}
+	if dom[0].name != "aria-hidden" {
+		t.Fatalf("dom name = %q, want aria-hidden", dom[0].name)
+	}
+	if dom[0].prop != (domProp{value: "true"}) {
+		t.Fatalf("dom prop = %#v, want serialized ARIA boolean", dom[0].prop)
+	}
+}
+
+func TestSplitPropsDoesNotUnicodeFoldAttributeNames(t *testing.T) {
+	dom, events := splitProps(Props{"data-Ä": "value"})
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want empty", events)
+	}
+	if len(dom) != 1 || dom[0].name != "data-Ä" {
+		t.Fatalf("dom = %#v, want unchanged non-ASCII attribute", dom)
+	}
+	if _, ok := dom.get("data-ä"); ok {
+		t.Fatal("lowercase non-ASCII lookup unexpectedly matched")
 	}
 }
 

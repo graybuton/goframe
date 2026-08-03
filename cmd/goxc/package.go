@@ -737,7 +737,9 @@ func generateIndexHTML(options htmlRewriteOptions) string {
 		}
 	}
 	for _, style := range options.stylePaths {
-		builder.WriteString(fmt.Sprintf("    <link rel=\"stylesheet\" href=\"%s\" />\n", style))
+		builder.WriteString("    <link rel=\"stylesheet\" href=\"")
+		builder.WriteString(style)
+		builder.WriteString("\" />\n")
 	}
 	builder.WriteString("</head>\n")
 	builder.WriteString("<body>\n")

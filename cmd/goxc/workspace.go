@@ -716,24 +716,6 @@ func generationFailureSource(targets []goxGenerationTarget, err error) string {
 	return targets[0].source
 }
 
-func generateFileSafely(file, output string, options gox.GenerateOptions) error {
-	content, err := readGenerationSource(file, "GOX source file")
-	if err != nil {
-		return err
-	}
-	generated, err := gox.GenerateWithOptions(content, options)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
-		return fmt.Errorf("create generated directory for %s: %w", output, err)
-	}
-	if err := writeFileAtomic(output, generated, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", output, err)
-	}
-	return nil
-}
-
 func writeWorkspaceGoMod(workDir, appDir string) error {
 	config := workspaceModuleConfigForApp(appDir)
 	appModule, err := readWorkspaceModuleDirectives(config.ModuleRoot)
@@ -745,22 +727,30 @@ func writeWorkspaceGoMod(workDir, appDir string) error {
 	if modulePath == "" {
 		modulePath = "goframe-app-build"
 	}
-	content.WriteString("module " + modulePath + "\n\n")
+	content.WriteString("module ")
+	content.WriteString(modulePath)
+	content.WriteString("\n\n")
 	content.WriteString("go 1.22\n\n")
 	writeWorkspaceRequires(&content, appModule.Requires)
 	if modulePath != canonicalModulePath {
 		if repoRoot, ok := findRepositoryRootForWorkspace(appDir); ok {
 			content.WriteString("require " + canonicalModulePath + " v0.0.0\n")
-			content.WriteString("\nreplace " + canonicalModulePath + " => " + filepath.ToSlash(repoRoot) + "\n")
+			content.WriteString("\nreplace " + canonicalModulePath + " => ")
+			content.WriteString(filepath.ToSlash(repoRoot))
+			content.WriteString("\n")
 		} else if repoRoot, ok := findRepositoryRootForWorkspace("."); ok {
 			content.WriteString("require " + canonicalModulePath + " v0.0.0\n")
-			content.WriteString("\nreplace " + canonicalModulePath + " => " + filepath.ToSlash(repoRoot) + "\n")
+			content.WriteString("\nreplace " + canonicalModulePath + " => ")
+			content.WriteString(filepath.ToSlash(repoRoot))
+			content.WriteString("\n")
 		} else {
 			version := goframeModuleVersionForBuild()
 			if version == "" || version == "v0.0.0" {
 				return fmt.Errorf("cannot create build workspace module: goframe repository root was not found and this goxc binary does not have a versioned %s module dependency; run goxc from the goframe checkout so a local module replace can be written, install a released goxc binary, or set GOFRAME_WORKSPACE/--workspace for read-only source while keeping goxc able to locate the repository", canonicalModulePath)
 			}
-			content.WriteString("require " + canonicalModulePath + " " + version + "\n")
+			content.WriteString("require " + canonicalModulePath + " ")
+			content.WriteString(version)
+			content.WriteString("\n")
 		}
 	}
 	writeWorkspaceReplaces(&content, appModule.Replaces)

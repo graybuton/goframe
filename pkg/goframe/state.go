@@ -62,10 +62,6 @@ func UseReducer[S any, A any](initial S, reducer Reducer[S, A]) (S, func(A)) {
 	}
 }
 
-func useState[T any](initial T) stateHandle[T] {
-	return useStateSlot(initial, "UseState")
-}
-
 func useStateSlot[T any](initial T, hookName string) stateHandle[T] {
 	instance := currentComponent
 	if instance == nil {
