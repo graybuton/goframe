@@ -23,7 +23,6 @@ func requireStateRenderParticipant(instance *componentInstance) *stateRenderPart
 	if state.attempt == nil {
 		state.attempt = attempt
 		state.instance = instance
-		attempt.participants = append(attempt.participants, state)
 	}
 	return state
 }
@@ -59,7 +58,7 @@ func (state *stateRenderParticipant) reducerFor(slot *stateSlot) (any, bool) {
 	return nil, false
 }
 
-func (state *stateRenderParticipant) finishRender(attempt *renderLifecycleAttempt, commit bool) {
+func (state *stateRenderParticipant) finishStateRender(attempt *renderLifecycleAttempt, commit bool) {
 	if state.attempt != attempt {
 		return
 	}
