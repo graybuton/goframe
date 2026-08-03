@@ -742,7 +742,7 @@ async function exerciseFailedStateTransactions(client) {
         current.stateTransactions.failedClosureInvocations ===
             beforeFailedClosures.stateTransactions.failedClosureInvocations + 1,
     "discarded state closure invocation");
-    await wait(250);
+    await waitForAnimationFrames(client, 2);
     const afterFailedClosures = await probe(client);
     counterDelta(
         afterFailedClosures.stateTransactions.initialRecoveredRenders,
@@ -980,6 +980,29 @@ async function click(client, selector) {
     }`, selector);
     if (!result) {
         throw new Error(`APP FAILURE: missing element for click ${selector}`);
+    }
+}
+
+async function waitForAnimationFrames(client, count = 2) {
+    if (!Number.isInteger(count) || count <= 0) {
+        throw new Error(`HARNESS FAILURE: animation frame count must be a positive integer; got ${count}`);
+    }
+    const completed = await client.callFunction(`function(count) {
+        return new Promise((resolve) => {
+            let remaining = count;
+            const next = () => {
+                remaining--;
+                if (remaining === 0) {
+                    resolve(true);
+                    return;
+                }
+                requestAnimationFrame(next);
+            };
+            requestAnimationFrame(next);
+        });
+    }`, count);
+    if (completed !== true) {
+        throw new Error(`HARNESS FAILURE: did not complete ${count} animation frames`);
     }
 }
 
