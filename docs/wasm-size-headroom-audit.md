@@ -30,6 +30,13 @@ the reviewed repeated-Mount head. Exactly three old-ceiling cells fail:
 Zstandard by `74 B`. Those three ceilings increase by `1024 B`; every other
 absolute ceiling and all ratio limits remain unchanged.
 
+The state render transaction adds speculative new-slot and reducer-replacement
+ownership. Specializing its commit/rollback path removes state-only reachability
+of the generic lifecycle participant interface and reverses about `18 KiB` of
+the eager/lazy state-only growth. All ratio limits pass unchanged. Fifteen
+remaining absolute cells are aligned to the next one-KiB boundary; no other
+ceiling, compression command, workflow, or application changes.
+
 ## Source of Truth
 
 - Workflow: `.github/workflows/ci-wasm-size.yml`
@@ -57,15 +64,15 @@ If no match exists, it reports the default missing path
 | --- | ---: | ---: | ---: | ---: |
 | counter | 97280 B | 40960 B | 56320 B | 49152 B |
 | components | 107520 B | 43008 B | 56320 B | 49152 B |
-| todo | 122880 B | 40960 B | 56320 B | 49152 B |
-| dashboard | 171008 B | 53248 B | 71680 B | 61440 B |
-| context | 117760 B | 36864 B | 46080 B | 40960 B |
-| virtualized | 124928 B | 40960 B | 49152 B | 44032 B |
+| todo | 123904 B | 40960 B | 56320 B | 49152 B |
+| dashboard | 175104 B | 53248 B | 71680 B | 61440 B |
+| context | 120832 B | 37888 B | 46080 B | 40960 B |
+| virtualized | 128000 B | 40960 B | 50176 B | 44032 B |
 | multipackage | 110592 B | 43008 B | 56320 B | 49152 B |
 | cmdapp | 110592 B | 43008 B | 56320 B | 49152 B |
-| router | 118784 B | 45056 B | 58368 B | 51200 B |
-| router-dashboard | 235520 B | 77824 B | 94208 B | 82944 B |
-| resource | 157696 B | 58368 B | 69632 B | 62464 B |
+| router | 119808 B | 45056 B | 58368 B | 51200 B |
+| router-dashboard | 240640 B | 79872 B | 96256 B | 84992 B |
+| resource | 162816 B | 59392 B | 70656 B | 63488 B |
 
 ## Supported Toolchain Baseline Migration - 2026-07-30
 
@@ -525,6 +532,146 @@ The old ceilings failed only at `router` raw (`117800 / 117760 B`),
 No other ceiling, ratio, compression command, workflow, or matrix membership
 changed. This is an accepted root-ownership correctness cost; the private
 repeated-Mount fixture remains outside the size matrix.
+
+## State Render Transactions — 2026-08-03
+
+This closeout compares frozen parent
+`20fbcf5d9fc6fb67ba43a9aa0e3fd6e5496cec35`, eager state transaction head
+`5b9f26cc1dc507689bf0011ccfa69128f2815a8d`, lazy state transaction head
+`c9d3f7b978b6087d46282a0c275533b2d2dec82b`, specialized production head
+`ea82bf7d1c0e0e46cf9e9cedce813ff57a6597b5`, and browser evidence head
+`88ff6031360eeb2edd1fdbc2f27855a59342edc6`.
+
+New state slots and reducer replacements remain speculative until render
+commit. State is allocated lazily and commits or rolls back directly before
+generic lifecycle participants and hooks. Resources retain the generic
+participant path. Protected ErrorBoundary subtrees retain deferred final
+ownership. Existing committed state-value updates are not generally rolled
+back, and this change does not add concurrent rendering or scheduler
+transactionality.
+
+Measurements use Go `1.26.5`, TinyGo `0.41.1` with LLVM `20.1.1`, Linux amd64,
+gzip `-n -9`, Brotli quality 11, and Zstandard level 19. Checkpoints were built
+sequentially from the same absolute checkout path with isolated writable Go and
+TinyGo caches.
+
+| checkpoint / app | raw | gzip | br | zstd | raw SHA-256 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| parent / counter | 85595 B | 34207 B | 28683 B | 30938 B | `1a45fd38b13eee14aca55bc0fda4260aae1d542d6419786569a46d3fa5951ed1` |
+| eager / counter | 105990 B | 49920 B | 43407 B | 45543 B | `0018c86f9b6eba5508266a9e552ac602f1d0e43623a5d90efdb494777109eace` |
+| lazy / counter | 106050 B | 49911 B | 43430 B | 45584 B | `ee0a9fd711e3f310a8cb99b234b4a2a405822a8ad21fbdc0b034553c0aa44cf7` |
+| specialized / counter | 87732 B | 35063 B | 29338 B | 31568 B | `b7354e7e9a086202aafd4757a3ef5a4ea41e7a58d8400681951d69e8ace10db2` |
+| parent / resource | 157320 B | 68670 B | 57926 B | 61534 B | `5f513a6bd7f30c0d8c0989f3a46e0bb0f1806118f8888dddd09e07c8ec56170a` |
+| eager / resource | 161871 B | 70096 B | 59046 B | 62853 B | `a00b60a2ad3fb20631fc8a2ed29daa092243e2d37145a9d1b40b2440e9aa8b81` |
+| lazy / resource | 161966 B | 70129 B | 59017 B | 62890 B | `c6e19ab213a346e6f3e967bc0fd0e0a903a57ef20035bdfca088e99770081a47` |
+| specialized / resource | 161949 B | 70190 B | 59189 B | 62940 B | `d7d51dfa99aaa3b1ba5b4d2ebe4fa4befcc61fdc30a263c20796212d8cd6ceb8` |
+| parent / router-dashboard | 234569 B | 94057 B | 77481 B | 82654 B | `dc65e8f4fd9b16eca1703ce7b5219d3a5aea337a11dd9c5464d65557c9100c3f` |
+| eager / router-dashboard | 239664 B | 95732 B | 78703 B | 84073 B | `2a543be7d56dd90bd91406894e109ce41c61ccbf5459194df746ffd791fcfcb3` |
+| lazy / router-dashboard | 239759 B | 95814 B | 78758 B | 84099 B | `91fef6fee07b0528d0dcc762c4a1ff2ee0891671f6cd6d38bc68ac4f1178d9e8` |
+| specialized / router-dashboard | 239735 B | 95816 B | 79001 B | 84130 B | `9b93b6755c38522047534f890b1654a92746031ceeec1546f973e17d0bbd22a7` |
+
+The eager and lazy `counter` artifacts contain
+`lifecycleRenderParticipant` and its interface `finishRender` invoke. The
+specialized `counter` contains `finishStateRender` instead and no generic
+participant interface symbol. Resource and router-dashboard continue to retain
+the interface because they use resources.
+
+| checkpoint / app | code section | data section | name section | data segments |
+| --- | ---: | ---: | ---: | ---: |
+| parent / counter | 69368 B | 9959 B | 4830 B | 7 |
+| eager / counter | 74110 B | 24823 B | 5572 B | 31 |
+| lazy / counter | 74170 B | 24823 B | 5572 B | 31 |
+| specialized / counter | 71350 B | 9959 B | 4979 B | 7 |
+| parent / resource | 116447 B | 29175 B | 10032 B | 34 |
+| eager / resource | 120461 B | 29479 B | 10262 B | 34 |
+| lazy / resource | 120556 B | 29479 B | 10262 B | 34 |
+| specialized / resource | 120410 B | 29519 B | 10349 B | 34 |
+| parent / router-dashboard | 180443 B | 35333 B | 16893 B | 40 |
+| eager / router-dashboard | 184993 B | 35645 B | 17123 B | 40 |
+| lazy / router-dashboard | 185088 B | 35645 B | 17123 B | 40 |
+| specialized / router-dashboard | 184944 B | 35677 B | 17210 B | 40 |
+
+The specialized state-only counter reverses `18318 B` of the lazy raw growth,
+including the extra 24 data segments. This confirms interface reachability as
+the large state-only cost. No second bounded representation is meaningful after
+removing the interface conversion: the remaining dedicated state path is the
+smallest direct expression of the required commit/rollback semantics.
+
+Commit 4 and Commit 5 produced byte-identical raw and reproducibly compressed
+streams for all eleven applications. The full parent-to-final matrix is:
+
+| app | parent raw | Commit 4 raw | Commit 5 raw | raw delta | gzip delta | br delta | zstd delta | final budget result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| counter | 85595 B | 87732 B | 87732 B | +2137 B | +856 B | +655 B | +630 B | pass |
+| components | 91243 B | 93383 B | 93383 B | +2140 B | +703 B | +621 B | +650 B | pass |
+| todo | 120480 B | 123390 B | 123390 B | +2910 B | +1218 B | +855 B | +938 B | pass |
+| dashboard | 170903 B | 174570 B | 174570 B | +3667 B | +1575 B | +1307 B | +1427 B | pass |
+| context | 117366 B | 120131 B | 120131 B | +2765 B | +1059 B | +962 B | +996 B | pass |
+| virtualized | 124297 B | 127601 B | 127601 B | +3304 B | +1275 B | +1160 B | +1166 B | pass |
+| multipackage | 96416 B | 98549 B | 98549 B | +2133 B | +663 B | +508 B | +636 B | pass |
+| cmdapp | 96434 B | 98567 B | 98567 B | +2133 B | +663 B | +630 B | +591 B | pass |
+| router | 117686 B | 119806 B | 119806 B | +2120 B | +700 B | +586 B | +607 B | pass |
+| router-dashboard | 234569 B | 239735 B | 239735 B | +5166 B | +1759 B | +1520 B | +1476 B | pass |
+| resource | 157320 B | 161949 B | 161949 B | +4629 B | +1520 B | +1263 B | +1406 B | pass |
+
+All ratio limits pass unchanged:
+
+| app | gzip ratio | br ratio | zstd ratio |
+| --- | ---: | ---: | ---: |
+| counter | 39.98% | 33.44% | 35.98% |
+| components | 39.50% | 32.88% | 35.38% |
+| todo | 38.78% | 32.00% | 34.49% |
+| dashboard | 37.67% | 30.42% | 32.79% |
+| context | 37.80% | 31.02% | 33.37% |
+| virtualized | 38.65% | 31.72% | 34.24% |
+| multipackage | 39.18% | 32.49% | 35.03% |
+| cmdapp | 39.17% | 32.56% | 35.03% |
+| router | 38.22% | 31.54% | 33.93% |
+| router-dashboard | 39.97% | 32.95% | 35.09% |
+| resource | 43.35% | 36.55% | 38.86% |
+
+Only absolute cells that still failed after specialization move to the next
+one-KiB boundary:
+
+| app / format | measured | old ceiling | overage | new ceiling | headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| todo raw | 123390 B | 122880 B | 510 B | 123904 B | 514 B |
+| dashboard raw | 174570 B | 171008 B | 3562 B | 175104 B | 534 B |
+| context raw | 120131 B | 117760 B | 2371 B | 120832 B | 701 B |
+| context br | 37268 B | 36864 B | 404 B | 37888 B | 620 B |
+| virtualized raw | 127601 B | 124928 B | 2673 B | 128000 B | 399 B |
+| virtualized gzip | 49311 B | 49152 B | 159 B | 50176 B | 865 B |
+| router raw | 119806 B | 118784 B | 1022 B | 119808 B | 2 B |
+| router-dashboard raw | 239735 B | 235520 B | 4215 B | 240640 B | 905 B |
+| router-dashboard br | 79001 B | 77824 B | 1177 B | 79872 B | 871 B |
+| router-dashboard gzip | 95816 B | 94208 B | 1608 B | 96256 B | 440 B |
+| router-dashboard zstd | 84130 B | 82944 B | 1186 B | 84992 B | 862 B |
+| resource raw | 161949 B | 157696 B | 4253 B | 162816 B | 867 B |
+| resource br | 59189 B | 58368 B | 821 B | 59392 B | 203 B |
+| resource gzip | 70190 B | 69632 B | 558 B | 70656 B | 466 B |
+| resource zstd | 62940 B | 62464 B | 476 B | 63488 B | 548 B |
+
+Every other absolute ceiling remains unchanged. Ratio limits remain gzip
+`52.00%`, Brotli `38.00%`, and Zstandard `46.00%`.
+
+Final Commit 4 and Commit 5 stream SHA-256 values are identical:
+
+| app | raw / gzip / br / zstd SHA-256 |
+| --- | --- |
+| counter | `b7354e7e9a086202aafd4757a3ef5a4ea41e7a58d8400681951d69e8ace10db2` / `096b8152071e809e6a9a752b02b036f5327d38908dd3db1ee2d9a90d768b8e24` / `3b4c0a8a8d08cc5519d4c7bc08afd71821a43e6703b5c74f9f096a5957014d5d` / `54c159d36cf946c4ddd84c62479a75bc15846ec0c070b569f1ed12762a0e2d66` |
+| components | `33e6023ec97e2551e9a1c7a49ae2e6d4c903a6de58c46037a36346b5e5284f57` / `989855728221a99ee84017c8adbd8ce3d82d6c326aeea540fa0c1db64f60f16e` / `56f89411c4c7f6d5283f56ab8e3e6354954bcf052d52ea7ebaf93e31d6d70379` / `57cf7e1e2ce583e5b60b8b000c58397c6e4e64648b53059e7b8f870d3e181961` |
+| todo | `32e61235ce954a1f1547d8e9bf6edaa95078b0db65a532eea19f28beefad02f7` / `cc4f6824d8eec0eb632c74940a9925eedbacb60738f6015dffe837b2f509038a` / `6e3e0307ad4fd94bb2e6b52d0228e87f1d8f0366da1ce883a5708be2b575be7a` / `5d2806f20be2f230d5c614ef50b74b9785f47f183c530066769be9ebee50bd86` |
+| dashboard | `8afa3972c38d866329b1119d419b9e7ec043368e7a4e6f66ce810dfb17d783f5` / `ce8ca0237293de1e749165241d8d2715071f28c441e7820197319310d030a0fd` / `618fe8e29220d9e8c321d019791aab0a56c78fab058ceffeb3f57a03ffcb7707` / `40885e2a7e27d41b650521dd63fae81a3a52f8561ddb7356276e131d268ca03e` |
+| context | `245ab1663610641738ebc0ce365b9573e730bac47861e3701055a9963d8b1510` / `1b76ad0a59dff899c5b8369a4488b55d9712caa246afdc1ddd3234f7774cfa9b` / `455c9b1256ecc2ca53e7028f3ffbb5a796e399b6463a81ad7791d2992b9624b0` / `8082f27437b041d26120694789c1db9a068d46c080fa1b410eb6e9c7ee6d0d52` |
+| virtualized | `42cb4a70318c3a6d2eb0dcaa71ea33e188a5e247511278135561b07a1ab3c98d` / `53890d2b090e13f3926fc836d94374059da87f610a993f9a6704c4cb576cd390` / `2b397bc473f0b96f9d5cf98f5467cebc57bf2f71d8afdec6626008e57832f9b0` / `4a1ff9623e4e0c71b0c983a2b30a97bc65ad89a9a62860802e68a271bd9b60c7` |
+| multipackage | `ef78166eb77bf535cae5a80c5f418cb13b1464312118eb89254d04767b58a512` / `e51d1765157ca127e62458afd016f60c8a4b460f7f2ae3ad5167c95bb9cd8250` / `ed71c05d2e996ef4e11ef37b883cdaf1ad554f7fbd2578aa3114f56b14341a47` / `6ed630e644086f72a43be7d7403738087b89d90d92f84b026873e85e0617f6b7` |
+| cmdapp | `94831796b91355bffdd07fee8fb9a9e10e15877c665f7f21a755806ed9494c94` / `92b19780658bb0c2d74d4a38558d9f76651e35fe15c541c0c8abf60a7532d3ab` / `2e29988c64d853b2d45070a14642721ffe6c7c6e634b78e965c91c65332c03cf` / `1dcd8b1c34772927a545cd6bfa0a4f45c5cf83aacc29914e702e9c26f1306f5c` |
+| router | `68229c2236646131b284f83f5ac061a036cc01322e80c15130dde27c05d237ce` / `668fc41104f9773380940dba11d0132f7bf03c37912707d4abbeee32041c76da` / `ef74d5148f356fa4eb11331d5b55e67a254128251b1ddd399e6b2a267157da05` / `64c4db672cb9ce6f7b690aac592c26573733a9d984db422c0871dc3b95eb5cfb` |
+| router-dashboard | `9b93b6755c38522047534f890b1654a92746031ceeec1546f973e17d0bbd22a7` / `17b12139769f8f67b90256d254b7faaa429bb0f71fb01b46ec793faf9e319702` / `08cf939265aa6c6b474051ad969d7f00dd67de35a17db08c3b6cec626c927772` / `b173b695a4153faaeae7cf55454afebb26faf5fe90abff122d255efb32e9bf69` |
+| resource | `d7d51dfa99aaa3b1ba5b4d2ebe4fa4befcc61fdc30a263c20796212d8cd6ceb8` / `6525c7916fec02fa3713d2e2a5d7241eb86617c5061941c9a5c6f85ffc543c67` / `9a4b4c7314ef6622bc2e3fbf7354b1a265dbdb27a31e02d97e32e2ae66101aa3` / `724217c325b0d6539868b39c3bce6849a2643a3104ffb74268c623e54493eedd` |
+
+The sorted 44-stream SHA-256 manifest hashes to
+`9bbce18fe7c2514d15fab3bd1070fc398209d5e52033439bb812c4d8b5eee20f`.
 
 ## Targeted ErrorBoundary Correctness Rebaseline — 2026-07-28
 

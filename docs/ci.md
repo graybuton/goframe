@@ -152,6 +152,14 @@ a small form-driven request. The same smoke covers a controlled backend failure
 state, delayed stale request no-overwrite behavior, and recovery after a later
 valid form submission. This does not add a GoFrame server API.
 
+The private Error Boundary fixture also covers state render transactions. Its
+standard-Go/WASM lane verifies failed initial state rollback, retry without a
+ghost slot, inert discarded setters and dispatchers, preservation and later
+replacement of a committed reducer, resource ordering, stable scenario DOM
+identity, and balanced listener cleanup. A TinyGo `0.41.1` lane verifies the
+successful state, reducer, resource, and cleanup path. It does not intentionally
+panic or claim recover-based rollback under TinyGo's trap-style panic mode.
+
 The runtime error containment fixture, Error Boundary fixture, context selector
 topology fixture, and router-dashboard reference-app smoke are compiled with
 the Go WASM compiler where recover-based render containment is being asserted.
