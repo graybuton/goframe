@@ -392,7 +392,7 @@ red commit was created.
   runs. Ten fresh standard-Go/WASM runs proved failed-render rollback, retry,
   inert discarded closures, and committed-reducer ownership. Ten fresh
   TinyGo/WASM runs proved the successful state/reducer/resource path without
-  intentionally panicking. Two aggregate Chrome runs passed.
+  intentionally panicking.
 - Two aggregate Chrome runs passed. Their dev publication probes observed
   respectively 18/14 batches, 54/42 complete responses, and zero 404 or partial
   responses. Server-backed, history routing, document ownership, runtime error,

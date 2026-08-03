@@ -204,8 +204,8 @@ Boundary rules:
 - first error wins until manual reset or `ResetKey` reset;
 - `ctx.Reset()` remounts the protected subtree fresh;
 - changing `ResetKey` while failed clears the incident and remounts children;
-- protected child state remains speculative until the boundary transaction
-  commits or rolls back;
+- new state slots and reducer replacements observed in protected children
+  remain speculative until the boundary transaction commits or rolls back;
 - runtime invariant panics whose value starts with `goframe:` bypass boundary
   containment.
 
