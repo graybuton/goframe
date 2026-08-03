@@ -62,6 +62,39 @@ func App() any {
 		line:    `<main class="first" className="second">Hello</main>`,
 	},
 	{
+		name: "label alias uppercase destination",
+		source: `package main
+
+func App() any {
+	return <label htmlFor="first" FOR="second">Hello</label>
+}
+`,
+		message: `gox: attribute "FOR" conflicts with "htmlFor" after normalization`,
+		line:    `<label htmlFor="first" FOR="second">Hello</label>`,
+	},
+	{
+		name: "data attribute case",
+		source: `package main
+
+func App() any {
+	return <main data-Mode="first" data-mode="second">Hello</main>
+}
+`,
+		message: `gox: attribute "data-mode" conflicts with "data-Mode" after normalization`,
+		line:    `<main data-Mode="first" data-mode="second">Hello</main>`,
+	},
+	{
+		name: "ARIA attribute case",
+		source: `package main
+
+func App() any {
+	return <main aria-Label="first" aria-label="second">Hello</main>
+}
+`,
+		message: `gox: attribute "aria-label" conflicts with "aria-Label" after normalization`,
+		line:    `<main aria-Label="first" aria-label="second">Hello</main>`,
+	},
+	{
 		name: "event case",
 		source: `package main
 

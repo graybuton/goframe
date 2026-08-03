@@ -29,11 +29,27 @@ type splitEventProps []splitEventProp
 
 func (props splitDOMProps) get(name string) (domProp, bool) {
 	for _, prop := range props {
-		if prop.name == name {
+		if prop.name == name || sameASCIIDestination(prop.name, name) {
 			return prop.prop, true
 		}
 	}
 	return domProp{}, false
+}
+
+func sameASCIIDestination(normalized, name string) bool {
+	if len(normalized) != len(name) {
+		return false
+	}
+	for index := 0; index < len(name); index++ {
+		character := name[index]
+		if character-'A' <= 'Z'-'A' {
+			character |= 'a' - 'A'
+		}
+		if normalized[index] != character {
+			return false
+		}
+	}
+	return true
 }
 
 func (props splitDOMProps) has(name string) bool {
@@ -120,27 +136,25 @@ func eventNameForProp(name string) (string, bool) {
 }
 
 func normalizeAttributeName(name string) string {
-	lower := strings.ToLower(name)
+	lower := asciiLower(name)
 	switch lower {
-	case "class", "id", "value", "type", "placeholder", "name", "disabled",
-		"checked", "selected", "href", "src", "alt", "title", "role":
-		return lower
 	case "classname":
 		return "class"
 	case "htmlfor":
 		return "for"
 	default:
-		return name
+		return lower
 	}
 }
 
-func isARIAAttribute(name string) bool {
-	return len(name) > 5 &&
-		name[0]|0x20 == 'a' &&
-		name[1]|0x20 == 'r' &&
-		name[2]|0x20 == 'i' &&
-		name[3]|0x20 == 'a' &&
-		name[4] == '-'
+func asciiLower(value string) string {
+	lower := []byte(value)
+	for index := 0; index < len(lower); index++ {
+		if lower[index]-'A' <= 'Z'-'A' {
+			lower[index] |= 'a' - 'A'
+		}
+	}
+	return string(lower)
 }
 
 func splitProps(props Props) (splitDOMProps, splitEventProps) {
@@ -154,17 +168,10 @@ func splitProps(props Props) (splitDOMProps, splitEventProps) {
 		if value == nil {
 			continue
 		}
-		if boolean, ok := value.(bool); ok && isARIAAttribute(name) {
-			if dom == nil {
-				dom = make(splitDOMProps, 0, len(props))
-			}
-			dom.set(name, domProp{value: strconv.FormatBool(boolean)})
-			continue
-		}
-		if boolean, ok := value.(bool); ok && !boolean {
-			continue
-		}
 		if eventName, ok := eventNameForProp(name); ok {
+			if boolean, ok := value.(bool); ok && !boolean {
+				continue
+			}
 			if events == nil {
 				events = make(splitEventProps, 0, len(props))
 			}
@@ -172,7 +179,17 @@ func splitProps(props Props) (splitDOMProps, splitEventProps) {
 			continue
 		}
 		name = normalizeAttributeName(name)
-		if _, ok := value.(bool); ok {
+		if boolean, ok := value.(bool); ok {
+			if len(name) > 5 && name[:5] == "aria-" {
+				if dom == nil {
+					dom = make(splitDOMProps, 0, len(props))
+				}
+				dom.set(name, domProp{value: strconv.FormatBool(boolean)})
+				continue
+			}
+			if !boolean {
+				continue
+			}
 			if dom == nil {
 				dom = make(splitDOMProps, 0, len(props))
 			}

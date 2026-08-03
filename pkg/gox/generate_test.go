@@ -958,6 +958,56 @@ func View() any {
 			message: `gox: attribute "for" conflicts with "htmlFor" after normalization`,
 		},
 		{
+			name: "label alias uppercase destination",
+			source: `package main
+
+func View() any {
+	return <label htmlFor="first" FOR="second" />
+}
+`,
+			message: `gox: attribute "FOR" conflicts with "htmlFor" after normalization`,
+		},
+		{
+			name: "data attribute case",
+			source: `package main
+
+func View() any {
+	return <div data-Mode="first" data-mode="second" />
+}
+`,
+			message: `gox: attribute "data-mode" conflicts with "data-Mode" after normalization`,
+		},
+		{
+			name: "ARIA attribute case",
+			source: `package main
+
+func View() any {
+	return <div aria-Label="first" aria-label="second" />
+}
+`,
+			message: `gox: attribute "aria-label" conflicts with "aria-Label" after normalization`,
+		},
+		{
+			name: "custom attribute case",
+			source: `package main
+
+func View() any {
+	return <div customFlag="first" CUSTOMFLAG="second" />
+}
+`,
+			message: `gox: attribute "CUSTOMFLAG" conflicts with "customFlag" after normalization`,
+		},
+		{
+			name: "class alias uppercase destination",
+			source: `package main
+
+func View() any {
+	return <div className="first" CLASS="second" />
+}
+`,
+			message: `gox: attribute "CLASS" conflicts with "className" after normalization`,
+		},
+		{
 			name: "event case",
 			source: `package main
 
@@ -1085,6 +1135,46 @@ func TestCodegenRejectsEffectivePropCollisions(t *testing.T) {
 			message: `gox: attribute "for" conflicts with "htmlFor" after normalization`,
 		},
 		{
+			name: "label alias uppercase destination",
+			node: &Element{Tag: "label", Attributes: []Attribute{
+				stringAttribute("htmlFor", "first"),
+				stringAttribute("FOR", "second"),
+			}},
+			message: `gox: attribute "FOR" conflicts with "htmlFor" after normalization`,
+		},
+		{
+			name: "data attribute case",
+			node: &Element{Tag: "div", Attributes: []Attribute{
+				stringAttribute("data-Mode", "first"),
+				stringAttribute("data-mode", "second"),
+			}},
+			message: `gox: attribute "data-mode" conflicts with "data-Mode" after normalization`,
+		},
+		{
+			name: "ARIA attribute case",
+			node: &Element{Tag: "div", Attributes: []Attribute{
+				stringAttribute("aria-Label", "first"),
+				stringAttribute("aria-label", "second"),
+			}},
+			message: `gox: attribute "aria-label" conflicts with "aria-Label" after normalization`,
+		},
+		{
+			name: "custom attribute case",
+			node: &Element{Tag: "div", Attributes: []Attribute{
+				stringAttribute("customFlag", "first"),
+				stringAttribute("CUSTOMFLAG", "second"),
+			}},
+			message: `gox: attribute "CUSTOMFLAG" conflicts with "customFlag" after normalization`,
+		},
+		{
+			name: "class alias uppercase destination",
+			node: &Element{Tag: "div", Attributes: []Attribute{
+				stringAttribute("className", "first"),
+				stringAttribute("CLASS", "second"),
+			}},
+			message: `gox: attribute "CLASS" conflicts with "className" after normalization`,
+		},
+		{
 			name: "event case",
 			node: &Element{Tag: "button", Attributes: []Attribute{
 				expressionAttribute("onClick", "first"),
@@ -1138,6 +1228,24 @@ func View() any {
 `,
 		},
 		{
+			name: "distinct lowercase custom and ARIA attributes",
+			source: `package main
+
+func View() any {
+	return <div data-mode="first" data-state="second" aria-label="third" aria-describedby="fourth" />
+}
+`,
+		},
+		{
+			name: "case-sensitive component fields",
+			source: `package main
+
+func View() any {
+	return <Panel Label="first" label="second" />
+}
+`,
+		},
+		{
 			name: "distinct events",
 			source: `package main
 
@@ -1167,6 +1275,18 @@ func View() any {
 				t.Fatalf("generated Go does not parse: %v\n%s", err, generated)
 			}
 		})
+	}
+}
+
+func TestEffectiveDOMAttributeNameUsesASCIICaseFolding(t *testing.T) {
+	for input, want := range map[string]string{
+		"DATA-Mode": "data-mode",
+		"data-Ä":    "data-Ä",
+		"DATA-Ä":    "data-Ä",
+	} {
+		if got := effectiveDOMAttributeName(input); got != want {
+			t.Fatalf("effectiveDOMAttributeName(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 
@@ -1203,8 +1323,21 @@ func WhitespaceOnly() gf.Node {
 </Panel>
 }
 
+type CaseProps struct {
+	Label string
+	label string
+}
+
+func Case(props CaseProps) gf.Node {
+	return gf.Text(props.Label + props.label)
+}
+
+func ComponentFieldCase() gf.Node {
+	return <Case Label="first" label="second" />
+}
+
 func DistinctDOMProps() gf.Node {
-	return <label class="field" data-class="custom" htmlFor="value" onClick={func() {}} onInput={func() {}} />
+	return <label class="field" data-class="custom" data-mode="first" data-state="second" aria-label="label" aria-describedby="description" htmlFor="value" onClick={func() {}} onInput={func() {}} />
 }
 `)
 	generated, err := GenerateNamed("view.gox", source)

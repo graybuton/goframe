@@ -202,18 +202,31 @@ func effectiveDOMEventName(name string) (string, bool) {
 }
 
 func effectiveDOMAttributeName(name string) string {
-	lower := strings.ToLower(name)
+	lower := asciiLower(name)
 	switch lower {
-	case "class", "id", "value", "type", "placeholder", "name", "disabled",
-		"checked", "selected", "href", "src", "alt", "title", "role":
-		return lower
 	case "classname":
 		return "class"
 	case "htmlfor":
 		return "for"
 	default:
-		return name
+		return lower
 	}
+}
+
+func asciiLower(value string) string {
+	for index := 0; index < len(value); index++ {
+		if value[index] < 'A' || value[index] > 'Z' {
+			continue
+		}
+		lower := []byte(value)
+		for index := index; index < len(lower); index++ {
+			if lower[index] >= 'A' && lower[index] <= 'Z' {
+				lower[index] += 'a' - 'A'
+			}
+		}
+		return string(lower)
+	}
+	return value
 }
 
 func validateElementAttributeDestinations(element *Element, component bool) error {
