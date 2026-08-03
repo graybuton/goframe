@@ -967,6 +967,129 @@ func TestProtectedSubtreeSuccessfulLifecycleOrderRemainsParentFirst(t *testing.T
 	assertEffectEvents(t, events, []string{"parent", "child"})
 }
 
+func TestProtectedSubtreeStateSlotsRollBackAfterDescendantFailure(t *testing.T) {
+	isolateLifecycleTestState(t)
+	boundary := transactionTestBoundary()
+	initial := 1
+	observed := 0
+	owner := testComponentInstanceWithParent("StateOwner", boundary, func() Node {
+		observed, _ = UseState(initial)
+		return Empty()
+	})
+
+	runProtectedSubtreeTestAttempt(boundary, func() {
+		renderComponentInstance(owner)
+		if len(owner.stateSlots) != 0 || !owner.lifecycleAttempt.active {
+			t.Fatalf("state committed before protected subtree result: slots=%d active=%v",
+				len(owner.stateSlots), owner.lifecycleAttempt.active)
+		}
+		renderComponentInstance(transactionTestRisky(boundary, "state descendant boom"))
+	})
+	if len(owner.stateSlots) != 0 || owner.lifecycleAttempt.active || owner.lifecycleAttempt.state.attempt != nil {
+		t.Fatalf("failed protected state retained slots=%d active=%v transaction=%p",
+			len(owner.stateSlots), owner.lifecycleAttempt.active, owner.lifecycleAttempt.state.attempt)
+	}
+
+	clearErrorBoundary(boundary.errorBoundary)
+	initial = 99
+	runProtectedSubtreeTestAttempt(boundary, func() {
+		renderComponentInstance(owner)
+	})
+	if observed != 99 || len(owner.stateSlots) != 1 || owner.stateSlots[0].value != 99 {
+		t.Fatalf("protected state retry observed=%d slots=%#v, want fresh 99", observed, owner.stateSlots)
+	}
+}
+
+func TestProtectedSubtreeReducerReplacementCommitsOnlyAfterSuccess(t *testing.T) {
+	isolateLifecycleTestState(t)
+	boundary := transactionTestBoundary()
+	useCandidate := false
+	var firstDispatch func(int)
+	owner := testComponentInstanceWithParent("ReducerOwner", boundary, func() Node {
+		reducer := Reducer[int, int](func(state, action int) int {
+			return state + action
+		})
+		if useCandidate {
+			reducer = func(state, action int) int {
+				return state + action*100
+			}
+		}
+		_, dispatch := UseReducer(1, reducer)
+		if firstDispatch == nil {
+			firstDispatch = dispatch
+		}
+		return Empty()
+	})
+
+	runProtectedSubtreeTestAttempt(boundary, func() {
+		renderComponentInstance(owner)
+	})
+	slot := owner.stateSlots[0]
+	useCandidate = true
+	runProtectedSubtreeTestAttempt(boundary, func() {
+		renderComponentInstance(owner)
+		renderComponentInstance(transactionTestRisky(boundary, "reducer descendant boom"))
+	})
+	if owner.stateSlots[0] != slot || slot.value != 1 {
+		t.Fatalf("failed protected reducer changed slot=%p value=%v, want %p/1", owner.stateSlots[0], slot.value, slot)
+	}
+	firstDispatch(1)
+	if slot.value != 2 {
+		t.Fatalf("old dispatch after failed protected reducer = %v, want 2", slot.value)
+	}
+
+	clearErrorBoundary(boundary.errorBoundary)
+	runProtectedSubtreeTestAttempt(boundary, func() {
+		renderComponentInstance(owner)
+	})
+	firstDispatch(1)
+	if slot.value != 102 {
+		t.Fatalf("old dispatch after successful protected reducer = %v, want 102", slot.value)
+	}
+}
+
+func TestNestedProtectedStateCommitDefersToOutermostBoundary(t *testing.T) {
+	isolateLifecycleTestState(t)
+	outer := transactionTestBoundary()
+	inner := transactionTestBoundaryWithParent(outer)
+	initial := 1
+	reducerInitial := 2
+	observed := 0
+	owner := testComponentInstanceWithParent("NestedStateOwner", inner, func() Node {
+		observed, _ = UseState(initial)
+		_, _ = UseReducer(reducerInitial, func(state, action int) int {
+			return state + action
+		})
+		return Empty()
+	})
+
+	runProtectedSubtreeTestAttempt(outer, func() {
+		runProtectedSubtreeTestAttempt(inner, func() {
+			renderComponentInstance(owner)
+		})
+		if len(owner.stateSlots) != 0 || !owner.lifecycleAttempt.active {
+			t.Fatalf("nested state committed before outer result: slots=%d active=%v",
+				len(owner.stateSlots), owner.lifecycleAttempt.active)
+		}
+		renderComponentInstance(transactionTestRisky(outer, "outer state descendant boom"))
+	})
+	if len(owner.stateSlots) != 0 || owner.lifecycleAttempt.active {
+		t.Fatalf("outer rollback retained nested state slots=%d active=%v", len(owner.stateSlots), owner.lifecycleAttempt.active)
+	}
+
+	clearErrorBoundary(outer.errorBoundary)
+	initial = 99
+	reducerInitial = 100
+	runProtectedSubtreeTestAttempt(outer, func() {
+		runProtectedSubtreeTestAttempt(inner, func() {
+			renderComponentInstance(owner)
+		})
+	})
+	if observed != 99 || len(owner.stateSlots) != 2 || owner.stateSlots[0].value != 99 || owner.stateSlots[1].value != 100 {
+		t.Fatalf("nested protected retry observed=%d slots=%#v, want fresh 99/100", observed, owner.stateSlots)
+	}
+}
+
 func runProtectedSubtreeTestAttempt(boundary *componentInstance, reconcile func()) {
 	var state *errorBoundaryState
 	if boundary != nil &&

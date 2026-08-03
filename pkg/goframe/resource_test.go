@@ -2,6 +2,7 @@ package goframe
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -1072,14 +1073,152 @@ func TestUseResourceInitialFailedRenderStartsNoLoader(t *testing.T) {
 	}
 }
 
+func TestStateRenderTransactionKeepsResourceHookSequenceAligned(t *testing.T) {
+	isolateLifecycleTestState(t)
+	loader := &resourceTestLoader{}
+	fail := true
+	stateInitial := 1
+	reducerInitial := 2
+	unmounts := 0
+	effectSetups := 0
+	var resource Resource[string]
+	var failedControl *resourceControl[string]
+	instance := testComponentInstance("StateResourceTransaction", func() Node {
+		_, _ = UseState(stateInitial)
+		_, _ = UseReducer(reducerInitial, func(state, action int) int {
+			return state + action
+		})
+		resource, _ = UseResource("resource", loader.load)
+		UseEffect(func() Cleanup {
+			effectSetups++
+			return nil
+		})
+		UseUnmount(func() {
+			unmounts++
+		})
+		if fail {
+			failedControl, _ = currentComponent.lifecycleAttempt.state.slots[2].value.(*resourceControl[string])
+			panic("mixed state resource render failed")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	if len(instance.stateSlots) != 0 || len(instance.effectSlots) != 0 || len(instance.unmountSlots) != 0 {
+		t.Fatalf("failed mixed render committed state=%d effects=%d unmounts=%d, want 0/0/0",
+			len(instance.stateSlots), len(instance.effectSlots), len(instance.unmountSlots))
+	}
+	if failedControl == nil || failedControl.pending.attempt != nil || failedControl.committed || len(loader.starts) != 0 {
+		t.Fatalf("failed mixed resource control=%#v starts=%#v, want discarded and idle", failedControl, loader.starts)
+	}
+
+	stateInitial = 10
+	reducerInitial = 20
+	fail = false
+	renderComponentInstance(instance)
+	if len(instance.stateSlots) != 3 {
+		t.Fatalf("successful mixed retry state slots = %d, want 3", len(instance.stateSlots))
+	}
+	wantKinds := []string{"UseState", "UseReducer", "UseResource"}
+	for index, kind := range wantKinds {
+		if instance.stateSlots[index].kind != kind {
+			t.Errorf("successful mixed retry slot %d kind = %q, want %q", index, instance.stateSlots[index].kind, kind)
+		}
+	}
+	control := resourceControlForTestAt[string](t, instance, 2)
+	if control == failedControl || !control.committed || control.owner != instance || control.key != "resource" || !resource.Loading() {
+		t.Fatalf("successful mixed retry resource/control = %#v/%#v", resource, control)
+	}
+	flushPendingEffects()
+	if got := loader.starts; len(got) != 1 || got[0] != "resource" || effectSetups != 1 {
+		t.Fatalf("successful mixed retry starts=%#v effect setups=%d, want [resource]/1", got, effectSetups)
+	}
+
+	deactivateComponent(instance)
+	if loader.cleanups != 1 || unmounts != 1 {
+		t.Fatalf("mixed retry unmount resource cleanups=%d unmounts=%d, want 1/1", loader.cleanups, unmounts)
+	}
+}
+
+func TestFailedReducerReplacementBesideResourcePreservesBothCommits(t *testing.T) {
+	isolateLifecycleTestState(t)
+	loader := &resourceTestLoader{}
+	useCandidate := false
+	fail := false
+	var resource Resource[string]
+	var firstDispatch func(int)
+	instance := testComponentInstance("ResourceReducerTransaction", func() Node {
+		resource, _ = UseResource("same", loader.load)
+		reducer := Reducer[int, int](func(state, action int) int {
+			return state + action
+		})
+		if useCandidate {
+			reducer = func(state, action int) int {
+				return state + action*100
+			}
+		}
+		_, dispatch := UseReducer(1, reducer)
+		if firstDispatch == nil {
+			firstDispatch = dispatch
+		}
+		if fail {
+			panic("resource reducer render failed")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	flushPendingEffects()
+	loader.resolves[0]("ready")
+	renderComponentInstance(instance)
+	control := resourceControlForTestAt[string](t, instance, 0)
+	reducerSlot := instance.stateSlots[1]
+	committedReducer := reflect.ValueOf(reducerSlot.reducer).Pointer()
+	committedLoader := reflect.ValueOf(control.loader).Pointer()
+	committedGeneration := control.generation
+	committedSnapshot := control.snapshot
+	committedRun := control.current
+
+	useCandidate = true
+	fail = true
+	renderComponentInstance(instance)
+	if control.key != "same" || control.generation != committedGeneration || control.snapshot != committedSnapshot || control.current != committedRun || reflect.ValueOf(control.loader).Pointer() != committedLoader {
+		t.Fatalf("failed reducer replacement disturbed resource: %#v", control)
+	}
+	if reflect.ValueOf(reducerSlot.reducer).Pointer() != committedReducer || reducerSlot.value != 1 {
+		t.Fatalf("failed reducer replacement changed slot reducer=%x value=%v, want %x/1",
+			reflect.ValueOf(reducerSlot.reducer).Pointer(), reducerSlot.value, committedReducer)
+	}
+	firstDispatch(1)
+	if reducerSlot.value != 2 {
+		t.Fatalf("old dispatch after failed mixed render = %v, want 2", reducerSlot.value)
+	}
+
+	fail = false
+	renderComponentInstance(instance)
+	firstDispatch(1)
+	if reducerSlot.value != 102 {
+		t.Fatalf("old dispatch after successful mixed render = %v, want 102", reducerSlot.value)
+	}
+	if !resource.Ready() || resource.Value != "ready" || len(loader.starts) != 1 || loader.cleanups != 0 {
+		t.Fatalf("resource after reducer commit = %#v starts=%#v cleanups=%d", resource, loader.starts, loader.cleanups)
+	}
+}
+
 func resourceControlForTest[T any](t *testing.T, instance *componentInstance) *resourceControl[T] {
 	t.Helper()
-	if len(instance.stateSlots) == 0 {
+	return resourceControlForTestAt[T](t, instance, 0)
+}
+
+func resourceControlForTestAt[T any](t *testing.T, instance *componentInstance, index int) *resourceControl[T] {
+	t.Helper()
+	if len(instance.stateSlots) <= index {
 		t.Fatal("component has no resource state slot")
 	}
-	control, ok := instance.stateSlots[0].value.(*resourceControl[T])
+	control, ok := instance.stateSlots[index].value.(*resourceControl[T])
 	if !ok || control == nil {
-		t.Fatalf("resource state slot = %#v, want *resourceControl", instance.stateSlots[0].value)
+		t.Fatalf("resource state slot = %#v, want *resourceControl", instance.stateSlots[index].value)
 	}
 	return control
 }

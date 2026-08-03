@@ -104,6 +104,195 @@ func TestFailedInitialStateRenderLeavesNoGhostSlot(t *testing.T) {
 	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalState", "component render", "state render failed")
 }
 
+func TestStateRenderTransactionDiscardsMultipleSlotsAndCommitsRetryInOrder(t *testing.T) {
+	errorsSeen := captureRuntimeErrors(t)
+	countInitial := 1
+	reducerInitial := 2
+	labelInitial := "failed"
+	fail := true
+	schedules := 0
+	reducerCalls := 0
+	var failedSetter func(int)
+	var failedDispatch func(int)
+	var failedSlots []*stateSlot
+	instance := testComponentInstance("TransactionalSlots", func() Node {
+		_, failedSetter = UseState(countInitial)
+		_, failedDispatch = UseReducer(reducerInitial, func(state, action int) int {
+			reducerCalls++
+			return state + action
+		})
+		_, _ = UseState(labelInitial)
+		if fail {
+			failedSlots = append(failedSlots[:0], currentComponent.lifecycleAttempt.state.slots...)
+			panic("multiple state slots failed")
+		}
+		return Empty()
+	}, func(*componentInstance) {
+		schedules++
+	})
+
+	renderComponentInstance(instance)
+	if len(instance.stateSlots) != 0 {
+		t.Fatalf("committed slots after failed multi-slot render = %d, want 0", len(instance.stateSlots))
+	}
+	if len(failedSlots) != 3 {
+		t.Fatalf("speculative slots = %d, want 3", len(failedSlots))
+	}
+	for index, slot := range failedSlots {
+		if slot.owner != nil || slot.pending != nil || slot.value != nil || slot.reducer != nil || slot.kind != "" {
+			t.Errorf("discarded slot %d retained state: %#v", index, slot)
+		}
+	}
+	failedSetter(9)
+	failedDispatch(9)
+	if instance.dirty || schedules != 0 || reducerCalls != 0 {
+		t.Fatalf("discarded closures dirty=%v schedules=%d reducer calls=%d, want false/0/0",
+			instance.dirty, schedules, reducerCalls)
+	}
+
+	countInitial = 10
+	reducerInitial = 20
+	labelInitial = "retry"
+	fail = false
+	renderComponentInstance(instance)
+	if len(instance.stateSlots) != 3 {
+		t.Fatalf("committed retry slots = %d, want 3", len(instance.stateSlots))
+	}
+	wantKinds := []string{"UseState", "UseReducer", "UseState"}
+	wantValues := []any{10, 20, "retry"}
+	for index, slot := range instance.stateSlots {
+		if slot.kind != wantKinds[index] || slot.value != wantValues[index] || slot.owner != instance || slot.pending != nil {
+			t.Errorf("committed retry slot %d = %#v, want kind %s value %v owner %p", index, slot, wantKinds[index], wantValues[index], instance)
+		}
+	}
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalSlots", "component render", "multiple state slots failed")
+}
+
+func TestStateRenderTransactionPreservesCommittedPrefixAfterTrailingFailure(t *testing.T) {
+	errorsSeen := captureRuntimeErrors(t)
+	includeTrailing := false
+	fail := false
+	trailingInitial := 2
+	instance := testComponentInstance("TransactionalPrefix", func() Node {
+		_, _ = UseState(1)
+		if includeTrailing {
+			_, _ = UseState(trailingInitial)
+		}
+		if fail {
+			panic("trailing slot failed")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	prefix := instance.stateSlots[0]
+	includeTrailing = true
+	fail = true
+	renderComponentInstance(instance)
+	if len(instance.stateSlots) != 1 || instance.stateSlots[0] != prefix || prefix.value != 1 {
+		t.Fatalf("committed prefix after trailing failure = %#v, want unchanged slot %p value 1", instance.stateSlots, prefix)
+	}
+
+	trailingInitial = 3
+	fail = false
+	renderComponentInstance(instance)
+	if len(instance.stateSlots) != 2 || instance.stateSlots[0] != prefix || instance.stateSlots[1].value != 3 {
+		t.Fatalf("slots after trailing retry = %#v, want stable prefix and value 3", instance.stateSlots)
+	}
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalPrefix", "component render", "trailing slot failed")
+}
+
+func TestFailedInitialRenderTimeStateUpdatesLeaveNoSchedule(t *testing.T) {
+	tests := []struct {
+		name   string
+		render func()
+	}{
+		{
+			name: "state setter",
+			render: func() {
+				_, setValue := UseState(0)
+				setValue(1)
+			},
+		},
+		{
+			name: "reducer dispatch",
+			render: func() {
+				_, dispatch := UseReducer(0, func(state, action int) int {
+					return state + action
+				})
+				dispatch(1)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			errorsSeen := captureRuntimeErrors(t)
+			schedules := 0
+			instance := testComponentInstance("FailedRenderUpdate", func() Node {
+				test.render()
+				panic("render-time update failed")
+			}, func(*componentInstance) {
+				schedules++
+			})
+
+			renderComponentInstance(instance)
+			if len(instance.stateSlots) != 0 || instance.dirty || schedules != 0 {
+				t.Fatalf("failed render-time update slots=%d dirty=%v schedules=%d, want 0/false/0",
+					len(instance.stateSlots), instance.dirty, schedules)
+			}
+			requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "FailedRenderUpdate", "component render", "render-time update failed")
+		})
+	}
+}
+
+func TestPendingStateClosuresAreInvalidatedByLifecycleRelease(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		release func(*componentInstance)
+	}{
+		{name: "release", release: releaseLifecycleRenderAttempt},
+		{name: "deactivate", release: deactivateComponent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			schedules := 0
+			instance := testComponentInstance("PendingState", func() Node { return Empty() }, func(*componentInstance) {
+				schedules++
+			})
+			clearComponentDirty(instance)
+			beginLifecycleRenderAttempt(instance)
+			previous := currentComponent
+			currentComponent = instance
+			instance.stateIndex = 0
+			state := useStateSlot(1, "UseState")
+			reducer := useStateSlot(2, "UseReducer")
+			reducerCalls := 0
+			setReducer(reducer.slot, Reducer[int, int](func(value, action int) int {
+				reducerCalls++
+				return value + action
+			}))
+			currentComponent = previous
+			slots := []*stateSlot{state.slot, reducer.slot}
+
+			test.release(instance)
+			for index, slot := range slots {
+				if slot.owner != nil || slot.pending != nil || slot.value != nil || slot.reducer != nil || slot.kind != "" {
+					t.Fatalf("released speculative slot %d retained state: %#v", index, slot)
+				}
+			}
+			if instance.lifecycleAttempt.active || len(instance.lifecycleAttempt.participants) != 0 || instance.lifecycleAttempt.state.attempt != nil {
+				t.Fatalf("released lifecycle attempt retained state: %#v", instance.lifecycleAttempt)
+			}
+			state.set(2)
+			dispatchReducer[int, int](reducer.slot, 1)
+			if instance.dirty || schedules != 0 || reducerCalls != 0 {
+				t.Fatalf("released closures dirty=%v schedules=%d reducer calls=%d, want false/0/0",
+					instance.dirty, schedules, reducerCalls)
+			}
+		})
+	}
+}
+
 func TestUseStateOutsideComponentPanics(t *testing.T) {
 	currentComponent = nil
 	defer func() {
@@ -196,8 +385,9 @@ func TestStateSetDuringRenderRemainsDirty(t *testing.T) {
 
 	renderComponentInstance(instance)
 
-	if !instance.dirty || schedules != 1 {
-		t.Fatalf("dirty=%v schedules=%d, want dirty scheduled component", instance.dirty, schedules)
+	if !instance.dirty || schedules != 1 || instance.stateSlots[0].value != 1 {
+		t.Fatalf("dirty=%v schedules=%d value=%v, want dirty scheduled component with 1",
+			instance.dirty, schedules, instance.stateSlots[0].value)
 	}
 }
 
@@ -382,11 +572,16 @@ func TestUseReducerStateTypeMismatchPanics(t *testing.T) {
 	}, nil)
 
 	renderComponentInstance(instance)
+	slot := instance.stateSlots[0]
+	reducer := reflect.ValueOf(slot.reducer).Pointer()
 	useString = true
 
 	assertPanic(t, "goframe: UseReducer state type changed between component renders", func() {
 		renderComponentInstance(instance)
 	})
+	if len(instance.stateSlots) != 1 || instance.stateSlots[0] != slot || reflect.ValueOf(slot.reducer).Pointer() != reducer {
+		t.Fatal("state type mismatch changed committed reducer slot")
+	}
 }
 
 func TestStateHookKindMismatchPanics(t *testing.T) {
@@ -403,11 +598,15 @@ func TestStateHookKindMismatchPanics(t *testing.T) {
 	}, nil)
 
 	renderComponentInstance(instance)
+	slot := instance.stateSlots[0]
 	useReducer = true
 
 	assertPanic(t, "goframe: hook at state slot 0 changed from UseState to UseReducer", func() {
 		renderComponentInstance(instance)
 	})
+	if len(instance.stateSlots) != 1 || instance.stateSlots[0] != slot || slot.kind != "UseState" {
+		t.Fatal("state hook-kind mismatch changed committed slot")
+	}
 }
 
 func TestReducerHookKindMismatchPanics(t *testing.T) {
@@ -450,11 +649,16 @@ func TestUseReducerReducerTypeMismatchPanics(t *testing.T) {
 	}, nil)
 
 	renderComponentInstance(instance)
+	slot := instance.stateSlots[0]
+	reducer := reflect.ValueOf(slot.reducer).Pointer()
 	useStringAction = true
 
 	assertPanic(t, "goframe: UseReducer reducer type changed between component renders", func() {
 		renderComponentInstance(instance)
 	})
+	if len(instance.stateSlots) != 1 || instance.stateSlots[0] != slot || reflect.ValueOf(slot.reducer).Pointer() != reducer {
+		t.Fatal("reducer type mismatch changed committed reducer slot")
+	}
 }
 
 func TestUseReducerOutsideComponentPanics(t *testing.T) {
@@ -516,8 +720,9 @@ func TestUseReducerDispatchDuringRenderRemainsDirty(t *testing.T) {
 
 	renderComponentInstance(instance)
 
-	if !instance.dirty || schedules != 1 {
-		t.Fatalf("dirty=%v schedules=%d, want dirty scheduled component", instance.dirty, schedules)
+	if !instance.dirty || schedules != 1 || instance.stateSlots[0].value != 1 {
+		t.Fatalf("dirty=%v schedules=%d value=%v, want dirty scheduled component with 1",
+			instance.dirty, schedules, instance.stateSlots[0].value)
 	}
 }
 
