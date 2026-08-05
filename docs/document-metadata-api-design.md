@@ -13,6 +13,12 @@ temporarily restored the authored baseline during ordinary route changes.
 No public API is added by this branch. The previous Component Candidate result
 and its measurements are superseded by this record.
 
+Later lifecycle research established a private, build-tagged bounded
+application-update handoff that removes the baseline interval. That Result B
+supersedes this record's lifecycle-foundation blocker, but it does not select
+one of these public API shapes. See
+[transactional document-state handoff](document-state-transactional-handoff.md).
+
 ## Context
 
 The document-state fixture and the server-backed example independently
@@ -628,6 +634,11 @@ into render.
 No proposed public spelling or stability tier is assigned. If a later design
 produces a viable candidate, it remains an Experimental Frontier question, not
 a Public-Candidate or compatibility promise.
+
+The later transactional-handoff research demonstrates that a private bounded
+application-update batch can coordinate outgoing cleanup with incoming
+publication. Result D remains the API-shape decision: the hook, component, and
+handle spellings have not been reevaluated or selected against that foundation.
 
 ## Rejected Alternatives
 

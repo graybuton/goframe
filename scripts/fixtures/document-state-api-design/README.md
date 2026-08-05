@@ -9,3 +9,10 @@ one ordered title and description coordinator:
 - `#/handle` models explicit owner-handle creation plus lifecycle publication.
 
 The fixture is design evidence only. It does not add a public GoFrame API.
+
+The `cmd/handoff` entry point and
+`scripts/document-state-transactional-handoff-browser-smoke.mjs` exercise a
+separate transactional-lifecycle experiment. They require the private
+`goframe_document_state_experiment` build tag and compare standard Go and
+TinyGo browser behavior. The build-tagged bridge is absent from ordinary
+applications and is not a fifth API candidate.
