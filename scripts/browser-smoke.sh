@@ -504,6 +504,18 @@ export GOFRAME_DOCUMENT_API_DESIGN_CHROME_DEBUG_PORT="${GOFRAME_DOCUMENT_API_DES
 GOXC="$GOXC" CHROME="$CHROME_BIN" node --experimental-websocket scripts/document-state-api-design-browser-smoke.mjs
 
 echo
+echo "== Transactional document metadata handoff (standard Go) =="
+GOFRAME_DOCUMENT_HANDOFF_COMPILER=go \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/document-state-transactional-handoff-browser-smoke.mjs
+
+echo
+echo "== Transactional document metadata handoff (TinyGo) =="
+GOFRAME_DOCUMENT_HANDOFF_COMPILER=tinygo \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/document-state-transactional-handoff-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo
