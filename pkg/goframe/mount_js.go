@@ -35,6 +35,13 @@ func Mount(rootID string, app func() Node) {
 	if mountTargetInsideCurrentRoot(root) {
 		panic("goframe: cannot mount inside current root")
 	}
+	documentMetadataUpdate := beginDocumentMetadataApplicationUpdate()
+	documentMetadataCommitted := false
+	defer func() {
+		if !documentMetadataCommitted {
+			rollbackDocumentMetadataApplicationUpdate(documentMetadataUpdate)
+		}
+	}()
 	if mountedApp.tree != nil {
 		removeMounted(mountedApp.root, mountedApp.tree)
 	}
@@ -50,7 +57,13 @@ func Mount(rootID string, app func() Node) {
 	mountedApp.effectLoopCount = 0
 	pendingEffects = nil
 
+	started := performanceNow()
 	mountApplication(document)
+	commitDocumentMetadataApplicationUpdate(documentMetadataUpdate)
+	documentMetadataCommitted = true
+	reportRender("first-render", performanceNow()-started)
+	flushPendingEffects()
+	checkEffectUpdateLoop()
 }
 
 func mountTargetInsideCurrentRoot(root js.Value) bool {
@@ -60,7 +73,6 @@ func mountTargetInsideCurrentRoot(root js.Value) bool {
 }
 
 func mountApplication(document js.Value) {
-	started := performanceNow()
 	mountedApp.rendering = true
 
 	rootNode := Component("App", rootProps{}, func(rootProps) Node {
@@ -70,9 +82,6 @@ func mountApplication(document js.Value) {
 	mountedApp.tree = mountNode(document, rootNode, nil)
 	placeMountedBefore(mountedApp.root, mountedApp.tree, js.Null())
 	mountedApp.rendering = false
-	reportRender("first-render", performanceNow()-started)
-	flushPendingEffects()
-	checkEffectUpdateLoop()
 }
 
 func queueDirtyComponent(instance *componentInstance) {
@@ -113,6 +122,13 @@ func flushDirtyComponents() {
 	}
 
 	started := performanceNow()
+	documentMetadataUpdate := beginDocumentMetadataApplicationUpdate()
+	documentMetadataCommitted := false
+	defer func() {
+		if !documentMetadataCommitted {
+			rollbackDocumentMetadataApplicationUpdate(documentMetadataUpdate)
+		}
+	}()
 	mountedApp.rendering = true
 
 	dirty := pruneDirtyComponents(mountedApp.dirty)
@@ -128,6 +144,8 @@ func flushDirtyComponents() {
 	}
 	restoreFocus(document, focus)
 	mountedApp.rendering = false
+	commitDocumentMetadataApplicationUpdate(documentMetadataUpdate)
+	documentMetadataCommitted = true
 	reportRender("update", performanceNow()-started)
 	flushPendingEffects()
 	checkEffectUpdateLoop()
