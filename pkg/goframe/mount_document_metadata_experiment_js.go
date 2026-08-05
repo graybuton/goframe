@@ -1,4 +1,4 @@
-//go:build js && wasm && !goframe_document_state_experiment
+//go:build js && wasm && goframe_document_state_experiment
 
 package goframe
 
@@ -35,44 +35,13 @@ func Mount(rootID string, app func() Node) {
 	if mountTargetInsideCurrentRoot(root) {
 		panic("goframe: cannot mount inside current root")
 	}
-	if mountedApp.tree != nil {
-		removeMounted(mountedApp.root, mountedApp.tree)
-	}
-
-	mountedApp.root = root
-	mountedApp.app = app
-	mountedApp.tree = nil
-	mountedApp.rendering = false
-	mountedApp.batch.reset()
-	mountedApp.dirty = nil
-	mountedApp.dirtySet = make(map[*componentInstance]bool)
-	mountedApp.effectScheduledUpdate = false
-	mountedApp.effectLoopCount = 0
-	pendingEffects = nil
-
-	mountApplication(document)
+	mountWithDocumentMetadataApplicationUpdate(root, app, document)
 }
 
 func mountTargetInsideCurrentRoot(root js.Value) bool {
 	return mountedApp.tree != nil &&
 		!root.Equal(mountedApp.root) &&
 		mountedApp.root.Call("contains", root).Bool()
-}
-
-func mountApplication(document js.Value) {
-	started := performanceNow()
-	mountedApp.rendering = true
-
-	rootNode := Component("App", rootProps{}, func(rootProps) Node {
-		return mountedApp.app()
-	})
-	mountedApp.root.Set("textContent", "")
-	mountedApp.tree = mountNode(document, rootNode, nil)
-	placeMountedBefore(mountedApp.root, mountedApp.tree, js.Null())
-	mountedApp.rendering = false
-	reportRender("first-render", performanceNow()-started)
-	flushPendingEffects()
-	checkEffectUpdateLoop()
 }
 
 func queueDirtyComponent(instance *componentInstance) {
@@ -111,14 +80,74 @@ func flushDirtyComponents() {
 		scheduleRender()
 		return
 	}
+	flushDirtyComponentsWithDocumentMetadataApplicationUpdate()
+}
+
+func mountWithDocumentMetadataApplicationUpdate(
+	root js.Value,
+	app func() Node,
+	document js.Value,
+) {
+	coordinator := activeDocumentMetadataCoordinator
+	if coordinator != nil {
+		coordinator.beginUpdate()
+	}
+	committed := false
+	defer func() {
+		if coordinator != nil && !committed {
+			coordinator.rollbackUpdate()
+		}
+	}()
+
+	if mountedApp.tree != nil {
+		removeMounted(mountedApp.root, mountedApp.tree)
+	}
+	mountedApp.root = root
+	mountedApp.app = app
+	mountedApp.tree = nil
+	mountedApp.rendering = false
+	mountedApp.batch.reset()
+	mountedApp.dirty = nil
+	mountedApp.dirtySet = make(map[*componentInstance]bool)
+	mountedApp.effectScheduledUpdate = false
+	mountedApp.effectLoopCount = 0
+	pendingEffects = nil
 
 	started := performanceNow()
 	mountedApp.rendering = true
+	rootNode := Component("App", rootProps{}, func(rootProps) Node {
+		return mountedApp.app()
+	})
+	mountedApp.root.Set("textContent", "")
+	mountedApp.tree = mountNode(document, rootNode, nil)
+	placeMountedBefore(mountedApp.root, mountedApp.tree, js.Null())
+	mountedApp.rendering = false
+	if coordinator != nil {
+		coordinator.commitUpdate()
+	}
+	committed = true
+	reportRender("first-render", performanceNow()-started)
+	flushPendingEffects()
+	checkEffectUpdateLoop()
+}
 
+func flushDirtyComponentsWithDocumentMetadataApplicationUpdate() {
+	coordinator := activeDocumentMetadataCoordinator
+	if coordinator != nil {
+		coordinator.beginUpdate()
+	}
+	committed := false
+	defer func() {
+		if coordinator != nil && !committed {
+			coordinator.rollbackUpdate()
+		}
+	}()
+
+	started := performanceNow()
+	mountedApp.rendering = true
 	dirty := pruneDirtyComponents(mountedApp.dirty)
 	mountedApp.dirty = nil
 	mountedApp.dirtySet = make(map[*componentInstance]bool)
-
 	document := js.Global().Get("document")
 	focus := captureFocus(document)
 	for _, instance := range dirty {
@@ -128,6 +157,10 @@ func flushDirtyComponents() {
 	}
 	restoreFocus(document, focus)
 	mountedApp.rendering = false
+	if coordinator != nil {
+		coordinator.commitUpdate()
+	}
+	committed = true
 	reportRender("update", performanceNow()-started)
 	flushPendingEffects()
 	checkEffectUpdateLoop()

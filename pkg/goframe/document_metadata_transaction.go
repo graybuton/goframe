@@ -1,3 +1,5 @@
+//go:build !js || !wasm || goframe_document_state_experiment
+
 package goframe
 
 type documentMetadataValue struct {
@@ -404,60 +406,16 @@ func (owner *documentMetadataOwner) finishRender(
 	owner.coordinator.report("publish-rolled-back", owner, pending.metadata, len(owner.coordinator.owners))
 }
 
-type documentMetadataUpdatePhase uint8
-
-const (
-	documentMetadataUpdateBegin documentMetadataUpdatePhase = iota + 1
-	documentMetadataUpdateCommit
-	documentMetadataUpdateRollback
-)
-
-var (
-	activeDocumentMetadataCoordinator *documentMetadataCoordinator
-	documentMetadataApplicationUpdate func(documentMetadataUpdatePhase)
-)
-
-func beginDocumentMetadataApplicationUpdate() bool {
-	update := documentMetadataApplicationUpdate
-	if update == nil {
-		return false
-	}
-	update(documentMetadataUpdateBegin)
-	return true
-}
-
-func commitDocumentMetadataApplicationUpdate(active bool) {
-	if active {
-		documentMetadataApplicationUpdate(documentMetadataUpdateCommit)
-	}
-}
-
-func rollbackDocumentMetadataApplicationUpdate(active bool) {
-	if active {
-		documentMetadataApplicationUpdate(documentMetadataUpdateRollback)
-	}
-}
+var activeDocumentMetadataCoordinator *documentMetadataCoordinator
 
 func installDocumentMetadataCoordinator(coordinator *documentMetadataCoordinator) {
 	if coordinator == nil {
 		panic("goframe: document metadata coordinator is nil")
 	}
-	if activeDocumentMetadataCoordinator != nil || documentMetadataApplicationUpdate != nil {
+	if activeDocumentMetadataCoordinator != nil {
 		panic("goframe: document metadata coordinator is already installed")
 	}
 	activeDocumentMetadataCoordinator = coordinator
-	documentMetadataApplicationUpdate = func(phase documentMetadataUpdatePhase) {
-		switch phase {
-		case documentMetadataUpdateBegin:
-			coordinator.beginUpdate()
-		case documentMetadataUpdateCommit:
-			coordinator.commitUpdate()
-		case documentMetadataUpdateRollback:
-			coordinator.rollbackUpdate()
-		default:
-			panic("goframe: invalid document metadata update phase")
-		}
-	}
 }
 
 func uninstallDocumentMetadataCoordinator() {
@@ -465,7 +423,6 @@ func uninstallDocumentMetadataCoordinator() {
 		panic("goframe: cannot uninstall document metadata coordinator during an update")
 	}
 	activeDocumentMetadataCoordinator = nil
-	documentMetadataApplicationUpdate = nil
 }
 
 func useDocumentMetadata(metadata documentMetadataValue) {
