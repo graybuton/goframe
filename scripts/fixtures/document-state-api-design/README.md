@@ -15,4 +15,9 @@ The `cmd/handoff` entry point and
 separate transactional-lifecycle experiment. They require the private
 `goframe_document_state_experiment` build tag and compare standard Go and
 TinyGo browser behavior. The build-tagged bridge is absent from ordinary
-applications and is not a fifth API candidate.
+applications and is not a fifth API candidate. The experiment uses the same
+mount, scheduling, dirty-update, focus, reconciliation, and effect-loop core as
+ordinary browser builds. Its build-tagged wrapper adds only the private
+document batch around that core. Standard Go also exercises direct keyed
+replacement failure and retry; TinyGo exercises the successful path without a
+recover claim.

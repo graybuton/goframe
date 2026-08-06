@@ -52,6 +52,14 @@ baseline restorations: 1
 The interval was therefore observable both within mutation delivery and at a
 browser frame boundary. It was not merely an internal coordinator state.
 
+The first failed-replacement fixture retained A as a mounted parent and placed
+failing B beneath it, so it proved failed nested-override isolation rather than
+replacement of A's lifetime. A keyed replacement probe against the reviewed
+head replaced owner A with a distinct failing owner B under one Error Boundary.
+B retained ID zero, but outgoing cleanup released A, restored the authored
+baseline, and left the coordinator with no active owner. The observed sequence
+was `A -> authored baseline`; retry could not be classified as a direct handoff.
+
 ## Lifecycle Order
 
 The current render and browser update path has this order:
@@ -67,11 +75,15 @@ The current render and browser update path has this order:
 5. Removed component instances run effect and `UseUnmount` cleanup. A document
    owner cleanup stages its release in the same application update.
 6. After all dirty roots have reconciled and focus restoration has completed,
-   the document update batch applies its ordered publish and release operations,
-   assigns IDs to owners that survived commit, selects the final owner, and
-   publishes at most one changed pair.
-7. The runtime reports the completed render and flushes pending effects.
-8. An effect that marks state dirty schedules a later browser update; it does
+   the document update batch validates and computes its complete next owner
+   state without changing committed coordinator state. It then publishes at
+   most one changed title/description pair.
+7. Successful publication commits the owner list, IDs, selected pair, and
+   statistics, closes the batch, and only then delivers buffered observer
+   events. Failed publication attempts to restore the previous pair and
+   discards the batch without advancing committed coordinator state.
+8. The runtime reports the completed render and flushes pending effects.
+9. An effect that marks state dirty schedules a later browser update; it does
    not reopen the completed document batch.
 
 Resource and document work use the existing lifecycle participant boundary.
@@ -82,7 +94,11 @@ reconciliation. State retains its existing explicit first-finalization rule.
 Protected Error Boundary descendants defer lifecycle completion to the owning
 boundary. A nested successful boundary delegates to its outer boundary. A
 failed protected attempt rolls back its document participant without staging a
-publish, while retained teardown leaves the previous committed owner active.
+publish. During a direct keyed A-to-B replacement, outgoing component teardown
+still runs, but the document coordinator retains A's committed metadata owner
+for that failed boundary. A successful retry consumes the retained release and
+commits B; unmounting the boundary abandons the retained owner. This retention
+is specific to document ownership and does not preserve A's component lifetime.
 
 ## Candidate A
 
@@ -124,7 +140,8 @@ One coordinator owns:
 - the current published pair;
 - monotonically increasing committed owner IDs;
 - one active application-update batch;
-- the publication callback.
+- a failure-reporting publication callback;
+- an optional failure-reporting observer callback.
 
 An owner token starts pending with ID zero. Rendering may allocate that ordinary
 Go object and store it in a speculative state slot. It does not reserve an ID,
@@ -141,6 +158,19 @@ pair differs from the current pair.
 Batch rollback discards every staged operation. It does not change committed
 owners, IDs, priority, or document state.
 
+Batch commit first validates and evaluates the complete operation plan against
+copies of the owner and boundary state. The publisher receives the previous and
+next complete pair. Its browser adapter writes title and then description; if
+description fails after title changes, it attempts to restore both fields and
+preserves the publication and restoration errors. A publisher failure assigns
+no ID, commits no owner or statistic, closes the batch, and permits a later
+clean retry.
+
+Observer events are buffered while the batch is active. They are delivered only
+after successful publication, internal commit, and batch closure. An observer
+failure remains visible as a runtime panic, but it does not roll back the
+already consistent document and coordinator or reactivate the batch.
+
 The implementation rejects foreign owners, publication after release,
 duplicate release, release of an inactive owner, operations outside a batch,
 nested batches, and coordinator replacement during an active update.
@@ -155,7 +185,8 @@ uses `MutationObserver` plus deterministic animation-frame sampling.
 | initial owner publishes without an initialization render | pass |
 | direct A-to-B replacement records exactly `A -> B` | pass |
 | failed initial render commits no ID, owner, or publication | pass |
-| failed replacement retains A until retry commits B | pass |
+| direct keyed A-to-failing-B replacement retains committed A | pass |
+| retry records exactly `A -> B`, assigns B once, and releases A once | pass |
 | Error Boundary retry establishes one new lifetime | pass |
 | nested owner overrides its parent | pass |
 | parent update beneath the override causes no document write | pass |
@@ -169,36 +200,46 @@ uses `MutationObserver` plus deterministic animation-frame sampling.
 | repeated `Mount` hands ownership directly to the replacement | pass |
 | title, description, and unrelated head-node identities remain stable | pass |
 | no mixed title/description pair is observed | pass |
+| title or description publication failure leaves the previous pair and coordinator intact | pass |
+| restoration failures preserve the original and restoration diagnostics | pass |
+| observer failure occurs after commit with the batch inactive | pass |
 
 Ten fresh standard-Go runs produced the same normalized evidence hash:
 
 ```text
-07a6a05bb5d3bf2dd684d31e226c2ad974670ce481a8758c596dbef1c16f0f4a
+b8bf7519ef49b65bf543b876856ca873cc14ae77aaaedf055804bc2bc8380150
 ```
 
-Their focused artifact was 2,544,136 raw bytes with SHA-256:
+Their focused artifact was 2,601,486 raw bytes with SHA-256:
 
 ```text
-e5d766c2dd80c22d9eacbbb72bfb537e6ace64dd48899aaf07966ddec9d077f1
+d4bff2fd34e257537c3a6099be037267ba2cab6b6d656e44ad247cfb7c3fb8a4
 ```
 
 Ten fresh TinyGo successful-path runs produced the same normalized evidence
 hash:
 
 ```text
-1dd34c9bab3c8a4beac17b331aa42806875dc4748e8df35f214eb3cb9cb7f2ea
+576dbf9d4b47b68e6b0633093a44f4c07be6492805ceca5c6dc14c8103b266ea
 ```
 
-Their focused artifact was 182,330 raw bytes with SHA-256:
+Their focused artifact was 194,890 raw bytes with SHA-256:
 
 ```text
-49bf7a637b2a863de132b87ef15882a3aaccea44ebad3444dedcc822454ba092
+278646b2b2c306507a4e179b239599be1daf66aaafd2babadbe7a06cd70e9749
 ```
 
 The decisive direct-replacement scenario used two owner tokens, assigned two
 committed IDs, released A once, performed two document publications total
 (initial A and replacement B), restored the baseline zero times, and required
 one render for each owner lifetime.
+
+The direct failed-replacement scenario kept A selected with one active owner,
+left failing B at ID zero, published no baseline or mixed pair, and reported one
+render failure. Retry rendered a fresh B lifetime, assigned committed ID 2,
+released A exactly once, and produced `A -> B` in both observer and
+animation-frame sequences. The final coordinator had one owner and no active
+batch, failed-boundary marker, or retained release.
 
 Standard Go covers recover-based failed initial render, failed replacement,
 and retry. TinyGo `0.41.1` uses trap-style panic behavior, so its browser lane
@@ -236,18 +277,44 @@ bytes, 27,154 data-section bytes, and 2,317 name-section bytes. TinyGo added
 18,165 code-section bytes, 5,708 data-section bytes, and 1,064 name-section
 bytes. The remaining raw delta is section framing and other fixture metadata.
 
+The review closeout compared the reviewed head `702132c37a1b` with the final
+code at one matched physical path. These deltas include the direct failed-owner
+fixture, boundary-aware retention, the shared mount core, pair restoration,
+observer buffering, fault diagnostics, and their experiment bridge evidence:
+
+| Compiler | Raw | gzip | Brotli | Zstandard |
+| --- | ---: | ---: | ---: | ---: |
+| standard Go | 2,544,337 -> 2,601,686 (+57,349) | +14,465 | +9,127 | +10,674 |
+| TinyGo | 182,330 -> 194,890 (+12,560) | +4,444 | +3,799 | +4,043 |
+
+Standard Go added 35,599 code-section bytes, 19,859 data-section bytes, and
+1,810 name-section bytes in this closeout. TinyGo added 10,781 code-section
+bytes, 1,152 data-section bytes, and 591 name-section bytes. The complete final
+raw SHA-256 values were `29f798ed88eaed424717c1d3026c2eb224268c35b847a71c5db2592c2a31e264`
+for standard Go and `278646b2b2c306507a4e179b239599be1daf66aaafd2babadbe7a06cd70e9749`
+for TinyGo.
+
 A nullable ordinary-build bridge retained 323-433 raw bytes in every measured
 TinyGo application. A no-op wrapper still retained 39 bytes. Keeping the
 participant in ordinary builds while tagging only its mount integration
 retained 41 bytes in the virtualized fixture through the generic lifecycle
 interface. The final source selection therefore excludes the complete
-coordinator, participant, bridge, and update wrapper from ordinary JS/WASM
-builds.
+coordinator, participant, bridge, and experiment update wrapper from ordinary
+JS/WASM builds. Ordinary and experiment builds now share `mount_common_js.go`,
+which contains mounted application state, scheduling, dirty flushing, focus
+handling, effect-loop handling, reconciliation, and repeated-`Mount`
+validation. Their build-tag-specific files contain only transaction-free or
+document-batch wrappers around that common core.
 
-All eleven budgeted applications were rebuilt at the same physical output path
-from the base and selected code. Raw bytes, compressed bytes, and SHA-256 were
-identical for every application. All existing absolute and ratio budgets pass;
-no budget changed.
+All eleven budgeted applications were rebuilt from the frozen base and final
+code at the same physical output path. The shared-core extraction reduced every
+raw artifact by 27 or 32 bytes. Each code section fell by 35 or 40 bytes, each
+data section retained its size, and each name section grew by 8 bytes. Across
+deterministic compression, gzip deltas were -13 to -27 bytes, Brotli deltas were
+-81 to +22 bytes, and Zstandard deltas were -13 to +18 bytes. All 44 current
+absolute cells and every ratio limit pass; no budget or ratio changed. Ordinary
+source selection and binary searches found no coordinator, experiment bridge,
+or experiment build-tag symbol.
 
 ## Limitations
 
@@ -260,6 +327,11 @@ no budget changed.
   mount path. It is not a generic transaction facility.
 - Pair consistency is established at committed framework and recorded observer
   boundaries, not as one browser DOM instruction.
+- Pair restoration is best-effort when the browser rejects both publication and
+  restoration. All failures remain available in the propagated diagnostic; no
+  private mechanism can make two independent DOM assignments physically atomic.
+- Observer failure is reported after commit. It cannot request transaction
+  rollback and the experiment does not provide a public observer policy.
 - External scripts that concurrently mutate the authored nodes are not covered.
 - Arbitrary head elements, SSR, hydration, SEO behavior, multiple documents,
   portals, and concurrent applications are outside this result.

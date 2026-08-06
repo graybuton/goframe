@@ -163,11 +163,13 @@ panic or claim recover-based rollback under TinyGo's trap-style panic mode.
 The private document-state handoff fixture runs through an experiment-only
 build tag under standard Go/WASM and TinyGo. It verifies one update-level
 handoff across incoming lifecycle commit and outgoing unmount cleanup, exact
-`A -> B` observer and animation-frame sequences, rollback and retry under
-standard Go, nested priority, no-op publication, final baseline restoration,
-remount lifetime, repeated `Mount`, teardown, and stable authored head-node
-identity. TinyGo covers the complete successful path and does not claim
-recover-based rollback.
+`A -> B` observer and animation-frame sequences, a real keyed A-to-failing-B
+replacement with retained A metadata and exact retry handoff under standard Go,
+nested priority, no-op publication, final baseline restoration, remount
+lifetime, repeated `Mount`, teardown, and stable authored head-node identity.
+Focused host tests inject title, description, restoration, and observer failures
+and verify a closed batch plus consistent document/coordinator state. TinyGo
+covers the complete successful path and does not claim recover-based rollback.
 
 The runtime error containment fixture, Error Boundary fixture, context selector
 topology fixture, and router-dashboard reference-app smoke are compiled with
