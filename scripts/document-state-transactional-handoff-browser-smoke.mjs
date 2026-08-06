@@ -268,25 +268,59 @@ async function runFailedInitial() {
 
 async function runFailedReplacementAndRetry() {
     let state = await navigateScenario("failed-replacement");
-    assertCommitted(state, metadataA, 1, "failed replacement initial parent");
+    assertCommitted(state, metadataA, 1, "failed replacement initial owner");
+    const ownerAID = Number(state.runtime.snapshot.activeOwnerID);
     let before = boundary(state);
     let frames = await clickAndCapture("activate-failed-owner", 5);
     state = await pageState();
     assertCommitted(state, metadataA, 1, "failed replacement rollback");
     assertSequence(frames, [metadataA], "failed replacement frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA], "failed replacement observer");
     assertDeltas(state, before, { title: 0, description: 0, applies: 0, baseline: 0 }, "failed replacement");
     assert(state.runtime.statistics.committedIDAssignments === 1, "failed replacement assigned speculative id");
+    assert(state.runtime.statistics.tokenCreations === 2, "failed replacement token count");
     assert(state.runtime.runtimeErrors === 1, "failed replacement runtime report count");
     assert(state.retryVisible, "failed replacement fallback retry is unavailable");
+    assert(Number(state.runtime.snapshot.activeOwnerID) === ownerAID, "failed replacement changed owner A identity");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 1, "failed replacement boundary was not retained");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 1, "failed replacement release was not retained");
+    assert(state.runtime.statistics.releases === 0, "failed replacement released owner A");
+    assert(state.runtime.statistics.baselineRestorations === 0, "failed replacement restored authored baseline");
+    const failedEvents = state.runtime.ownershipEvents.slice(before.ownershipEventIndex);
+    assert(
+        failedEvents.some((event) =>
+            event.kind === "publish-rolled-back" &&
+            Number(event.ownerID) === 0 &&
+            pairEqual(pairFromState(event), metadataB)
+        ),
+        "failed replacement did not retain B as an uncommitted owner",
+    );
+    assert(
+        failedEvents.filter((event) => event.kind === "owner-committed").length === 0,
+        "failed replacement committed owner B",
+    );
 
     before = boundary(state);
     frames = await clickAndCapture("retry-owner", 5);
     state = await pageState();
-    assertCommitted(state, metadataB, 2, "ErrorBoundary retry");
+    assertCommitted(state, metadataB, 1, "ErrorBoundary retry");
     assertSequence(frames, [metadataA, metadataB], "ErrorBoundary retry frames");
     assertSequence(observerSequenceSince(state, before), [metadataA, metadataB], "ErrorBoundary retry observer");
     assertDeltas(state, before, { title: 1, description: 1, applies: 1, baseline: 0 }, "ErrorBoundary retry");
     assert(state.runtime.statistics.committedIDAssignments === 2, "retry owner id assignment");
+    assert(state.runtime.statistics.tokenCreations === 3, "retry did not create one fresh B lifetime");
+    assert(Number(state.runtime.snapshot.activeOwnerID) > ownerAID, "retry did not commit a distinct owner B identity");
+    assert(state.runtime.statistics.releases === 1, "retry did not release owner A exactly once");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 0, "retry retained failed boundary state");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "retry retained stale owner release");
+    assert(state.runtime.statistics.baselineRestorations === 0, "retry exposed authored baseline");
+    assert(state.runtime.runtimeErrors === 1, "retry changed runtime error count");
+    assert(
+        JSON.stringify(state.runtime.ownerRenders.map((entry) => entry.role)) ===
+            JSON.stringify(["replacement-a", "replacement-b", "replacement-b"]),
+        `failed replacement owner renders = ${JSON.stringify(state.runtime.ownerRenders)}`,
+    );
+    assertIdentity(state, "failed replacement retry");
     return resultSummary(state, frames);
 }
 
@@ -423,6 +457,7 @@ function boundary(state) {
         snapshotIndex: state.head.snapshots.length,
         documentApplies: state.runtime.documentApplies,
         baselineRestorations: state.runtime.baselineRestorations,
+        ownershipEventIndex: state.runtime.ownershipEvents.length,
         statistics: { ...state.runtime.statistics },
     };
 }

@@ -23,10 +23,13 @@ type DocumentMetadataHandoffExperimentEvent struct {
 // DocumentMetadataHandoffExperimentSnapshot is the fixture-only committed
 // ownership snapshot.
 type DocumentMetadataHandoffExperimentSnapshot struct {
-	ActiveOwnerID uint64
-	OwnerCount    int
-	Title         string
-	Description   string
+	ActiveOwnerID        uint64
+	OwnerCount           int
+	FailedBoundaryCount  int
+	RetainedReleaseCount int
+	BatchActive          bool
+	Title                string
+	Description          string
 }
 
 // DocumentMetadataHandoffExperimentStatistics contains fixture-only counters.
@@ -100,10 +103,13 @@ func CurrentDocumentMetadataHandoffExperiment() DocumentMetadataHandoffExperimen
 		ownerID = snapshot.owner.id
 	}
 	return DocumentMetadataHandoffExperimentSnapshot{
-		ActiveOwnerID: ownerID,
-		OwnerCount:    snapshot.ownerCount,
-		Title:         snapshot.metadata.title,
-		Description:   snapshot.metadata.description,
+		ActiveOwnerID:        ownerID,
+		OwnerCount:           snapshot.ownerCount,
+		FailedBoundaryCount:  snapshot.failedBoundaryCount,
+		RetainedReleaseCount: snapshot.retainedReleaseCount,
+		BatchActive:          snapshot.batchActive,
+		Title:                snapshot.metadata.title,
+		Description:          snapshot.metadata.description,
 	}
 }
 

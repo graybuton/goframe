@@ -333,6 +333,99 @@ func TestDocumentMetadataProtectedLifecycleCommitAndRollback(t *testing.T) {
 	assertDocumentMetadataSnapshot(t, coordinator, committedB, metadataB, 1)
 }
 
+func TestDocumentMetadataFailedBoundaryReplacementRetainsOwnerUntilRetry(t *testing.T) {
+	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
+	metadataA := documentMetadataValue{title: "A", description: "Description A"}
+	metadataB := documentMetadataValue{title: "B", description: "Description B"}
+	var publications []documentMetadataValue
+	coordinator := newDocumentMetadataCoordinator(baseline, func(value documentMetadataValue) {
+		publications = append(publications, value)
+	}, nil)
+	boundaryOwner := testComponentInstance("Boundary", func() Node { return Empty() }, nil)
+	boundary := ensureErrorBoundaryState(boundaryOwner)
+	ownerA := coordinator.newOwner()
+	ownerB := coordinator.newOwner()
+
+	coordinator.beginUpdate()
+	coordinator.stagePublishForBoundary(ownerA, metadataA, boundary, boundaryOwner)
+	coordinator.commitUpdate()
+	assertDocumentMetadataSnapshot(t, coordinator, ownerA, metadataA, 1)
+
+	coordinator.beginUpdate()
+	coordinator.stageFailedPublish(ownerB, metadataB, boundary, boundaryOwner)
+	coordinator.commitUpdate()
+	coordinator.beginUpdate()
+	coordinator.stageRelease(ownerA)
+	coordinator.commitUpdate()
+
+	assertDocumentMetadataSnapshot(t, coordinator, ownerA, metadataA, 1)
+	if ownerA.state != documentMetadataOwnerActive || ownerB.id != 0 {
+		t.Fatalf("failed replacement owners: A=%#v B=%#v", ownerA, ownerB)
+	}
+	if coordinator.snapshot().failedBoundaryCount != 1 ||
+		coordinator.snapshot().retainedReleaseCount != 1 ||
+		coordinator.snapshot().batchActive {
+		t.Fatalf("failed replacement state = %#v", coordinator.snapshot())
+	}
+	if coordinator.statistics.releases != 0 ||
+		coordinator.statistics.baselineRestorations != 0 {
+		t.Fatalf("failed replacement statistics = %#v", coordinator.statistics)
+	}
+
+	coordinator.beginUpdate()
+	coordinator.stagePublishForBoundary(ownerB, metadataB, boundary, boundaryOwner)
+	coordinator.commitUpdate()
+
+	assertDocumentMetadataSnapshot(t, coordinator, ownerB, metadataB, 1)
+	if ownerA.state != documentMetadataOwnerReleased || ownerB.id != 2 {
+		t.Fatalf("retried replacement owners: A=%#v B=%#v", ownerA, ownerB)
+	}
+	if coordinator.snapshot().failedBoundaryCount != 0 ||
+		coordinator.snapshot().retainedReleaseCount != 0 ||
+		coordinator.snapshot().batchActive {
+		t.Fatalf("retried replacement state = %#v", coordinator.snapshot())
+	}
+	if coordinator.statistics.releases != 1 ||
+		coordinator.statistics.baselineRestorations != 0 {
+		t.Fatalf("retried replacement statistics = %#v", coordinator.statistics)
+	}
+	if !reflect.DeepEqual(publications, []documentMetadataValue{metadataA, metadataB}) {
+		t.Fatalf("replacement publications = %#v, want A -> B", publications)
+	}
+}
+
+func TestDocumentMetadataAbandonedFailedBoundaryReleasesRetainedOwner(t *testing.T) {
+	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
+	metadataA := documentMetadataValue{title: "A", description: "Description A"}
+	coordinator := newDocumentMetadataCoordinator(baseline, func(documentMetadataValue) {}, nil)
+	boundaryOwner := testComponentInstance("Boundary", func() Node { return Empty() }, nil)
+	boundary := ensureErrorBoundaryState(boundaryOwner)
+	ownerA := coordinator.newOwner()
+	failed := coordinator.newOwner()
+
+	coordinator.beginUpdate()
+	coordinator.stagePublishForBoundary(ownerA, metadataA, boundary, boundaryOwner)
+	coordinator.commitUpdate()
+	coordinator.beginUpdate()
+	coordinator.stageFailedPublish(failed, metadataA, boundary, boundaryOwner)
+	coordinator.commitUpdate()
+	coordinator.beginUpdate()
+	coordinator.stageRelease(ownerA)
+	coordinator.commitUpdate()
+
+	coordinator.beginUpdate()
+	deactivateComponent(boundaryOwner)
+	coordinator.commitUpdate()
+
+	assertDocumentMetadataSnapshot(t, coordinator, nil, baseline, 0)
+	if ownerA.state != documentMetadataOwnerReleased ||
+		coordinator.snapshot().failedBoundaryCount != 0 ||
+		coordinator.snapshot().retainedReleaseCount != 0 ||
+		coordinator.registeredBoundaries[boundary] {
+		t.Fatalf("abandoned boundary state: owner=%#v snapshot=%#v", ownerA, coordinator.snapshot())
+	}
+}
+
 func TestDocumentMetadataNestedProtectedLifecycleDelegatesToOuterBoundary(t *testing.T) {
 	metadata := documentMetadataValue{title: "Nested", description: "Nested description"}
 	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, func(documentMetadataValue) {}, nil)

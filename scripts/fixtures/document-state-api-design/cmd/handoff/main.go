@@ -211,11 +211,17 @@ func renderFailedInitialScenario(struct{}) gf.Node {
 }
 
 func renderFailedReplacementScenario(struct{}) gf.Node {
-	active, setActive := gf.UseState(false)
+	target, setTarget := gf.UseState("a")
 	failure, setFailure := gf.UseState(true)
-	child := gf.Empty()
-	if active {
-		child = gf.ErrorBoundary(gf.ErrorBoundaryProps{
+	value := metadataA()
+	if target == "b" {
+		value = metadataB()
+	}
+	return scenarioSection(
+		button("activate-failed-owner", "Activate failing owner", func() {
+			setTarget("b")
+		}),
+		gf.ErrorBoundary(gf.ErrorBoundaryProps{
 			Fallback: func(context gf.ErrorBoundaryContext) gf.Node {
 				return button("retry-owner", "Retry owner", func() {
 					setFailure(false)
@@ -223,15 +229,14 @@ func renderFailedReplacementScenario(struct{}) gf.Node {
 				})
 			},
 			Children: []gf.Node{
-				ownerNode("replacement-b", "replacement-b", metadataB(), failure),
+				ownerNode(
+					"replacement-"+target,
+					"replacement-"+target,
+					value,
+					target == "b" && failure,
+				),
 			},
-		})
-	}
-	return scenarioSection(
-		button("activate-failed-owner", "Activate failing owner", func() {
-			setActive(true)
 		}),
-		ownerNode("replacement-parent", "replacement-parent", metadataA(), false, child),
 	)
 }
 
@@ -449,6 +454,9 @@ func updateCommittedEvidence() {
 	snapshotValue := js.Global().Get("Object").New()
 	snapshotValue.Set("activeOwnerID", snapshot.ActiveOwnerID)
 	snapshotValue.Set("ownerCount", snapshot.OwnerCount)
+	snapshotValue.Set("failedBoundaryCount", snapshot.FailedBoundaryCount)
+	snapshotValue.Set("retainedReleaseCount", snapshot.RetainedReleaseCount)
+	snapshotValue.Set("batchActive", snapshot.BatchActive)
 	snapshotValue.Set("title", snapshot.Title)
 	snapshotValue.Set("description", snapshot.Description)
 	evidence().Set("snapshot", snapshotValue)
