@@ -13,9 +13,8 @@ func mountApplicationUpdate(
 	if coordinator != nil {
 		coordinator.beginUpdate()
 	}
-	committed := false
 	defer func() {
-		if coordinator != nil && !committed {
+		if coordinator != nil && coordinator.batch.active {
 			coordinator.rollbackUpdate()
 		}
 	}()
@@ -24,7 +23,6 @@ func mountApplicationUpdate(
 	if coordinator != nil {
 		coordinator.commitUpdate()
 	}
-	committed = true
 	finishBrowserRender("first-render", started)
 }
 
@@ -33,9 +31,8 @@ func flushDirtyComponentsApplicationUpdate() {
 	if coordinator != nil {
 		coordinator.beginUpdate()
 	}
-	committed := false
 	defer func() {
-		if coordinator != nil && !committed {
+		if coordinator != nil && coordinator.batch.active {
 			coordinator.rollbackUpdate()
 		}
 	}()
@@ -44,6 +41,5 @@ func flushDirtyComponentsApplicationUpdate() {
 	if coordinator != nil {
 		coordinator.commitUpdate()
 	}
-	committed = true
 	finishBrowserRender("update", started)
 }

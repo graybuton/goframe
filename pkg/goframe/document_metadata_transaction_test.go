@@ -1,6 +1,7 @@
 package goframe
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -15,9 +16,9 @@ func TestDocumentMetadataTransactionCommitAndRollback(t *testing.T) {
 	var publications []documentMetadataValue
 	coordinator := newDocumentMetadataCoordinator(
 		baseline,
-		func(value documentMetadataValue) {
+		testDocumentMetadataPublisher(func(value documentMetadataValue) {
 			publications = append(publications, value)
-		},
+		}),
 		nil,
 	)
 	ownerA := coordinator.newOwner()
@@ -89,9 +90,9 @@ func TestDocumentMetadataTransactionPriorityAndNoOpPublication(t *testing.T) {
 	metadataB := documentMetadataValue{title: "B", description: "Description B"}
 
 	var publications []documentMetadataValue
-	coordinator := newDocumentMetadataCoordinator(baseline, func(value documentMetadataValue) {
+	coordinator := newDocumentMetadataCoordinator(baseline, testDocumentMetadataPublisher(func(value documentMetadataValue) {
 		publications = append(publications, value)
-	}, nil)
+	}), nil)
 	ownerA := coordinator.newOwner()
 	ownerB := coordinator.newOwner()
 
@@ -142,7 +143,7 @@ func TestDocumentMetadataTransactionMixedOperationsUseOperationOrder(t *testing.
 	metadataB := documentMetadataValue{title: "B", description: "Description B"}
 	metadataC := documentMetadataValue{title: "C", description: "Description C"}
 
-	coordinator := newDocumentMetadataCoordinator(baseline, func(documentMetadataValue) {}, nil)
+	coordinator := newDocumentMetadataCoordinator(baseline, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
 	ownerA := coordinator.newOwner()
 	ownerB := coordinator.newOwner()
 	ownerC := coordinator.newOwner()
@@ -170,9 +171,9 @@ func TestDocumentMetadataTransactionDoesNotCommitShortLivedOwner(t *testing.T) {
 	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
 	metadata := documentMetadataValue{title: "Temporary", description: "Temporary description"}
 	var publications []documentMetadataValue
-	coordinator := newDocumentMetadataCoordinator(baseline, func(value documentMetadataValue) {
+	coordinator := newDocumentMetadataCoordinator(baseline, testDocumentMetadataPublisher(func(value documentMetadataValue) {
 		publications = append(publications, value)
-	}, nil)
+	}), nil)
 	owner := coordinator.newOwner()
 
 	coordinator.beginUpdate()
@@ -194,8 +195,8 @@ func TestDocumentMetadataTransactionDoesNotCommitShortLivedOwner(t *testing.T) {
 
 func TestDocumentMetadataTransactionRejectsInvalidOwnership(t *testing.T) {
 	metadata := documentMetadataValue{title: "A", description: "Description A"}
-	first := newDocumentMetadataCoordinator(documentMetadataValue{}, func(documentMetadataValue) {}, nil)
-	second := newDocumentMetadataCoordinator(documentMetadataValue{}, func(documentMetadataValue) {}, nil)
+	first := newDocumentMetadataCoordinator(documentMetadataValue{}, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
+	second := newDocumentMetadataCoordinator(documentMetadataValue{}, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
 	owner := first.newOwner()
 
 	first.beginUpdate()
@@ -231,7 +232,7 @@ func TestDocumentMetadataTransactionRejectsInvalidOwnership(t *testing.T) {
 func TestDocumentMetadataRenderParticipantStagesCommitAndRollback(t *testing.T) {
 	metadataA := documentMetadataValue{title: "A", description: "Description A"}
 	metadataB := documentMetadataValue{title: "B", description: "Description B"}
-	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, func(documentMetadataValue) {}, nil)
+	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
 	installDocumentMetadataCoordinator(coordinator)
 	t.Cleanup(uninstallDocumentMetadataCoordinator)
 
@@ -264,7 +265,7 @@ func TestDocumentMetadataRenderParticipantStagesCommitAndRollback(t *testing.T) 
 }
 
 func TestDocumentMetadataFailedInitialRenderCommitsNoOwner(t *testing.T) {
-	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, func(documentMetadataValue) {}, nil)
+	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
 	installDocumentMetadataCoordinator(coordinator)
 	t.Cleanup(uninstallDocumentMetadataCoordinator)
 
@@ -287,7 +288,7 @@ func TestDocumentMetadataFailedInitialRenderCommitsNoOwner(t *testing.T) {
 func TestDocumentMetadataProtectedLifecycleCommitAndRollback(t *testing.T) {
 	metadataA := documentMetadataValue{title: "A", description: "Description A"}
 	metadataB := documentMetadataValue{title: "B", description: "Description B"}
-	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, func(documentMetadataValue) {}, nil)
+	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
 	installDocumentMetadataCoordinator(coordinator)
 	t.Cleanup(uninstallDocumentMetadataCoordinator)
 
@@ -338,9 +339,9 @@ func TestDocumentMetadataFailedBoundaryReplacementRetainsOwnerUntilRetry(t *test
 	metadataA := documentMetadataValue{title: "A", description: "Description A"}
 	metadataB := documentMetadataValue{title: "B", description: "Description B"}
 	var publications []documentMetadataValue
-	coordinator := newDocumentMetadataCoordinator(baseline, func(value documentMetadataValue) {
+	coordinator := newDocumentMetadataCoordinator(baseline, testDocumentMetadataPublisher(func(value documentMetadataValue) {
 		publications = append(publications, value)
-	}, nil)
+	}), nil)
 	boundaryOwner := testComponentInstance("Boundary", func() Node { return Empty() }, nil)
 	boundary := ensureErrorBoundaryState(boundaryOwner)
 	ownerA := coordinator.newOwner()
@@ -397,7 +398,7 @@ func TestDocumentMetadataFailedBoundaryReplacementRetainsOwnerUntilRetry(t *test
 func TestDocumentMetadataAbandonedFailedBoundaryReleasesRetainedOwner(t *testing.T) {
 	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
 	metadataA := documentMetadataValue{title: "A", description: "Description A"}
-	coordinator := newDocumentMetadataCoordinator(baseline, func(documentMetadataValue) {}, nil)
+	coordinator := newDocumentMetadataCoordinator(baseline, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
 	boundaryOwner := testComponentInstance("Boundary", func() Node { return Empty() }, nil)
 	boundary := ensureErrorBoundaryState(boundaryOwner)
 	ownerA := coordinator.newOwner()
@@ -426,9 +427,205 @@ func TestDocumentMetadataAbandonedFailedBoundaryReleasesRetainedOwner(t *testing
 	}
 }
 
+func TestDocumentMetadataPairPublicationIsFailureAtomic(t *testing.T) {
+	previous := documentMetadataValue{title: "A", description: "Description A"}
+	next := documentMetadataValue{title: "B", description: "Description B"}
+	titleFailure := errors.New("write title")
+	descriptionFailure := errors.New("write description")
+	restoreTitleFailure := errors.New("restore title")
+	restoreDescriptionFailure := errors.New("restore description")
+
+	t.Run("title write fails before mutation", func(t *testing.T) {
+		current := previous
+		descriptionWrites := 0
+		err := writeDocumentMetadataPair(
+			previous,
+			next,
+			func(string) error { return titleFailure },
+			func(value string) error {
+				descriptionWrites++
+				current.description = value
+				return nil
+			},
+		)
+		if !errors.Is(err, titleFailure) || current != previous || descriptionWrites != 0 {
+			t.Fatalf("title failure: error=%v current=%#v description writes=%d", err, current, descriptionWrites)
+		}
+	})
+
+	t.Run("description failure restores the previous pair", func(t *testing.T) {
+		current := previous
+		descriptionAttempts := 0
+		err := writeDocumentMetadataPair(
+			previous,
+			next,
+			func(value string) error {
+				current.title = value
+				return nil
+			},
+			func(value string) error {
+				descriptionAttempts++
+				if descriptionAttempts == 1 {
+					return descriptionFailure
+				}
+				current.description = value
+				return nil
+			},
+		)
+		if !errors.Is(err, descriptionFailure) || current != previous || descriptionAttempts != 2 {
+			t.Fatalf("description failure: error=%v current=%#v attempts=%d", err, current, descriptionAttempts)
+		}
+	})
+
+	t.Run("restoration failures remain visible", func(t *testing.T) {
+		current := previous
+		titleAttempts := 0
+		descriptionAttempts := 0
+		err := writeDocumentMetadataPair(
+			previous,
+			next,
+			func(value string) error {
+				titleAttempts++
+				if titleAttempts == 2 {
+					return restoreTitleFailure
+				}
+				current.title = value
+				return nil
+			},
+			func(string) error {
+				descriptionAttempts++
+				if descriptionAttempts == 1 {
+					return descriptionFailure
+				}
+				return restoreDescriptionFailure
+			},
+		)
+		if !errors.Is(err, descriptionFailure) ||
+			!errors.Is(err, restoreTitleFailure) ||
+			!errors.Is(err, restoreDescriptionFailure) {
+			t.Fatalf("restoration error = %v", err)
+		}
+		if current.title != next.title {
+			t.Fatalf("failed title restoration changed current title to %q", current.title)
+		}
+	})
+}
+
+func TestDocumentMetadataPublicationFailurePreservesCommittedState(t *testing.T) {
+	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
+	metadataA := documentMetadataValue{title: "A", description: "Description A"}
+	metadataB := documentMetadataValue{title: "B", description: "Description B"}
+	publicationFailure := errors.New("forced publication failure")
+	document := baseline
+	failPublication := false
+	coordinator := newDocumentMetadataCoordinator(
+		baseline,
+		func(previous, next documentMetadataValue) error {
+			if document != previous {
+				t.Fatalf("publisher previous=%#v document=%#v", previous, document)
+			}
+			if failPublication {
+				return publicationFailure
+			}
+			document = next
+			return nil
+		},
+		nil,
+	)
+	ownerA := coordinator.newOwner()
+	ownerB := coordinator.newOwner()
+
+	coordinator.beginUpdate()
+	coordinator.stagePublish(ownerA, metadataA)
+	coordinator.commitUpdate()
+	beforeStatistics := coordinator.statistics
+	failPublication = true
+
+	coordinator.beginUpdate()
+	coordinator.stagePublish(ownerB, metadataB)
+	coordinator.stageRelease(ownerA)
+	err := recoverDocumentMetadataError(t, coordinator.commitUpdate)
+	if !errors.Is(err, publicationFailure) {
+		t.Fatalf("publication error = %v", err)
+	}
+	assertDocumentMetadataSnapshot(t, coordinator, ownerA, metadataA, 1)
+	if document != metadataA || ownerA.state != documentMetadataOwnerActive ||
+		ownerB.id != 0 || ownerB.state != documentMetadataOwnerPending ||
+		coordinator.batch.active || len(coordinator.batch.operations) != 0 ||
+		len(coordinator.batch.events) != 0 ||
+		coordinator.statistics != beforeStatistics {
+		t.Fatalf("failed publication: document=%#v A=%#v B=%#v batch=%#v statistics=%#v want=%#v",
+			document, ownerA, ownerB, coordinator.batch, coordinator.statistics, beforeStatistics)
+	}
+
+	failPublication = false
+	coordinator.beginUpdate()
+	coordinator.stagePublish(ownerB, metadataB)
+	coordinator.stageRelease(ownerA)
+	coordinator.commitUpdate()
+	assertDocumentMetadataSnapshot(t, coordinator, ownerB, metadataB, 1)
+	if document != metadataB || ownerA.state != documentMetadataOwnerReleased || ownerB.id != 2 {
+		t.Fatalf("retry: document=%#v A=%#v B=%#v", document, ownerA, ownerB)
+	}
+}
+
+func TestDocumentMetadataObserverFailureDoesNotRollBackCommit(t *testing.T) {
+	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
+	metadataA := documentMetadataValue{title: "A", description: "Description A"}
+	metadataB := documentMetadataValue{title: "B", description: "Description B"}
+	observerFailure := errors.New("forced observer failure")
+	document := baseline
+	failObserver := false
+	var coordinator *documentMetadataCoordinator
+	var ownerB *documentMetadataOwner
+	coordinator = newDocumentMetadataCoordinator(
+		baseline,
+		func(previous, next documentMetadataValue) error {
+			if document != previous {
+				t.Fatalf("publisher previous=%#v document=%#v", previous, document)
+			}
+			document = next
+			return nil
+		},
+		func(event documentMetadataEvent) error {
+			if failObserver && event.kind == "update-commit" {
+				assertDocumentMetadataSnapshot(t, coordinator, ownerB, metadataB, 1)
+				if coordinator.batch.active {
+					t.Fatal("observer ran before the committed batch became inactive")
+				}
+				return observerFailure
+			}
+			return nil
+		},
+	)
+	ownerA := coordinator.newOwner()
+	ownerB = coordinator.newOwner()
+
+	coordinator.beginUpdate()
+	coordinator.stagePublish(ownerA, metadataA)
+	coordinator.commitUpdate()
+	failObserver = true
+
+	coordinator.beginUpdate()
+	coordinator.stagePublish(ownerB, metadataB)
+	coordinator.stageRelease(ownerA)
+	err := recoverDocumentMetadataError(t, coordinator.commitUpdate)
+	if !errors.Is(err, observerFailure) {
+		t.Fatalf("observer error = %v", err)
+	}
+	assertDocumentMetadataSnapshot(t, coordinator, ownerB, metadataB, 1)
+	if document != metadataB || ownerA.state != documentMetadataOwnerReleased ||
+		ownerB.id != 2 || coordinator.batch.active ||
+		len(coordinator.batch.operations) != 0 || len(coordinator.batch.events) != 0 ||
+		coordinator.statistics.rollbacks != 0 {
+		t.Fatalf("observer failure: document=%#v A=%#v B=%#v batch=%#v statistics=%#v",
+			document, ownerA, ownerB, coordinator.batch, coordinator.statistics)
+	}
+}
+
 func TestDocumentMetadataNestedProtectedLifecycleDelegatesToOuterBoundary(t *testing.T) {
 	metadata := documentMetadataValue{title: "Nested", description: "Nested description"}
-	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, func(documentMetadataValue) {}, nil)
+	coordinator := newDocumentMetadataCoordinator(documentMetadataValue{}, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
 	installDocumentMetadataCoordinator(coordinator)
 	t.Cleanup(uninstallDocumentMetadataCoordinator)
 
@@ -483,4 +680,30 @@ func documentMetadataOwnerAtStateSlot(instance *componentInstance, index int) *d
 	}
 	owner, _ := instance.stateSlots[index].value.(*documentMetadataOwner)
 	return owner
+}
+
+func recoverDocumentMetadataError(t *testing.T, operation func()) (err error) {
+	t.Helper()
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("operation did not panic")
+		}
+		var ok bool
+		err, ok = recovered.(error)
+		if !ok {
+			t.Fatalf("panic = %#v, want error", recovered)
+		}
+	}()
+	operation()
+	return nil
+}
+
+func testDocumentMetadataPublisher(
+	apply func(documentMetadataValue),
+) documentMetadataPublisher {
+	return func(_ documentMetadataValue, next documentMetadataValue) error {
+		apply(next)
+		return nil
+	}
 }

@@ -333,6 +333,42 @@ type documentAdapter struct {
 	current     metadata
 }
 
+type documentMetadataWriteFailure struct {
+	message string
+	cause   error
+}
+
+func (failure *documentMetadataWriteFailure) Error() string {
+	if failure.cause == nil {
+		return failure.message
+	}
+	return failure.message + ": " + failure.cause.Error()
+}
+
+func (failure *documentMetadataWriteFailure) Unwrap() error {
+	return failure.cause
+}
+
+type documentMetadataWriteFailures []error
+
+func (failures documentMetadataWriteFailures) Error() string {
+	message := ""
+	for _, failure := range failures {
+		if failure == nil {
+			continue
+		}
+		if message != "" {
+			message += "\n"
+		}
+		message += failure.Error()
+	}
+	return message
+}
+
+func (failures documentMetadataWriteFailures) Unwrap() []error {
+	return failures
+}
+
 func newDocumentAdapter() *documentAdapter {
 	document := js.Global().Get("document")
 	title := document.Call("querySelector", "head title")
@@ -363,11 +399,13 @@ func (adapter *documentAdapter) apply(value metadata) {
 		panic("document-state handoff fixture: unrelated metadata changed")
 	}
 	previous := adapter.current
-	if adapter.title.Get("textContent").String() != value.Title {
-		adapter.title.Set("textContent", value.Title)
-	}
-	if adapter.description.Call("getAttribute", "content").String() != value.Description {
-		adapter.description.Call("setAttribute", "content", value.Description)
+	if err := writeDocumentMetadataPair(
+		previous,
+		value,
+		adapter.writeTitle,
+		adapter.writeDescription,
+	); err != nil {
+		panic(err)
 	}
 	adapter.current = value
 	incrementEvidence("documentApplies")
@@ -375,6 +413,70 @@ func (adapter *documentAdapter) apply(value metadata) {
 		incrementEvidence("baselineRestorations")
 	}
 	appendPairEvidence("documentSnapshots", value)
+}
+
+func (adapter *documentAdapter) writeTitle(value string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = documentMetadataWriteError("write title", recovered)
+		}
+	}()
+	if adapter.title.Get("textContent").String() != value {
+		adapter.title.Set("textContent", value)
+	}
+	return nil
+}
+
+func (adapter *documentAdapter) writeDescription(value string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = documentMetadataWriteError("write description", recovered)
+		}
+	}()
+	if adapter.description.Call("getAttribute", "content").String() != value {
+		adapter.description.Call("setAttribute", "content", value)
+	}
+	return nil
+}
+
+func writeDocumentMetadataPair(
+	previous metadata,
+	next metadata,
+	writeTitle func(string) error,
+	writeDescription func(string) error,
+) error {
+	if err := writeTitle(next.Title); err != nil {
+		return err
+	}
+	if err := writeDescription(next.Description); err != nil {
+		restoreTitleError := writeTitle(previous.Title)
+		restoreDescriptionError := writeDescription(previous.Description)
+		failures := make(documentMetadataWriteFailures, 0, 3)
+		for _, failure := range []error{err, restoreTitleError, restoreDescriptionError} {
+			if failure != nil {
+				failures = append(failures, failure)
+			}
+		}
+		if len(failures) == 1 {
+			return failures[0]
+		}
+		return failures
+	}
+	return nil
+}
+
+func documentMetadataWriteError(operation string, recovered any) error {
+	if err, ok := recovered.(error); ok {
+		return &documentMetadataWriteFailure{
+			message: "document-state handoff fixture: " + operation,
+			cause:   err,
+		}
+	}
+	message := "document-state handoff fixture: " + operation
+	if value, ok := recovered.(string); ok {
+		message += ": " + value
+	}
+	return &documentMetadataWriteFailure{message: message}
 }
 
 func initializeEvidence() {

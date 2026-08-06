@@ -59,16 +59,32 @@ func InstallDocumentMetadataHandoffExperiment(
 	}
 	coordinator := newDocumentMetadataCoordinator(
 		documentMetadataExperimentValue(baseline),
-		func(value documentMetadataValue) {
-			apply(DocumentMetadataHandoffExperimentValue{
-				Title:       value.title,
-				Description: value.description,
-			})
-		},
-		func(event documentMetadataEvent) {
-			if observe == nil {
-				return
+		func(previous, next documentMetadataValue) error {
+			publicationError := applyDocumentMetadataExperimentValue(apply, next)
+			if publicationError == nil {
+				return nil
 			}
+			restoreError := applyDocumentMetadataExperimentValue(apply, previous)
+			if restoreError != nil {
+				restoreError = wrapDocumentMetadataError(
+					"restore document metadata experiment value",
+					restoreError,
+				)
+			}
+			return joinDocumentMetadataErrors(publicationError, restoreError)
+		},
+		func(event documentMetadataEvent) (err error) {
+			if observe == nil {
+				return nil
+			}
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = recoveredDocumentMetadataError(
+						"observe document metadata experiment event",
+						recovered,
+					)
+				}
+			}()
 			observe(DocumentMetadataHandoffExperimentEvent{
 				Kind:        event.kind,
 				BatchID:     event.batchID,
@@ -77,9 +93,29 @@ func InstallDocumentMetadataHandoffExperiment(
 				Title:       event.metadata.title,
 				Description: event.metadata.description,
 			})
+			return nil
 		},
 	)
 	installDocumentMetadataCoordinator(coordinator)
+}
+
+func applyDocumentMetadataExperimentValue(
+	apply func(DocumentMetadataHandoffExperimentValue),
+	value documentMetadataValue,
+) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = recoveredDocumentMetadataError(
+				"apply document metadata experiment value",
+				recovered,
+			)
+		}
+	}()
+	apply(DocumentMetadataHandoffExperimentValue{
+		Title:       value.title,
+		Description: value.description,
+	})
+	return nil
 }
 
 // UseDocumentMetadataHandoffExperiment participates in the private document

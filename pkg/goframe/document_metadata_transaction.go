@@ -7,6 +7,124 @@ type documentMetadataValue struct {
 	description string
 }
 
+type documentMetadataPublisher func(
+	previous documentMetadataValue,
+	next documentMetadataValue,
+) error
+
+type documentMetadataObserver func(documentMetadataEvent) error
+
+type documentMetadataWrappedError struct {
+	message string
+	cause   error
+}
+
+func (err *documentMetadataWrappedError) Error() string {
+	if err == nil {
+		return ""
+	}
+	if err.cause == nil {
+		return err.message
+	}
+	return err.message + ": " + err.cause.Error()
+}
+
+func (err *documentMetadataWrappedError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.cause
+}
+
+type documentMetadataJoinedError struct {
+	errors []error
+}
+
+func (err *documentMetadataJoinedError) Error() string {
+	if err == nil {
+		return ""
+	}
+	message := ""
+	for _, current := range err.errors {
+		if current == nil {
+			continue
+		}
+		if message != "" {
+			message += "\n"
+		}
+		message += current.Error()
+	}
+	return message
+}
+
+func (err *documentMetadataJoinedError) Unwrap() []error {
+	if err == nil {
+		return nil
+	}
+	return err.errors
+}
+
+func wrapDocumentMetadataError(message string, cause error) error {
+	return &documentMetadataWrappedError{message: message, cause: cause}
+}
+
+func joinDocumentMetadataErrors(values ...error) error {
+	errors := make([]error, 0, len(values))
+	for _, err := range values {
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	if len(errors) == 1 {
+		return errors[0]
+	}
+	return &documentMetadataJoinedError{errors: errors}
+}
+
+func recoveredDocumentMetadataError(prefix string, recovered any) error {
+	if err, ok := recovered.(error); ok {
+		return wrapDocumentMetadataError(prefix, err)
+	}
+	if message, ok := recovered.(string); ok {
+		return &documentMetadataWrappedError{message: prefix + ": " + message}
+	}
+	return &documentMetadataWrappedError{message: prefix}
+}
+
+func writeDocumentMetadataPair(
+	previous documentMetadataValue,
+	next documentMetadataValue,
+	writeTitle func(string) error,
+	writeDescription func(string) error,
+) error {
+	if err := writeTitle(next.title); err != nil {
+		return wrapDocumentMetadataError("write document title", err)
+	}
+	if err := writeDescription(next.description); err != nil {
+		publicationError := wrapDocumentMetadataError("write document description", err)
+		restoreTitleError := writeTitle(previous.title)
+		if restoreTitleError != nil {
+			restoreTitleError = wrapDocumentMetadataError("restore document title", restoreTitleError)
+		}
+		restoreDescriptionError := writeDescription(previous.description)
+		if restoreDescriptionError != nil {
+			restoreDescriptionError = wrapDocumentMetadataError(
+				"restore document description",
+				restoreDescriptionError,
+			)
+		}
+		return joinDocumentMetadataErrors(
+			publicationError,
+			restoreTitleError,
+			restoreDescriptionError,
+		)
+	}
+	return nil
+}
+
 type documentMetadataOwnerState uint8
 
 const (
@@ -57,6 +175,7 @@ type documentMetadataBatch struct {
 	active     bool
 	id         uint64
 	operations []documentMetadataOperation
+	events     []documentMetadataEvent
 }
 
 type documentMetadataSnapshot struct {
@@ -98,23 +217,23 @@ type documentMetadataCoordinator struct {
 	retainedReleases     map[*errorBoundaryState]map[*documentMetadataOwner]bool
 	registeredBoundaries map[*errorBoundaryState]bool
 	batch                documentMetadataBatch
-	apply                func(documentMetadataValue)
-	observe              func(documentMetadataEvent)
+	publish              documentMetadataPublisher
+	observe              documentMetadataObserver
 	statistics           documentMetadataStatistics
 }
 
 func newDocumentMetadataCoordinator(
 	baseline documentMetadataValue,
-	apply func(documentMetadataValue),
-	observe func(documentMetadataEvent),
+	publish documentMetadataPublisher,
+	observe documentMetadataObserver,
 ) *documentMetadataCoordinator {
-	if apply == nil {
+	if publish == nil {
 		panic("goframe: document metadata coordinator requires a publication callback")
 	}
 	return &documentMetadataCoordinator{
 		baseline: baseline,
 		current:  baseline,
-		apply:    apply,
+		publish:  publish,
 		observe:  observe,
 	}
 }
@@ -139,7 +258,7 @@ func (coordinator *documentMetadataCoordinator) beginUpdate() {
 	coordinator.batch.active = true
 	coordinator.batch.id++
 	coordinator.batch.operations = coordinator.batch.operations[:0]
-	coordinator.statistics.updateBatches++
+	coordinator.batch.events = coordinator.batch.events[:0]
 	coordinator.report("update-begin", nil, coordinator.current, len(coordinator.owners))
 }
 
@@ -374,7 +493,10 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	}
 	publish := next != coordinator.current
 	if publish {
-		coordinator.apply(next)
+		if err := coordinator.publish(coordinator.current, next); err != nil {
+			coordinator.discardUpdate()
+			panic(wrapDocumentMetadataError("goframe: document metadata publication failed", err))
+		}
 	}
 
 	for _, record := range coordinator.owners {
@@ -425,6 +547,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.statistics.updates += updates
 	coordinator.statistics.releases += releases
 	coordinator.statistics.duplicatePublications += duplicatePublications
+	coordinator.statistics.updateBatches++
 	if publish {
 		coordinator.statistics.documentPublications++
 		if previousCurrent != coordinator.baseline && next == coordinator.baseline {
@@ -433,7 +556,8 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 		coordinator.report("document-published", coordinator.selectedOwner(), next, len(owners))
 	}
 	coordinator.report("update-commit", coordinator.selectedOwner(), next, len(owners))
-	coordinator.finishUpdate()
+	events := coordinator.finishUpdate()
+	coordinator.notify(events)
 }
 
 func cloneDocumentMetadataFailedBoundaries(
@@ -516,13 +640,27 @@ func (coordinator *documentMetadataCoordinator) registerBoundaryCleanupFor(
 func (coordinator *documentMetadataCoordinator) rollbackUpdate() {
 	coordinator.requireActiveUpdate()
 	coordinator.statistics.rollbacks++
+	coordinator.statistics.updateBatches++
 	coordinator.report("update-rollback", coordinator.selectedOwner(), coordinator.current, len(coordinator.owners))
-	coordinator.finishUpdate()
+	events := coordinator.finishUpdate()
+	coordinator.notify(events)
 }
 
-func (coordinator *documentMetadataCoordinator) finishUpdate() {
+func (coordinator *documentMetadataCoordinator) finishUpdate() []documentMetadataEvent {
+	events := append([]documentMetadataEvent(nil), coordinator.batch.events...)
 	clear(coordinator.batch.operations)
+	clear(coordinator.batch.events)
 	coordinator.batch.operations = coordinator.batch.operations[:0]
+	coordinator.batch.events = coordinator.batch.events[:0]
+	coordinator.batch.active = false
+	return events
+}
+
+func (coordinator *documentMetadataCoordinator) discardUpdate() {
+	clear(coordinator.batch.operations)
+	clear(coordinator.batch.events)
+	coordinator.batch.operations = coordinator.batch.operations[:0]
+	coordinator.batch.events = coordinator.batch.events[:0]
 	coordinator.batch.active = false
 }
 
@@ -594,13 +732,31 @@ func (coordinator *documentMetadataCoordinator) report(
 	if owner != nil {
 		ownerID = owner.id
 	}
-	coordinator.observe(documentMetadataEvent{
+	event := documentMetadataEvent{
 		kind:       kind,
 		batchID:    coordinator.batch.id,
 		ownerID:    ownerID,
 		ownerCount: ownerCount,
 		metadata:   metadata,
-	})
+	}
+	if coordinator.batch.active {
+		coordinator.batch.events = append(coordinator.batch.events, event)
+		return
+	}
+	coordinator.notify([]documentMetadataEvent{event})
+}
+
+func (coordinator *documentMetadataCoordinator) notify(
+	events []documentMetadataEvent,
+) {
+	if coordinator == nil || coordinator.observe == nil {
+		return
+	}
+	for _, event := range events {
+		if err := coordinator.observe(event); err != nil {
+			panic(wrapDocumentMetadataError("goframe: document metadata observer failed", err))
+		}
+	}
 }
 
 func (owner *documentMetadataOwner) prepareRender(
