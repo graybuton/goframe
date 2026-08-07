@@ -16,10 +16,11 @@ type appProps struct {
 }
 
 type ownerProps struct {
-	role     string
-	metadata metadata
-	failure  bool
-	children []gf.Node
+	role          string
+	metadata      metadata
+	failureBefore bool
+	failureAfter  bool
+	children      []gf.Node
 }
 
 type replacementState struct {
@@ -61,6 +62,30 @@ var (
 		"fixture.document-state-handoff.FailedReplacement",
 		"DocumentStateHandoffFailedReplacement",
 	)
+	panicBeforeMetadataType = gf.NewComponentType(
+		"fixture.document-state-handoff.PanicBeforeMetadata",
+		"DocumentStateHandoffPanicBeforeMetadata",
+	)
+	siblingFailureType = gf.NewComponentType(
+		"fixture.document-state-handoff.SiblingFailure",
+		"DocumentStateHandoffSiblingFailure",
+	)
+	ownerlessRecoveryType = gf.NewComponentType(
+		"fixture.document-state-handoff.OwnerlessRecovery",
+		"DocumentStateHandoffOwnerlessRecovery",
+	)
+	nestedOuterFailureType = gf.NewComponentType(
+		"fixture.document-state-handoff.NestedOuterFailure",
+		"DocumentStateHandoffNestedOuterFailure",
+	)
+	publicationFailureType = gf.NewComponentType(
+		"fixture.document-state-handoff.PublicationFailure",
+		"DocumentStateHandoffPublicationFailure",
+	)
+	failingSiblingType = gf.NewComponentType(
+		"fixture.document-state-handoff.FailingSibling",
+		"DocumentStateHandoffFailingSibling",
+	)
 	multipleType = gf.NewComponentType(
 		"fixture.document-state-handoff.Multiple",
 		"DocumentStateHandoffMultiple",
@@ -70,13 +95,15 @@ var (
 		"DocumentStateHandoffLifetime",
 	)
 
-	retainedFunctions []js.Func
+	retainedFunctions     []js.Func
+	activeDocumentAdapter *documentAdapter
 )
 
 func main() {
 	initializeEvidence()
 	installDebugProbes()
 	adapter := newDocumentAdapter()
+	activeDocumentAdapter = adapter
 	gf.InstallDocumentMetadataHandoffExperiment(
 		adapter.baseline,
 		adapter.apply,
@@ -114,6 +141,16 @@ func renderApp(props appProps) gf.Node {
 		scenario = gf.ComponentT(failedInitialType, struct{}{}, renderFailedInitialScenario)
 	case "failed-replacement":
 		scenario = gf.ComponentT(failedReplacementType, struct{}{}, renderFailedReplacementScenario)
+	case "panic-before-metadata":
+		scenario = gf.ComponentT(panicBeforeMetadataType, struct{}{}, renderPanicBeforeMetadataScenario)
+	case "sibling-failure":
+		scenario = gf.ComponentT(siblingFailureType, struct{}{}, renderSiblingFailureScenario)
+	case "ownerless-recovery":
+		scenario = gf.ComponentT(ownerlessRecoveryType, struct{}{}, renderOwnerlessRecoveryScenario)
+	case "nested-outer-failure":
+		scenario = gf.ComponentT(nestedOuterFailureType, struct{}{}, renderNestedOuterFailureScenario)
+	case "publication-failure":
+		scenario = gf.ComponentT(publicationFailureType, struct{}{}, renderPublicationFailureScenario)
 	case "multiple":
 		scenario = gf.ComponentT(multipleType, struct{}{}, renderMultipleScenario)
 	case "lifetime":
@@ -240,6 +277,188 @@ func renderFailedReplacementScenario(struct{}) gf.Node {
 	)
 }
 
+func renderPanicBeforeMetadataScenario(struct{}) gf.Node {
+	target, setTarget := gf.UseState("a")
+	failure, setFailure := gf.UseState(true)
+	value := metadataA()
+	if target == "b" {
+		value = metadataB()
+	}
+	return scenarioSection(
+		button("activate-pre-metadata-failure", "Activate pre-metadata failure", func() {
+			setTarget("b")
+		}),
+		gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: func(context gf.ErrorBoundaryContext) gf.Node {
+				return button("retry-pre-metadata", "Retry pre-metadata owner", func() {
+					setFailure(false)
+					context.Reset()
+				})
+			},
+			Children: []gf.Node{
+				ownerNodeWithFailure(
+					"pre-metadata-"+target,
+					"pre-metadata-"+target,
+					value,
+					target == "b" && failure,
+					false,
+				),
+			},
+		}),
+	)
+}
+
+func renderSiblingFailureScenario(struct{}) gf.Node {
+	target, setTarget := gf.UseState("a")
+	failure, setFailure := gf.UseState(true)
+	value := metadataA()
+	if target == "b" {
+		value = metadataB()
+	}
+	children := []gf.Node{
+		ownerNode("sibling-owner-"+target, "sibling-owner-"+target, value, false),
+	}
+	if target == "b" && failure {
+		children = append(children, failingSiblingNode("sibling-failure"))
+	}
+	return scenarioSection(
+		button("activate-sibling-failure", "Activate sibling failure", func() {
+			setTarget("b")
+		}),
+		gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: func(context gf.ErrorBoundaryContext) gf.Node {
+				return button("retry-sibling-failure", "Retry sibling failure", func() {
+					setFailure(false)
+					context.Reset()
+				})
+			},
+			Children: children,
+		}),
+	)
+}
+
+func renderOwnerlessRecoveryScenario(struct{}) gf.Node {
+	target, setTarget := gf.UseState("a")
+	ownerless, setOwnerless := gf.UseState(false)
+	children := []gf.Node{
+		ownerNodeWithFailure(
+			"ownerless-"+target,
+			"ownerless-"+target,
+			metadataA(),
+			target == "b",
+			false,
+		),
+	}
+	if ownerless {
+		children = []gf.Node{
+			gf.El("p", gf.Props{"data-testid": "ownerless-recovery-content"}, gf.Text("ownerless recovery")),
+		}
+	}
+	return scenarioSection(
+		button("activate-ownerless-failure", "Activate ownerless failure", func() {
+			setTarget("b")
+		}),
+		gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: func(context gf.ErrorBoundaryContext) gf.Node {
+				return button("recover-ownerless", "Recover without owner", func() {
+					setOwnerless(true)
+					context.Reset()
+				})
+			},
+			Children: children,
+		}),
+	)
+}
+
+func renderNestedOuterFailureScenario(struct{}) gf.Node {
+	target, setTarget := gf.UseState("a")
+	failure, setFailure := gf.UseState(true)
+	ownerless, setOwnerless := gf.UseState(false)
+	value := metadataA()
+	if target == "b" {
+		value = metadataB()
+	}
+	children := []gf.Node{
+		gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: func(gf.ErrorBoundaryContext) gf.Node {
+				return gf.El("p", gf.Props{"data-testid": "unexpected-inner-fallback"}, gf.Text("inner fallback"))
+			},
+			Children: []gf.Node{
+				ownerNode("nested-outer-"+target, "nested-outer-"+target, value, false),
+			},
+		}),
+	}
+	if target == "b" && failure {
+		children = append(children, failingSiblingNode("outer-sibling-failure"))
+	}
+	if ownerless {
+		children = []gf.Node{
+			gf.El("p", gf.Props{"data-testid": "nested-ownerless-content"}, gf.Text("nested ownerless recovery")),
+		}
+	}
+	return scenarioSection(
+		button("activate-nested-outer-failure", "Activate outer failure", func() {
+			setTarget("b")
+		}),
+		gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: func(context gf.ErrorBoundaryContext) gf.Node {
+				return gf.Fragment(
+					button("retry-nested-outer", "Retry outer owner", func() {
+						setFailure(false)
+						context.Reset()
+					}),
+					button("recover-nested-ownerless", "Recover outer ownerless", func() {
+						setFailure(false)
+						setOwnerless(true)
+						context.Reset()
+					}),
+				)
+			},
+			Children: children,
+		}),
+	)
+}
+
+func renderPublicationFailureScenario(struct{}) gf.Node {
+	target, setTarget := gf.UseState("a")
+	nonce, setNonce := gf.UseState(0)
+	active, setActive := gf.UseState(true)
+	value := metadataA()
+	if target == "b" {
+		value = metadataB()
+	}
+	owner := gf.Empty()
+	if active {
+		owner = ownerNode(
+			"publication-"+target,
+			"publication-"+target,
+			value,
+			false,
+			gf.El("span", gf.Props{"data-testid": "publication-nonce"}, gf.Text(gf.ToString(nonce))),
+		)
+	}
+	return scenarioSection(
+		button("activate-publication-failure", "Activate publication failure", func() {
+			activeDocumentAdapter.failNextPublication = true
+			setTarget("b")
+		}),
+		button("retry-publication", "Retry publication", func() {
+			setNonce(nonce + 1)
+		}),
+		button("unmount-publication-owner", "Unmount publication owner", func() {
+			setActive(false)
+		}),
+		owner,
+	)
+}
+
+func failingSiblingNode(role string) gf.Node {
+	return gf.ComponentT(failingSiblingType, role, func(role string) gf.Node {
+		recordOwnerRender(role)
+		panic("document-state handoff fixture: forced sibling render failure")
+	})
+}
+
 func renderMultipleScenario(struct{}) gf.Node {
 	state, setState := gf.UseState(replacementState{
 		parent: metadataA(),
@@ -291,8 +510,14 @@ func renderLifetimeScenario(struct{}) gf.Node {
 
 func renderOwner(props ownerProps) gf.Node {
 	recordOwnerRender(props.role)
+	if props.failureBefore {
+		panic("document-state handoff fixture: forced owner render failure before metadata")
+	}
 	gf.UseDocumentMetadataHandoffExperiment(props.metadata)
-	if props.failure {
+	gf.UseUnmount(func() {
+		recordOwnerCleanup(props.role)
+	})
+	if props.failureAfter {
 		panic("document-state handoff fixture: forced owner render failure")
 	}
 	return gf.Fragment(props.children...)
@@ -305,11 +530,23 @@ func ownerNode(
 	failure bool,
 	children ...gf.Node,
 ) gf.Node {
+	return ownerNodeWithFailure(key, role, value, false, failure, children...)
+}
+
+func ownerNodeWithFailure(
+	key string,
+	role string,
+	value metadata,
+	failureBefore bool,
+	failureAfter bool,
+	children ...gf.Node,
+) gf.Node {
 	return gf.Key(key, gf.ComponentT(ownerType, ownerProps{
-		role:     role,
-		metadata: value,
-		failure:  failure,
-		children: children,
+		role:          role,
+		metadata:      value,
+		failureBefore: failureBefore,
+		failureAfter:  failureAfter,
+		children:      children,
 	}, renderOwner))
 }
 
@@ -326,11 +563,12 @@ func button(testID string, label string, action func()) gf.Node {
 }
 
 type documentAdapter struct {
-	title       js.Value
-	description js.Value
-	unrelated   js.Value
-	baseline    metadata
-	current     metadata
+	title               js.Value
+	description         js.Value
+	unrelated           js.Value
+	baseline            metadata
+	current             metadata
+	failNextPublication bool
 }
 
 type documentMetadataWriteFailure struct {
@@ -399,6 +637,11 @@ func (adapter *documentAdapter) apply(value metadata) {
 		panic("document-state handoff fixture: unrelated metadata changed")
 	}
 	previous := adapter.current
+	if adapter.failNextPublication {
+		adapter.failNextPublication = false
+		incrementEvidence("publicationFailures")
+		panic("document-state handoff fixture: forced publication failure")
+	}
 	if err := writeDocumentMetadataPair(
 		previous,
 		value,
@@ -489,6 +732,7 @@ func initializeEvidence() {
 		"componentRenders",
 		"componentPatches",
 		"runtimeErrors",
+		"publicationFailures",
 	} {
 		evidence.Set(name, 0)
 	}
@@ -496,6 +740,7 @@ func initializeEvidence() {
 		"ownershipEvents",
 		"documentSnapshots",
 		"ownerRenders",
+		"ownerCleanups",
 		"runtimeReports",
 	} {
 		evidence.Set(name, js.Global().Get("Array").New())
@@ -514,6 +759,9 @@ func installDebugProbes() {
 	})
 	retainGlobalFunction("goframeComponentPatchProbe", func(args []js.Value) {
 		incrementEvidence("componentPatches")
+	})
+	retainGlobalFunction("goframeDocumentHandoffRefreshEvidence", func(args []js.Value) {
+		updateCommittedEvidence()
 	})
 }
 
@@ -582,6 +830,12 @@ func recordOwnerRender(role string) {
 	value := js.Global().Get("Object").New()
 	value.Set("role", role)
 	evidence().Get("ownerRenders").Call("push", value)
+}
+
+func recordOwnerCleanup(role string) {
+	value := js.Global().Get("Object").New()
+	value.Set("role", role)
+	evidence().Get("ownerCleanups").Call("push", value)
 }
 
 func recordRuntimeError(info gf.ErrorInfo) {

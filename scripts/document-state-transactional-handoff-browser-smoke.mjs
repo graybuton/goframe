@@ -82,6 +82,11 @@ try {
     if (compiler === "go") {
         results.failedInitial = await runFailedInitial();
         results.failedReplacement = await runFailedReplacementAndRetry();
+        results.panicBeforeMetadata = await runPanicBeforeMetadataAndRetry();
+        results.siblingFailure = await runSiblingFailureAndRetry();
+        results.ownerlessRecovery = await runOwnerlessRecovery();
+        results.nestedOuterFailure = await runNestedOuterFailure();
+        results.publicationFailure = await runPublicationFailureAndRetry();
     }
 
     const report = {
@@ -324,6 +329,191 @@ async function runFailedReplacementAndRetry() {
     return resultSummary(state, frames);
 }
 
+async function runPanicBeforeMetadataAndRetry() {
+    let state = await navigateScenario("panic-before-metadata");
+    assertCommitted(state, metadataA, 1, "pre-metadata initial owner");
+    const ownerAID = Number(state.runtime.snapshot.activeOwnerID);
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-pre-metadata-failure", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "pre-metadata failure retention");
+    assertSequence(frames, [metadataA], "pre-metadata failure frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA], "pre-metadata failure observer");
+    assertDeltas(state, before, { title: 0, description: 0, applies: 0, baseline: 0 }, "pre-metadata failure");
+    assert(state.retryPreMetadataVisible, "pre-metadata retry is unavailable");
+    assert(Number(state.runtime.snapshot.activeOwnerID) === ownerAID, "pre-metadata failure changed owner A");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 1, "pre-metadata failure boundary missing");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 1, "pre-metadata release missing");
+    assert(!state.runtime.snapshot.batchActive, "pre-metadata failure left a batch active");
+    assert(state.runtime.statistics.tokenCreations === 1, "pre-metadata panic created owner B token");
+    assert(cleanupCount(state, "pre-metadata-a") === 1, "pre-metadata owner A cleanup count");
+
+    before = boundary(state);
+    frames = await clickAndCapture("retry-pre-metadata", 5);
+    state = await pageState();
+    assertCommitted(state, metadataB, 1, "pre-metadata retry");
+    assertSequence(frames, [metadataA, metadataB], "pre-metadata retry frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataB], "pre-metadata retry observer");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 0, "pre-metadata retry retained failed boundary");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "pre-metadata retry retained release");
+    assert(!state.runtime.snapshot.batchActive, "pre-metadata retry left a batch active");
+    assert(state.runtime.statistics.releases === 1, "pre-metadata retry release count");
+    assert(cleanupCount(state, "pre-metadata-a") === 1, "pre-metadata retry replayed owner A cleanup");
+    return resultSummary(state, frames);
+}
+
+async function runSiblingFailureAndRetry() {
+    let state = await navigateScenario("sibling-failure");
+    assertCommitted(state, metadataA, 1, "sibling initial owner");
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-sibling-failure", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "sibling failure retention");
+    assertSequence(frames, [metadataA], "sibling failure frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA], "sibling failure observer");
+    assert(state.retrySiblingVisible, "sibling retry is unavailable");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 1, "sibling failed boundary missing");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 1, "sibling retained release missing");
+    assert(!state.runtime.snapshot.batchActive, "sibling failure left a batch active");
+    assert(state.runtime.statistics.committedIDAssignments === 1, "sibling failure committed owner B");
+    assert(cleanupCount(state, "sibling-owner-a") === 1, "sibling failure owner A cleanup count");
+
+    before = boundary(state);
+    frames = await clickAndCapture("retry-sibling-failure", 5);
+    state = await pageState();
+    assertCommitted(state, metadataB, 1, "sibling retry");
+    assertSequence(frames, [metadataA, metadataB], "sibling retry frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataB], "sibling retry observer");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 0, "sibling retry retained failed boundary");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "sibling retry retained release");
+    assert(!state.runtime.snapshot.batchActive, "sibling retry left a batch active");
+    assert(state.runtime.statistics.committedIDAssignments === 2, "sibling retry did not commit B once");
+    assert(state.runtime.statistics.releases === 1, "sibling retry release count");
+    return resultSummary(state, frames);
+}
+
+async function runOwnerlessRecovery() {
+    let state = await navigateScenario("ownerless-recovery");
+    assertCommitted(state, metadataA, 1, "ownerless initial owner");
+    let frames = await clickAndCapture("activate-ownerless-failure", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "ownerless failure retention");
+    assertSequence(frames, [metadataA], "ownerless failure frames");
+    assert(state.recoverOwnerlessVisible, "ownerless recovery is unavailable");
+    const before = boundary(state);
+
+    frames = await clickAndCapture("recover-ownerless", 5);
+    state = await pageState();
+    assertCommitted(state, baseline, 0, "ownerless recovery");
+    assert(state.ownerlessRecoveryContent, "ownerless recovery content is absent");
+    assertSequence(frames, [metadataA, baseline], "ownerless recovery frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, baseline], "ownerless recovery observer");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 0, "ownerless recovery retained failed boundary");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "ownerless recovery retained release");
+    assert(!state.runtime.snapshot.batchActive, "ownerless recovery left a batch active");
+    assert(state.runtime.statistics.releases === 1, "ownerless recovery release count");
+    assert(state.runtime.statistics.baselineRestorations === 1, "ownerless recovery baseline count");
+    assert(cleanupCount(state, "ownerless-a") === 1, "ownerless recovery replayed owner A cleanup");
+    return resultSummary(state, frames);
+}
+
+async function runNestedOuterFailure() {
+    let state = await navigateScenario("nested-outer-failure");
+    assertCommitted(state, metadataA, 1, "nested outer initial owner");
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-nested-outer-failure", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "nested outer failure retention");
+    assert(!state.unexpectedInnerFallback, "nested inner boundary captured the outer sibling failure");
+    assert(state.retryNestedOuterVisible, "nested outer retry is unavailable");
+    assertSequence(frames, [metadataA], "nested outer failure frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA], "nested outer failure observer");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 1, "nested outer failed boundary missing");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 1, "nested outer retained release missing");
+    assert(!state.runtime.snapshot.batchActive, "nested outer failure left a batch active");
+
+    before = boundary(state);
+    frames = await clickAndCapture("retry-nested-outer", 5);
+    state = await pageState();
+    assertCommitted(state, metadataB, 1, "nested outer retry");
+    assertSequence(frames, [metadataA, metadataB], "nested outer retry frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataB], "nested outer retry observer");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 0, "nested outer retry retained boundary");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "nested outer retry retained release");
+    assert(!state.runtime.snapshot.batchActive, "nested outer retry left a batch active");
+
+    state = await navigateScenario("nested-outer-failure");
+    assertCommitted(state, metadataA, 1, "nested ownerless initial owner");
+    frames = await clickAndCapture("activate-nested-outer-failure", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "nested ownerless failure retention");
+    before = boundary(state);
+    frames = await clickAndCapture("recover-nested-ownerless", 5);
+    state = await pageState();
+    assertCommitted(state, baseline, 0, "nested ownerless recovery");
+    assert(state.nestedOwnerlessContent, "nested ownerless content is absent");
+    assertSequence(frames, [metadataA, baseline], "nested ownerless recovery frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, baseline], "nested ownerless recovery observer");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 0, "nested ownerless recovery retained boundary");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "nested ownerless recovery retained release");
+    assert(!state.runtime.snapshot.batchActive, "nested ownerless recovery left a batch active");
+    assert(cleanupCount(state, "nested-outer-a") === 1, "nested ownerless recovery replayed owner A cleanup");
+    return resultSummary(state, frames);
+}
+
+async function runPublicationFailureAndRetry() {
+    let state = await navigateScenario("publication-failure");
+    assertCommitted(state, metadataA, 1, "publication failure initial owner");
+    const ownerAID = Number(state.runtime.snapshot.activeOwnerID);
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-publication-failure", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "publication failure retention");
+    assertSequence(frames, [metadataA], "publication failure frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA], "publication failure observer");
+    assert(Number(state.runtime.snapshot.activeOwnerID) === ownerAID, "publication failure changed owner A");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 1, "publication failure lost owner A detach");
+    assert(!state.runtime.snapshot.batchActive, "publication failure left a batch active");
+    assert(state.publicationNonce === "0", "publication failure did not retain mounted B");
+    assert(state.runtime.publicationFailures === 1, "publication failure was not injected once");
+    assert(state.runtime.statistics.tokenCreations === 2, "publication failure did not render owner B");
+    assert(state.runtime.statistics.committedIDAssignments === 1, "publication failure committed owner B");
+    assert(state.runtime.statistics.releases === 0, "publication failure committed owner A release");
+    assert(state.runtime.runtimeErrors === 1, "publication failure runtime report count");
+    assert(state.runtime.runtimeReports.length === 1, "publication failure report evidence count");
+    assert(state.runtime.runtimeReports[0].phase === "render", "publication failure report phase");
+    assert(state.runtime.runtimeReports[0].operation === "document metadata transaction", "publication failure report operation");
+    assert(state.runtime.runtimeReports[0].panic.includes("document metadata publication failed"), "publication failure report diagnostic");
+    assert(cleanupCount(state, "publication-a") === 1, "publication failure owner A cleanup count");
+
+    before = boundary(state);
+    frames = await clickAndCapture("retry-publication", 5);
+    state = await pageState();
+    assertCommitted(state, metadataB, 1, "publication retry");
+    assertSequence(frames, [metadataA, metadataB], "publication retry frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataB], "publication retry observer");
+    assert(state.publicationNonce === "1", "publication retry did not rerender mounted B");
+    assert(state.runtime.statistics.committedIDAssignments === 2, "publication retry did not commit B once");
+    assert(state.runtime.statistics.releases === 1, "publication retry owner A release count");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "publication retry retained detach");
+    assert(!state.runtime.snapshot.batchActive, "publication retry left a batch active");
+    assert(state.runtime.runtimeErrors === 1, "publication retry added a runtime report");
+    assert(cleanupCount(state, "publication-a") === 1, "publication retry replayed owner A cleanup");
+
+    before = boundary(state);
+    frames = await clickAndCapture("unmount-publication-owner", 5);
+    state = await pageState();
+    assertCommitted(state, baseline, 0, "publication owner unmount");
+    assertSequence(frames, [metadataB, baseline], "publication owner unmount frames");
+    assertSequence(observerSequenceSince(state, before), [metadataB, baseline], "publication owner unmount observer");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, "publication owner unmount retained detach");
+    assert(!state.runtime.snapshot.batchActive, "publication owner unmount left a batch active");
+    assert(state.runtime.statistics.releases === 2, "publication owner unmount release count");
+    assert(cleanupCount(state, "publication-a") === 1, "publication owner unmount replayed owner A cleanup");
+    assert(cleanupCount(state, "publication-b") === 1, "publication owner B cleanup count");
+    return resultSummary(state, frames);
+}
+
 async function navigateScenario(scenario) {
     await client.call("Page.navigate", {
         url: `${origin}/?scenario=${encodeURIComponent(scenario)}&run=${Date.now()}`,
@@ -423,6 +613,7 @@ async function waitForBoot(scenario) {
 
 async function pageState() {
     return client.evaluate(`(() => {
+        window.goframeDocumentHandoffRefreshEvidence?.();
         const title = document.querySelector('head title');
         const description = document.querySelector('head meta[name="description"]');
         const head = window.__goframeDocumentHandoffHead;
@@ -431,6 +622,14 @@ async function pageState() {
             app: Boolean(document.querySelector('[data-testid="handoff-app"]')),
             ownerlessApp: Boolean(document.querySelector('[data-testid="ownerless-app"]')),
             retryVisible: Boolean(document.querySelector('[data-testid="retry-owner"]')),
+            retryPreMetadataVisible: Boolean(document.querySelector('[data-testid="retry-pre-metadata"]')),
+            retrySiblingVisible: Boolean(document.querySelector('[data-testid="retry-sibling-failure"]')),
+            recoverOwnerlessVisible: Boolean(document.querySelector('[data-testid="recover-ownerless"]')),
+            retryNestedOuterVisible: Boolean(document.querySelector('[data-testid="retry-nested-outer"]')),
+            ownerlessRecoveryContent: Boolean(document.querySelector('[data-testid="ownerless-recovery-content"]')),
+            nestedOwnerlessContent: Boolean(document.querySelector('[data-testid="nested-ownerless-content"]')),
+            unexpectedInnerFallback: Boolean(document.querySelector('[data-testid="unexpected-inner-fallback"]')),
+            publicationNonce: document.querySelector('[data-testid="publication-nonce"]')?.textContent ?? '',
             scenario: document.querySelector('[data-testid="handoff-app"]')?.getAttribute('data-scenario') ?? '',
             title: title?.textContent ?? '',
             description: description?.getAttribute('content') ?? '',
@@ -515,6 +714,10 @@ function assertIdentity(state, label) {
     assert(state.head.unrelatedValue === "preserve-me", `${label} changed unrelated head metadata`);
 }
 
+function cleanupCount(state, role) {
+    return state.runtime.ownerCleanups.filter((entry) => entry.role === role).length;
+}
+
 function resultSummary(state, frames) {
     assertNoInvalidPairs(state, state.scenario || "ownerless result");
     assertIdentity(state, state.scenario || "ownerless result");
@@ -533,6 +736,10 @@ function resultSummary(state, frames) {
         componentPatches: state.runtime.componentPatches,
         effectFlushes: state.runtime.effectFlushes,
         runtimeErrors: state.runtime.runtimeErrors,
+        publicationFailures: state.runtime.publicationFailures,
+        snapshot: state.runtime.snapshot,
+        ownerCleanups: state.runtime.ownerCleanups,
+        runtimeReports: state.runtime.runtimeReports,
     };
 }
 

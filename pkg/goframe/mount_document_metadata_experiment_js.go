@@ -21,7 +21,7 @@ func mountApplicationUpdate(
 
 	started := renderMountedApplication(root, app, document)
 	if coordinator != nil {
-		coordinator.commitUpdate()
+		commitDocumentMetadataApplicationUpdate(coordinator)
 	}
 	finishBrowserRender("first-render", started)
 }
@@ -39,7 +39,28 @@ func flushDirtyComponentsApplicationUpdate() {
 
 	started := renderDirtyComponents()
 	if coordinator != nil {
-		coordinator.commitUpdate()
+		commitDocumentMetadataApplicationUpdate(coordinator)
 	}
 	finishBrowserRender("update", started)
+}
+
+func commitDocumentMetadataApplicationUpdate(
+	coordinator *documentMetadataCoordinator,
+) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			return
+		}
+		documentError, ok := recovered.(*documentMetadataWrappedError)
+		if !ok {
+			panic(recovered)
+		}
+		reportRuntimeError(ErrorInfo{
+			Phase:     ErrorPhaseRender,
+			Operation: "document metadata transaction",
+			Panic:     documentError.Error(),
+		})
+	}()
+	coordinator.commitUpdate()
 }
