@@ -211,16 +211,18 @@ type documentMetadataEvent struct {
 }
 
 type documentMetadataCoordinator struct {
-	baseline         documentMetadataValue
-	current          documentMetadataValue
-	nextID           uint64
-	owners           []documentMetadataOwnerRecord
-	failedBoundaries map[*errorBoundaryState]bool
-	retainedReleases map[*errorBoundaryState]map[*documentMetadataOwner]bool
-	batch            documentMetadataBatch
-	publish          documentMetadataPublisher
-	observe          documentMetadataObserver
-	statistics       documentMetadataStatistics
+	baseline              documentMetadataValue
+	current               documentMetadataValue
+	nextID                uint64
+	owners                []documentMetadataOwnerRecord
+	failedBoundaries      map[*errorBoundaryState]bool
+	retainedReleases      map[*errorBoundaryState]map[*documentMetadataOwner]bool
+	retainedDetachIntents []*documentMetadataOwner
+	retainedDetachSet     map[*documentMetadataOwner]bool
+	batch                 documentMetadataBatch
+	publish               documentMetadataPublisher
+	observe               documentMetadataObserver
+	statistics            documentMetadataStatistics
 }
 
 func newDocumentMetadataCoordinator(
@@ -365,6 +367,26 @@ func (coordinator *documentMetadataCoordinator) stageRelease(owner *documentMeta
 	if owner.state == documentMetadataOwnerReleased {
 		panic("goframe: document metadata owner is already released")
 	}
+	staged := false
+	for _, operation := range coordinator.batch.operations {
+		if operation.kind == documentMetadataRelease && operation.owner == owner {
+			staged = true
+			break
+		}
+	}
+	if coordinator.retainedDetachSet[owner] && !staged {
+		panic("goframe: document metadata owner was released more than once")
+	}
+	if !coordinator.retainedDetachSet[owner] {
+		if coordinator.retainedDetachSet == nil {
+			coordinator.retainedDetachSet = make(map[*documentMetadataOwner]bool)
+		}
+		coordinator.retainedDetachSet[owner] = true
+		coordinator.retainedDetachIntents = append(
+			coordinator.retainedDetachIntents,
+			owner,
+		)
+	}
 	coordinator.batch.operations = append(
 		coordinator.batch.operations,
 		documentMetadataOperation{
@@ -378,10 +400,28 @@ func (coordinator *documentMetadataCoordinator) stageRelease(owner *documentMeta
 func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.requireActiveUpdate()
 
+	stagedReleases := make(map[*documentMetadataOwner]bool)
+	for _, operation := range coordinator.batch.operations {
+		if operation.kind == documentMetadataRelease {
+			stagedReleases[operation.owner] = true
+		}
+	}
 	operations := append(
-		[]documentMetadataOperation(nil),
+		make(
+			[]documentMetadataOperation,
+			0,
+			len(coordinator.retainedDetachIntents)+len(coordinator.batch.operations),
+		),
 		coordinator.batch.operations...,
 	)
+	for _, owner := range coordinator.retainedDetachIntents {
+		if !stagedReleases[owner] {
+			operations = append(operations, documentMetadataOperation{
+				kind:  documentMetadataRelease,
+				owner: owner,
+			})
+		}
+	}
 	delegatedBoundaries := make(map[*errorBoundaryState]*errorBoundaryState)
 	for _, operation := range operations {
 		if operation.kind == documentMetadataDelegateBoundary {
@@ -576,6 +616,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.current = next
 	coordinator.failedBoundaries = failedBoundaries
 	coordinator.retainedReleases = retainedReleases
+	coordinator.clearRetainedDetachIntents()
 	coordinator.statistics.committedIDAssignments += len(assignments)
 	coordinator.statistics.activeAdditions += additions
 	coordinator.statistics.updates += updates
@@ -592,6 +633,12 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.report("update-commit", coordinator.selectedOwner(), next, len(owners))
 	events := coordinator.finishUpdate()
 	coordinator.notify(events)
+}
+
+func (coordinator *documentMetadataCoordinator) clearRetainedDetachIntents() {
+	clear(coordinator.retainedDetachIntents)
+	clear(coordinator.retainedDetachSet)
+	coordinator.retainedDetachIntents = coordinator.retainedDetachIntents[:0]
 }
 
 func resolveDocumentMetadataBoundary(
@@ -704,9 +751,13 @@ func (coordinator *documentMetadataCoordinator) snapshot() documentMetadataSnaps
 }
 
 func (coordinator *documentMetadataCoordinator) retainedReleaseCount() int {
-	count := 0
+	count := len(coordinator.retainedDetachIntents)
 	for _, owners := range coordinator.retainedReleases {
-		count += len(owners)
+		for owner := range owners {
+			if !coordinator.retainedDetachSet[owner] {
+				count++
+			}
+		}
 	}
 	return count
 }

@@ -61,7 +61,6 @@ func TestDocumentMetadataTransactionCommitAndRollback(t *testing.T) {
 	coordinator.beginUpdate()
 	coordinator.stagePublish(ownerB, metadataA2)
 	coordinator.stagePublish(ownerC, metadataC)
-	coordinator.stageRelease(ownerB)
 	coordinator.commitUpdate()
 	assertDocumentMetadataSnapshot(t, coordinator, ownerC, metadataC, 1)
 	if ownerC.id != 3 {
@@ -220,7 +219,6 @@ func TestDocumentMetadataTransactionRejectsInvalidOwnership(t *testing.T) {
 	}
 
 	first.beginUpdate()
-	first.stageRelease(owner)
 	first.commitUpdate()
 	first.beginUpdate()
 	assertPanic(t, "goframe: document metadata owner is already released", func() {
@@ -579,6 +577,7 @@ func TestDocumentMetadataPublicationFailurePreservesCommittedState(t *testing.T)
 		ownerB.id != 0 || ownerB.state != documentMetadataOwnerPending ||
 		coordinator.batch.active || len(coordinator.batch.operations) != 0 ||
 		len(coordinator.batch.events) != 0 ||
+		coordinator.snapshot().retainedReleaseCount != 1 ||
 		coordinator.statistics != beforeStatistics {
 		t.Fatalf("failed publication: document=%#v A=%#v B=%#v batch=%#v statistics=%#v want=%#v",
 			document, ownerA, ownerB, coordinator.batch, coordinator.statistics, beforeStatistics)
@@ -587,7 +586,6 @@ func TestDocumentMetadataPublicationFailurePreservesCommittedState(t *testing.T)
 	failPublication = false
 	coordinator.beginUpdate()
 	coordinator.stagePublish(ownerB, metadataB)
-	coordinator.stageRelease(ownerA)
 	coordinator.commitUpdate()
 	assertDocumentMetadataSnapshot(t, coordinator, ownerB, metadataB, 1)
 	if document != metadataB || ownerA.state != documentMetadataOwnerReleased || ownerB.id != 2 {
