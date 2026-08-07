@@ -19,5 +19,7 @@ applications and is not a fifth API candidate. The experiment uses the same
 mount, scheduling, dirty-update, focus, reconciliation, and effect-loop core as
 ordinary browser builds. Its build-tagged wrapper adds only the private
 document batch around that core. Standard Go also exercises direct keyed
-replacement failure and retry; TinyGo exercises the successful path without a
-recover claim.
+replacement failure before and after metadata participation, ownerless and
+nested-boundary recovery, boundary abandonment, publication failure with a
+durable detach-intent retry, and final release. TinyGo exercises the successful
+path without a recover claim.

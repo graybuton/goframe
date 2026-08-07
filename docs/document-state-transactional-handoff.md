@@ -60,6 +60,16 @@ B retained ID zero, but outgoing cleanup released A, restored the authored
 baseline, and left the coordinator with no active owner. The observed sequence
 was `A -> authored baseline`; retry could not be classified as a direct handoff.
 
+The first bounded retention correction derived the failed replacement from a
+document participant rollback. That was too narrow. A panic before B observed
+document metadata created no participant and dropped A. A sibling panic could
+retain A only when B had already created a participant. Ownerless recovery left
+A retained, a nested successful boundary associated an owner with the inner
+boundary rather than the final outer transaction owner, and publication failure
+lost the teardown release before the next retry. These cases established that
+protected-boundary outcomes and durable detach intent, rather than document-hook
+encounter order, are the required inputs to the coordinator.
+
 ## Lifecycle Order
 
 The current render and browser update path has this order:
@@ -92,13 +102,20 @@ operations remain staged until the update-level finalization after
 reconciliation. State retains its existing explicit first-finalization rule.
 
 Protected Error Boundary descendants defer lifecycle completion to the owning
-boundary. A nested successful boundary delegates to its outer boundary. A
-failed protected attempt rolls back its document participant without staging a
-publish. During a direct keyed A-to-B replacement, outgoing component teardown
-still runs, but the document coordinator retains A's committed metadata owner
-for that failed boundary. A successful retry consumes the retained release and
-commits B; unmounting the boundary abandons the retained owner. This retention
-is specific to document ownership and does not preserve A's component lifetime.
+boundary. Every protected attempt now records one explicit outcome:
+`committed`, `failed`, or `delegated`. A nested successful boundary delegates
+to its outer boundary, so the final outer boundary owns the transaction outcome
+even when the metadata owner was rendered beneath an inner boundary. Outcome
+reporting occurs independently of whether a document participant was observed.
+
+During a direct keyed A-to-B replacement, outgoing component teardown still
+runs. If the final protected outcome fails, the document coordinator retains
+A's committed metadata owner and records its completed teardown as a detach
+intent. A successful retry consumes that intent and commits B. A successful
+ownerless retry releases A and reveals the next parent owner or authored
+baseline. Unmounting the failed boundary abandons the retained owner. This
+retention is specific to document ownership and does not preserve A's component
+lifetime.
 
 ## Candidate A
 
@@ -140,6 +157,8 @@ One coordinator owns:
 - the current published pair;
 - monotonically increasing committed owner IDs;
 - one active application-update batch;
+- final protected-boundary outcomes and retained owners;
+- durable, deduplicated detach intents for completed owner teardown;
 - a failure-reporting publication callback;
 - an optional failure-reporting observer callback.
 
@@ -157,6 +176,14 @@ pair differs from the current pair.
 
 Batch rollback discards every staged operation. It does not change committed
 owners, IDs, priority, or document state.
+
+Component teardown is not replayable, so a staged release caused by real
+teardown is retained as a one-shot detach intent until a later successful batch
+commits it. A failed publication keeps both the old committed owner and that
+intent. The next clean batch injects the intent before evaluating new
+operations. The intent set deduplicates repeated observation and is cleared
+only after a successful batch incorporates it. Protected-boundary abandonment
+is represented by such a batch rather than by a separate out-of-band cleanup.
 
 Batch commit first validates and evaluates the complete operation plan against
 copies of the owner and boundary state. The publisher receives the previous and
@@ -187,6 +214,12 @@ uses `MutationObserver` plus deterministic animation-frame sampling.
 | failed initial render commits no ID, owner, or publication | pass |
 | direct keyed A-to-failing-B replacement retains committed A | pass |
 | retry records exactly `A -> B`, assigns B once, and releases A once | pass |
+| panic before B observes metadata retains A and retries to B | pass |
+| B metadata followed by a failing sibling retains A and retries to B | pass |
+| ownerless recovery consumes the retained release | pass |
+| ownerless recovery reveals a surviving parent owner | pass |
+| nested metadata ownership follows the final outer boundary | pass |
+| repeated failure and boundary abandonment clear retained state | pass |
 | Error Boundary retry establishes one new lifetime | pass |
 | nested owner overrides its parent | pass |
 | parent update beneath the override causes no document write | pass |
@@ -201,32 +234,34 @@ uses `MutationObserver` plus deterministic animation-frame sampling.
 | title, description, and unrelated head-node identities remain stable | pass |
 | no mixed title/description pair is observed | pass |
 | title or description publication failure leaves the previous pair and coordinator intact | pass |
+| publication failure retains completed A teardown for a later B-only retry | pass |
+| B unmount after publication retry restores the authored baseline | pass |
 | restoration failures preserve the original and restoration diagnostics | pass |
 | observer failure occurs after commit with the batch inactive | pass |
 
 Ten fresh standard-Go runs produced the same normalized evidence hash:
 
 ```text
-b8bf7519ef49b65bf543b876856ca873cc14ae77aaaedf055804bc2bc8380150
+4ba1ba77f0ca324d6c18095d7c564cc2976fac594c9599845956ed4748ba8486
 ```
 
-Their focused artifact was 2,601,486 raw bytes with SHA-256:
+Their focused artifact was 2,682,484 raw bytes with SHA-256:
 
 ```text
-d4bff2fd34e257537c3a6099be037267ba2cab6b6d656e44ad247cfb7c3fb8a4
+07513666fbf33a40fb220f4888674b05e9fdac764314e78d02ae8cf1e922d52d
 ```
 
 Ten fresh TinyGo successful-path runs produced the same normalized evidence
 hash:
 
 ```text
-576dbf9d4b47b68e6b0633093a44f4c07be6492805ceca5c6dc14c8103b266ea
+f139ce79f23b5dc0feb54df7e81e8cec78fff1348109455afee3fb698de6d416
 ```
 
-Their focused artifact was 194,890 raw bytes with SHA-256:
+Their focused artifact was 209,711 raw bytes with SHA-256:
 
 ```text
-278646b2b2c306507a4e179b239599be1daf66aaafd2babadbe7a06cd70e9749
+1f3e66103f5166b2194f27351e16891d5499261008bd9fb119bc39cdb580ba06
 ```
 
 The decisive direct-replacement scenario used two owner tokens, assigned two
@@ -240,6 +275,22 @@ render failure. Retry rendered a fresh B lifetime, assigned committed ID 2,
 released A exactly once, and produced `A -> B` in both observer and
 animation-frame sequences. The final coordinator had one owner and no active
 batch, failed-boundary marker, or retained release.
+
+The boundary-outcome matrix also failed before B observed metadata, failed in a
+sibling after B observed metadata, recovered without a replacement owner,
+revealed a surviving parent owner, delegated nested success to the final outer
+boundary, and abandoned repeated failures. Every failed attempt retained A
+without publishing the authored baseline. Retrying with B produced `A -> B`;
+ownerless recovery or abandonment released A exactly once and left no active
+batch, failed boundary, or retained detach intent.
+
+The publication-failure browser case performed A's real cleanup once, rejected
+the A-to-B publication, kept A selected, left B at ID zero, and retained one
+detach intent. A later ordinary B rerender, without another A cleanup, assigned
+B committed ID 2 and released A. B unmount then restored the authored baseline.
+The tagged mount wrapper reports the typed publication failure through the
+existing runtime error channel after the document batch has closed; unrelated
+runtime invariant panics are not converted into reports.
 
 Standard Go covers recover-based failed initial render, failed replacement,
 and retry. TinyGo `0.41.1` uses trap-style panic behavior, so its browser lane
@@ -277,9 +328,9 @@ bytes, 27,154 data-section bytes, and 2,317 name-section bytes. TinyGo added
 18,165 code-section bytes, 5,708 data-section bytes, and 1,064 name-section
 bytes. The remaining raw delta is section framing and other fixture metadata.
 
-The review closeout compared the reviewed head `702132c37a1b` with the final
-code at one matched physical path. These deltas include the direct failed-owner
-fixture, boundary-aware retention, the shared mount core, pair restoration,
+The first review closeout compared `702132c37a1b` with `a0a36a82a13c` at one
+matched physical path. Those deltas include the direct failed-owner fixture,
+the first bounded retention model, the shared mount core, pair restoration,
 observer buffering, fault diagnostics, and their experiment bridge evidence:
 
 | Compiler | Raw | gzip | Brotli | Zstandard |
@@ -288,10 +339,24 @@ observer buffering, fault diagnostics, and their experiment bridge evidence:
 | TinyGo | 182,330 -> 194,890 (+12,560) | +4,444 | +3,799 | +4,043 |
 
 Standard Go added 35,599 code-section bytes, 19,859 data-section bytes, and
-1,810 name-section bytes in this closeout. TinyGo added 10,781 code-section
-bytes, 1,152 data-section bytes, and 591 name-section bytes. The complete final
-raw SHA-256 values were `29f798ed88eaed424717c1d3026c2eb224268c35b847a71c5db2592c2a31e264`
-for standard Go and `278646b2b2c306507a4e179b239599be1daf66aaafd2babadbe7a06cd70e9749`
+1,810 name-section bytes in that closeout. TinyGo added 10,781 code-section
+bytes, 1,152 data-section bytes, and 591 name-section bytes.
+
+The boundary-outcome closeout compared `a0a36a82a13c` with `e73351815664` at
+the same physical path. It adds the participant-independent boundary outcomes,
+outer-boundary ownership, ownerless recovery, durable detach intents, and the
+new browser scenarios:
+
+| Compiler | Raw | gzip | Brotli | Zstandard |
+| --- | ---: | ---: | ---: | ---: |
+| standard Go | 2,601,644 -> 2,679,032 (+77,388) | +14,009 | +10,033 | +10,998 |
+| TinyGo | 194,890 -> 209,711 (+14,821) | +4,386 | +3,010 | +3,279 |
+
+Standard Go added 51,756 code-section bytes, 23,450 data-section bytes, and
+2,065 name-section bytes. TinyGo added 12,157 code-section bytes, 1,556
+data-section bytes, and 993 name-section bytes. The final raw SHA-256 values
+were `ccfabc4ffd964c97797c49fb834cbae8aa7e7185438efb1628787696e999eb1c`
+for standard Go and `1f3e66103f5166b2194f27351e16891d5499261008bd9fb119bc39cdb580ba06`
 for TinyGo.
 
 A nullable ordinary-build bridge retained 323-433 raw bytes in every measured
@@ -306,15 +371,20 @@ handling, effect-loop handling, reconciliation, and repeated-`Mount`
 validation. Their build-tag-specific files contain only transaction-free or
 document-batch wrappers around that common core.
 
-All eleven budgeted applications were rebuilt from the frozen base and final
-code at the same physical output path. The shared-core extraction reduced every
-raw artifact by 27 or 32 bytes. Each code section fell by 35 or 40 bytes, each
-data section retained its size, and each name section grew by 8 bytes. Across
-deterministic compression, gzip deltas were -13 to -27 bytes, Brotli deltas were
--81 to +22 bytes, and Zstandard deltas were -13 to +18 bytes. All 44 current
-absolute cells and every ratio limit pass; no budget or ratio changed. Ordinary
-source selection and binary searches found no coordinator, experiment bridge,
-or experiment build-tag symbol.
+The preceding review closeout rebuilt all eleven budgeted applications from the
+frozen base to `a0a36a82a13c` at the same physical output path. The shared-core
+extraction reduced every raw artifact by 27 or 32 bytes and all 44 streams
+remained within their current ceilings and ratios.
+
+The boundary-outcome closeout then compared `a0a36a82a13c` with
+`e73351815664`. Nine applications were byte-identical across raw, gzip, Brotli,
+and Zstandard output. `router-dashboard` and `resource`, the two ordinary
+fixtures that compile the Error Boundary path, each added seven raw code-section
+bytes with unchanged data and name sections. Their compressed deltas were
+respectively +7/-7/-19 and +3/+40/+3 bytes for gzip/Brotli/Zstandard. All 44
+current absolute cells and every ratio limit pass; no budget or ratio changed.
+Ordinary source selection and binary searches found no coordinator, experiment
+bridge, document batch wrapper, or experiment build-tag symbol.
 
 ## Limitations
 
