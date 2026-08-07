@@ -134,19 +134,17 @@ const (
 )
 
 type documentMetadataOwner struct {
-	coordinator   *documentMetadataCoordinator
-	id            uint64
-	state         documentMetadataOwnerState
-	boundary      *errorBoundaryState
-	boundaryOwner *componentInstance
-	pending       documentMetadataRenderState
+	coordinator *documentMetadataCoordinator
+	id          uint64
+	state       documentMetadataOwnerState
+	boundary    *errorBoundaryState
+	pending     documentMetadataRenderState
 }
 
 type documentMetadataRenderState struct {
-	attempt       *renderLifecycleAttempt
-	metadata      documentMetadataValue
-	boundary      *errorBoundaryState
-	boundaryOwner *componentInstance
+	attempt  *renderLifecycleAttempt
+	metadata documentMetadataValue
+	boundary *errorBoundaryState
 }
 
 type documentMetadataOwnerRecord struct {
@@ -160,6 +158,10 @@ const (
 	documentMetadataPublish documentMetadataOperationKind = iota + 1
 	documentMetadataRelease
 	documentMetadataFailedPublish
+	documentMetadataBoundaryCommitted
+	documentMetadataBoundaryRecovered
+	documentMetadataBoundaryFailed
+	documentMetadataDelegateBoundary
 	documentMetadataAbandonBoundary
 )
 
@@ -168,7 +170,7 @@ type documentMetadataOperation struct {
 	owner         *documentMetadataOwner
 	metadata      documentMetadataValue
 	boundary      *errorBoundaryState
-	boundaryOwner *componentInstance
+	finalBoundary *errorBoundaryState
 }
 
 type documentMetadataBatch struct {
@@ -209,17 +211,16 @@ type documentMetadataEvent struct {
 }
 
 type documentMetadataCoordinator struct {
-	baseline             documentMetadataValue
-	current              documentMetadataValue
-	nextID               uint64
-	owners               []documentMetadataOwnerRecord
-	failedBoundaries     map[*errorBoundaryState]bool
-	retainedReleases     map[*errorBoundaryState]map[*documentMetadataOwner]bool
-	registeredBoundaries map[*errorBoundaryState]bool
-	batch                documentMetadataBatch
-	publish              documentMetadataPublisher
-	observe              documentMetadataObserver
-	statistics           documentMetadataStatistics
+	baseline         documentMetadataValue
+	current          documentMetadataValue
+	nextID           uint64
+	owners           []documentMetadataOwnerRecord
+	failedBoundaries map[*errorBoundaryState]bool
+	retainedReleases map[*errorBoundaryState]map[*documentMetadataOwner]bool
+	batch            documentMetadataBatch
+	publish          documentMetadataPublisher
+	observe          documentMetadataObserver
+	statistics       documentMetadataStatistics
 }
 
 func newDocumentMetadataCoordinator(
@@ -266,32 +267,26 @@ func (coordinator *documentMetadataCoordinator) stagePublish(
 	owner *documentMetadataOwner,
 	metadata documentMetadataValue,
 ) {
-	coordinator.stagePublishForBoundary(owner, metadata, nil, nil)
+	coordinator.stagePublishForBoundary(owner, metadata, nil)
 }
 
 func (coordinator *documentMetadataCoordinator) stagePublishForBoundary(
 	owner *documentMetadataOwner,
 	metadata documentMetadataValue,
 	boundary *errorBoundaryState,
-	boundaryOwner *componentInstance,
 ) {
 	coordinator.validateOwner(owner)
 	coordinator.requireActiveUpdate()
 	if owner.state == documentMetadataOwnerReleased {
 		panic("goframe: document metadata owner is already released")
 	}
-	if owner.id != 0 &&
-		(owner.boundary != boundary || owner.boundaryOwner != boundaryOwner) {
-		panic("goframe: document metadata owner changed error boundary")
-	}
 	coordinator.batch.operations = append(
 		coordinator.batch.operations,
 		documentMetadataOperation{
-			kind:          documentMetadataPublish,
-			owner:         owner,
-			metadata:      metadata,
-			boundary:      boundary,
-			boundaryOwner: boundaryOwner,
+			kind:     documentMetadataPublish,
+			owner:    owner,
+			metadata: metadata,
+			boundary: boundary,
 		},
 	)
 	coordinator.report("publish-staged", owner, metadata, len(coordinator.owners))
@@ -301,21 +296,51 @@ func (coordinator *documentMetadataCoordinator) stageFailedPublish(
 	owner *documentMetadataOwner,
 	metadata documentMetadataValue,
 	boundary *errorBoundaryState,
-	boundaryOwner *componentInstance,
 ) {
 	coordinator.validateOwner(owner)
 	coordinator.requireActiveUpdate()
 	coordinator.batch.operations = append(
 		coordinator.batch.operations,
 		documentMetadataOperation{
-			kind:          documentMetadataFailedPublish,
-			owner:         owner,
-			metadata:      metadata,
-			boundary:      boundary,
-			boundaryOwner: boundaryOwner,
+			kind:     documentMetadataFailedPublish,
+			owner:    owner,
+			metadata: metadata,
+			boundary: boundary,
 		},
 	)
 	coordinator.report("publish-rolled-back", owner, metadata, len(coordinator.owners))
+}
+
+func (coordinator *documentMetadataCoordinator) stageBoundaryOutcome(
+	state *errorBoundaryState,
+	final *errorBoundaryState,
+	outcome protectedSubtreeLifecycleOutcome,
+) {
+	coordinator.requireActiveUpdate()
+	if state == nil || final == nil {
+		panic("goframe: document metadata boundary is nil")
+	}
+	kind := documentMetadataBoundaryFailed
+	switch outcome {
+	case protectedSubtreeLifecycleCommitted:
+		kind = documentMetadataBoundaryCommitted
+		if coordinator.failedBoundaries[final] {
+			kind = documentMetadataBoundaryRecovered
+		}
+	case protectedSubtreeLifecycleFailed:
+	case protectedSubtreeLifecycleDelegated:
+		kind = documentMetadataDelegateBoundary
+	default:
+		panic("goframe: invalid protected subtree lifecycle outcome")
+	}
+	coordinator.batch.operations = append(
+		coordinator.batch.operations,
+		documentMetadataOperation{
+			kind:          kind,
+			boundary:      state,
+			finalBoundary: final,
+		},
+	)
 }
 
 func (coordinator *documentMetadataCoordinator) stageBoundaryAbandon(
@@ -353,6 +378,27 @@ func (coordinator *documentMetadataCoordinator) stageRelease(owner *documentMeta
 func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.requireActiveUpdate()
 
+	operations := append(
+		[]documentMetadataOperation(nil),
+		coordinator.batch.operations...,
+	)
+	delegatedBoundaries := make(map[*errorBoundaryState]*errorBoundaryState)
+	for _, operation := range operations {
+		if operation.kind == documentMetadataDelegateBoundary {
+			delegatedBoundaries[operation.boundary] = operation.finalBoundary
+		}
+	}
+	for index := range operations {
+		operations[index].boundary = resolveDocumentMetadataBoundary(
+			operations[index].boundary,
+			delegatedBoundaries,
+		)
+		operations[index].finalBoundary = resolveDocumentMetadataBoundary(
+			operations[index].finalBoundary,
+			delegatedBoundaries,
+		)
+	}
+
 	owners := append([]documentMetadataOwnerRecord(nil), coordinator.owners...)
 	indices := make(map[*documentMetadataOwner]int, len(owners))
 	for index := range owners {
@@ -365,12 +411,14 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 		coordinator.retainedReleases,
 	)
 	abandonedBoundaries := make(map[*errorBoundaryState]bool)
-	for _, operation := range coordinator.batch.operations {
+	recoveredBoundaries := make(map[*errorBoundaryState]bool)
+	for _, operation := range operations {
 		switch operation.kind {
-		case documentMetadataFailedPublish:
-			if operation.boundary != nil {
-				failedBoundaries[operation.boundary] = true
-			}
+		case documentMetadataBoundaryFailed:
+			failedBoundaries[operation.boundary] = true
+		case documentMetadataBoundaryCommitted,
+			documentMetadataBoundaryRecovered:
+			recoveredBoundaries[operation.boundary] = true
 		case documentMetadataAbandonBoundary:
 			abandonedBoundaries[operation.boundary] = true
 		}
@@ -378,13 +426,21 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 
 	released := make(map[*documentMetadataOwner]bool)
 	consumedRetained := make(map[*documentMetadataOwner]bool)
+	finalizedBoundaries := make(map[*errorBoundaryState]bool)
+	for boundary := range recoveredBoundaries {
+		finalizedBoundaries[boundary] = true
+	}
 	for boundary := range abandonedBoundaries {
+		finalizedBoundaries[boundary] = true
+	}
+	for boundary := range finalizedBoundaries {
 		delete(failedBoundaries, boundary)
 		for owner := range retainedReleases[boundary] {
 			var removed bool
 			owners, removed = removeDocumentMetadataOwner(owners, indices, owner)
 			if removed {
 				released[owner] = true
+				consumedRetained[owner] = true
 			}
 		}
 		delete(retainedReleases, boundary)
@@ -393,28 +449,15 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	duplicatePublications := 0
 	boundaries := make(map[*documentMetadataOwner]documentMetadataOperation)
 
-	for _, operation := range coordinator.batch.operations {
+	for _, operation := range operations {
 		switch operation.kind {
 		case documentMetadataPublish:
 			if released[operation.owner] {
 				panic("goframe: document metadata owner cannot publish after release")
 			}
-			if operation.boundary != nil {
-				for retained := range retainedReleases[operation.boundary] {
-					if retained == operation.owner {
-						continue
-					}
-					var removed bool
-					owners, removed = removeDocumentMetadataOwner(owners, indices, retained)
-					if removed {
-						released[retained] = true
-						consumedRetained[retained] = true
-					}
-				}
-				delete(retainedReleases, operation.boundary)
-				delete(failedBoundaries, operation.boundary)
+			if operation.owner.id == 0 {
+				boundaries[operation.owner] = operation
 			}
-			boundaries[operation.owner] = operation
 			if index, ok := indices[operation.owner]; ok {
 				if owners[index].metadata == operation.metadata {
 					duplicatePublications++
@@ -441,7 +484,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 			boundary := operation.owner.boundary
 			if boundary != nil &&
 				failedBoundaries[boundary] &&
-				!abandonedBoundaries[boundary] {
+				!finalizedBoundaries[boundary] {
 				if retainedReleases[boundary] == nil {
 					retainedReleases[boundary] = make(map[*documentMetadataOwner]bool)
 				}
@@ -451,7 +494,12 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 			}
 			owners = removeDocumentMetadataOwnerAt(owners, indices, index)
 			released[operation.owner] = true
-		case documentMetadataFailedPublish, documentMetadataAbandonBoundary:
+		case documentMetadataFailedPublish,
+			documentMetadataBoundaryCommitted,
+			documentMetadataBoundaryRecovered,
+			documentMetadataBoundaryFailed,
+			documentMetadataDelegateBoundary,
+			documentMetadataAbandonBoundary:
 		default:
 			panic("goframe: invalid document metadata operation")
 		}
@@ -502,11 +550,13 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	for _, record := range coordinator.owners {
 		if !active[record.owner] {
 			record.owner.state = documentMetadataOwnerReleased
+			record.owner.boundary = nil
 		}
 	}
 	for owner := range released {
 		if !active[owner] {
 			owner.state = documentMetadataOwnerReleased
+			owner.boundary = nil
 		}
 	}
 	for _, record := range owners {
@@ -516,7 +566,6 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 		}
 		if operation, ok := boundaries[record.owner]; ok {
 			record.owner.boundary = operation.boundary
-			record.owner.boundaryOwner = operation.boundaryOwner
 		}
 		record.owner.state = documentMetadataOwnerActive
 	}
@@ -527,21 +576,6 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.current = next
 	coordinator.failedBoundaries = failedBoundaries
 	coordinator.retainedReleases = retainedReleases
-	for boundary := range abandonedBoundaries {
-		delete(coordinator.registeredBoundaries, boundary)
-	}
-	for _, record := range owners {
-		coordinator.registerBoundaryCleanup(record.owner)
-	}
-	for _, operation := range coordinator.batch.operations {
-		if operation.kind == documentMetadataFailedPublish &&
-			!abandonedBoundaries[operation.boundary] {
-			coordinator.registerBoundaryCleanupFor(
-				operation.boundary,
-				operation.boundaryOwner,
-			)
-		}
-	}
 	coordinator.statistics.committedIDAssignments += len(assignments)
 	coordinator.statistics.activeAdditions += additions
 	coordinator.statistics.updates += updates
@@ -558,6 +592,20 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.report("update-commit", coordinator.selectedOwner(), next, len(owners))
 	events := coordinator.finishUpdate()
 	coordinator.notify(events)
+}
+
+func resolveDocumentMetadataBoundary(
+	boundary *errorBoundaryState,
+	delegated map[*errorBoundaryState]*errorBoundaryState,
+) *errorBoundaryState {
+	for boundary != nil {
+		final := delegated[boundary]
+		if final == nil || final == boundary {
+			return boundary
+		}
+		boundary = final
+	}
+	return nil
 }
 
 func cloneDocumentMetadataFailedBoundaries(
@@ -612,29 +660,6 @@ func removeDocumentMetadataOwnerAt(
 		indices[owners[next].owner] = next
 	}
 	return owners
-}
-
-func (coordinator *documentMetadataCoordinator) registerBoundaryCleanup(
-	owner *documentMetadataOwner,
-) {
-	coordinator.registerBoundaryCleanupFor(owner.boundary, owner.boundaryOwner)
-}
-
-func (coordinator *documentMetadataCoordinator) registerBoundaryCleanupFor(
-	boundary *errorBoundaryState,
-	boundaryOwner *componentInstance,
-) {
-	if boundary == nil || boundaryOwner == nil ||
-		coordinator.registeredBoundaries[boundary] {
-		return
-	}
-	if coordinator.registeredBoundaries == nil {
-		coordinator.registeredBoundaries = make(map[*errorBoundaryState]bool)
-	}
-	coordinator.registeredBoundaries[boundary] = true
-	boundaryOwner.unmountSlots = append(boundaryOwner.unmountSlots, func() {
-		coordinator.stageBoundaryAbandon(boundary)
-	})
 }
 
 func (coordinator *documentMetadataCoordinator) rollbackUpdate() {
@@ -772,12 +797,11 @@ func (owner *documentMetadataOwner) prepareRender(
 	if owner.pending.attempt != nil {
 		panic("goframe: document metadata owner already participated in this render attempt")
 	}
-	boundary, boundaryOwner := currentDocumentMetadataBoundary()
+	boundary := currentDocumentMetadataBoundary()
 	owner.pending = documentMetadataRenderState{
-		attempt:       attempt,
-		metadata:      metadata,
-		boundary:      boundary,
-		boundaryOwner: boundaryOwner,
+		attempt:  attempt,
+		metadata: metadata,
+		boundary: boundary,
 	}
 	attempt.participants = append(attempt.participants, owner)
 }
@@ -796,7 +820,6 @@ func (owner *documentMetadataOwner) finishRender(
 			owner,
 			pending.metadata,
 			pending.boundary,
-			pending.boundaryOwner,
 		)
 		return
 	}
@@ -804,21 +827,17 @@ func (owner *documentMetadataOwner) finishRender(
 		owner,
 		pending.metadata,
 		pending.boundary,
-		pending.boundaryOwner,
 	)
 }
 
-func currentDocumentMetadataBoundary() (
-	*errorBoundaryState,
-	*componentInstance,
-) {
+func currentDocumentMetadataBoundary() *errorBoundaryState {
 	boundary := currentProtectedLifecycleBoundary
 	if boundary == nil {
-		return nil, nil
+		return nil
 	}
 	for instance := currentComponent; instance != nil; instance = instance.parent {
 		if instance.errorBoundary == boundary {
-			return boundary, instance
+			return boundary
 		}
 	}
 	panic("goframe: document metadata boundary owner is unavailable")
@@ -834,12 +853,22 @@ func installDocumentMetadataCoordinator(coordinator *documentMetadataCoordinator
 		panic("goframe: document metadata coordinator is already installed")
 	}
 	activeDocumentMetadataCoordinator = coordinator
+	reportProtectedSubtreeLifecycleOutcome = func(
+		state *errorBoundaryState,
+		final *errorBoundaryState,
+		outcome protectedSubtreeLifecycleOutcome,
+	) {
+		coordinator.stageBoundaryOutcome(state, final, outcome)
+	}
+	reportProtectedSubtreeLifecycleAbandon = coordinator.stageBoundaryAbandon
 }
 
 func uninstallDocumentMetadataCoordinator() {
 	if activeDocumentMetadataCoordinator != nil && activeDocumentMetadataCoordinator.batch.active {
 		panic("goframe: cannot uninstall document metadata coordinator during an update")
 	}
+	reportProtectedSubtreeLifecycleOutcome = nil
+	reportProtectedSubtreeLifecycleAbandon = nil
 	activeDocumentMetadataCoordinator = nil
 }
 

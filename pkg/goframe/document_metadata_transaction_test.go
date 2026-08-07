@@ -348,12 +348,22 @@ func TestDocumentMetadataFailedBoundaryReplacementRetainsOwnerUntilRetry(t *test
 	ownerB := coordinator.newOwner()
 
 	coordinator.beginUpdate()
-	coordinator.stagePublishForBoundary(ownerA, metadataA, boundary, boundaryOwner)
+	coordinator.stagePublishForBoundary(ownerA, metadataA, boundary)
+	coordinator.stageBoundaryOutcome(
+		boundary,
+		boundary,
+		protectedSubtreeLifecycleCommitted,
+	)
 	coordinator.commitUpdate()
 	assertDocumentMetadataSnapshot(t, coordinator, ownerA, metadataA, 1)
 
 	coordinator.beginUpdate()
-	coordinator.stageFailedPublish(ownerB, metadataB, boundary, boundaryOwner)
+	coordinator.stageFailedPublish(ownerB, metadataB, boundary)
+	coordinator.stageBoundaryOutcome(
+		boundary,
+		boundary,
+		protectedSubtreeLifecycleFailed,
+	)
 	coordinator.commitUpdate()
 	coordinator.beginUpdate()
 	coordinator.stageRelease(ownerA)
@@ -374,7 +384,12 @@ func TestDocumentMetadataFailedBoundaryReplacementRetainsOwnerUntilRetry(t *test
 	}
 
 	coordinator.beginUpdate()
-	coordinator.stagePublishForBoundary(ownerB, metadataB, boundary, boundaryOwner)
+	coordinator.stagePublishForBoundary(ownerB, metadataB, boundary)
+	coordinator.stageBoundaryOutcome(
+		boundary,
+		boundary,
+		protectedSubtreeLifecycleCommitted,
+	)
 	coordinator.commitUpdate()
 
 	assertDocumentMetadataSnapshot(t, coordinator, ownerB, metadataB, 1)
@@ -399,16 +414,28 @@ func TestDocumentMetadataAbandonedFailedBoundaryReleasesRetainedOwner(t *testing
 	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
 	metadataA := documentMetadataValue{title: "A", description: "Description A"}
 	coordinator := newDocumentMetadataCoordinator(baseline, testDocumentMetadataPublisher(func(documentMetadataValue) {}), nil)
+	installDocumentMetadataCoordinator(coordinator)
+	t.Cleanup(uninstallDocumentMetadataCoordinator)
 	boundaryOwner := testComponentInstance("Boundary", func() Node { return Empty() }, nil)
 	boundary := ensureErrorBoundaryState(boundaryOwner)
 	ownerA := coordinator.newOwner()
 	failed := coordinator.newOwner()
 
 	coordinator.beginUpdate()
-	coordinator.stagePublishForBoundary(ownerA, metadataA, boundary, boundaryOwner)
+	coordinator.stagePublishForBoundary(ownerA, metadataA, boundary)
+	coordinator.stageBoundaryOutcome(
+		boundary,
+		boundary,
+		protectedSubtreeLifecycleCommitted,
+	)
 	coordinator.commitUpdate()
 	coordinator.beginUpdate()
-	coordinator.stageFailedPublish(failed, metadataA, boundary, boundaryOwner)
+	coordinator.stageFailedPublish(failed, metadataA, boundary)
+	coordinator.stageBoundaryOutcome(
+		boundary,
+		boundary,
+		protectedSubtreeLifecycleFailed,
+	)
 	coordinator.commitUpdate()
 	coordinator.beginUpdate()
 	coordinator.stageRelease(ownerA)
@@ -421,8 +448,7 @@ func TestDocumentMetadataAbandonedFailedBoundaryReleasesRetainedOwner(t *testing
 	assertDocumentMetadataSnapshot(t, coordinator, nil, baseline, 0)
 	if ownerA.state != documentMetadataOwnerReleased ||
 		coordinator.snapshot().failedBoundaryCount != 0 ||
-		coordinator.snapshot().retainedReleaseCount != 0 ||
-		coordinator.registeredBoundaries[boundary] {
+		coordinator.snapshot().retainedReleaseCount != 0 {
 		t.Fatalf("abandoned boundary state: owner=%#v snapshot=%#v", ownerA, coordinator.snapshot())
 	}
 }

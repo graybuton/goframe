@@ -1,5 +1,22 @@
 package goframe
 
+type protectedSubtreeLifecycleOutcome uint8
+
+const (
+	protectedSubtreeLifecycleCommitted protectedSubtreeLifecycleOutcome = iota + 1
+	protectedSubtreeLifecycleFailed
+	protectedSubtreeLifecycleDelegated
+)
+
+var (
+	reportProtectedSubtreeLifecycleOutcome func(
+		state *errorBoundaryState,
+		final *errorBoundaryState,
+		outcome protectedSubtreeLifecycleOutcome,
+	)
+	reportProtectedSubtreeLifecycleAbandon func(*errorBoundaryState)
+)
+
 func beginProtectedSubtreeLifecycle(state *errorBoundaryState) *errorBoundaryState {
 	if state.phase != errorBoundaryProtected || state.attempts != nil {
 		panic("goframe: invalid protected subtree transaction")
@@ -32,12 +49,22 @@ func finishProtectedSubtreeLifecycle(
 	if recovered != nil {
 		rollbackProtectedSubtreeLifecycleAttempts(attempts)
 		state.teardown.retain()
+		reportProtectedSubtreeOutcome(
+			state,
+			state,
+			protectedSubtreeLifecycleFailed,
+		)
 		panic(recovered)
 	}
 	if state.phase != errorBoundaryProtected &&
 		state.phase != errorBoundaryFallback {
 		rollbackProtectedSubtreeLifecycleAttempts(attempts)
 		state.teardown.retain()
+		reportProtectedSubtreeOutcome(
+			state,
+			state,
+			protectedSubtreeLifecycleFailed,
+		)
 		return
 	}
 	if previous != nil {
@@ -45,11 +72,37 @@ func finishProtectedSubtreeLifecycle(
 		// able to roll back work from this successful nested subtree.
 		previous.attempts = append(previous.attempts, attempts...)
 		state.teardown.merge(&previous.teardown)
+		reportProtectedSubtreeOutcome(
+			state,
+			previous,
+			protectedSubtreeLifecycleDelegated,
+		)
 		return
 	}
 	state.teardown.retain()
 	commitProtectedSubtreeLifecycleAttempts(attempts)
 	state.teardown.release()
+	outcome := protectedSubtreeLifecycleCommitted
+	if state.phase == errorBoundaryFallback {
+		outcome = protectedSubtreeLifecycleFailed
+	}
+	reportProtectedSubtreeOutcome(state, state, outcome)
+}
+
+func reportProtectedSubtreeOutcome(
+	state *errorBoundaryState,
+	final *errorBoundaryState,
+	outcome protectedSubtreeLifecycleOutcome,
+) {
+	if reportProtectedSubtreeLifecycleOutcome != nil {
+		reportProtectedSubtreeLifecycleOutcome(state, final, outcome)
+	}
+}
+
+func reportProtectedSubtreeAbandon(state *errorBoundaryState) {
+	if reportProtectedSubtreeLifecycleAbandon != nil {
+		reportProtectedSubtreeLifecycleAbandon(state)
+	}
 }
 
 func finalizePendingProtectedSubtreeTeardown(state *errorBoundaryState) {
