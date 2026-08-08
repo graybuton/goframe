@@ -958,9 +958,6 @@ func (coordinator *documentMetadataCoordinator) retainFailedHandoff(
 			}
 		}
 	}
-	if len(outgoing) == 0 && handoff == nil {
-		return nil
-	}
 	if coordinator.pendingHandoffs == nil {
 		coordinator.pendingHandoffs = make(
 			map[*documentMetadataOwner]*documentMetadataPendingHandoff,

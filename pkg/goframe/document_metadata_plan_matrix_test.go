@@ -231,6 +231,175 @@ func assertDocumentMetadataPlanReadiness(
 	}
 }
 
+func assertDocumentMetadataPendingOwnerOnlyPlan(
+	t *testing.T,
+	harness *documentMetadataPlanHarness,
+	owner *documentMetadataPlanOwner,
+) {
+	t.Helper()
+	token := owner.token()
+	if token == nil || token.id != 0 || token.state != documentMetadataOwnerPending {
+		t.Errorf("pending owner = %#v, want uncommitted pending token", token)
+		return
+	}
+	if len(harness.coordinator.pendingHandoffOrder) != 1 {
+		t.Errorf("pending handoffs = %d, want 1", len(harness.coordinator.pendingHandoffOrder))
+		return
+	}
+	handoff := harness.coordinator.pendingHandoffOrder[0]
+	if handoff.id == 0 || len(handoff.owners) != 1 ||
+		handoff.owners[0].owner != token || handoff.owners[0].metadata != owner.metadata ||
+		len(handoff.releases) != 0 || len(handoff.finalizations) != 0 ||
+		harness.coordinator.pendingHandoffs[token] != handoff {
+		t.Errorf("pending-owner-only plan = %#v", handoff)
+	}
+}
+
+func captureDocumentMetadataPanic(operation func()) (recovered any) {
+	defer func() {
+		recovered = recover()
+	}()
+	operation()
+	return nil
+}
+
+func TestDocumentMetadataFailedAdditiveOwnerCanAbandon(t *testing.T) {
+	runDocumentMetadataFailedAdditiveOwnerCanAbandon(t)
+}
+
+func runDocumentMetadataFailedAdditiveOwnerCanAbandon(t *testing.T) {
+	harness := newDocumentMetadataPlanHarness(t)
+	ownerA := harness.newOwner("OwnerA", nil, documentMetadataPlanValue("A"))
+	ownerB := harness.newOwner("OwnerB", nil, documentMetadataPlanValue("B"))
+	ownerAState := harness.commitInitial(ownerA)
+	harness.renderAndFail(ownerB)
+	ownerBState := ownerB.token()
+	assertDocumentMetadataSnapshot(t, harness.coordinator, ownerAState, ownerA.metadata, 1)
+	assertDocumentMetadataPendingOwnerOnlyPlan(t, harness, ownerB)
+
+	rendersB := ownerB.renders
+	statistics := harness.coordinator.statistics
+	harness.coordinator.beginUpdate()
+	harness.coordinator.commitUpdate()
+	assertDocumentMetadataSnapshot(t, harness.coordinator, ownerAState, ownerA.metadata, 1)
+	assertDocumentMetadataPendingOwnerOnlyPlan(t, harness, ownerB)
+	if ownerB.renders != rendersB ||
+		harness.coordinator.statistics.documentPublications != statistics.documentPublications ||
+		harness.coordinator.statistics.baselineRestorations != statistics.baselineRestorations {
+		t.Fatalf("unrelated update: B renders=%d statistics=%#v",
+			ownerB.renders, harness.coordinator.statistics)
+	}
+
+	harness.coordinator.beginUpdate()
+	deactivateComponent(ownerB.component)
+	recovered := captureDocumentMetadataPanic(harness.coordinator.commitUpdate)
+	if recovered != nil {
+		if harness.coordinator.batch.active {
+			harness.coordinator.discardUpdate()
+		}
+		t.Fatalf("pending owner abandonment panic: %v", recovered)
+	}
+	assertDocumentMetadataSnapshot(t, harness.coordinator, ownerAState, ownerA.metadata, 1)
+	if ownerAState.id != 1 || ownerAState.state != documentMetadataOwnerActive ||
+		ownerBState.id != 0 || ownerBState.state != documentMetadataOwnerReleased ||
+		ownerA.cleanups != 0 || ownerB.cleanups != 1 ||
+		harness.coordinator.statistics.baselineRestorations != 0 ||
+		!reflect.DeepEqual(harness.publications, []documentMetadataValue{ownerA.metadata}) {
+		t.Fatalf("additive abandonment: A=%#v B=%#v cleanups=%d/%d statistics=%#v publications=%#v",
+			ownerAState, ownerBState, ownerA.cleanups, ownerB.cleanups,
+			harness.coordinator.statistics, harness.publications)
+	}
+	assertDocumentMetadataCoordinatorFinalized(t, harness.coordinator)
+}
+
+func TestDocumentMetadataFailedInitialOwnerCanAbandon(t *testing.T) {
+	runDocumentMetadataFailedInitialOwnerCanAbandon(t)
+}
+
+func runDocumentMetadataFailedInitialOwnerCanAbandon(t *testing.T) {
+	harness := newDocumentMetadataPlanHarness(t)
+	ownerB := harness.newOwner("OwnerB", nil, documentMetadataPlanValue("B"))
+	harness.renderAndFail(ownerB)
+	ownerBState := ownerB.token()
+	assertDocumentMetadataSnapshot(t, harness.coordinator, nil, harness.baseline, 0)
+	assertDocumentMetadataPendingOwnerOnlyPlan(t, harness, ownerB)
+
+	rendersB := ownerB.renders
+	statistics := harness.coordinator.statistics
+	harness.coordinator.beginUpdate()
+	harness.coordinator.commitUpdate()
+	assertDocumentMetadataSnapshot(t, harness.coordinator, nil, harness.baseline, 0)
+	assertDocumentMetadataPendingOwnerOnlyPlan(t, harness, ownerB)
+	if ownerB.renders != rendersB ||
+		harness.coordinator.statistics.documentPublications != statistics.documentPublications ||
+		harness.coordinator.statistics.baselineRestorations != statistics.baselineRestorations {
+		t.Fatalf("unrelated update: B renders=%d statistics=%#v",
+			ownerB.renders, harness.coordinator.statistics)
+	}
+
+	harness.coordinator.beginUpdate()
+	deactivateComponent(ownerB.component)
+	recovered := captureDocumentMetadataPanic(harness.coordinator.commitUpdate)
+	if recovered != nil {
+		if harness.coordinator.batch.active {
+			harness.coordinator.discardUpdate()
+		}
+		t.Fatalf("pending owner abandonment panic: %v", recovered)
+	}
+	assertDocumentMetadataSnapshot(t, harness.coordinator, nil, harness.baseline, 0)
+	if ownerBState.id != 0 || ownerBState.state != documentMetadataOwnerReleased ||
+		ownerB.cleanups != 1 || harness.coordinator.statistics.documentPublications != 0 ||
+		harness.coordinator.statistics.baselineRestorations != 0 || len(harness.publications) != 0 {
+		t.Fatalf("initial abandonment: B=%#v cleanup=%d statistics=%#v publications=%#v",
+			ownerBState, ownerB.cleanups, harness.coordinator.statistics, harness.publications)
+	}
+	assertDocumentMetadataCoordinatorFinalized(t, harness.coordinator)
+}
+
+func TestDocumentMetadataFailedAdditiveOwnerCanRetry(t *testing.T) {
+	runDocumentMetadataFailedAdditiveOwnerCanRetry(t)
+}
+
+func runDocumentMetadataFailedAdditiveOwnerCanRetry(t *testing.T) {
+	harness := newDocumentMetadataPlanHarness(t)
+	ownerA := harness.newOwner("OwnerA", nil, documentMetadataPlanValue("A"))
+	ownerB := harness.newOwner("OwnerB", nil, documentMetadataPlanValue("B"))
+	ownerAState := harness.commitInitial(ownerA)
+	harness.renderAndFail(ownerB)
+
+	harness.renderAndCommit(ownerB)
+	assertDocumentMetadataPlanCommitted(t, harness, ownerB, ownerA, ownerB)
+	if ownerAState.id != 1 || ownerAState.state != documentMetadataOwnerActive ||
+		ownerB.token().id != 2 || ownerA.cleanups != 0 ||
+		!reflect.DeepEqual(harness.coordinator.ownerIDs(), []uint64{1, 2}) ||
+		!reflect.DeepEqual(harness.publications, []documentMetadataValue{ownerA.metadata, ownerB.metadata}) {
+		t.Fatalf("additive retry: ids=%v A=%#v B=%#v cleanup=%d publications=%#v",
+			harness.coordinator.ownerIDs(), ownerAState, ownerB.token(),
+			ownerA.cleanups, harness.publications)
+	}
+	assertDocumentMetadataCoordinatorFinalized(t, harness.coordinator)
+}
+
+func TestDocumentMetadataFailedInitialOwnerCanRetry(t *testing.T) {
+	runDocumentMetadataFailedInitialOwnerCanRetry(t)
+}
+
+func runDocumentMetadataFailedInitialOwnerCanRetry(t *testing.T) {
+	harness := newDocumentMetadataPlanHarness(t)
+	ownerB := harness.newOwner("OwnerB", nil, documentMetadataPlanValue("B"))
+	harness.renderAndFail(ownerB)
+
+	harness.renderAndCommit(ownerB)
+	assertDocumentMetadataPlanCommitted(t, harness, ownerB, ownerB)
+	if ownerB.token().id != 1 || ownerB.cleanups != 0 ||
+		!reflect.DeepEqual(harness.coordinator.ownerIDs(), []uint64{1}) ||
+		!reflect.DeepEqual(harness.publications, []documentMetadataValue{ownerB.metadata}) {
+		t.Fatalf("initial retry: ids=%v B=%#v cleanup=%d publications=%#v",
+			harness.coordinator.ownerIDs(), ownerB.token(), ownerB.cleanups, harness.publications)
+	}
+	assertDocumentMetadataCoordinatorFinalized(t, harness.coordinator)
+}
+
 func TestDocumentMetadataPendingOwnerRetryPreservesOriginalPriority(t *testing.T) {
 	runDocumentMetadataPendingOwnerRetryPreservesOriginalPriority(t)
 }
@@ -426,9 +595,13 @@ func TestDocumentMetadataUnresolvedOwnershipPlanMatrix(t *testing.T) {
 		{"28_application_teardown_restores_baseline_once", runDocumentMetadataApplicationTeardownMatrix},
 		{"29_repeated_mount_handoff_semantics", runDocumentMetadataRepeatedMountMatrix},
 		{"30_observer_failure_after_internal_commit", TestDocumentMetadataObserverFailureDoesNotRollBackCommit},
+		{"31_failed_additive_owner_abandonment", runDocumentMetadataFailedAdditiveOwnerCanAbandon},
+		{"32_failed_initial_owner_abandonment", runDocumentMetadataFailedInitialOwnerCanAbandon},
+		{"33_failed_additive_owner_retry", runDocumentMetadataFailedAdditiveOwnerCanRetry},
+		{"34_failed_initial_owner_retry", runDocumentMetadataFailedInitialOwnerCanRetry},
 	}
-	if len(cells) != 30 {
-		t.Fatalf("matrix cells = %d, want 30", len(cells))
+	if len(cells) != 34 {
+		t.Fatalf("matrix cells = %d, want 34", len(cells))
 	}
 	for _, cell := range cells {
 		cell := cell
