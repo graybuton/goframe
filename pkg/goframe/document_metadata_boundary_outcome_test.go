@@ -299,6 +299,16 @@ func assertDocumentMetadataCoordinatorFinalized(
 	if len(coordinator.batch.operations) != 0 || len(coordinator.batch.events) != 0 {
 		t.Fatalf("coordinator retained batch values = %#v", coordinator.batch)
 	}
+	if len(coordinator.pendingHandoffs) != 0 ||
+		len(coordinator.pendingHandoffOrder) != 0 ||
+		len(coordinator.pendingFinalizations) != 0 ||
+		len(coordinator.pendingFinalizationOrder) != 0 {
+		t.Fatalf("coordinator retained durable state: handoffs=%#v handoff order=%#v finalizations=%#v finalization order=%#v",
+			coordinator.pendingHandoffs,
+			coordinator.pendingHandoffOrder,
+			coordinator.pendingFinalizations,
+			coordinator.pendingFinalizationOrder)
+	}
 }
 
 func committedDocumentMetadataBoundaryOwner(t *testing.T) (
