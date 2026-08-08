@@ -153,16 +153,18 @@ type documentMetadataOwnerRecord struct {
 }
 
 type documentMetadataPendingOwner struct {
-	owner    *documentMetadataOwner
-	boundary *errorBoundaryState
+	owner     *documentMetadataOwner
+	boundary  *errorBoundaryState
+	abandoned bool
 }
 
 type documentMetadataPendingHandoff struct {
-	owners     []*documentMetadataPendingOwner
-	ownerSet   map[*documentMetadataOwner]*documentMetadataPendingOwner
-	releases   []*documentMetadataOwner
-	releaseSet map[*documentMetadataOwner]bool
-	boundary   *errorBoundaryState
+	owners          []*documentMetadataPendingOwner
+	ownerSet        map[*documentMetadataOwner]*documentMetadataPendingOwner
+	releases        []*documentMetadataOwner
+	releaseSet      map[*documentMetadataOwner]bool
+	finalizations   []*documentMetadataBoundaryFinalization
+	finalizationSet map[*errorBoundaryState]*documentMetadataBoundaryFinalization
 }
 
 type documentMetadataBoundaryFinalization struct {
@@ -448,7 +450,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 		remaining := 0
 		allRemainingPublished := true
 		for _, pending := range handoff.owners {
-			if pendingOwnerReleases[pending.owner] {
+			if pending.abandoned || pendingOwnerReleases[pending.owner] {
 				abandonedPendingOwners[pending.owner] = handoff
 				continue
 			}
@@ -462,7 +464,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 		}
 		resolvingHandoffs[handoff] = true
 		for _, pending := range handoff.owners {
-			if !pendingOwnerReleases[pending.owner] {
+			if !pending.abandoned && !pendingOwnerReleases[pending.owner] {
 				allowedPendingPublishes[pending.owner] = true
 			}
 		}
@@ -497,12 +499,6 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	for _, handoff := range coordinator.pendingHandoffOrder {
 		if !resolvingHandoffs[handoff] {
 			continue
-		}
-		if handoff.boundary != nil {
-			operations = append(operations, documentMetadataOperation{
-				kind:     documentMetadataBoundaryRecovered,
-				boundary: handoff.boundary,
-			})
 		}
 		for _, owner := range handoff.releases {
 			if stagedReleases[owner] {
@@ -544,14 +540,37 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 			currentBoundaryOperations[operation.boundary] = operation.kind
 		}
 	}
+	effectiveBoundaryOperations := make(
+		map[*errorBoundaryState]documentMetadataOperationKind,
+		len(currentBoundaryOperations),
+	)
+	for boundary, kind := range currentBoundaryOperations {
+		effectiveBoundaryOperations[boundary] = kind
+	}
+	for _, handoff := range coordinator.pendingHandoffOrder {
+		if !resolvingHandoffs[handoff] {
+			continue
+		}
+		for _, finalization := range handoff.finalizations {
+			if effectiveBoundaryOperations[finalization.boundary] != 0 {
+				continue
+			}
+			operations = append(operations, documentMetadataOperation{
+				kind:     finalization.kind,
+				boundary: finalization.boundary,
+			})
+			effectiveBoundaryOperations[finalization.boundary] = finalization.kind
+		}
+	}
 	for _, finalization := range coordinator.pendingFinalizationOrder {
-		if currentBoundaryOperations[finalization.boundary] != 0 {
+		if effectiveBoundaryOperations[finalization.boundary] != 0 {
 			continue
 		}
 		operations = append(operations, documentMetadataOperation{
 			kind:     finalization.kind,
 			boundary: finalization.boundary,
 		})
+		effectiveBoundaryOperations[finalization.boundary] = finalization.kind
 	}
 
 	owners := append([]documentMetadataOwnerRecord(nil), coordinator.owners...)
@@ -697,20 +716,28 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	publish := next != coordinator.current
 	if publish {
 		if err := coordinator.publish(coordinator.current, next); err != nil {
-			failedSuccessor := coordinator.retainFailedHandoff(
+			failedHandoff := coordinator.retainFailedHandoff(
 				operations,
 				owners,
 				active,
 			)
-			handoffBoundaries := make(map[*errorBoundaryState]bool)
+			affectedHandoffs := make(map[*documentMetadataPendingHandoff]bool)
 			for handoff := range resolvedHandoffs {
-				if handoff.boundary != nil {
-					handoffBoundaries[handoff.boundary] = true
+				affectedHandoffs[handoff] = true
+			}
+			if failedHandoff != nil {
+				affectedHandoffs[failedHandoff] = true
+			}
+			for owner, handoff := range abandonedPendingOwners {
+				if pending := handoff.ownerSet[owner]; pending != nil {
+					pending.abandoned = true
 				}
 			}
-			if failedSuccessor != nil && failedSuccessor.boundary != nil {
-				handoffBoundaries[failedSuccessor.boundary] = true
-			}
+			handoffBoundaries := coordinator.retainHandoffFinalizations(
+				affectedHandoffs,
+				operations,
+				currentBoundaryOperations,
+			)
 			coordinator.retainBoundaryFinalizations(
 				operations,
 				currentBoundaryOperations,
@@ -751,6 +778,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.failedBoundaries = failedBoundaries
 	coordinator.retainedReleases = retainedReleases
 	coordinator.clearRetainedDetachIntents()
+	coordinator.clearSupersededHandoffFinalizations(currentBoundaryOperations)
 	coordinator.clearAppliedBoundaryFinalizations(operations)
 	for owner, handoff := range abandonedPendingOwners {
 		if !active[owner] {
@@ -884,9 +912,6 @@ func (coordinator *documentMetadataCoordinator) retainFailedHandoff(
 		handoff.releases = append(handoff.releases, owner)
 		coordinator.removeRetainedDetachIntent(owner)
 	}
-	if len(handoff.owners) != 0 {
-		handoff.boundary = handoff.owners[len(handoff.owners)-1].boundary
-	}
 	return handoff
 }
 
@@ -933,11 +958,139 @@ func (coordinator *documentMetadataCoordinator) removePendingHandoffOwner(
 		handoff.owners = handoff.owners[:last]
 		break
 	}
-	if len(handoff.owners) == 0 {
-		handoff.boundary = nil
+	for _, finalization := range append(
+		[]*documentMetadataBoundaryFinalization(nil),
+		handoff.finalizations...,
+	) {
+		if !documentMetadataHandoffHasBoundary(handoff, finalization.boundary) {
+			coordinator.removeHandoffFinalization(handoff, finalization.boundary)
+		}
+	}
+}
+
+func (coordinator *documentMetadataCoordinator) retainHandoffFinalizations(
+	handoffs map[*documentMetadataPendingHandoff]bool,
+	operations []documentMetadataOperation,
+	current map[*errorBoundaryState]documentMetadataOperationKind,
+) map[*errorBoundaryState]bool {
+	boundaries := make(map[*errorBoundaryState]bool)
+	for handoff := range handoffs {
+		for boundary, kind := range current {
+			if kind == documentMetadataBoundaryFailed &&
+				documentMetadataHandoffHasBoundary(handoff, boundary) {
+				coordinator.removeHandoffFinalization(handoff, boundary)
+				coordinator.removePendingBoundaryFinalization(boundary)
+			}
+		}
+		for _, operation := range operations {
+			if operation.boundary == nil ||
+				!documentMetadataHandoffHasBoundary(handoff, operation.boundary) ||
+				current[operation.boundary] == documentMetadataBoundaryFailed {
+				continue
+			}
+			switch operation.kind {
+			case documentMetadataBoundaryRecovered,
+				documentMetadataAbandonBoundary:
+				coordinator.retainHandoffFinalization(
+					handoff,
+					operation.boundary,
+					operation.kind,
+				)
+				boundaries[operation.boundary] = true
+			}
+		}
+	}
+	return boundaries
+}
+
+func (coordinator *documentMetadataCoordinator) retainHandoffFinalization(
+	handoff *documentMetadataPendingHandoff,
+	boundary *errorBoundaryState,
+	kind documentMetadataOperationKind,
+) {
+	if handoff == nil || boundary == nil {
 		return
 	}
-	handoff.boundary = handoff.owners[len(handoff.owners)-1].boundary
+	if kind != documentMetadataBoundaryRecovered &&
+		kind != documentMetadataAbandonBoundary {
+		panic("goframe: invalid document metadata handoff finalization")
+	}
+	if handoff.finalizationSet == nil {
+		handoff.finalizationSet = make(
+			map[*errorBoundaryState]*documentMetadataBoundaryFinalization,
+		)
+	}
+	if finalization := handoff.finalizationSet[boundary]; finalization != nil {
+		if kind == documentMetadataAbandonBoundary {
+			finalization.kind = kind
+		}
+		coordinator.removePendingBoundaryFinalization(boundary)
+		return
+	}
+	finalization := &documentMetadataBoundaryFinalization{
+		boundary: boundary,
+		kind:     kind,
+	}
+	handoff.finalizationSet[boundary] = finalization
+	handoff.finalizations = append(handoff.finalizations, finalization)
+	coordinator.removePendingBoundaryFinalization(boundary)
+}
+
+func (coordinator *documentMetadataCoordinator) clearSupersededHandoffFinalizations(
+	current map[*errorBoundaryState]documentMetadataOperationKind,
+) {
+	for boundary, kind := range current {
+		if kind != documentMetadataBoundaryFailed {
+			continue
+		}
+		for _, handoff := range coordinator.pendingHandoffOrder {
+			coordinator.removeHandoffFinalization(handoff, boundary)
+		}
+	}
+}
+
+func (coordinator *documentMetadataCoordinator) removeHandoffFinalization(
+	handoff *documentMetadataPendingHandoff,
+	boundary *errorBoundaryState,
+) {
+	if handoff == nil {
+		return
+	}
+	finalization := handoff.finalizationSet[boundary]
+	if finalization == nil {
+		return
+	}
+	delete(handoff.finalizationSet, boundary)
+	for index, pending := range handoff.finalizations {
+		if pending != finalization {
+			continue
+		}
+		copy(handoff.finalizations[index:], handoff.finalizations[index+1:])
+		last := len(handoff.finalizations) - 1
+		handoff.finalizations[last] = nil
+		handoff.finalizations = handoff.finalizations[:last]
+		return
+	}
+}
+
+func documentMetadataHandoffHasBoundary(
+	handoff *documentMetadataPendingHandoff,
+	boundary *errorBoundaryState,
+) bool {
+	if handoff == nil || boundary == nil {
+		return false
+	}
+	for _, pending := range handoff.owners {
+		if pending.boundary == boundary {
+			return true
+		}
+	}
+	for _, owner := range handoff.releases {
+		if owner.boundary == boundary {
+			return true
+		}
+	}
+	return false
 }
 
 func (coordinator *documentMetadataCoordinator) retainBoundaryFinalizations(
