@@ -24,9 +24,16 @@ type DocumentMetadataHandoffExperimentEvent struct {
 // ownership snapshot.
 type DocumentMetadataHandoffExperimentSnapshot struct {
 	ActiveOwnerID        uint64
+	OwnerIDs             []uint64
+	OwnerTitles          []string
 	OwnerCount           int
 	FailedBoundaryCount  int
 	RetainedReleaseCount int
+	PendingPlanCount     int
+	PendingOwnerCount    int
+	PendingOwnerIDs      []uint64
+	PendingOwnerTitles   []string
+	PendingFinalizations int
 	BatchActive          bool
 	Title                string
 	Description          string
@@ -138,11 +145,41 @@ func CurrentDocumentMetadataHandoffExperiment() DocumentMetadataHandoffExperimen
 	if snapshot.owner != nil {
 		ownerID = snapshot.owner.id
 	}
+	ownerIDs := coordinator.ownerIDs()
+	ownerTitles := make([]string, len(coordinator.owners))
+	for index, record := range coordinator.owners {
+		ownerTitles[index] = record.metadata.title
+	}
+	pendingOwnerCount := 0
+	pendingFinalizations := len(coordinator.pendingFinalizationOrder)
+	pendingOwnerIDs := make([]uint64, 0)
+	pendingOwnerTitles := make([]string, 0)
+	for _, handoff := range coordinator.pendingHandoffOrder {
+		pendingFinalizations += len(handoff.finalizations)
+		for _, pending := range handoff.owners {
+			if pending.abandoned {
+				continue
+			}
+			pendingOwnerCount++
+			pendingOwnerIDs = append(pendingOwnerIDs, pending.owner.id)
+			pendingOwnerTitles = append(
+				pendingOwnerTitles,
+				pending.metadata.title,
+			)
+		}
+	}
 	return DocumentMetadataHandoffExperimentSnapshot{
 		ActiveOwnerID:        ownerID,
+		OwnerIDs:             ownerIDs,
+		OwnerTitles:          ownerTitles,
 		OwnerCount:           snapshot.ownerCount,
 		FailedBoundaryCount:  snapshot.failedBoundaryCount,
 		RetainedReleaseCount: snapshot.retainedReleaseCount,
+		PendingPlanCount:     len(coordinator.pendingHandoffOrder),
+		PendingOwnerCount:    pendingOwnerCount,
+		PendingOwnerIDs:      pendingOwnerIDs,
+		PendingOwnerTitles:   pendingOwnerTitles,
+		PendingFinalizations: pendingFinalizations,
 		BatchActive:          snapshot.batchActive,
 		Title:                snapshot.metadata.title,
 		Description:          snapshot.metadata.description,

@@ -87,6 +87,19 @@ try {
         results.ownerlessRecovery = await runOwnerlessRecovery();
         results.nestedOuterFailure = await runNestedOuterFailure();
         results.publicationFailure = await runPublicationFailureAndRetry();
+        results.reversedPlan = await runReversedOwnershipPlan();
+        results.partialPlan = await runPartialOwnershipPlan();
+        results.additivePlan = await runAdditiveOwnershipPlan();
+        results.initialPlan = await runInitialOwnershipPlan();
+        results.externalFinalization = await runFinalizationAbsorption(
+            "plan-finalization-external",
+            "external",
+        );
+        results.crossBoundaryFinalization = await runFinalizationAbsorption(
+            "plan-finalization-cross-boundary",
+            "cross",
+        );
+        results.newerBoundaryFailure = await runNewerBoundaryFailure();
     }
 
     const report = {
@@ -485,6 +498,19 @@ async function runPublicationFailureAndRetry() {
     assert(state.runtime.runtimeReports[0].operation === "document metadata transaction", "publication failure report operation");
     assert(state.runtime.runtimeReports[0].panic.includes("document metadata publication failed"), "publication failure report diagnostic");
     assert(cleanupCount(state, "publication-a") === 1, "publication failure owner A cleanup count");
+    assertPendingPlan(state, [metadataB.title], 1, 0, "publication failure plan");
+
+    const rendersBeforeShell = ownerRenderCount(state, "publication-b");
+    before = boundary(state);
+    frames = await clickAndCapture("update-publication-shell", 3);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "publication failure unrelated update");
+    assertSequence(frames, [metadataA], "publication failure unrelated frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA], "publication failure unrelated observer");
+    assertDeltas(state, before, { title: 0, description: 0, applies: 0, baseline: 0 }, "publication failure unrelated update");
+    assert(state.shell["publication-shell"] === "1", "publication shell did not update");
+    assert(ownerRenderCount(state, "publication-b") === rendersBeforeShell, "unrelated shell update rerendered B");
+    assertPendingPlan(state, [metadataB.title], 1, 0, "publication failure plan after unrelated update");
 
     before = boundary(state);
     frames = await clickAndCapture("retry-publication", 5);
@@ -511,6 +537,289 @@ async function runPublicationFailureAndRetry() {
     assert(state.runtime.statistics.releases === 2, "publication owner unmount release count");
     assert(cleanupCount(state, "publication-a") === 1, "publication owner unmount replayed owner A cleanup");
     assert(cleanupCount(state, "publication-b") === 1, "publication owner B cleanup count");
+    return resultSummary(state, frames);
+}
+
+async function runReversedOwnershipPlan() {
+    let state = await navigateScenario("plan-reversed");
+    assertCommitted(state, metadataA, 1, "reversed plan initial owner");
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-plan-reversed", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "reversed plan failed publication");
+    assertSequence(frames, [metadataA], "reversed plan failure frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA], "reversed plan failure observer");
+    assertNoDocumentPublication(state, before, "reversed plan failure");
+    assertPendingPlan(state, [metadataB.title, metadataC.title], 1, 0, "reversed plan pending order");
+    assert(ownerRenderCount(state, "reversed-b") === 1, "reversed plan B initial render count");
+    assert(ownerRenderCount(state, "reversed-c") === 1, "reversed plan C initial render count");
+    assert(cleanupCount(state, "reversed-a") === 1, "reversed plan A cleanup count");
+
+    before = boundary(state);
+    frames = await clickAndCapture("retry-plan-reversed", 5);
+    state = await pageState();
+    assertCommitted(state, metadataC, 2, "reversed plan retry");
+    assertSequence(frames, [metadataA, metadataC], "reversed plan retry frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataC], "reversed plan retry observer");
+    assertOwnerOrder(state, [2, 3], [metadataB.title, metadataC.title], "reversed plan retry");
+    assert(Number(state.runtime.snapshot.activeOwnerID) === 3, "reversed plan selected the retry encounter order");
+    assert(ownerRenderCount(state, "reversed-b") === 2, "reversed plan B retry render count");
+    assert(ownerRenderCount(state, "reversed-c") === 2, "reversed plan C retry render count");
+    assertNoPendingState(state, "reversed plan retry");
+    return resultSummary(state, frames);
+}
+
+async function runPartialOwnershipPlan() {
+    let state = await navigateScenario("plan-partial");
+    assertCommitted(state, metadataA, 1, "partial plan initial owner");
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-plan-partial", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "partial plan failed publication");
+    assertSequence(frames, [metadataA], "partial plan failure frames");
+    assertNoDocumentPublication(state, before, "partial plan failure");
+    assertPendingPlan(state, [metadataB.title, metadataC.title], 1, 0, "partial plan initial pending state");
+
+    before = boundary(state);
+    frames = await clickAndCapture("retry-plan-partial-b", 3);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "partial plan B readiness");
+    assertSequence(frames, [metadataA], "partial plan B readiness frames");
+    assertNoDocumentPublication(state, before, "partial plan B readiness");
+    assertPendingPlan(state, [metadataB.title, metadataC.title], 1, 0, "partial plan B readiness state");
+    assert(ownerRenderCount(state, "partial-b") === 2, "partial plan B readiness render count");
+    assert(ownerRenderCount(state, "partial-c") === 1, "partial plan C rendered during B readiness");
+
+    const rendersBeforeShell = ownerRenderCount(state, "partial-b");
+    before = boundary(state);
+    frames = await clickAndCapture("update-partial-shell", 3);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "partial plan unrelated update");
+    assertSequence(frames, [metadataA], "partial plan unrelated frames");
+    assertDeltas(state, before, { title: 0, description: 0, applies: 0, baseline: 0 }, "partial plan unrelated update");
+    assert(state.shell["partial-shell"] === "1", "partial plan shell did not update");
+    assert(ownerRenderCount(state, "partial-b") === rendersBeforeShell, "partial plan unrelated update rerendered B");
+
+    before = boundary(state);
+    frames = await clickAndCapture("retry-plan-partial-c", 5);
+    state = await pageState();
+    assertCommitted(state, metadataC, 2, "partial plan final retry");
+    assertSequence(frames, [metadataA, metadataC], "partial plan final frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataC], "partial plan final observer");
+    assertOwnerOrder(state, [2, 3], [metadataB.title, metadataC.title], "partial plan final order");
+    assert(ownerRenderCount(state, "partial-b") === 2, "partial plan rerendered ready B a third time");
+    assert(ownerRenderCount(state, "partial-c") === 2, "partial plan C final render count");
+    assertNoPendingState(state, "partial plan final retry");
+    return resultSummary(state, frames);
+}
+
+async function runAdditiveOwnershipPlan() {
+    let state = await navigateScenario("plan-additive");
+    assertCommitted(state, metadataA, 1, "additive plan initial owner");
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-plan-additive", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "additive plan failed publication");
+    assertSequence(frames, [metadataA], "additive plan failure frames");
+    assertNoDocumentPublication(state, before, "additive plan failure");
+    assertOwnerOrder(state, [1], [metadataA.title], "additive plan committed owner");
+    assertPendingPlan(state, [metadataB.title], 0, 0, "additive plan pending owner");
+    assert(cleanupCount(state, "additive-a") === 0, "additive plan cleaned up A");
+
+    const rendersBeforeShell = ownerRenderCount(state, "additive-b");
+    before = boundary(state);
+    frames = await clickAndCapture("update-additive-shell", 3);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "additive plan unrelated update");
+    assertSequence(frames, [metadataA], "additive plan unrelated frames");
+    assertDeltas(state, before, { title: 0, description: 0, applies: 0, baseline: 0 }, "additive plan unrelated update");
+    assert(ownerRenderCount(state, "additive-b") === rendersBeforeShell, "additive shell rerendered B");
+
+    before = boundary(state);
+    frames = await clickAndCapture("abandon-plan-additive", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "additive plan abandonment");
+    assertSequence(frames, [metadataA], "additive plan abandonment frames");
+    assertNoDocumentPublication(state, before, "additive plan abandonment");
+    assert(cleanupCount(state, "additive-b") === 1, "additive plan B cleanup count");
+    assert(cleanupCount(state, "additive-a") === 0, "additive plan A cleanup count");
+    assert(state.runtime.statistics.baselineRestorations === 0, "additive plan restored baseline");
+    assertNoPendingState(state, "additive plan abandonment");
+    const abandonment = resultSummary(state, frames);
+
+    state = await navigateScenario("plan-additive");
+    await clickAndCapture("activate-plan-additive", 5);
+    state = await pageState();
+    assertPendingPlan(state, [metadataB.title], 0, 0, "additive retry pending owner");
+    before = boundary(state);
+    frames = await clickAndCapture("retry-plan-additive", 5);
+    state = await pageState();
+    assertCommitted(state, metadataB, 2, "additive plan retry");
+    assertSequence(frames, [metadataA, metadataB], "additive plan retry frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataB], "additive plan retry observer");
+    assertOwnerOrder(state, [1, 2], [metadataA.title, metadataB.title], "additive plan retry order");
+    assert(cleanupCount(state, "additive-a") === 0, "additive retry cleaned up A");
+    assertNoPendingState(state, "additive plan retry");
+    return { abandonment, retry: resultSummary(state, frames) };
+}
+
+async function runInitialOwnershipPlan() {
+    let state = await navigateScenario("plan-initial");
+    assertCommitted(state, baseline, 0, "initial plan authored baseline");
+    let before = boundary(state);
+    let frames = await clickAndCapture("activate-plan-initial", 5);
+    state = await pageState();
+    assertCommitted(state, baseline, 0, "initial plan failed publication");
+    assertSequence(frames, [baseline], "initial plan failure frames");
+    assertNoDocumentPublication(state, before, "initial plan failure");
+    assertPendingPlan(state, [metadataB.title], 0, 0, "initial plan pending owner");
+    assert(state.runtime.statistics.committedIDAssignments === 0, "initial plan assigned B an ID");
+
+    const rendersBeforeShell = ownerRenderCount(state, "initial-b");
+    before = boundary(state);
+    frames = await clickAndCapture("update-initial-shell", 3);
+    state = await pageState();
+    assertCommitted(state, baseline, 0, "initial plan unrelated update");
+    assertSequence(frames, [baseline], "initial plan unrelated frames");
+    assertDeltas(state, before, { title: 0, description: 0, applies: 0, baseline: 0 }, "initial plan unrelated update");
+    assert(ownerRenderCount(state, "initial-b") === rendersBeforeShell, "initial shell rerendered B");
+
+    before = boundary(state);
+    frames = await clickAndCapture("abandon-plan-initial", 5);
+    state = await pageState();
+    assertCommitted(state, baseline, 0, "initial plan abandonment");
+    assertSequence(frames, [baseline], "initial plan abandonment frames");
+    assertNoDocumentPublication(state, before, "initial plan abandonment");
+    assert(cleanupCount(state, "initial-b") === 1, "initial plan B cleanup count");
+    assert(state.runtime.statistics.documentPublications === 0, "initial plan published metadata");
+    assert(state.runtime.statistics.baselineRestorations === 0, "initial plan counted a baseline restoration");
+    assertNoPendingState(state, "initial plan abandonment");
+    const abandonment = resultSummary(state, frames);
+
+    state = await navigateScenario("plan-initial");
+    await clickAndCapture("activate-plan-initial", 5);
+    state = await pageState();
+    assertPendingPlan(state, [metadataB.title], 0, 0, "initial retry pending owner");
+    before = boundary(state);
+    frames = await clickAndCapture("retry-plan-initial", 5);
+    state = await pageState();
+    assertCommitted(state, metadataB, 1, "initial plan retry");
+    assertSequence(frames, [baseline, metadataB], "initial plan retry frames");
+    assertSequence(observerSequenceSince(state, before), [baseline, metadataB], "initial plan retry observer");
+    assertOwnerOrder(state, [1], [metadataB.title], "initial plan retry order");
+    assertNoPendingState(state, "initial plan retry");
+    return { abandonment, retry: resultSummary(state, frames) };
+}
+
+async function runFinalizationAbsorption(scenario, prefix) {
+    let state = await navigateScenario(scenario);
+    assertCommitted(state, metadataA, 1, `${prefix} finalization initial owner`);
+    let before = boundary(state);
+    let frames = await clickAndCapture(`${prefix}-fail-boundary`, 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, `${prefix} finalization retained owner`);
+    assertSequence(frames, [metadataA], `${prefix} finalization failure frames`);
+    assertNoDocumentPublication(state, before, `${prefix} finalization render failure`);
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 1, `${prefix} failed boundary count`);
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 1, `${prefix} retained release count`);
+    assert(cleanupCount(state, `${prefix}-a`) === 1, `${prefix} owner A cleanup count`);
+
+    before = boundary(state);
+    frames = await clickAndCapture(`${prefix}-recover-ownerless`, 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, `${prefix} ownerless publication failure`);
+    assertSequence(frames, [metadataA], `${prefix} ownerless failure frames`);
+    assertNoDocumentPublication(state, before, `${prefix} ownerless publication failure`);
+    assert(Number(state.runtime.snapshot.pendingPlanCount) === 0, `${prefix} ownerless failure created a plan`);
+    assert(Number(state.runtime.snapshot.pendingFinalizations) === 1, `${prefix} ownerless finalization was not retained`);
+    assert(state.runtime.runtimeErrors === 2, `${prefix} ownerless runtime error count`);
+
+    before = boundary(state);
+    frames = await clickAndCapture(`${prefix}-mount-successor`, 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, `${prefix} successor publication failure`);
+    assertSequence(frames, [metadataA], `${prefix} successor failure frames`);
+    assertNoDocumentPublication(state, before, `${prefix} successor publication failure`);
+    assertPendingPlan(state, [metadataB.title], 1, 1, `${prefix} absorbed finalization`);
+    assert(state.runtime.runtimeErrors === 3, `${prefix} successor runtime error count`);
+    assert(!state.unexpectedYFallback, `${prefix} boundary Y entered fallback`);
+
+    const rendersBeforeShell = ownerRenderCount(state, `${prefix}-b`);
+    before = boundary(state);
+    frames = await clickAndCapture(`update-${prefix}-shell`, 3);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, `${prefix} unrelated update`);
+    assertSequence(frames, [metadataA], `${prefix} unrelated frames`);
+    assertDeltas(state, before, { title: 0, description: 0, applies: 0, baseline: 0 }, `${prefix} unrelated update`);
+    assert(ownerRenderCount(state, `${prefix}-b`) === rendersBeforeShell, `${prefix} unrelated update rerendered B`);
+    assertPendingPlan(state, [metadataB.title], 1, 1, `${prefix} plan after unrelated update`);
+
+    before = boundary(state);
+    frames = await clickAndCapture(`${prefix}-retry-successor`, 5);
+    state = await pageState();
+    assertCommitted(state, metadataB, 1, `${prefix} successor retry`);
+    assertSequence(frames, [metadataA, metadataB], `${prefix} successor retry frames`);
+    assertSequence(observerSequenceSince(state, before), [metadataA, metadataB], `${prefix} successor retry observer`);
+    assertOwnerOrder(state, [2], [metadataB.title], `${prefix} successor retry order`);
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 0, `${prefix} retained failed boundary`);
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 0, `${prefix} retained release after retry`);
+    assert(cleanupCount(state, `${prefix}-a`) === 1, `${prefix} replayed A cleanup`);
+    assert(ownerRenderCount(state, `${prefix}-b`) === 2, `${prefix} B retry render count`);
+    assert(state.runtime.statistics.baselineRestorations === 0, `${prefix} exposed authored baseline`);
+    assertNoPendingState(state, `${prefix} successor retry`);
+    return resultSummary(state, frames);
+}
+
+async function runNewerBoundaryFailure() {
+    let state = await navigateScenario("plan-newer-boundary-failure");
+    assertCommitted(state, metadataA, 1, "newer boundary initial owner");
+    let before = boundary(state);
+    let frames = await clickAndCapture("supersede-fail-initial", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "newer boundary first failure");
+    assertSequence(frames, [metadataA], "newer boundary first failure frames");
+    assertNoDocumentPublication(state, before, "newer boundary first failure");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 1, "newer boundary first failed state");
+
+    before = boundary(state);
+    frames = await clickAndCapture("supersede-recover-ownerless", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "newer boundary ownerless publication failure");
+    assertSequence(frames, [metadataA], "newer boundary ownerless failure frames");
+    assertNoDocumentPublication(state, before, "newer boundary ownerless publication failure");
+    assert(Number(state.runtime.snapshot.pendingFinalizations) === 1, "newer boundary finalization missing");
+
+    before = boundary(state);
+    frames = await clickAndCapture("supersede-mount-b", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "newer boundary pending B failure");
+    assertSequence(frames, [metadataA], "newer boundary pending B frames");
+    assertNoDocumentPublication(state, before, "newer boundary pending B failure");
+    assertPendingPlan(state, [metadataB.title], 1, 1, "newer boundary pending B plan");
+    assert(ownerRenderCount(state, "supersede-b") === 1, "newer boundary B initial render count");
+
+    before = boundary(state);
+    frames = await clickAndCapture("supersede-fail-newer", 5);
+    state = await pageState();
+    assertCommitted(state, metadataA, 1, "newer boundary superseding failure");
+    assertSequence(frames, [metadataA], "newer boundary superseding failure frames");
+    assertNoDocumentPublication(state, before, "newer boundary superseding failure");
+    assert(Number(state.runtime.snapshot.failedBoundaryCount) === 1, "newer boundary did not remain failed");
+    assert(Number(state.runtime.snapshot.retainedReleaseCount) === 1, "newer boundary lost A release");
+    assert(cleanupCount(state, "supersede-b") === 1, "newer boundary B cleanup count");
+    assertNoPendingState(state, "newer boundary superseding failure");
+    assert(state.runtime.runtimeErrors === 4, "newer boundary runtime error count");
+
+    before = boundary(state);
+    frames = await clickAndCapture("supersede-final-recover", 5);
+    state = await pageState();
+    assertCommitted(state, baseline, 0, "newer boundary final recovery");
+    assertSequence(frames, [metadataA, baseline], "newer boundary final recovery frames");
+    assertSequence(observerSequenceSince(state, before), [metadataA, baseline], "newer boundary final recovery observer");
+    assert(cleanupCount(state, "supersede-a") === 1, "newer boundary replayed A cleanup");
+    assert(cleanupCount(state, "supersede-b") === 1, "newer boundary replayed B cleanup");
+    assert(state.runtime.statistics.baselineRestorations === 1, "newer boundary baseline restoration count");
+    assertNoPendingState(state, "newer boundary final recovery");
     return resultSummary(state, frames);
 }
 
@@ -629,7 +938,14 @@ async function pageState() {
             ownerlessRecoveryContent: Boolean(document.querySelector('[data-testid="ownerless-recovery-content"]')),
             nestedOwnerlessContent: Boolean(document.querySelector('[data-testid="nested-ownerless-content"]')),
             unexpectedInnerFallback: Boolean(document.querySelector('[data-testid="unexpected-inner-fallback"]')),
+            unexpectedYFallback: Boolean(document.querySelector('[data-testid$="-unexpected-y-fallback"]')),
             publicationNonce: document.querySelector('[data-testid="publication-nonce"]')?.textContent ?? '',
+            shell: Object.fromEntries(
+                [...document.querySelectorAll('[data-shell-role]')].map((element) => [
+                    element.getAttribute('data-shell-role') ?? '',
+                    element.textContent ?? '',
+                ]),
+            ),
             scenario: document.querySelector('[data-testid="handoff-app"]')?.getAttribute('data-scenario') ?? '',
             title: title?.textContent ?? '',
             description: description?.getAttribute('content') ?? '',
@@ -693,6 +1009,66 @@ function assertDeltas(state, before, expected, label) {
     );
 }
 
+function assertNoDocumentPublication(state, before, label) {
+    assert(
+        state.head.titleMutations === before.titleMutations &&
+            state.head.descriptionMutations === before.descriptionMutations,
+        `${label} mutated authored metadata nodes`,
+    );
+    assert(
+        Number(state.runtime.statistics.documentPublications) ===
+            Number(before.statistics.documentPublications),
+        `${label} committed a document publication`,
+    );
+    assert(
+        Number(state.runtime.statistics.baselineRestorations) ===
+            Number(before.statistics.baselineRestorations),
+        `${label} restored the authored baseline`,
+    );
+}
+
+function assertOwnerOrder(state, ids, titles, label) {
+    assert(
+        JSON.stringify(state.runtime.snapshot.ownerIDs) === JSON.stringify(ids),
+        `${label} owner IDs = ${JSON.stringify(state.runtime.snapshot.ownerIDs)}, want ${JSON.stringify(ids)}`,
+    );
+    assert(
+        JSON.stringify(state.runtime.snapshot.ownerTitles) === JSON.stringify(titles),
+        `${label} owner titles = ${JSON.stringify(state.runtime.snapshot.ownerTitles)}, want ${JSON.stringify(titles)}`,
+    );
+}
+
+function assertPendingPlan(state, titles, retainedReleases, finalizations, label) {
+    const snapshot = state.runtime.snapshot;
+    assert(Number(snapshot.pendingPlanCount) === 1, `${label} plan count = ${snapshot.pendingPlanCount}`);
+    assert(Number(snapshot.pendingOwnerCount) === titles.length, `${label} owner count = ${snapshot.pendingOwnerCount}`);
+    assert(
+        JSON.stringify(snapshot.pendingOwnerTitles) === JSON.stringify(titles),
+        `${label} owner titles = ${JSON.stringify(snapshot.pendingOwnerTitles)}, want ${JSON.stringify(titles)}`,
+    );
+    assert(
+        JSON.stringify(snapshot.pendingOwnerIDs) === JSON.stringify(titles.map(() => 0)),
+        `${label} owner IDs = ${JSON.stringify(snapshot.pendingOwnerIDs)}, want pending ID zero`,
+    );
+    assert(
+        Number(snapshot.retainedReleaseCount) === retainedReleases,
+        `${label} retained releases = ${snapshot.retainedReleaseCount}, want ${retainedReleases}`,
+    );
+    assert(
+        Number(snapshot.pendingFinalizations) === finalizations,
+        `${label} pending finalizations = ${snapshot.pendingFinalizations}, want ${finalizations}`,
+    );
+    assert(!snapshot.batchActive, `${label} left the batch active`);
+}
+
+function assertNoPendingState(state, label) {
+    const snapshot = state.runtime.snapshot;
+    assert(Number(snapshot.pendingPlanCount) === 0, `${label} retained a pending plan`);
+    assert(Number(snapshot.pendingOwnerCount) === 0, `${label} retained pending owners`);
+    assert(Number(snapshot.pendingFinalizations) === 0, `${label} retained finalization authority`);
+    assert(!snapshot.batchActive, `${label} left the batch active`);
+}
+
 function assertSequence(values, expected, label) {
     const actual = normalizePairs(values.map(pairFromState));
     assert(
@@ -716,6 +1092,10 @@ function assertIdentity(state, label) {
 
 function cleanupCount(state, role) {
     return state.runtime.ownerCleanups.filter((entry) => entry.role === role).length;
+}
+
+function ownerRenderCount(state, role) {
+    return state.runtime.ownerRenders.filter((entry) => entry.role === role).length;
 }
 
 function resultSummary(state, frames) {

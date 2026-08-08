@@ -29,6 +29,20 @@ type replacementState struct {
 	showC  bool
 }
 
+type finalizationScenarioProps struct {
+	prefix        string
+	crossBoundary bool
+}
+
+type finalizationBoundaryProps struct {
+	prefix string
+}
+
+type successorHostProps struct {
+	prefix        string
+	crossBoundary bool
+}
+
 var (
 	appType = gf.NewComponentType(
 		"fixture.document-state-handoff.App",
@@ -37,6 +51,14 @@ var (
 	ownerType = gf.NewComponentType(
 		"fixture.document-state-handoff.Owner",
 		"DocumentStateHandoffOwner",
+	)
+	controlledOwnerType = gf.NewComponentType(
+		"fixture.document-state-handoff.ControlledOwner",
+		"DocumentStateHandoffControlledOwner",
+	)
+	shellType = gf.NewComponentType(
+		"fixture.document-state-handoff.Shell",
+		"DocumentStateHandoffShell",
 	)
 	directType = gf.NewComponentType(
 		"fixture.document-state-handoff.Direct",
@@ -82,6 +104,38 @@ var (
 		"fixture.document-state-handoff.PublicationFailure",
 		"DocumentStateHandoffPublicationFailure",
 	)
+	reverseRetryType = gf.NewComponentType(
+		"fixture.document-state-handoff.ReverseRetry",
+		"DocumentStateHandoffReverseRetry",
+	)
+	partialReadinessType = gf.NewComponentType(
+		"fixture.document-state-handoff.PartialReadiness",
+		"DocumentStateHandoffPartialReadiness",
+	)
+	additivePlanType = gf.NewComponentType(
+		"fixture.document-state-handoff.AdditivePlan",
+		"DocumentStateHandoffAdditivePlan",
+	)
+	initialPlanType = gf.NewComponentType(
+		"fixture.document-state-handoff.InitialPlan",
+		"DocumentStateHandoffInitialPlan",
+	)
+	finalizationAbsorptionType = gf.NewComponentType(
+		"fixture.document-state-handoff.FinalizationAbsorption",
+		"DocumentStateHandoffFinalizationAbsorption",
+	)
+	finalizationBoundaryType = gf.NewComponentType(
+		"fixture.document-state-handoff.FinalizationBoundary",
+		"DocumentStateHandoffFinalizationBoundary",
+	)
+	successorHostType = gf.NewComponentType(
+		"fixture.document-state-handoff.SuccessorHost",
+		"DocumentStateHandoffSuccessorHost",
+	)
+	newerBoundaryFailureType = gf.NewComponentType(
+		"fixture.document-state-handoff.NewerBoundaryFailure",
+		"DocumentStateHandoffNewerBoundaryFailure",
+	)
 	failingSiblingType = gf.NewComponentType(
 		"fixture.document-state-handoff.FailingSibling",
 		"DocumentStateHandoffFailingSibling",
@@ -95,8 +149,9 @@ var (
 		"DocumentStateHandoffLifetime",
 	)
 
-	retainedFunctions     []js.Func
-	activeDocumentAdapter *documentAdapter
+	retainedFunctions      []js.Func
+	activeDocumentAdapter  *documentAdapter
+	controlledOwnerUpdates = make(map[string]func())
 )
 
 func main() {
@@ -151,6 +206,32 @@ func renderApp(props appProps) gf.Node {
 		scenario = gf.ComponentT(nestedOuterFailureType, struct{}{}, renderNestedOuterFailureScenario)
 	case "publication-failure":
 		scenario = gf.ComponentT(publicationFailureType, struct{}{}, renderPublicationFailureScenario)
+	case "plan-reversed":
+		scenario = gf.ComponentT(reverseRetryType, struct{}{}, renderReverseRetryScenario)
+	case "plan-partial":
+		scenario = gf.ComponentT(partialReadinessType, struct{}{}, renderPartialReadinessScenario)
+	case "plan-additive":
+		scenario = gf.ComponentT(additivePlanType, struct{}{}, renderAdditivePlanScenario)
+	case "plan-initial":
+		scenario = gf.ComponentT(initialPlanType, struct{}{}, renderInitialPlanScenario)
+	case "plan-finalization-external":
+		scenario = gf.ComponentT(
+			finalizationAbsorptionType,
+			finalizationScenarioProps{prefix: "external"},
+			renderFinalizationAbsorptionScenario,
+		)
+	case "plan-finalization-cross-boundary":
+		scenario = gf.ComponentT(
+			finalizationAbsorptionType,
+			finalizationScenarioProps{prefix: "cross", crossBoundary: true},
+			renderFinalizationAbsorptionScenario,
+		)
+	case "plan-newer-boundary-failure":
+		scenario = gf.ComponentT(
+			newerBoundaryFailureType,
+			struct{}{},
+			renderNewerBoundaryFailureScenario,
+		)
 	case "multiple":
 		scenario = gf.ComponentT(multipleType, struct{}{}, renderMultipleScenario)
 	case "lifetime":
@@ -448,8 +529,293 @@ func renderPublicationFailureScenario(struct{}) gf.Node {
 		button("unmount-publication-owner", "Unmount publication owner", func() {
 			setActive(false)
 		}),
+		shellNode("publication-shell"),
 		owner,
 	)
+}
+
+func renderReverseRetryScenario(struct{}) gf.Node {
+	return renderPendingOwnersScenario("reversed", false)
+}
+
+func renderPartialReadinessScenario(struct{}) gf.Node {
+	return renderPendingOwnersScenario("partial", true)
+}
+
+func renderPendingOwnersScenario(prefix string, partial bool) gf.Node {
+	active, setActive := gf.UseState(false)
+	owners := gf.Node(ownerNode(prefix+"-a", prefix+"-a", metadataA(), false))
+	if active {
+		owners = gf.Fragment(
+			controlledOwnerNode(prefix+"-b", prefix+"-b", metadataB()),
+			controlledOwnerNode(prefix+"-c", prefix+"-c", metadataC()),
+		)
+	}
+	controls := []gf.Node{
+		button("activate-plan-"+prefix, "Activate pending owners", func() {
+			activeDocumentAdapter.failNextPublication = true
+			setActive(true)
+		}),
+		shellNode(prefix + "-shell"),
+	}
+	if partial {
+		controls = append(
+			controls,
+			button("retry-plan-partial-b", "Retry B", func() {
+				rerenderControlledOwner("partial-b")
+			}),
+			button("retry-plan-partial-c", "Retry C", func() {
+				rerenderControlledOwner("partial-c")
+			}),
+		)
+	} else {
+		controls = append(controls, button("retry-plan-reversed", "Retry C then B", func() {
+			rerenderControlledOwner("reversed-c")
+			rerenderControlledOwner("reversed-b")
+		}))
+	}
+	controls = append(controls, owners)
+	return scenarioSection(controls...)
+}
+
+func renderAdditivePlanScenario(struct{}) gf.Node {
+	showB, setShowB := gf.UseState(false)
+	children := []gf.Node{
+		button("activate-plan-additive", "Activate additive B", func() {
+			activeDocumentAdapter.failNextPublication = true
+			setShowB(true)
+		}),
+		button("retry-plan-additive", "Retry additive B", func() {
+			rerenderControlledOwner("additive-b")
+		}),
+		button("abandon-plan-additive", "Abandon additive B", func() {
+			setShowB(false)
+		}),
+		shellNode("additive-shell"),
+		ownerNode("additive-a", "additive-a", metadataA(), false),
+	}
+	if showB {
+		children = append(children, controlledOwnerNode("additive-b", "additive-b", metadataB()))
+	}
+	return scenarioSection(children...)
+}
+
+func renderInitialPlanScenario(struct{}) gf.Node {
+	showB, setShowB := gf.UseState(false)
+	children := []gf.Node{
+		button("activate-plan-initial", "Activate first B", func() {
+			activeDocumentAdapter.failNextPublication = true
+			setShowB(true)
+		}),
+		button("retry-plan-initial", "Retry first B", func() {
+			rerenderControlledOwner("initial-b")
+		}),
+		button("abandon-plan-initial", "Abandon first B", func() {
+			setShowB(false)
+		}),
+		shellNode("initial-shell"),
+	}
+	if showB {
+		children = append(children, controlledOwnerNode("initial-b", "initial-b", metadataB()))
+	}
+	return scenarioSection(children...)
+}
+
+func renderFinalizationAbsorptionScenario(props finalizationScenarioProps) gf.Node {
+	return scenarioSection(
+		gf.Key(props.prefix+"-boundary-driver", gf.ComponentT(
+			finalizationBoundaryType,
+			finalizationBoundaryProps{prefix: props.prefix},
+			renderFinalizationBoundary,
+		)),
+		gf.Key(props.prefix+"-successor-host", gf.ComponentT(
+			successorHostType,
+			successorHostProps{
+				prefix:        props.prefix,
+				crossBoundary: props.crossBoundary,
+			},
+			renderSuccessorHost,
+		)),
+	)
+}
+
+func renderFinalizationBoundary(props finalizationBoundaryProps) gf.Node {
+	phase, setPhase := gf.UseState("a")
+	children := []gf.Node{
+		ownerNode(props.prefix+"-a", props.prefix+"-a", metadataA(), false),
+	}
+	if phase == "fail" {
+		children = []gf.Node{failingSiblingNode(props.prefix + "-boundary-failure")}
+	} else if phase == "ownerless" {
+		children = []gf.Node{gf.El(
+			"p",
+			gf.Props{"data-testid": props.prefix + "-ownerless"},
+			gf.Text("ownerless"),
+		)}
+	}
+	return gf.Fragment(
+		button(props.prefix+"-fail-boundary", "Fail boundary", func() {
+			setPhase("fail")
+		}),
+		gf.Key(props.prefix+"-boundary-x", gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: func(context gf.ErrorBoundaryContext) gf.Node {
+				return button(props.prefix+"-recover-ownerless", "Recover ownerless", func() {
+					activeDocumentAdapter.failNextPublication = true
+					setPhase("ownerless")
+					context.Reset()
+				})
+			},
+			Children: children,
+		})),
+	)
+}
+
+func renderSuccessorHost(props successorHostProps) gf.Node {
+	showB, setShowB := gf.UseState(false)
+	owner := gf.Node(gf.Empty())
+	if showB {
+		owner = controlledOwnerNode(props.prefix+"-b", props.prefix+"-b", metadataB())
+	}
+	if props.crossBoundary {
+		owner = gf.Key(props.prefix+"-boundary-y", gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: func(gf.ErrorBoundaryContext) gf.Node {
+				return gf.El(
+					"p",
+					gf.Props{"data-testid": props.prefix + "-unexpected-y-fallback"},
+					gf.Text("unexpected boundary Y fallback"),
+				)
+			},
+			Children: []gf.Node{owner},
+		}))
+	}
+	return gf.Fragment(
+		button(props.prefix+"-mount-successor", "Mount failing successor", func() {
+			activeDocumentAdapter.failNextPublication = true
+			setShowB(true)
+		}),
+		button(props.prefix+"-retry-successor", "Retry successor", func() {
+			rerenderControlledOwner(props.prefix + "-b")
+		}),
+		shellNode(props.prefix+"-shell"),
+		owner,
+	)
+}
+
+func renderNewerBoundaryFailureScenario(struct{}) gf.Node {
+	phase, setPhase := gf.UseState("a")
+	children := []gf.Node{
+		ownerNode("supersede-a", "supersede-a", metadataA(), false),
+	}
+	switch phase {
+	case "fail-initial":
+		children = []gf.Node{failingSiblingNode("supersede-initial-failure")}
+	case "ownerless", "final":
+		children = []gf.Node{gf.El(
+			"p",
+			gf.Props{"data-testid": "supersede-ownerless"},
+			gf.Text("ownerless"),
+		)}
+	case "b":
+		children = []gf.Node{controlledOwnerNode("supersede-b", "supersede-b", metadataB())}
+	case "fail-newer":
+		children = []gf.Node{
+			controlledOwnerNode("supersede-b", "supersede-b", metadataB()),
+			failingSiblingNode("supersede-newer-failure"),
+		}
+	}
+	fallback := func(context gf.ErrorBoundaryContext) gf.Node {
+		if phase == "fail-newer" {
+			return button("supersede-final-recover", "Recover final ownerless state", func() {
+				setPhase("final")
+				context.Reset()
+			})
+		}
+		return button("supersede-recover-ownerless", "Recover ownerless", func() {
+			activeDocumentAdapter.failNextPublication = true
+			setPhase("ownerless")
+			context.Reset()
+		})
+	}
+	return scenarioSection(
+		button("supersede-fail-initial", "Fail initial owner", func() {
+			setPhase("fail-initial")
+		}),
+		button("supersede-mount-b", "Mount pending B", func() {
+			activeDocumentAdapter.failNextPublication = true
+			setPhase("b")
+		}),
+		button("supersede-fail-newer", "Fail boundary again", func() {
+			setPhase("fail-newer")
+		}),
+		shellNode("supersede-shell"),
+		gf.Key("supersede-boundary-x", gf.ErrorBoundary(gf.ErrorBoundaryProps{
+			Fallback: fallback,
+			Children: children,
+		})),
+	)
+}
+
+func renderControlledOwner(props ownerProps) gf.Node {
+	nonce, setNonce := gf.UseState(0)
+	controlledOwnerUpdates[props.role] = func() {
+		setNonce(nonce + 1)
+	}
+	recordOwnerRender(props.role)
+	gf.UseDocumentMetadataHandoffExperiment(props.metadata)
+	gf.UseUnmount(func() {
+		delete(controlledOwnerUpdates, props.role)
+		recordOwnerCleanup(props.role)
+	})
+	if props.failureBefore {
+		panic("document-state handoff fixture: forced controlled owner render failure before metadata")
+	}
+	if props.failureAfter {
+		panic("document-state handoff fixture: forced controlled owner render failure")
+	}
+	return gf.Fragment(
+		gf.El(
+			"span",
+			gf.Props{
+				"data-controlled-owner": props.role,
+				"hidden":                true,
+			},
+			gf.Text(gf.ToString(nonce)),
+		),
+		gf.Fragment(props.children...),
+	)
+}
+
+func controlledOwnerNode(key string, role string, value metadata) gf.Node {
+	return gf.Key(key, gf.ComponentT(controlledOwnerType, ownerProps{
+		role:     role,
+		metadata: value,
+	}, renderControlledOwner))
+}
+
+func rerenderControlledOwner(role string) {
+	update := controlledOwnerUpdates[role]
+	if update == nil {
+		panic("document-state handoff fixture: controlled owner is unavailable: " + role)
+	}
+	update()
+}
+
+func renderShell(role string) gf.Node {
+	value, setValue := gf.UseState(0)
+	return gf.Fragment(
+		button("update-"+role, "Update unrelated shell", func() {
+			setValue(value + 1)
+		}),
+		gf.El(
+			"span",
+			gf.Props{"data-shell-role": role},
+			gf.Text(gf.ToString(value)),
+		),
+	)
+}
+
+func shellNode(role string) gf.Node {
+	return gf.Key(role, gf.ComponentT(shellType, role, renderShell))
 }
 
 func failingSiblingNode(role string) gf.Node {
@@ -803,9 +1169,32 @@ func updateCommittedEvidence() {
 	snapshot := gf.CurrentDocumentMetadataHandoffExperiment()
 	snapshotValue := js.Global().Get("Object").New()
 	snapshotValue.Set("activeOwnerID", snapshot.ActiveOwnerID)
+	ownerIDs := js.Global().Get("Array").New()
+	for _, ownerID := range snapshot.OwnerIDs {
+		ownerIDs.Call("push", ownerID)
+	}
+	snapshotValue.Set("ownerIDs", ownerIDs)
+	ownerTitles := js.Global().Get("Array").New()
+	for _, title := range snapshot.OwnerTitles {
+		ownerTitles.Call("push", title)
+	}
+	snapshotValue.Set("ownerTitles", ownerTitles)
 	snapshotValue.Set("ownerCount", snapshot.OwnerCount)
 	snapshotValue.Set("failedBoundaryCount", snapshot.FailedBoundaryCount)
 	snapshotValue.Set("retainedReleaseCount", snapshot.RetainedReleaseCount)
+	snapshotValue.Set("pendingPlanCount", snapshot.PendingPlanCount)
+	snapshotValue.Set("pendingOwnerCount", snapshot.PendingOwnerCount)
+	pendingOwnerIDs := js.Global().Get("Array").New()
+	for _, ownerID := range snapshot.PendingOwnerIDs {
+		pendingOwnerIDs.Call("push", ownerID)
+	}
+	snapshotValue.Set("pendingOwnerIDs", pendingOwnerIDs)
+	pendingOwnerTitles := js.Global().Get("Array").New()
+	for _, title := range snapshot.PendingOwnerTitles {
+		pendingOwnerTitles.Call("push", title)
+	}
+	snapshotValue.Set("pendingOwnerTitles", pendingOwnerTitles)
+	snapshotValue.Set("pendingFinalizations", snapshot.PendingFinalizations)
 	snapshotValue.Set("batchActive", snapshot.BatchActive)
 	snapshotValue.Set("title", snapshot.Title)
 	snapshotValue.Set("description", snapshot.Description)
