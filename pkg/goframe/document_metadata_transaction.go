@@ -917,6 +917,27 @@ func (coordinator *documentMetadataCoordinator) retainFailedHandoff(
 			outgoingSet[owner] = true
 		}
 	}
+	var causalFinalizations []*documentMetadataBoundaryFinalization
+	for _, finalization := range append(
+		[]*documentMetadataBoundaryFinalization(nil),
+		coordinator.pendingFinalizationOrder...,
+	) {
+		causal := false
+		for owner := range coordinator.retainedReleases[finalization.boundary] {
+			if owner == nil || active[owner] || owner.id == 0 {
+				continue
+			}
+			causal = true
+			if outgoingSet[owner] {
+				continue
+			}
+			outgoing = append(outgoing, owner)
+			outgoingSet[owner] = true
+		}
+		if causal {
+			causalFinalizations = append(causalFinalizations, finalization)
+		}
+	}
 	var handoff *documentMetadataPendingHandoff
 	selectHandoff := func(candidate *documentMetadataPendingHandoff) {
 		if candidate == nil {
@@ -978,6 +999,18 @@ func (coordinator *documentMetadataCoordinator) retainFailedHandoff(
 		handoff.releases = append(handoff.releases, owner)
 		coordinator.removeRetainedDetachIntent(owner)
 	}
+	for _, finalization := range causalFinalizations {
+		if coordinator.handoffConsumesBoundaryFinalization(
+			handoff,
+			finalization.boundary,
+		) {
+			coordinator.retainHandoffFinalization(
+				handoff,
+				finalization.boundary,
+				finalization.kind,
+			)
+		}
+	}
 	return handoff
 }
 
@@ -1024,14 +1057,6 @@ func (coordinator *documentMetadataCoordinator) removePendingHandoffOwner(
 		handoff.owners = handoff.owners[:last]
 		break
 	}
-	for _, finalization := range append(
-		[]*documentMetadataBoundaryFinalization(nil),
-		handoff.finalizations...,
-	) {
-		if !documentMetadataHandoffHasBoundary(handoff, finalization.boundary) {
-			coordinator.removeHandoffFinalization(handoff, finalization.boundary)
-		}
-	}
 }
 
 func (coordinator *documentMetadataCoordinator) retainHandoffFinalizations(
@@ -1041,16 +1066,23 @@ func (coordinator *documentMetadataCoordinator) retainHandoffFinalizations(
 ) map[*errorBoundaryState]bool {
 	boundaries := make(map[*errorBoundaryState]bool)
 	for handoff := range handoffs {
+		for _, finalization := range handoff.finalizations {
+			boundaries[finalization.boundary] = true
+		}
 		for boundary, kind := range current {
 			if kind == documentMetadataBoundaryFailed &&
-				documentMetadataHandoffHasBoundary(handoff, boundary) {
+				handoff.finalizationSet[boundary] != nil {
 				coordinator.removeHandoffFinalization(handoff, boundary)
 				coordinator.removePendingBoundaryFinalization(boundary)
+				delete(boundaries, boundary)
 			}
 		}
 		for _, operation := range operations {
 			if operation.boundary == nil ||
-				!documentMetadataHandoffHasBoundary(handoff, operation.boundary) ||
+				!coordinator.handoffConsumesBoundaryFinalization(
+					handoff,
+					operation.boundary,
+				) ||
 				current[operation.boundary] == documentMetadataBoundaryFailed {
 				continue
 			}
@@ -1067,6 +1099,21 @@ func (coordinator *documentMetadataCoordinator) retainHandoffFinalizations(
 		}
 	}
 	return boundaries
+}
+
+func (coordinator *documentMetadataCoordinator) handoffConsumesBoundaryFinalization(
+	handoff *documentMetadataPendingHandoff,
+	boundary *errorBoundaryState,
+) bool {
+	if handoff == nil || boundary == nil {
+		return false
+	}
+	for owner := range coordinator.retainedReleases[boundary] {
+		if handoff.releaseSet[owner] {
+			return true
+		}
+	}
+	return false
 }
 
 func (coordinator *documentMetadataCoordinator) retainHandoffFinalization(
@@ -1137,26 +1184,6 @@ func (coordinator *documentMetadataCoordinator) removeHandoffFinalization(
 		handoff.finalizations = handoff.finalizations[:last]
 		return
 	}
-}
-
-func documentMetadataHandoffHasBoundary(
-	handoff *documentMetadataPendingHandoff,
-	boundary *errorBoundaryState,
-) bool {
-	if handoff == nil || boundary == nil {
-		return false
-	}
-	for _, pending := range handoff.owners {
-		if pending.boundary == boundary {
-			return true
-		}
-	}
-	for _, owner := range handoff.releases {
-		if owner.boundary == boundary {
-			return true
-		}
-	}
-	return false
 }
 
 func (coordinator *documentMetadataCoordinator) retainBoundaryFinalizations(

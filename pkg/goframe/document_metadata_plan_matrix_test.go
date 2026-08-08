@@ -287,3 +287,105 @@ func runDocumentMetadataPendingOwnerProgressPersistsAcrossUpdates(t *testing.T) 
 	}
 	assertDocumentMetadataCoordinatorFinalized(t, harness.coordinator)
 }
+
+func TestDocumentMetadataExternalSuccessorAbsorbsPendingFinalization(t *testing.T) {
+	runDocumentMetadataSuccessorAbsorbsPendingFinalization(t, false)
+}
+
+func TestDocumentMetadataCrossBoundarySuccessorAbsorbsPendingFinalization(t *testing.T) {
+	runDocumentMetadataSuccessorAbsorbsPendingFinalization(t, true)
+}
+
+func runDocumentMetadataSuccessorAbsorbsPendingFinalization(
+	t *testing.T,
+	crossBoundary bool,
+) {
+	fixture := newFailedDocumentMetadataBoundaryFixture(t)
+	fixture.failPublication = true
+	clearErrorBoundary(fixture.boundary)
+	fixture.coordinator.beginUpdate()
+	previous := beginProtectedSubtreeLifecycle(fixture.boundary)
+	finishProtectedSubtreeLifecycle(fixture.boundary, previous)
+	err := recoverDocumentMetadataError(t, fixture.coordinator.commitUpdate)
+	if !errors.Is(err, fixture.publicationFailure) {
+		t.Fatalf("ownerless finalization error = %v", err)
+	}
+	if len(fixture.coordinator.pendingFinalizations) != 1 {
+		t.Fatalf("standalone finalizations = %#v, want one", fixture.coordinator.pendingFinalizations)
+	}
+
+	metadataB := documentMetadataPlanValue("B")
+	var boundaryOwner *componentInstance
+	var boundary *errorBoundaryState
+	if crossBoundary {
+		boundaryOwner = testComponentInstance("BoundaryY", func() Node { return Empty() }, nil)
+		boundary = ensureErrorBoundaryState(boundaryOwner)
+	}
+	rendersB := 0
+	ownerBComponent := func() *componentInstance {
+		render := func() Node {
+			rendersB++
+			useDocumentMetadata(metadataB)
+			return Empty()
+		}
+		if boundaryOwner == nil {
+			return testComponentInstance("OwnerB", render, nil)
+		}
+		return testComponentInstanceWithParent("OwnerB", boundaryOwner, render)
+	}()
+
+	fixture.coordinator.beginUpdate()
+	if boundary != nil {
+		previous = beginProtectedSubtreeLifecycle(boundary)
+	}
+	renderComponentInstance(ownerBComponent)
+	if boundary != nil {
+		finishProtectedSubtreeLifecycle(boundary, previous)
+	}
+	err = recoverDocumentMetadataError(t, fixture.coordinator.commitUpdate)
+	if !errors.Is(err, fixture.publicationFailure) {
+		t.Fatalf("successor publication error = %v", err)
+	}
+	ownerB := documentMetadataOwnerAtStateSlot(ownerBComponent, 0)
+	handoff := fixture.coordinator.pendingHandoffs[ownerB]
+	if ownerB == nil || ownerB.id != 0 || handoff == nil ||
+		len(handoff.finalizations) != 1 || handoff.finalizations[0].boundary != fixture.boundary ||
+		len(fixture.coordinator.pendingFinalizations) != 0 {
+		t.Fatalf("absorbed finalization: B=%#v handoff=%#v standalone=%#v",
+			ownerB, handoff, fixture.coordinator.pendingFinalizations)
+	}
+
+	fixture.failPublication = false
+	shellRenders := 0
+	shell := testComponentInstance("Shell", func() Node {
+		shellRenders++
+		return Empty()
+	}, nil)
+	fixture.coordinator.beginUpdate()
+	renderComponentInstance(shell)
+	fixture.coordinator.commitUpdate()
+	assertDocumentMetadataSnapshot(t, fixture.coordinator, fixture.ownerA, fixture.metadataA, 1)
+	if fixture.document != fixture.metadataA || ownerB.id != 0 || rendersB != 1 ||
+		shellRenders != 1 || len(fixture.publications) != 1 {
+		t.Fatalf("unrelated update: document=%#v B=%#v renders=%d shell=%d publications=%#v",
+			fixture.document, ownerB, rendersB, shellRenders, fixture.publications)
+	}
+
+	fixture.coordinator.beginUpdate()
+	if boundary != nil {
+		previous = beginProtectedSubtreeLifecycle(boundary)
+	}
+	renderComponentInstance(ownerBComponent)
+	if boundary != nil {
+		finishProtectedSubtreeLifecycle(boundary, previous)
+	}
+	fixture.coordinator.commitUpdate()
+	assertDocumentMetadataSnapshot(t, fixture.coordinator, ownerB, metadataB, 1)
+	if fixture.ownerA.state != documentMetadataOwnerReleased || ownerB.id != 2 ||
+		rendersB != 2 || fixture.cleanupA != 1 ||
+		!reflect.DeepEqual(fixture.publications, []documentMetadataValue{fixture.metadataA, metadataB}) {
+		t.Fatalf("successor retry: A=%#v B=%#v renders=%d cleanup=%d publications=%#v",
+			fixture.ownerA, ownerB, rendersB, fixture.cleanupA, fixture.publications)
+	}
+	assertDocumentMetadataCoordinatorFinalized(t, fixture.coordinator)
+}
