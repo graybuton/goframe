@@ -152,6 +152,13 @@ type documentMetadataOwnerRecord struct {
 	metadata documentMetadataValue
 }
 
+type documentMetadataPendingHandoff struct {
+	successor  *documentMetadataOwner
+	releases   []*documentMetadataOwner
+	releaseSet map[*documentMetadataOwner]bool
+	abandoned  bool
+}
+
 type documentMetadataOperationKind uint8
 
 const (
@@ -219,6 +226,8 @@ type documentMetadataCoordinator struct {
 	retainedReleases      map[*errorBoundaryState]map[*documentMetadataOwner]bool
 	retainedDetachIntents []*documentMetadataOwner
 	retainedDetachSet     map[*documentMetadataOwner]bool
+	pendingHandoffs       map[*documentMetadataOwner]*documentMetadataPendingHandoff
+	pendingHandoffOrder   []*documentMetadataPendingHandoff
 	batch                 documentMetadataBatch
 	publish               documentMetadataPublisher
 	observe               documentMetadataObserver
@@ -377,7 +386,8 @@ func (coordinator *documentMetadataCoordinator) stageRelease(owner *documentMeta
 	if coordinator.retainedDetachSet[owner] && !staged {
 		panic("goframe: document metadata owner was released more than once")
 	}
-	if !coordinator.retainedDetachSet[owner] {
+	_, pendingSuccessor := coordinator.pendingHandoffs[owner]
+	if !pendingSuccessor && !coordinator.retainedDetachSet[owner] {
 		if coordinator.retainedDetachSet == nil {
 			coordinator.retainedDetachSet = make(map[*documentMetadataOwner]bool)
 		}
@@ -400,20 +410,35 @@ func (coordinator *documentMetadataCoordinator) stageRelease(owner *documentMeta
 func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.requireActiveUpdate()
 
+	pendingSuccessorReleases := make(map[*documentMetadataOwner]bool)
+	pendingSuccessorPublishes := make(map[*documentMetadataOwner]bool)
 	stagedReleases := make(map[*documentMetadataOwner]bool)
 	for _, operation := range coordinator.batch.operations {
-		if operation.kind == documentMetadataRelease {
+		switch operation.kind {
+		case documentMetadataRelease:
 			stagedReleases[operation.owner] = true
+			if coordinator.pendingHandoffs[operation.owner] != nil {
+				pendingSuccessorReleases[operation.owner] = true
+			}
+		case documentMetadataPublish:
+			if coordinator.pendingHandoffs[operation.owner] != nil {
+				pendingSuccessorPublishes[operation.owner] = true
+			}
 		}
 	}
-	operations := append(
-		make(
-			[]documentMetadataOperation,
-			0,
-			len(coordinator.retainedDetachIntents)+len(coordinator.batch.operations),
-		),
-		coordinator.batch.operations...,
+	operations := make(
+		[]documentMetadataOperation,
+		0,
+		len(coordinator.retainedDetachIntents)+len(coordinator.batch.operations),
 	)
+	for _, operation := range coordinator.batch.operations {
+		if pendingSuccessorReleases[operation.owner] &&
+			(operation.kind == documentMetadataPublish ||
+				operation.kind == documentMetadataRelease) {
+			continue
+		}
+		operations = append(operations, operation)
+	}
 	for _, owner := range coordinator.retainedDetachIntents {
 		if !stagedReleases[owner] {
 			operations = append(operations, documentMetadataOperation{
@@ -421,6 +446,27 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 				owner: owner,
 			})
 		}
+	}
+	resolvedHandoffs := make(map[*documentMetadataOwner]bool)
+	for _, handoff := range coordinator.pendingHandoffOrder {
+		successor := handoff.successor
+		if pendingSuccessorReleases[successor] {
+			handoff.abandoned = true
+		}
+		if !handoff.abandoned && !pendingSuccessorPublishes[successor] {
+			continue
+		}
+		for _, owner := range handoff.releases {
+			if stagedReleases[owner] {
+				continue
+			}
+			operations = append(operations, documentMetadataOperation{
+				kind:  documentMetadataRelease,
+				owner: owner,
+			})
+			stagedReleases[owner] = true
+		}
+		resolvedHandoffs[successor] = true
 	}
 	delegatedBoundaries := make(map[*errorBoundaryState]*errorBoundaryState)
 	for _, operation := range operations {
@@ -582,6 +628,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	publish := next != coordinator.current
 	if publish {
 		if err := coordinator.publish(coordinator.current, next); err != nil {
+			coordinator.retainFailedHandoff(operations, owners, active)
 			coordinator.discardUpdate()
 			panic(wrapDocumentMetadataError("goframe: document metadata publication failed", err))
 		}
@@ -617,6 +664,14 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 	coordinator.failedBoundaries = failedBoundaries
 	coordinator.retainedReleases = retainedReleases
 	coordinator.clearRetainedDetachIntents()
+	for successor := range resolvedHandoffs {
+		handoff := coordinator.pendingHandoffs[successor]
+		if handoff != nil && handoff.abandoned && !active[successor] {
+			successor.state = documentMetadataOwnerReleased
+			successor.boundary = nil
+		}
+		coordinator.removePendingHandoff(successor)
+	}
 	coordinator.statistics.committedIDAssignments += len(assignments)
 	coordinator.statistics.activeAdditions += additions
 	coordinator.statistics.updates += updates
@@ -639,6 +694,112 @@ func (coordinator *documentMetadataCoordinator) clearRetainedDetachIntents() {
 	clear(coordinator.retainedDetachIntents)
 	clear(coordinator.retainedDetachSet)
 	coordinator.retainedDetachIntents = coordinator.retainedDetachIntents[:0]
+}
+
+func (coordinator *documentMetadataCoordinator) retainFailedHandoff(
+	operations []documentMetadataOperation,
+	owners []documentMetadataOwnerRecord,
+	active map[*documentMetadataOwner]bool,
+) {
+	if len(owners) == 0 {
+		return
+	}
+	successor := owners[len(owners)-1].owner
+	if successor == nil || successor.id != 0 ||
+		successor.state != documentMetadataOwnerPending {
+		return
+	}
+	published := false
+	for _, operation := range operations {
+		if operation.kind == documentMetadataPublish && operation.owner == successor {
+			published = true
+			break
+		}
+	}
+	if !published {
+		return
+	}
+
+	var outgoing []*documentMetadataOwner
+	for _, owner := range coordinator.retainedDetachIntents {
+		if owner == nil || owner == successor || active[owner] || owner.id == 0 {
+			continue
+		}
+		outgoing = append(outgoing, owner)
+	}
+	if len(outgoing) == 0 {
+		return
+	}
+	if coordinator.pendingHandoffs == nil {
+		coordinator.pendingHandoffs = make(
+			map[*documentMetadataOwner]*documentMetadataPendingHandoff,
+		)
+	}
+	handoff := coordinator.pendingHandoffs[successor]
+	if handoff == nil {
+		handoff = &documentMetadataPendingHandoff{
+			successor:  successor,
+			releaseSet: make(map[*documentMetadataOwner]bool),
+		}
+		coordinator.pendingHandoffs[successor] = handoff
+		coordinator.pendingHandoffOrder = append(
+			coordinator.pendingHandoffOrder,
+			handoff,
+		)
+	}
+	for _, owner := range outgoing {
+		if handoff.releaseSet[owner] {
+			continue
+		}
+		handoff.releaseSet[owner] = true
+		handoff.releases = append(handoff.releases, owner)
+		coordinator.removeRetainedDetachIntent(owner)
+	}
+}
+
+func (coordinator *documentMetadataCoordinator) removePendingHandoff(
+	successor *documentMetadataOwner,
+) {
+	handoff := coordinator.pendingHandoffs[successor]
+	if handoff == nil {
+		return
+	}
+	delete(coordinator.pendingHandoffs, successor)
+	for index, pending := range coordinator.pendingHandoffOrder {
+		if pending != handoff {
+			continue
+		}
+		copy(
+			coordinator.pendingHandoffOrder[index:],
+			coordinator.pendingHandoffOrder[index+1:],
+		)
+		last := len(coordinator.pendingHandoffOrder) - 1
+		coordinator.pendingHandoffOrder[last] = nil
+		coordinator.pendingHandoffOrder = coordinator.pendingHandoffOrder[:last]
+		return
+	}
+}
+
+func (coordinator *documentMetadataCoordinator) removeRetainedDetachIntent(
+	owner *documentMetadataOwner,
+) {
+	if !coordinator.retainedDetachSet[owner] {
+		return
+	}
+	delete(coordinator.retainedDetachSet, owner)
+	for index, retained := range coordinator.retainedDetachIntents {
+		if retained != owner {
+			continue
+		}
+		copy(
+			coordinator.retainedDetachIntents[index:],
+			coordinator.retainedDetachIntents[index+1:],
+		)
+		last := len(coordinator.retainedDetachIntents) - 1
+		coordinator.retainedDetachIntents[last] = nil
+		coordinator.retainedDetachIntents = coordinator.retainedDetachIntents[:last]
+		return
+	}
 }
 
 func resolveDocumentMetadataBoundary(
@@ -751,15 +912,21 @@ func (coordinator *documentMetadataCoordinator) snapshot() documentMetadataSnaps
 }
 
 func (coordinator *documentMetadataCoordinator) retainedReleaseCount() int {
-	count := len(coordinator.retainedDetachIntents)
-	for _, owners := range coordinator.retainedReleases {
-		for owner := range owners {
-			if !coordinator.retainedDetachSet[owner] {
-				count++
-			}
+	retained := make(map[*documentMetadataOwner]bool)
+	for _, owner := range coordinator.retainedDetachIntents {
+		retained[owner] = true
+	}
+	for _, handoff := range coordinator.pendingHandoffOrder {
+		for _, owner := range handoff.releases {
+			retained[owner] = true
 		}
 	}
-	return count
+	for _, owners := range coordinator.retainedReleases {
+		for owner := range owners {
+			retained[owner] = true
+		}
+	}
+	return len(retained)
 }
 
 func (coordinator *documentMetadataCoordinator) ownerIDs() []uint64 {
