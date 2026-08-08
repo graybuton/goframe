@@ -204,6 +204,117 @@ func TestDocumentMetadataPendingReplacementAbandonmentResolvesHandoff(t *testing
 	}
 }
 
+func TestDocumentMetadataFailedPublicationPreservesPendingOwnerPriority(t *testing.T) {
+	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
+	metadataA := documentMetadataValue{title: "A", description: "Description A"}
+	metadataB := documentMetadataValue{title: "B", description: "Description B"}
+	metadataC := documentMetadataValue{title: "C", description: "Description C"}
+	publicationFailure := errors.New("forced publication failure")
+	document := baseline
+	failPublication := false
+	var publications []documentMetadataValue
+	coordinator := newDocumentMetadataCoordinator(
+		baseline,
+		func(previous, next documentMetadataValue) error {
+			if document != previous {
+				t.Fatalf("publisher previous=%#v document=%#v", previous, document)
+			}
+			if failPublication {
+				return publicationFailure
+			}
+			document = next
+			publications = append(publications, next)
+			return nil
+		},
+		nil,
+	)
+	installDocumentMetadataCoordinator(coordinator)
+	t.Cleanup(uninstallDocumentMetadataCoordinator)
+
+	rendersA := 0
+	cleanupA := 0
+	ownerAComponent := testComponentInstance("OwnerA", func() Node {
+		rendersA++
+		useDocumentMetadata(metadataA)
+		UseUnmount(func() { cleanupA++ })
+		return Empty()
+	}, nil)
+	rendersB := 0
+	ownerBComponent := testComponentInstance("OwnerB", func() Node {
+		rendersB++
+		useDocumentMetadata(metadataB)
+		return Empty()
+	}, nil)
+	rendersC := 0
+	cleanupC := 0
+	ownerCComponent := testComponentInstance("OwnerC", func() Node {
+		rendersC++
+		useDocumentMetadata(metadataC)
+		UseUnmount(func() { cleanupC++ })
+		return Empty()
+	}, nil)
+
+	coordinator.beginUpdate()
+	renderComponentInstance(ownerAComponent)
+	coordinator.commitUpdate()
+	ownerA := documentMetadataOwnerAtStateSlot(ownerAComponent, 0)
+
+	failPublication = true
+	coordinator.beginUpdate()
+	renderComponentInstance(ownerBComponent)
+	renderComponentInstance(ownerCComponent)
+	deactivateComponent(ownerAComponent)
+	err := recoverDocumentMetadataError(t, coordinator.commitUpdate)
+	if !errors.Is(err, publicationFailure) {
+		t.Fatalf("multiple-owner publication error = %v", err)
+	}
+	ownerB := documentMetadataOwnerAtStateSlot(ownerBComponent, 0)
+	ownerC := documentMetadataOwnerAtStateSlot(ownerCComponent, 0)
+	assertDocumentMetadataSnapshot(t, coordinator, ownerA, metadataA, 1)
+	if document != metadataA || ownerB == nil || ownerB.id != 0 ||
+		ownerC == nil || ownerC.id != 0 || rendersA != 1 || rendersB != 1 ||
+		rendersC != 1 || cleanupA != 1 ||
+		coordinator.snapshot().retainedReleaseCount != 1 {
+		t.Fatalf("failed multiple-owner handoff: document=%#v A=%#v B=%#v C=%#v renders=%d/%d/%d cleanup A=%d snapshot=%#v",
+			document, ownerA, ownerB, ownerC, rendersA, rendersB, rendersC,
+			cleanupA, coordinator.snapshot())
+	}
+
+	failPublication = false
+	coordinator.beginUpdate()
+	deactivateComponent(ownerCComponent)
+	coordinator.commitUpdate()
+
+	assertDocumentMetadataSnapshot(t, coordinator, ownerA, metadataA, 1)
+	if document != metadataA || ownerA.state != documentMetadataOwnerActive ||
+		ownerB.id != 0 || ownerB.state != documentMetadataOwnerPending ||
+		ownerC.id != 0 || ownerC.state != documentMetadataOwnerReleased ||
+		rendersB != 1 || rendersC != 1 || cleanupA != 1 || cleanupC != 1 ||
+		coordinator.snapshot().retainedReleaseCount != 1 ||
+		coordinator.statistics.baselineRestorations != 0 ||
+		!reflect.DeepEqual(publications, []documentMetadataValue{metadataA}) {
+		t.Fatalf("selected pending owner abandonment: document=%#v A=%#v B=%#v C=%#v renders=%d/%d cleanups=%d/%d snapshot=%#v statistics=%#v publications=%#v",
+			document, ownerA, ownerB, ownerC, rendersB, rendersC, cleanupA, cleanupC,
+			coordinator.snapshot(), coordinator.statistics, publications)
+	}
+
+	coordinator.beginUpdate()
+	renderComponentInstance(ownerBComponent)
+	coordinator.commitUpdate()
+
+	assertDocumentMetadataSnapshot(t, coordinator, ownerB, metadataB, 1)
+	if document != metadataB || ownerA.state != documentMetadataOwnerReleased ||
+		ownerB.id != 2 || ownerB.state != documentMetadataOwnerActive ||
+		ownerC.id != 0 || ownerC.state != documentMetadataOwnerReleased ||
+		rendersB != 2 || rendersC != 1 || cleanupA != 1 || cleanupC != 1 ||
+		!reflect.DeepEqual(publications, []documentMetadataValue{metadataA, metadataB}) {
+		t.Fatalf("lower-priority successor retry: document=%#v A=%#v B=%#v C=%#v renders=%d/%d cleanups=%d/%d publications=%#v",
+			document, ownerA, ownerB, ownerC, rendersB, rendersC, cleanupA, cleanupC,
+			publications)
+	}
+	assertDocumentMetadataCoordinatorFinalized(t, coordinator)
+}
+
 func TestDocumentMetadataLifecycleDetachSurvivesPublicationFailure(t *testing.T) {
 	baseline := documentMetadataValue{title: "Authored", description: "Baseline"}
 	metadataA := documentMetadataValue{title: "A", description: "Description A"}
