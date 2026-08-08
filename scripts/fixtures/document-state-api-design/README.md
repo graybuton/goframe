@@ -18,10 +18,11 @@ TinyGo browser behavior. The build-tagged bridge is absent from ordinary
 applications and is not a fifth API candidate. The experiment uses the same
 mount, scheduling, dirty-update, focus, reconciliation, and effect-loop core as
 ordinary browser builds. Its build-tagged wrapper adds only the private
-document batch around that core. Standard Go also exercises direct keyed
-replacement failure before and after metadata participation, ownerless and
-nested-boundary recovery, boundary abandonment, publication failure with a
-durable ownership-plan retry, ordered multi-owner retry, partial readiness,
-pending-owner abandonment, cross-boundary finalization, newer boundary failure,
-and final release. Unrelated updates are checked not to consume unresolved
-plans. TinyGo exercises the successful path without a recover claim.
+document batch around that core. Standard Go exercises 22 scenarios, including
+direct keyed replacement failure, an unrelated update during unresolved
+handoff, reversed multi-owner retry order, partial readiness, additive and
+initial pending-owner abandonment and retry, cross-boundary finalization, newer
+boundary failure, and final release. Snapshots expose committed owner order and
+IDs, pending owner plans, finalization counts, batch state, exact observer and
+animation-frame sequences, and authored head-node identity. TinyGo exercises
+eight successful-path scenarios without a recover claim.

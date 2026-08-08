@@ -2,7 +2,8 @@
 
 ## Status
 
-Result B: document metadata ownership requires a bounded update-level handoff.
+Result B confirmed: a bounded document-specific application-update handoff is
+technically viable.
 
 This record establishes a private lifecycle mechanism, not a public document
 metadata API. The browser implementation and fixture bridge are available only
@@ -109,13 +110,13 @@ even when the metadata owner was rendered beneath an inner boundary. Outcome
 reporting occurs independently of whether a document participant was observed.
 
 During a direct keyed A-to-B replacement, outgoing component teardown still
-runs. If the final protected outcome fails, the document coordinator retains
-A's committed metadata owner and records its completed teardown as a detach
-intent. A successful retry consumes that intent and commits B. A successful
-ownerless retry releases A and reveals the next parent owner or authored
-baseline. Unmounting the failed boundary abandons the retained owner. This
-retention is specific to document ownership and does not preserve A's component
-lifetime.
+runs. If publication fails, the document coordinator retains A's committed
+metadata owner and records B plus A's completed release in one unresolved
+ownership plan. A successful B retry resolves that plan and commits B. A
+successful ownerless recovery releases A and reveals the next parent owner or
+authored baseline. Unmounting the failed boundary abandons the retained owner.
+This retention is specific to document ownership and does not preserve A's
+component lifetime.
 
 ## Candidate A
 
@@ -149,6 +150,57 @@ Candidate B was accepted because it observes both lifetimes and produces one
 final selected snapshot without an initialization render.
 
 ## Selected Model
+
+The final private coordinator owns:
+
+- the authored baseline pair;
+- an ordered list of committed owner records;
+- the current published pair and monotonically increasing committed owner IDs;
+- one active document-specific application-update batch;
+- failed-boundary state and retained committed-owner releases;
+- bounded unresolved ownership plans;
+- a failure-reporting pair publisher and an optional observer.
+
+Each unresolved ownership plan retains an ordered set of pending owners. Every
+pending entry keeps its latest metadata, resolved boundary scope, readiness,
+and abandonment state. A plan may additionally own outgoing committed releases
+and boundary recovery or abandonment authority. Pending-owner-only plans are
+valid: neither an outgoing release nor a finalization is required when failed
+publication leaves a mounted owner pending with ID zero.
+
+Publication failure does not change committed owners, IDs, selected metadata,
+or committed statistics. It closes the active batch and creates or extends the
+causal unresolved plan. An unrelated successful update does not consume that
+plan. A pending owner advances only when that owner publishes again or is
+abandoned by its real component lifetime. Readiness survives across updates,
+latest metadata replaces older pending metadata, and retry encounter order does
+not change the retained owner order.
+
+Outgoing releases and boundary finalization are consumed only by the plan that
+causally owns the retained committed owner. This authority can cross boundary
+scopes when an external or nested successor consumes that owner. A newer
+failure from the same boundary supersedes stale recovery authority. Final
+outer-boundary delegation, rather than intermediate boundary equality,
+determines the effective protected outcome.
+
+When every remaining pending owner is ready, or all pending owners are
+abandoned, the coordinator evaluates the plan against copies of committed
+state. It publishes at most one final title/description pair. Only successful
+publication commits owner order, metadata, IDs, releases, finalization state,
+statistics, and observer events. Resolved plans and their indexes are removed
+rather than retained as history.
+
+The publisher validates the complete operation plan before document side
+effects. Its browser adapter restores the previous pair when the second write
+fails and preserves publication plus restoration errors. Observer delivery
+occurs after publication, internal commit, and batch closure. An observer
+failure remains visible but does not roll back committed state or reactivate
+the batch.
+
+This model is document-specific. It does not make rendering, scheduling, or
+arbitrary lifecycle side effects transactional.
+
+## Historical Intermediate Model
 
 One coordinator owns:
 
@@ -202,7 +254,62 @@ The implementation rejects foreign owners, publication after release,
 duplicate release, release of an inactive owner, operations outside a batch,
 nested batches, and coordinator replacement during an active update.
 
-## Behavioral Evidence
+## Final Closeout Evidence
+
+Pure Go tests exercise 34 deterministic unresolved-ownership-plan matrix
+cells. The matrix passed 100 repetitions, 20 race-detector repetitions, and 20
+`goframe_debug` repetitions. It covers direct replacement, unrelated updates
+during a failed handoff, pending-owner abandonment, repeated publication
+failure, latest pending metadata, retained owner order, partial readiness, all
+six three-owner retry permutations, same-boundary and cross-boundary
+finalization, newer-failure supersession, pending-owner-only plans, teardown,
+and observer-after-commit ordering.
+
+The standard-Go/WASM browser lane ran 22 scenarios in ten fresh executions.
+All ten passed with normalized behavior SHA-256:
+
+```text
+e53dbd3fde3533e50d8087770d0de9207a7e6b8b3c7aec5a95a6916a500e52e5
+```
+
+The browser artifact was 2,863,166 raw bytes with SHA-256:
+
+```text
+364fca2b9b24f27fe26dc2c0b0242577384efa29fb9faf5b21c1b4e61a80fa10
+```
+
+The standard-Go scenarios establish exact direct `A -> B` handoff, no
+`A -> authored baseline -> B` interval, zero B rerenders and zero document
+publication during an unrelated update, deterministic retained priority under
+reversed retry order, readiness across separate updates, pending-owner
+abandonment and retry, external and cross-boundary finalization absorption,
+and newer boundary failure superseding stale recovery authority. Exact
+`MutationObserver` and animation-frame sequences contained no mixed
+title/description pair. Authored title and description node identities remained
+stable, completed batches were inactive, and completed scenarios retained no
+pending plan or finalization.
+
+The TinyGo `0.41.1` browser lane ran eight successful-path scenarios in ten
+fresh executions. All ten passed with normalized behavior SHA-256:
+
+```text
+f18688e83005a227759fe6a46077d9ee58cb422865ba05987807a4f1462febb0
+```
+
+The TinyGo artifact was 256,348 raw bytes with SHA-256:
+
+```text
+becb96acd49ab7a2c1208954d816f79a8693a4032cd67e6a40d774a74ef4eb08
+```
+
+TinyGo proves successful ownership paths only. It does not prove recover-based
+publication-failure or Error Boundary rollback.
+
+## Historical Intermediate Behavioral Evidence
+
+The following scenarios and measurements describe earlier coordinator
+revisions. They remain useful implementation history but are not the final
+closeout scenario count, hashes, or artifact sizes.
 
 The focused Chrome harness observes the authored nodes before WASM boot and
 uses `MutationObserver` plus deterministic animation-frame sampling.
@@ -294,11 +401,50 @@ runtime invariant panics are not converted into reports.
 
 Standard Go covers recover-based failed initial render, failed replacement,
 and retry. TinyGo `0.41.1` uses trap-style panic behavior, so its browser lane
-covers the complete successful activation, update, priority, replacement,
+covers successful activation, update, priority, replacement,
 release, remount, repeated-mount, and teardown path without claiming
 recover-based rollback.
 
-## Size And Reachability
+## Final Size And Reachability
+
+The evidence closeout compared
+`b465fc7e27dc14041608ca0624a9831d911f6b6e` with
+`912e51ac672751a3e7e560b9513bea7b6cc00589` at matched physical output paths.
+All eleven ordinary applications were byte-identical across raw, gzip,
+Brotli, and Zstandard streams. Both 44-stream manifests have SHA-256:
+
+```text
+e58e11d27bc46534243c36be823de21c9c60c9344dff0268847663568e3b340e
+```
+
+Across the full research branch, all 44 current absolute ceilings and every
+compression-ratio limit passed. No budget or ratio changed.
+
+Ordinary standard-Go and TinyGo source selection excludes the coordinator,
+experiment mount wrapper, and fixture bridge. Source-selection and artifact
+inspection found none of these experiment-only identifiers or classes:
+
+```text
+documentMetadataCoordinator
+DocumentMetadataHandoffExperiment
+goframe_document_state_experiment
+unresolved ownership-plan symbols
+fixture controls
+experiment telemetry
+```
+
+The focused fixture intentionally grew because the evidence closeout added
+seven browser scenarios and private telemetry. Standard Go grew by 118,323 raw
+bytes: 81,456 code-section bytes, 33,731 data-section bytes, and 2,977
+name-section bytes. TinyGo grew by 25,066 raw bytes: 20,673 code-section bytes,
+2,558 data-section bytes, and 1,684 name-section bytes. These focused-fixture
+deltas do not appear in ordinary application artifacts.
+
+## Historical Intermediate Size And Reachability
+
+The measurements below describe candidate selection and intermediate review
+closeouts. They are retained as historical evidence and are not the final
+closeout artifact sizes or hashes above.
 
 The experiment bridge and telemetry make the selected fixture an upper bound,
 not a proposed public API size. The candidate comparison below uses matched
@@ -354,8 +500,8 @@ new browser scenarios:
 
 Standard Go added 51,756 code-section bytes, 23,450 data-section bytes, and
 2,065 name-section bytes. TinyGo added 12,157 code-section bytes, 1,556
-data-section bytes, and 993 name-section bytes. The final raw SHA-256 values
-were `ccfabc4ffd964c97797c49fb834cbae8aa7e7185438efb1628787696e999eb1c`
+data-section bytes, and 993 name-section bytes. The intermediate raw SHA-256
+values were `ccfabc4ffd964c97797c49fb834cbae8aa7e7185438efb1628787696e999eb1c`
 for standard Go and `1f3e66103f5166b2194f27351e16891d5499261008bd9fb119bc39cdb580ba06`
 for TinyGo.
 
@@ -363,9 +509,10 @@ A nullable ordinary-build bridge retained 323-433 raw bytes in every measured
 TinyGo application. A no-op wrapper still retained 39 bytes. Keeping the
 participant in ordinary builds while tagging only its mount integration
 retained 41 bytes in the virtualized fixture through the generic lifecycle
-interface. The final source selection therefore excludes the complete
-coordinator, participant, bridge, and experiment update wrapper from ordinary
-JS/WASM builds. Ordinary and experiment builds now share `mount_common_js.go`,
+interface. That intermediate source-selection correction therefore excludes
+the coordinator, participant, bridge, and experiment update wrapper from
+ordinary JS/WASM builds. Ordinary and experiment builds now share
+`mount_common_js.go`,
 which contains mounted application state, scheduling, dirty flushing, focus
 handling, effect-loop handling, reconciliation, and repeated-`Mount`
 validation. Their build-tag-specific files contain only transaction-free or
@@ -382,14 +529,33 @@ and Zstandard output. `router-dashboard` and `resource`, the two ordinary
 fixtures that compile the Error Boundary path, each added seven raw code-section
 bytes with unchanged data and name sections. Their compressed deltas were
 respectively +7/-7/-19 and +3/+40/+3 bytes for gzip/Brotli/Zstandard. All 44
-current absolute cells and every ratio limit pass; no budget or ratio changed.
+absolute cells and every ratio limit passed at that intermediate closeout; no
+budget or ratio changed.
 Ordinary source selection and binary searches found no coordinator, experiment
 bridge, document batch wrapper, or experiment build-tag symbol.
+
+## Validation
+
+The final research head passed the Go `1.22.12`, `1.25.12`, and `1.26.5`
+ordinary and `goframe_debug` test lanes plus vet. The supported Go lanes passed
+the package and command race matrix. Artifact, module-path, documentation,
+actionlint, extension, size, and aggregate Browser Smoke gates passed. Two
+fresh aggregate Browser Smoke executions passed under Go `1.26.5`, Node
+`24.18.1`, TinyGo `0.41.1`, and Chrome.
+
+Windows host evidence belongs to the existing Core `windows-latest` lane,
+which runs formatting, ordinary tests, vet, `goframe_debug` tests, and selected
+GOX golden tests. Browser-only `js && wasm` main packages are not a local
+Windows all-package build contract.
 
 ## Limitations
 
 - The accepted mechanism is experiment-tagged. This stage establishes the
   lifecycle boundary but does not ship a document metadata feature.
+- Result B does not select the hook, non-DOM component, or owner-handle API
+  shape and does not authorize a release or compatibility guarantee.
+- TinyGo evidence covers successful ownership paths only. It does not establish
+  recover-based publication failure or Error Boundary rollback.
 - The fixture bridge is exported only so a separate `main` package can exercise
   private runtime behavior in a real browser. Those names are absent from
   ordinary builds and are not compatibility candidates.
@@ -408,11 +574,11 @@ bridge, document batch wrapper, or experiment build-tag symbol.
 
 ## Decision Boundary
 
-Result B supersedes only the lifecycle blocker identified by Result D. A later
-API-shape comparison may reevaluate the implicit hook, non-DOM component, and
-explicit owner-handle shapes against this foundation. It must still measure
-call-site semantics, misuse resistance, generated GOX ergonomics, ordinary
-build reachability, and browser behavior before selecting any public API.
+Result B confirms only the private lifecycle foundation identified as missing
+by Result D. Result D remains the current API-shape decision for the implicit
+hook, non-DOM component, and explicit owner-handle candidates: none is
+selected. This evidence assigns no public stability tier, compatibility
+guarantee, or release authorization.
 
 This research is independent of Issue #117. It uses neither the evaluator
 workspace nor unpublished evaluator submissions and makes no conclusion about
