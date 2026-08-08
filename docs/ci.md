@@ -160,6 +160,25 @@ identity, and balanced listener cleanup. A TinyGo `0.41.1` lane verifies the
 successful state, reducer, resource, and cleanup path. It does not intentionally
 panic or claim recover-based rollback under TinyGo's trap-style panic mode.
 
+Pure Go document-state tests include a deterministic 34-cell unresolved
+ownership-plan matrix. It covers retained owner order, readiness across
+updates, latest pending metadata, pending-owner abandonment, pending-owner-only
+plans, all six three-owner retry permutations, same-boundary and cross-boundary
+finalization, newer-failure supersession, teardown, and observer-after-commit
+ordering.
+
+The private document-state handoff fixture runs through an experiment-only
+build tag under standard Go/WASM and TinyGo. Standard Go/WASM covers
+publication failure and recover-based Error Boundary paths, including direct
+replacement, unrelated updates during unresolved handoff, reversed retry
+order, partial readiness, additive and initial pending-owner abandonment,
+cross-boundary finalization, and newer boundary failure. TinyGo/WASM covers
+successful ownership paths only; it does not claim recover-based publication
+failure or Error Boundary rollback. The focused fixture checks committed owner
+order and IDs, pending plans, finalization state, exact `MutationObserver` and
+animation-frame sequences, mixed-pair absence, and stable authored head-node
+identity.
+
 The runtime error containment fixture, Error Boundary fixture, context selector
 topology fixture, and router-dashboard reference-app smoke are compiled with
 the Go WASM compiler where recover-based render containment is being asserted.

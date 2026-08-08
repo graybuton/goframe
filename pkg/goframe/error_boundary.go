@@ -77,6 +77,7 @@ func ensureErrorBoundaryState(instance *componentInstance) *errorBoundaryState {
 		instance.errorBoundary = state
 		instance.unmountSlots = append(instance.unmountSlots, func() {
 			state.teardown.release()
+			reportProtectedSubtreeAbandon(state)
 		})
 	}
 	return instance.errorBoundary

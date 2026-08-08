@@ -2,7 +2,8 @@
 
 ## Status
 
-Corrected - Result D: no implementation candidate selected.
+Corrected - Result D: no implementation candidate selected. The three-shape
+comparison recorded by PR #122 remains valid.
 
 The hook, non-DOM component, and owner-handle prototypes satisfy the focused
 coordinator and wrapper-lifecycle contract. After owner creation was moved out
@@ -12,6 +13,13 @@ temporarily restored the authored baseline during ordinary route changes.
 
 No public API is added by this branch. The previous Component Candidate result
 and its measurements are superseded by this record.
+
+Separate lifecycle research now confirms Result B for a private, build-tagged
+bounded application-update handoff that removes the baseline interval. Result
+B resolves this record's lifecycle-foundation blocker, but it does not select
+one of these public API shapes or authorize a release or compatibility
+guarantee. See
+[transactional document-state handoff](document-state-transactional-handoff.md).
 
 ## Context
 
@@ -616,18 +624,24 @@ owner-handoff counters.
 
 ## Decision
 
-Result D is selected: no implementation candidate.
+Result D remains selected for the API-shape comparison: no implementation
+candidate.
 
 The component remains the clearest call-site shape and the narrowest integrated
-patch, but that relative lead does not override the shared lifecycle
-regression. A component, hook, or handle API should not be selected until
-committed owner activation can hand off between component lifetimes without an
-observable authored-baseline interval and without moving owner creation back
-into render.
+patch. The private Result B foundation now hands ownership between component
+lifetimes without an authored-baseline interval and without moving owner
+creation back into render. The hook, component, and handle candidates have not
+been reevaluated against that foundation, so this evidence does not select
+among them.
 
-No proposed public spelling or stability tier is assigned. If a later design
-produces a viable candidate, it remains an Experimental Frontier question, not
-a Public-Candidate or compatibility promise.
+No proposed public spelling or stability tier is assigned. The unresolved API
+shape remains an Experimental Frontier question, not a Public-Candidate or
+compatibility promise.
+
+The transactional-handoff research demonstrates that a private bounded
+application-update batch can coordinate outgoing cleanup with incoming
+publication. Result D remains the API-shape decision: the public
+hook/component/handle question is unresolved and outside Result B.
 
 ## Rejected Alternatives
 
@@ -655,6 +669,9 @@ gf.UseOwnedDocumentMetadata
 ```
 
 No production implementation is authorized by this record.
+
+The private Result B foundation does not assign compatibility guarantees or
+authorize a public release.
 
 ## Remaining Limits
 
