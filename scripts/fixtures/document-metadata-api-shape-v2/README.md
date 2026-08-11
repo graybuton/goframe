@@ -18,3 +18,12 @@ The harness generates `projections.gox` inside a temporary workspace, then
 builds with `goframe_document_state_experiment`. Nothing in this directory is a
 public API or compatibility promise, and the experiment tag remains absent from
 ordinary builds.
+
+Ten accepted standard-Go runs produced combined behavior SHA-256
+`c1651f9bbb1a870432dc369eeef1eef948bff42f8ff672356edbe0dbd1b3a4dc`.
+Ten accepted TinyGo successful-path runs produced combined behavior SHA-256
+`69e153d6abc68edf47f04a5cee9a2d7e4eec7a95d9a74e76adcea27dbd3a9d05`.
+The comparison retains API-shape Result D: all three candidates satisfy the
+transactional lifecycle gates, but no public shape has a material
+evidence-backed advantage. The complete decision and size record is in the
+[transactional API-shape reevaluation](../../../docs/document-metadata-api-shape-reevaluation.md).

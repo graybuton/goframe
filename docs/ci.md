@@ -179,6 +179,25 @@ order and IDs, pending plans, finalization state, exact `MutationObserver` and
 animation-frame sequences, mixed-pair absence, and stable authored head-node
 identity.
 
+The private transactional API-shape fixture projects a direct foundation
+control, implicit hook, non-DOM component, and explicit owner handle onto that
+same merged coordinator. Standard Go/WASM runs 22 shared scenarios per mode,
+including failed initial render, failed replacement, publication failure,
+recovery, teardown, and repeated `Mount`. TinyGo/WASM runs the eight shared
+successful-path scenarios without a recover claim. Candidate-specific paths
+verify ordered hook slots and component-boundary conditional ownership,
+component prop updates with no wrapper DOM or child-identity loss, and handle
+forwarding, duplicate coalescing, conflict rejection, update, and release.
+The harness records exact document, `MutationObserver`, and animation-frame
+sequences plus render and cleanup counts, token and owner IDs, owner order,
+pending plans, finalizations, batch state, baseline restorations, runtime
+errors, and authored head-node identity. Its generated GOX projection is built
+as part of each focused browser run.
+
+Experiment-tagged pure Go tests separately establish first-render publication,
+failed-render isolation, direct replacement, update and release behavior, and
+the candidate-specific misuse contracts against actual lifecycle helpers.
+
 The runtime error containment fixture, Error Boundary fixture, context selector
 topology fixture, and router-dashboard reference-app smoke are compiled with
 the Go WASM compiler where recover-based render containment is being asserted.
