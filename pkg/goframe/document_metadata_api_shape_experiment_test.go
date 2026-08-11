@@ -3,6 +3,7 @@
 package goframe
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -539,6 +540,64 @@ func TestDocumentMetadataAPIShapeHandleDoesNotTransferPrimary(t *testing.T) {
 	assertDocumentMetadataAPIShapeSnapshot(t, coordinator, baseline, 0)
 }
 
+func TestDocumentMetadataAPIShapeHandleRetriesPublicationFailure(t *testing.T) {
+	baseline := documentMetadataAPIShapeTestValue{"Authored", "Baseline"}
+	valueA := documentMetadataAPIShapeTestValue{"A", "Description A"}
+	valueB := documentMetadataAPIShapeTestValue{"B", "Description B"}
+	publications := make([]documentMetadataValue, 0, 2)
+	failNext := false
+	coordinator := newDocumentMetadataCoordinator(
+		baseline.private(),
+		func(_ documentMetadataValue, next documentMetadataValue) error {
+			if failNext {
+				failNext = false
+				return errors.New("forced publication failure")
+			}
+			publications = append(publications, next)
+			return nil
+		},
+		nil,
+	)
+	installDocumentMetadataCoordinator(coordinator)
+	t.Cleanup(uninstallDocumentMetadataCoordinator)
+
+	value := valueA.public()
+	var handle *DocumentMetadataOwner
+	instance := testComponentInstance("RetryHandlePublication", func() Node {
+		handle = UseDocumentMetadataOwner()
+		UseOwnedDocumentMetadata(handle, value)
+		return Empty()
+	}, nil)
+
+	coordinator.beginUpdate()
+	renderComponentInstance(instance)
+	coordinator.commitUpdate()
+	assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueA, 1)
+
+	value = valueB.public()
+	failNext = true
+	coordinator.beginUpdate()
+	renderComponentInstance(instance)
+	if recovered := captureDocumentMetadataAPIShapePanic(coordinator.commitUpdate); recovered == nil {
+		t.Fatal("publication failure did not panic")
+	}
+	assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueA, 1)
+	if handle.ID() != 1 || len(publications) != 1 {
+		t.Fatalf("failed publication handle ID=%d publications=%#v", handle.ID(), publications)
+	}
+
+	coordinator.beginUpdate()
+	renderComponentInstance(instance)
+	coordinator.commitUpdate()
+	assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueB, 1)
+	if handle.ID() != 1 || !reflect.DeepEqual(publications, []documentMetadataValue{
+		valueA.private(),
+		valueB.private(),
+	}) {
+		t.Fatalf("retry handle ID=%d publications=%#v", handle.ID(), publications)
+	}
+}
+
 type documentMetadataAPIShapeTestValue struct {
 	title       string
 	description string
@@ -594,4 +653,12 @@ func useOwnedDocumentMetadataAPIShapeTestHelper(
 	metadata DocumentMetadata,
 ) {
 	UseOwnedDocumentMetadata(owner, metadata)
+}
+
+func captureDocumentMetadataAPIShapePanic(operation func()) (recovered any) {
+	defer func() {
+		recovered = recover()
+	}()
+	operation()
+	return nil
 }

@@ -355,6 +355,13 @@ func (owner *DocumentMetadataOwner) commitPublication(
 
 	publication.metadata = pending.metadata
 	if previousMetadata == pending.metadata {
+		if owner.primary == publication {
+			owner.owner.owner.coordinator.stagePublishForBoundary(
+				owner.owner.owner,
+				pending.metadata,
+				pending.boundary,
+			)
+		}
 		return
 	}
 	owner.metadata = pending.metadata
