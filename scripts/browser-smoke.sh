@@ -516,6 +516,18 @@ GOFRAME_DOCUMENT_HANDOFF_COMPILER=tinygo \
 	node --experimental-websocket scripts/document-state-transactional-handoff-browser-smoke.mjs
 
 echo
+echo "== Transactional document metadata API shapes (standard Go) =="
+GOFRAME_DOCUMENT_API_SHAPE_COMPILER=go \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/document-metadata-api-shape-v2-browser-smoke.mjs
+
+echo
+echo "== Transactional document metadata API shapes (TinyGo) =="
+GOFRAME_DOCUMENT_API_SHAPE_COMPILER=tinygo \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/document-metadata-api-shape-v2-browser-smoke.mjs
+
+echo
 echo "== Restore Todo production bundle =="
 "$GOXC" package ./examples/todo --compiler=tinygo
 "$GOXC" package ./examples/dashboard --compiler=tinygo

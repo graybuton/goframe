@@ -1,0 +1,18 @@
+package main
+
+import (
+	gf "github.com/graybuton/goframe/pkg/goframe"
+	"github.com/graybuton/goframe/scripts/fixtures/document-metadata-api-shape-v2/internal/sizefixture"
+)
+
+func main() {
+	sizefixture.Run(renderMetadataComponent)
+}
+
+func renderMetadataComponent() gf.Node {
+	return (
+		<gf.DocumentMetadataComponent Metadata={sizefixture.Metadata()}>
+			{sizefixture.Content()}
+		</gf.DocumentMetadataComponent>
+	)
+}

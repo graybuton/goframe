@@ -1,0 +1,6 @@
+{
+  "name": "document-metadata-api-shape-v2",
+  "entry": "./cmd/app",
+  "compiler": "tinygo",
+  "assets": "./assets"
+}

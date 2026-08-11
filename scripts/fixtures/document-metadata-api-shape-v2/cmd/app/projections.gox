@@ -1,0 +1,94 @@
+package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+type candidateProjectionProps struct {
+	Metadata metadata
+	Children []gf.Node
+}
+
+func renderCandidateOwnerProjection(
+	mode string,
+	value metadata,
+	children []gf.Node,
+) gf.Node {
+	props := candidateProjectionProps{
+		Metadata: value,
+		Children: children,
+	}
+	switch mode {
+	case "control":
+		return controlOwnerProjection(props)
+	case "hook":
+		return hookOwnerProjection(props)
+	case "component":
+		return componentOwnerProjection(props)
+	case "handle":
+		return handleOwnerProjection(props)
+	default:
+		panic("document metadata API shape fixture: unknown mode " + mode)
+	}
+}
+
+func controlOwnerProjection(props candidateProjectionProps) gf.Node {
+	gf.UseDocumentMetadataHandoffExperiment(props.Metadata)
+	return gf.Fragment(props.Children...)
+}
+
+func hookOwnerProjection(props candidateProjectionProps) gf.Node {
+	gf.UseDocumentMetadata(apiShapeMetadata(props.Metadata))
+	return gf.Fragment(props.Children...)
+}
+
+func componentOwnerProjection(props candidateProjectionProps) gf.Node {
+	return (
+		<gf.DocumentMetadataComponent Metadata={apiShapeMetadata(props.Metadata)}>
+			{gf.Fragment(props.Children...)}
+		</gf.DocumentMetadataComponent>
+	)
+}
+
+func handleOwnerProjection(props candidateProjectionProps) gf.Node {
+	owner := gf.UseDocumentMetadataOwner()
+	publishOwnedMetadata(owner, apiShapeMetadata(props.Metadata))
+	return gf.Fragment(props.Children...)
+}
+
+func publishOwnedMetadata(
+	owner *gf.DocumentMetadataOwner,
+	value gf.DocumentMetadata,
+) {
+	gf.UseOwnedDocumentMetadata(owner, value)
+}
+
+func apiShapeMetadata(value metadata) gf.DocumentMetadata {
+	return gf.DocumentMetadata{
+		Title:       value.Title,
+		Description: value.Description,
+	}
+}
+
+func renderHookSlotsProjection(props hookSlotsProps) gf.Node {
+	gf.UseDocumentMetadata(apiShapeMetadata(props.first))
+	gf.UseDocumentMetadata(apiShapeMetadata(metadataB()))
+	return (
+		<span data-testid="hook-slot-content">two hook slots</span>
+	)
+}
+
+func renderComponentContractProjection(props componentContractProps) gf.Node {
+	return (
+		<gf.DocumentMetadataComponent Metadata={apiShapeMetadata(props.value)}>
+			{gf.Fragment(props.children...)}
+		</gf.DocumentMetadataComponent>
+	)
+}
+
+func renderHandlePublicationProjection(props handlePublicationProps) gf.Node {
+	publishOwnedMetadata(props.owner, apiShapeMetadata(props.value))
+	return (
+		<span data-testid={props.testID}>
+			{gf.Fragment(props.children...)}
+		</span>
+	)
+}
