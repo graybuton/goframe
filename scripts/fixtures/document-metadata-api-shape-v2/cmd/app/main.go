@@ -181,6 +181,10 @@ var (
 		"fixture.document-metadata-api-shape-v2.ComponentProjection",
 		"DocumentMetadataAPIShapeComponentProjection",
 	)
+	componentFailureType = gf.NewComponentType(
+		"fixture.document-metadata-api-shape-v2.ComponentFailure",
+		"DocumentMetadataAPIShapeComponentFailure",
+	)
 	handleContractType = gf.NewComponentType(
 		"fixture.document-metadata-api-shape-v2.HandleContract",
 		"DocumentMetadataAPIShapeHandleContract",
@@ -1066,14 +1070,32 @@ func renderOwner(props ownerProps) gf.Node {
 	if props.failureBefore {
 		panic("document-state handoff fixture: forced owner render failure before metadata")
 	}
-	children := renderCandidateOwnerProjection(activeCandidateMode, props.metadata, props.children)
+	projectionChildren := props.children
+	failedInsideComponent := activeCandidateMode == "component" && props.failureAfter
+	if failedInsideComponent {
+		projectionChildren = append(
+			append([]gf.Node(nil), projectionChildren...),
+			componentFailureNode(props.role),
+		)
+	}
+	children := renderCandidateOwnerProjection(
+		activeCandidateMode,
+		props.metadata,
+		projectionChildren,
+	)
 	gf.UseUnmount(func() {
 		recordOwnerCleanup(props.role)
 	})
-	if props.failureAfter {
+	if props.failureAfter && !failedInsideComponent {
 		panic("document-state handoff fixture: forced owner render failure")
 	}
 	return children
+}
+
+func componentFailureNode(role string) gf.Node {
+	return gf.ComponentT(componentFailureType, role, func(string) gf.Node {
+		panic("document-state handoff fixture: forced owner render failure")
+	})
 }
 
 func ownerNode(

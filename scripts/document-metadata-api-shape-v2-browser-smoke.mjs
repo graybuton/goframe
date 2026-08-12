@@ -418,10 +418,7 @@ async function runFailedInitial() {
     const rolledBack = state.runtime.ownershipEvents.some(
         (event) => event.kind === "publish-rolled-back",
     );
-    assert(
-        activeMode === "component" ? !rolledBack : rolledBack,
-        "failed initial candidate participation evidence",
-    );
+    assert(rolledBack, "failed initial candidate participation evidence");
     assertNoInvalidPairs(state, "failed initial owner");
     return resultSummary(state, [baseline]);
 }
@@ -455,10 +452,7 @@ async function runFailedReplacementAndRetry() {
         Number(event.ownerID) === 0 &&
         pairEqual(pairFromState(event), metadataB)
     );
-    assert(
-        activeMode === "component" ? !failedPublication : failedPublication,
-        "failed replacement candidate participation evidence",
-    );
+    assert(failedPublication, "failed replacement candidate participation evidence");
     assert(
         failedEvents.filter((event) => event.kind === "owner-committed").length === 0,
         "failed replacement committed owner B",
