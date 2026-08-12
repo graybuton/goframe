@@ -598,6 +598,172 @@ func TestDocumentMetadataAPIShapeHandleRetriesPublicationFailure(t *testing.T) {
 	}
 }
 
+func TestDocumentMetadataAPIShapeConditionalOwnershipRemount(t *testing.T) {
+	baseline := documentMetadataAPIShapeTestValue{"Authored", "Baseline"}
+	valueA := documentMetadataAPIShapeTestValue{"A", "Description A"}
+
+	t.Run("hook", func(t *testing.T) {
+		coordinator, _ := installDocumentMetadataAPIShapeTestCoordinator(t, baseline)
+		host := testComponentInstance("ConditionalHookHost", func() Node {
+			return Empty()
+		}, nil)
+		newOwner := func() *componentInstance {
+			return testComponentInstanceWithParent(
+				"ConditionalHookOwner",
+				host,
+				func() Node {
+					UseDocumentMetadata(valueA.public())
+					return Empty()
+				},
+			)
+		}
+		owner := newOwner()
+
+		coordinator.beginUpdate()
+		renderComponentInstance(host)
+		renderComponentInstance(owner)
+		coordinator.commitUpdate()
+		firstID := coordinator.snapshot().owner.id
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueA, 1)
+
+		coordinator.beginUpdate()
+		deactivateComponent(owner)
+		renderComponentInstance(host)
+		coordinator.commitUpdate()
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, baseline, 0)
+
+		coordinator.beginUpdate()
+		renderComponentInstance(host)
+		renderComponentInstance(newOwner())
+		coordinator.commitUpdate()
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueA, 1)
+		if coordinator.snapshot().owner.id <= firstID {
+			t.Fatalf("hook remount owner ID = %d, want greater than %d", coordinator.snapshot().owner.id, firstID)
+		}
+	})
+
+	t.Run("component", func(t *testing.T) {
+		coordinator, _ := installDocumentMetadataAPIShapeTestCoordinator(t, baseline)
+		host := testComponentInstance("ConditionalComponentHost", func() Node {
+			return Empty()
+		}, nil)
+		newOwner := func() *componentInstance {
+			return testComponentInstanceWithParent(
+				"ConditionalMetadataComponent",
+				host,
+				func() Node {
+					return DocumentMetadataComponent(DocumentMetadataComponentProps{
+						Metadata: valueA.public(),
+					})
+				},
+			)
+		}
+		owner := newOwner()
+
+		coordinator.beginUpdate()
+		renderComponentInstance(host)
+		renderComponentInstance(owner)
+		coordinator.commitUpdate()
+		firstID := coordinator.snapshot().owner.id
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueA, 1)
+
+		coordinator.beginUpdate()
+		deactivateComponent(owner)
+		renderComponentInstance(host)
+		coordinator.commitUpdate()
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, baseline, 0)
+
+		coordinator.beginUpdate()
+		renderComponentInstance(host)
+		renderComponentInstance(newOwner())
+		coordinator.commitUpdate()
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueA, 1)
+		if coordinator.snapshot().owner.id <= firstID {
+			t.Fatalf("component remount owner ID = %d, want greater than %d", coordinator.snapshot().owner.id, firstID)
+		}
+	})
+
+	t.Run("handle", func(t *testing.T) {
+		coordinator, publications := installDocumentMetadataAPIShapeTestCoordinator(t, baseline)
+		var handle *DocumentMetadataOwner
+		host := testComponentInstance("StableHandleHost", func() Node {
+			current := UseDocumentMetadataOwner()
+			if handle != nil && current != handle {
+				panic("document metadata API shape test: stable handle changed")
+			}
+			handle = current
+			return Empty()
+		}, nil)
+		newPublication := func() *componentInstance {
+			return testComponentInstanceWithParent(
+				"ConditionalHandlePublication",
+				host,
+				func() Node {
+					UseOwnedDocumentMetadata(handle, valueA.public())
+					return Empty()
+				},
+			)
+		}
+		publication := newPublication()
+
+		coordinator.beginUpdate()
+		renderComponentInstance(host)
+		renderComponentInstance(publication)
+		coordinator.commitUpdate()
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, valueA, 1)
+
+		coordinator.beginUpdate()
+		deactivateComponent(publication)
+		coordinator.commitUpdate()
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, baseline, 0)
+		if handle.ActivePublications() != 0 || handle.ID() != 1 {
+			t.Fatalf("released handle ID=%d publications=%d, want ID=1 publications=0", handle.ID(), handle.ActivePublications())
+		}
+
+		// The experiment intentionally preserves this released-handle limitation
+		// instead of extending the candidate with owner renewal or resurrection.
+		releasedHandle := handle
+		beforeStatistics := coordinator.statistics
+		beforePublications := len(*publications)
+		beforeNextID := coordinator.nextID
+		coordinator.beginUpdate()
+		recovered := captureDocumentMetadataAPIShapePanic(func() {
+			renderComponentInstance(host)
+		})
+		coordinator.discardUpdate()
+		if recovered != "goframe: document metadata owner is already released" {
+			t.Fatalf("stable handle reuse panic = %v, want released-owner diagnostic", recovered)
+		}
+		if handle != releasedHandle {
+			t.Fatal("released stable handle object changed")
+		}
+		if handle.ActivePublications() != 0 || handle.ID() != 1 {
+			t.Fatalf("rejected reuse handle ID=%d publications=%d, want ID=1 publications=0", handle.ID(), handle.ActivePublications())
+		}
+		assertDocumentMetadataAPIShapeSnapshot(t, coordinator, baseline, 0)
+		if coordinator.nextID != beforeNextID ||
+			!reflect.DeepEqual(coordinator.statistics, beforeStatistics) ||
+			len(*publications) != beforePublications ||
+			len(coordinator.owners) != 0 ||
+			len(coordinator.pendingHandoffs) != 0 ||
+			len(coordinator.pendingHandoffOrder) != 0 ||
+			len(coordinator.pendingFinalizations) != 0 ||
+			len(coordinator.pendingFinalizationOrder) != 0 {
+			t.Fatalf(
+				"rejected reuse mutated coordinator: nextID=%d statistics=%#v publications=%#v owners=%#v plans=%#v planOrder=%#v finalizations=%#v finalizationOrder=%#v",
+				coordinator.nextID,
+				coordinator.statistics,
+				*publications,
+				coordinator.owners,
+				coordinator.pendingHandoffs,
+				coordinator.pendingHandoffOrder,
+				coordinator.pendingFinalizations,
+				coordinator.pendingFinalizationOrder,
+			)
+		}
+	})
+}
+
 type documentMetadataAPIShapeTestValue struct {
 	title       string
 	description string
