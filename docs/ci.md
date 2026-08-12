@@ -188,13 +188,16 @@ replacement, publication failure, recovery, teardown, and repeated `Mount`.
 TinyGo/WASM runs the eight shared successful-path scenarios without a recover
 claim. Candidate-specific paths verify ordered hook slots and
 component-boundary conditional ownership, component prop updates with no
-wrapper DOM or child-identity loss, and handle forwarding, duplicate
-coalescing, conflict rejection, update, and release. The focused harness
-records exact document, `MutationObserver`, and animation-frame sequences plus
-render and cleanup counts, token and owner IDs, owner order, pending plans,
-finalizations, batch state, baseline restorations, runtime errors, and authored
-head-node identity. Its generated GOX projection is built as part of each
-focused run.
+wrapper DOM or child-identity loss, real component publication rollback after a
+descendant fails inside the mounted component subtree, and handle forwarding,
+duplicate coalescing, conflict rejection, update, and release. The focused
+harness records exact document, `MutationObserver`, and animation-frame
+sequences plus render and cleanup counts, token and owner IDs, owner order,
+pending plans, finalizations, batch state, baseline restorations, runtime
+errors, and authored head-node identity. Its generated GOX projection is built
+as part of each focused run. Pending CDP calls fail deterministically when the
+focused harness WebSocket closes, errors, or rejects a send; the harness adds
+no run-level retry.
 
 Experiment-tagged pure Go tests separately establish first-render publication,
 failed-render isolation, direct replacement, update and release behavior, and

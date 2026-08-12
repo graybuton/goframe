@@ -205,12 +205,12 @@ combined behavior hashes:
 | --- | --- |
 | control | `e53dbd3fde3533e50d8087770d0de9207a7e6b8b3c7aec5a95a6916a500e52e5` |
 | hook | `13301feeea702981b8003df3228d80259a02cd1031f6b1711915a5058243ce6c` |
-| component | `35dc6f4ba1c661581605d5b2b1ccf2820b49ee3a3f68276a34c4573633665d9c` |
+| component | `6b592bf9c90cf262edda061612d3428ae74d54946b9a0b8708032d6aff80121c` |
 | handle | `ddc6db4b999ecb611167ff8eb9fdb31fdfdc18e7e5949e2d8309aad0c78ce00d` |
-| combined | `c1651f9bbb1a870432dc369eeef1eef948bff42f8ff672356edbe0dbd1b3a4dc` |
+| combined | `fba6c1d9d3df2c5b6d361be35aaa369f2f01e8ebac49536bcf41a80f7328f6ee` |
 
-The shared standard-Go comparison artifact is 2,977,607 raw bytes with
-SHA-256 `f0bde42ee4e8c45f3f61637493719705b2b0e8ed827163446207f6b1c4a622bd`.
+The shared standard-Go comparison artifact is 2,979,773 raw bytes with
+SHA-256 `33f5e060bdc3088c72557da047272b89c23f56b90862abc5ae384d1a99e19529`.
 Generated GOX is stable at SHA-256
 `d927def1df878d39030491037f7972dbaff2507ab44e74c9df8e1d92c02def99`.
 
@@ -220,6 +220,16 @@ zero times. Failed initial render assigns zero tokens and IDs and performs zero
 document publications. Completed scenarios leave an inactive batch, no
 pending ownership plan, no pending finalization, stable authored head nodes,
 and no mixed metadata pair.
+
+The corrected component failure path mounts `DocumentMetadataComponent`,
+stages its speculative metadata publication, and then fails in a descendant
+inside that component subtree. Failed initial render now records the rolled
+back publication while committing zero tokens, owner IDs, or document writes.
+Failed replacement rolls back the speculative B publication, keeps A selected,
+and retries with a fresh B component to commit exact `A -> B`; A releases once
+and no authored-baseline interval appears. This makes the component's failure
+evidence equivalent to the hook and control foundation boundary rather than
+inferring rollback from non-participation.
 
 Ten accepted TinyGo 0.41.1 executions produced identical successful-path
 hashes:
@@ -232,21 +242,28 @@ hashes:
 | handle | `00f26a44f08c7c3fbe9b06a3d88e22601921b8d040428f3b97be42fcad400e68` |
 | combined | `69e153d6abc68edf47f04a5cee9a2d7e4eec7a95d9a74e76adcea27dbd3a9d05` |
 
-The shared TinyGo artifact is 283,374 raw bytes with SHA-256
-`4764e23a022022273e89a91cc804797d5fb08e6d559251f81e95c878be89b9ee`.
+The shared TinyGo artifact is 283,739 raw bytes with SHA-256
+`04f1d83a6f73d532b4d95b4b652ed8df4fe5c69e741630d4aaaa263c4e449451`.
 TinyGo executes eight shared successful-path scenarios and the successful
 candidate-specific contracts. It does not intentionally panic and does not
 establish recover-based publication-failure or Error Boundary rollback.
 
-One additional standard-Go attempt and one additional TinyGo attempt loaded
-the authored page but did not initialize the WASM application. Neither attempt
-changed application or document state, and neither is counted among the ten
-accepted executions.
+All ten corrected standard-Go attempts passed. The TinyGo closeout required
+eleven attempts: one pre-WASM startup attempt loaded the authored page but did
+not initialize the application, changed no application or document state, and
+was preserved as a failed attempt; the other ten passed with identical hashes.
 
 The comparison harness remains focused reproducible research evidence. It is
 not invoked by `scripts/browser-smoke.sh`; the merged transactional ownership
 foundation retains its separate standard-Go and TinyGo aggregate lanes. No
 generic retry hides application, runtime, or scenario failures.
+
+The focused harness CDP client also treats the first WebSocket close, error, or
+send failure as terminal. It rejects and clears every pending call with one
+deterministic harness error, rejects future calls immediately, ignores late
+responses, and keeps close idempotent. This is harness-lifecycle reliability;
+it does not add a scenario retry or make the focused comparison an aggregate
+Browser Smoke gate.
 
 ## Candidate-Specific Evidence
 
@@ -303,7 +320,10 @@ path and scenario UI; deltas are relative to the direct foundation control.
 | handle | 161,534 | 70,407 | 59,453 | 63,186 | 122,751 | 29,203 | 8,042 | +7,429 |
 
 Size favors the hook, but the differences do not resolve the ownership and
-composition tradeoffs by themselves.
+composition tradeoffs by themselves. The corrected nested component failure
+increased only the shared focused fixture: standard Go grew by 2,166 raw bytes
+and TinyGo by 365 raw bytes. Rerunning the candidate-only measurement produced
+the byte-identical matrix above, so no candidate-only size comparison changed.
 
 ## Ordinary-Build Isolation
 

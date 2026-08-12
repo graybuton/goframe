@@ -20,6 +20,14 @@ the
 for the executable call sites, browser hashes, hard-gate matrix, candidate-only
 sizes, and current decision.
 
+The final component evidence mounts the real non-DOM component, stages its
+metadata publication, and fails in a descendant inside its subtree. Failed
+initial render rolls that publication back without a committed token, owner ID,
+or document write. Failed replacement retains A, and retry with a fresh B
+component commits exact `A -> B`. The focused CDP client rejects pending and
+future calls deterministically when its socket terminates; no browser retry is
+part of that correction.
+
 No public API, release authorization, stability tier, or compatibility
 guarantee is added by this research.
 
@@ -634,9 +642,10 @@ API-shape Result D remains selected: no implementation candidate.
 The transactional reevaluation removes the historical shared initialization
 blocker and proves that hook and component projections can publish from their
 first successful render, replace A directly with B, preserve failed-render
-isolation, and remount conditional ownership while the composition host
-remains mounted. The result therefore rests on candidate-specific tradeoffs
-rather than a missing lifecycle foundation.
+isolation after actual candidate participation, and remount conditional
+ownership while the composition host remains mounted. The result therefore
+rests on candidate-specific tradeoffs rather than a missing lifecycle
+foundation.
 
 The hook is smallest but implicit and positional. The component expresses
 conditional ownership directly in GOX, but Go cannot use `DocumentMetadata` as
