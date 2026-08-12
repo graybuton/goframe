@@ -11,8 +11,11 @@ a private, bounded application-update handoff removes that shared baseline
 interval without selecting a public API.
 
 The three shapes have now been reevaluated over the merged transactional
-foundation. All pass the lifecycle hard gates, but the comparison still does
-not show a material evidence-backed winner. See the
+foundation. The hook and non-DOM component pass the current hard gates and
+remain materially tied. The handle is disqualified because a stable handle
+retains its released underlying owner after its final publication disappears,
+so later reuse panics instead of establishing a new publication lifetime. See
+the
 [transactional API-shape reevaluation](document-metadata-api-shape-reevaluation.md)
 for the executable call sites, browser hashes, hard-gate matrix, candidate-only
 sizes, and current decision.
@@ -629,19 +632,27 @@ owner-handoff counters.
 API-shape Result D remains selected: no implementation candidate.
 
 The transactional reevaluation removes the historical shared initialization
-blocker and proves that hook, component, and handle projections can all publish
-from their first successful render, replace A directly with B, and preserve
-failed-render isolation over the same merged coordinator. The result therefore
-rests on candidate-specific tradeoffs rather than a missing lifecycle
-foundation.
+blocker and proves that hook and component projections can publish from their
+first successful render, replace A directly with B, preserve failed-render
+isolation, and remount conditional ownership while the composition host
+remains mounted. The result therefore rests on candidate-specific tradeoffs
+rather than a missing lifecycle foundation.
 
 The hook is smallest but implicit and positional. The component expresses
 conditional ownership directly in GOX, but Go cannot use `DocumentMetadata` as
 both the value type and component function name. The handle supports explicit
-helper forwarding, but requires substantially more lifecycle state, misuse
-rules, code, and WASM bytes. The hook and component remain materially tied on
-different ergonomic axes, while the handle's composition benefit does not
-offset its complexity.
+helper forwarding, but after its final forwarded publication releases the
+underlying owner, the stable handle's next render panics with the exact
+diagnostic `goframe: document metadata owner is already released`. The
+rejected reuse leaves the authored baseline and coordinator unchanged.
+Automatic owner renewal was not added because it would weaken
+one-handle/one-owner identity; deferred final release was not added because it
+would retain stale metadata with zero publications. The handle is therefore
+disqualified rather than repaired.
+
+The hook and component remain materially tied on different ergonomic axes.
+Neither has a material evidence-backed advantage sufficient to select a public
+surface.
 
 Lifecycle Result B remains confirmed. API-shape Result B is not selected. No
 proposed public spelling or stability tier is assigned.

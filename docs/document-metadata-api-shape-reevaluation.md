@@ -7,8 +7,9 @@ API-shape Result D - no shape selected.
 The merged private lifecycle foundation remains Lifecycle Result B: a bounded,
 document-specific application-update handoff is technically viable. This
 reevaluation projects the implicit hook, non-DOM component, and explicit owner
-handle onto that same foundation. All three pass the lifecycle hard gates, but
-none has a material evidence-backed advantage over the others.
+handle onto that same foundation. The hook and non-DOM component pass the
+current lifecycle hard gates. The handle fails stable reuse across a
+zero-publication interval and is disqualified from the current comparison.
 
 No public API is added. The build-tagged identifiers in the comparison fixture
 are fixture-only exports, are absent from ordinary builds and package
@@ -130,6 +131,24 @@ identical rerender after publisher failure was treated as already published.
 The handle adapter now restages its primary publication while preserving the
 coordinator unchanged. Focused host and browser regressions cover that rule.
 
+A later host-lifetime test exposed a separate terminal-lifetime defect. When
+the final forwarded publication unmounts, the coordinator releases the
+underlying owner while the handle-owning component and stable Go handle remain
+mounted. Its next render panics with:
+
+```text
+goframe: document metadata owner is already released
+```
+
+The rejected render creates no token, committed ID, owner, publication,
+pending plan, or document write; the authored baseline remains selected and
+the batch is inactive. The experiment intentionally does not renew the
+underlying owner, because that would weaken the rule that one handle denotes
+one logical owner. It also does not defer final release until handle unmount,
+because that would leave stale metadata selected while the publication count
+is zero. This is a handle-candidate disqualification, not a transactional
+foundation failure.
+
 ## Host Evidence
 
 Experiment-tagged host tests execute real render lifecycle helpers rather than
@@ -143,8 +162,10 @@ testing only detached data structures. They establish:
 - stable ID and priority on selected updates;
 - no document write for non-selected release;
 - final release to baseline and remount with a new ID;
-- ordered hook slots, component child preservation, and the complete handle
-  duplicate and conflict contract.
+- hook and component conditional-owner remount while their composition hosts
+  remain mounted;
+- ordered hook slots, component child preservation, the handle duplicate and
+  conflict contract, and released-handle reuse characterization.
 
 The focused suite passed 100 repetitions, 20 race-detector repetitions, and 20
 `goframe_debug` repetitions under Go 1.26.5. The real GOX projection generated,
@@ -161,6 +182,7 @@ parsed, and type-checked as a complete package in 20 fixture-test repetitions.
 | exact keyed `A -> B` | pass | pass | pass | host replacement test plus observer and frame sequences |
 | updates preserve identity and priority | pass | pass | pass | priority/update host test and selected-update browser path |
 | selected release reveals survivor or baseline | pass | pass | pass | nested and final-release scenarios |
+| conditional ownership can disappear and return while the composition host remains mounted | pass through component-boundary lifetime | pass through ordinary conditional mount | fail; stable handle retains its released underlying owner | `TestDocumentMetadataAPIShapeConditionalOwnershipRemount` |
 | non-selected release writes nothing | pass | pass | pass | non-selected browser scenario |
 | component and application teardown release once | pass | pass | pass | lifetime, teardown, and repeated-Mount scenarios |
 | no generic renderer or scheduler transaction | pass | pass | pass | candidate-only tagged adapter diff |
@@ -170,8 +192,9 @@ parsed, and type-checked as a complete package in 20 fixture-test repetitions.
 | standard Go failure and recovery | pass | pass | pass | 22 common browser scenarios per candidate |
 | TinyGo successful paths only | pass | pass | pass | eight common successful scenarios per candidate |
 
-All three candidates remain eligible. Passing the hard gates does not by itself
-select one.
+The hook and component remain eligible. The handle fails the conditional
+disappearance-and-return gate and is disqualified. Passing the remaining hard
+gates does not restore its eligibility.
 
 ## Browser Evidence
 
@@ -220,13 +243,18 @@ the authored page but did not initialize the WASM application. Neither attempt
 changed application or document state, and neither is counted among the ten
 accepted executions.
 
+The comparison harness remains focused reproducible research evidence. It is
+not invoked by `scripts/browser-smoke.sh`; the merged transactional ownership
+foundation retains its separate standard-Go and TinyGo aggregate lanes. No
+generic retry hides application, runtime, or scenario failures.
+
 ## Candidate-Specific Evidence
 
 | Candidate | Evidence |
 | --- | --- |
 | hook | two calls create ordered owners; updating the selected slot keeps identity; removing the conditional child boundary releases both slots exactly once |
 | component | conditional mount and prop update keep one owner ID; no wrapper element is emitted; the child element retains DOM identity |
-| handle | helper forwarding retains identity; identical duplicate coalesces; conflict reports one precise render error without mutation; duplicate release preserves primary; sole-primary update and final release succeed |
+| handle | helper forwarding retains identity; identical duplicate coalesces; conflict reports one precise render error without mutation; duplicate release preserves primary; sole-primary update and final release succeed; after final release, the stable handle remains a Go object but reuse reports the exact released-owner panic without state mutation |
 
 ## Ergonomics And Implementation Cost
 
@@ -301,23 +329,26 @@ The hook is the narrowest call site and smallest artifact, but its ownership is
 implicit and conditional use inherits positional-hook constraints. The
 component gives the clearest conditional and nested lifetime in GOX, but costs
 more and cannot use the conceptual `DocumentMetadata` component name alongside
-the metadata value type. The handle makes helper forwarding explicit, but its
-two-slot lifecycle, primary/duplicate rules, conflict behavior, retry rule,
-support code, and size are materially more complex.
+the metadata value type. The handle makes helper forwarding explicit, but a
+stable handle cannot publish again after its last forwarded publication
+releases the underlying owner. It is therefore disqualified independently of
+its two-slot lifecycle, primary/duplicate rules, retry rule, support code, and
+size.
 
 The hook and component remain a tradeoff between implicit minimalism and
-visible structural ownership. The handle's composition advantage does not
-offset its contract cost. Choosing between the two leading shapes would depend
-mainly on API taste rather than a decisive behavior, safety, integration, or
-size result. That is insufficient evidence for a public surface.
+visible structural ownership. Choosing between those two eligible shapes would
+depend mainly on API taste rather than a decisive behavior, safety,
+integration, or size result. That is insufficient evidence for a public
+surface.
 
 Lifecycle Result B remains confirmed. API-shape Result B is not selected.
 
 ## Public Surface Boundary
 
-This branch does not add an ordinary-build public API. It does not select a
-hook, component, or handle for later compatibility treatment, authorize a
-release, or assign a stability tier.
+This branch does not add an ordinary-build public API. It does not select the
+eligible hook or component for later compatibility treatment; the handle is
+disqualified by its zero-publication reuse contract. The branch does not
+authorize a release or assign a stability tier.
 
 The private fixture exports candidate spellings only under
 `goframe_document_state_experiment` so a separate browser `main` package can
