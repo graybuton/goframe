@@ -2,16 +2,14 @@
 
 ## Purpose
 
-GoFrame is still pre-preview. This document defines compatibility expectations
-for the first public preview preparation phase.
+GoFrame is in an experimental pre-1.0 preview line. This document defines the
+current compatibility expectations for those previews.
 
 It does not promise SemVer 1.0 stability.
 
-## Pre-Preview Rules
+## Experimental Preview Rules
 
 Status: Ready with limitations.
-
-Before public preview:
 
 - breaking changes are allowed when they fix unsafe behavior, correct a wrong
   public shape, or unblock the architecture;
@@ -21,9 +19,7 @@ Before public preview:
 - generated workspace internals may change without migration support;
 - security/path-safety hardening may reject previously accepted unsafe input.
 
-## Post-Preview Expectations
-
-After public preview:
+## Current Preview Expectations
 
 - Public-Candidate APIs should not break without a migration note;
 - deprecated APIs should remain for at least one documented release stage unless
@@ -69,6 +65,10 @@ Migration notes are required when:
 - package output contract changes affect deployment.
 
 Migration notes should follow `docs/migrations.md`.
+
+The release-specific actions for generated-workspace compiler isolation and
+repeated-Mount descendant rejection are recorded in
+[the v0.3.0-preview.1 migration notes](migration-v0.3.0-preview.1.md).
 
 ## Exceptions
 

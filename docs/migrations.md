@@ -18,6 +18,13 @@ Add a migration note when a change affects:
 
 Security hardening still needs a note when users may see new rejections.
 
+## Current Preview Migration
+
+The user-action notes for `v0.3.0-preview.1` are in
+[Migrating to v0.3.0-preview.1](migration-v0.3.0-preview.1.md). They cover
+generated-workspace compiler environment isolation and the narrowed repeated
+Mount descendant-target contract.
+
 ## Template
 
 ```md

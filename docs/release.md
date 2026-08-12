@@ -17,6 +17,15 @@ Latest published preview tag:
 v0.2.0-preview.6
 ```
 
+Prepared release candidate:
+
+```text
+v0.3.0-preview.1
+```
+
+Git tags and GitHub Releases are authoritative for publication state. A release
+note file or release branch does not make a preview published.
+
 Subsequent previews should increment the pre-release number.
 
 The current MVP tags remain historical milestone tags. They are not public API
@@ -36,16 +45,17 @@ Before creating a tag:
 - working tree is clean;
 - `main` contains the intended merge commit;
 - module path is `github.com/graybuton/goframe`;
-- `go test ./...` passes;
-- `go test -race ./pkg/... ./cmd/...` passes;
-- `go vet ./...` passes;
-- `go test -tags=goframe_debug ./...` passes;
+- ordinary, `goframe_debug`, and vet lanes pass on the supported Go toolchain
+  matrix;
+- race lanes pass on the supported race-enabled Go toolchains;
 - GOX golden tests pass;
 - `scripts/check.sh` passes locally or in CI;
 - `scripts/size-budget.sh` passes;
 - `scripts/browser-smoke.sh` passes on a machine with Chrome and localhost bind;
 - VS Code extension JSON validation, TypeScript compile, and pure Node tests
-  pass (`npm test --prefix extensions/vscode-gox` covers compile and tests);
+  pass under the documented Node.js baseline (`npm test --prefix
+  extensions/vscode-gox` covers compile and tests);
+- `actionlint` passes at the workflow baseline;
 - `scripts/artifact-check.sh` passes;
 - `scripts/module-path-check.sh` passes;
 - release package layout is checked with `goxc package --asset-hash --preload`
@@ -99,6 +109,7 @@ Current preview release note documents:
 - `docs/release-notes-v0.2.0-preview.4.md`
 - `docs/release-notes-v0.2.0-preview.5.md`
 - `docs/release-notes-v0.2.0-preview.6.md`
+- `docs/release-notes-v0.3.0-preview.1.md`
 
 `CHANGELOG.md` remains the factual change log; release notes should summarize
 preview scope, maturity tiers, validation evidence, compatibility notes, and

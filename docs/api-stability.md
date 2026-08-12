@@ -3,7 +3,7 @@
 ## Current Status
 
 GoFrame is experimental. APIs, GOX syntax, manifests, and toolchain behavior
-may still change between MVPs.
+may still change between previews.
 
 This document classifies current surfaces so future changes can be discussed
 with clear expectations. It does not create a stable 1.0 compatibility promise.
@@ -17,10 +17,10 @@ notes, tests, and a compatibility reason.
 
 ### Experimental Frontier
 
-Can change between MVPs. Changes should be documented, but migration support is
-best-effort. Experimental frontier surfaces are real working surfaces, not
-hidden or deprecated features; they need more contract hardening before broad
-preview promises.
+Can change between previews. Changes should be documented, but migration
+support is best-effort. Experimental frontier surfaces are real working
+surfaces, not hidden or deprecated features; they need more contract hardening
+before broad preview promises.
 
 ### Compiler-Facing / Low-Level
 
@@ -45,7 +45,7 @@ surfaces.
 
 ## Compatibility Policy
 
-Before public preview:
+During the current pre-1.0 preview line:
 
 - compatibility is important but not absolute;
 - breaking changes are allowed when they remove unsafe behavior, simplify a
@@ -53,7 +53,7 @@ Before public preview:
 - breaking changes should be documented in `CHANGELOG.md` and relevant docs;
 - generated output and hidden workspace internals are not stable.
 
-After public preview, this policy should be revisited and tightened.
+This policy should be revisited and tightened before a stable 1.0 release.
 
 ## Current API Classification
 
@@ -109,13 +109,21 @@ Tooling:
 - `goxc package`
 - `goxc export`
 - `goxc serve`
+- `goxc dev`
 - `goxc size`
 - `goxc doctor`
 - `goxc clean`
 - `goxc version`
 
 These are public-candidate because examples and docs rely on them, but their
-exact shapes can still change before public preview.
+exact shapes can still change before stable 1.0.
+
+The high-level `goxc dev` contract is a loopback-only development server over
+verified completed full-package generations. Failed rebuilds preserve the last
+successful generation, and successful rebuilds trigger a full-page reload.
+Polling intervals, quiet-period timing, reload transport internals, and terminal
+wording are not compatibility contracts. `goxc dev` does not establish HMR,
+incremental compilation, a browser error overlay, or production hosting.
 
 The `goxc check --format=json` schema version 1 transport is a versioned
 tooling process contract. Consumers should reject unsupported schema versions,
@@ -193,7 +201,7 @@ package source set and any required package-selection or filesystem policy;
 `goxc` provides its own discovery and root-aware filesystem safety around this
 boundary. Exact generated component variable names, collision suffixes, and
 allocation choices remain internal implementation details. These declarations
-are compiler-facing and experimental before public preview. Third-party
+are compiler-facing and experimental before stable 1.0. Third-party
 compiler or editor tooling may call them, but their option and result shapes
 may change with compiler needs. Such changes should be documented and tested;
 this surface does not establish a stable package-loader, build-system, or
@@ -276,6 +284,8 @@ VS Code extension:
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands, snippets, and CLI-backed diagnostics behavior.
+- `goxc dev` watcher timing, reload transport, and generation bookkeeping below
+  the documented high-level command behavior.
 - `pkg/gox` AST/lexer/parser structures.
 
 These surfaces should be hardened, tested, and documented before wider
@@ -315,6 +325,8 @@ These are not part of the current preview promise.
 - exact generated `.goframe/gen` filenames;
 - browser debug global object shapes;
 - package/export staging temporary directories.
+- build-tagged document metadata coordinators, candidate adapters, fixture
+  telemetry, and transactional ownership research symbols;
 
 ### Legacy / Deprecated
 

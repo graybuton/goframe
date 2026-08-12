@@ -10,8 +10,8 @@ The current strongest evidence is Linux plus Chrome/Chromium. macOS currently
 has lightweight Intel-runner CI evidence for core Go/toolchain behavior, and
 Windows has lightweight CI evidence for the same layer. Firefox and Safari are
 not rejected platforms, but they are outside the current preview evidence.
-The browser smoke harness is Chrome DevTools Protocol based, so non-Chrome
-behavior is not claimed by `v0.1.0-preview.*`.
+The browser smoke harness is Chrome DevTools Protocol based, so equivalent
+non-Chrome behavior is not claimed by the current pre-1.0 preview line.
 
 Labels:
 
@@ -59,7 +59,8 @@ Current non-Chrome boundary:
   Protocol over WebSocket;
 - the repository does not currently include a Playwright, WebDriver, Marionette,
   or WebKit automation harness;
-- `v0.1.0-preview.*` does not claim equivalent Firefox or Safari behavior.
+- the current pre-1.0 preview line does not claim equivalent Firefox or Safari
+  behavior.
 
 Required browser APIs:
 

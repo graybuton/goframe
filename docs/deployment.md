@@ -214,7 +214,7 @@ metadata compatibility policy.
 ```
 
 Local checkout builds write `devel`; tagged module installs write the module
-version recorded in Go build information, such as `v0.2.0-preview.6`.
+version recorded in Go build information, such as `vX.Y.Z-preview.N`.
 
 `goframe-package.json` is the authoritative current package completion marker.
 `goxc` publishes it last and removes it first during destructive package
