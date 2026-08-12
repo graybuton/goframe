@@ -7,6 +7,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createPortServer } from "node:net";
 
+import { createCDPClient } from "./document-metadata-api-shape-v2-cdp.mjs";
+
 if (typeof WebSocket === "undefined") {
     throw new Error("WebSocket is unavailable; run Node with --experimental-websocket");
 }
@@ -1570,39 +1572,7 @@ async function connect(url) {
         socket.addEventListener("open", resolveOpen, { once: true });
         socket.addEventListener("error", reject, { once: true });
     });
-    let nextID = 1;
-    const pending = new Map();
-    socket.addEventListener("message", (event) => {
-        const message = JSON.parse(event.data);
-        if (!message.id || !pending.has(message.id)) return;
-        const request = pending.get(message.id);
-        pending.delete(message.id);
-        if (message.error) request.reject(new Error(message.error.message));
-        else request.resolve(message.result);
-    });
-    return {
-        call(method, params = {}) {
-            return new Promise((resolveCall, reject) => {
-                const id = nextID++;
-                pending.set(id, { resolve: resolveCall, reject });
-                socket.send(JSON.stringify({ id, method, params }));
-            });
-        },
-        async evaluate(expression) {
-            const result = await this.call("Runtime.evaluate", {
-                expression,
-                returnByValue: true,
-                awaitPromise: true,
-            });
-            if (result.exceptionDetails) {
-                throw new Error(`APP FAILURE: browser evaluation failed: ${JSON.stringify(result.exceptionDetails)}`);
-            }
-            return result.result.value;
-        },
-        close() {
-            socket.close();
-        },
-    };
+    return createCDPClient(socket);
 }
 
 function runCommand(command, args, environment, workingDirectory = rootDir) {
