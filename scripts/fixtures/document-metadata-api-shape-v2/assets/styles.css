@@ -1,0 +1,42 @@
+:root {
+    color-scheme: light dark;
+    font-family: system-ui, sans-serif;
+}
+
+body {
+    margin: 0;
+}
+
+.design-app {
+    box-sizing: border-box;
+    margin: 0 auto;
+    max-width: 64rem;
+    padding: 2rem;
+}
+
+.design-card,
+.design-evidence {
+    border: 1px solid currentColor;
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.design-controls,
+.design-modes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-block: 1rem;
+}
+
+.design-evidence {
+    display: grid;
+    gap: 0.35rem;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+}
+
+.nested-owner {
+    border-inline-start: 0.25rem solid currentColor;
+    margin-top: 0.75rem;
+    padding-inline-start: 0.75rem;
+}

@@ -2,26 +2,39 @@
 
 ## Status
 
-Corrected - Result D: no implementation candidate selected. The three-shape
-comparison recorded by PR #122 remains valid.
+API-shape Result D: no implementation candidate selected.
 
-The hook, non-DOM component, and owner-handle prototypes satisfy the focused
-coordinator and wrapper-lifecycle contract. After owner creation was moved out
-of render, however, all three corrected server-backed projections exposed an
-extra committed initialization phase between route-owner lifetimes. That phase
-temporarily restored the authored baseline during ordinary route changes.
+PR #122 established the historical three-shape Result D because its corrected
+hook, non-DOM component, and owner-handle prototypes all required an extra
+committed initialization render. PR #134 later confirmed Lifecycle Result B:
+a private, bounded application-update handoff removes that shared baseline
+interval without selecting a public API.
 
-No public API is added by this branch. The previous Component Candidate result
-and its measurements are superseded by this record.
+The three shapes have now been reevaluated over the merged transactional
+foundation. The hook and non-DOM component pass the current hard gates and
+remain materially tied. The handle is disqualified because a stable handle
+retains its released underlying owner after its final publication disappears,
+so later reuse panics instead of establishing a new publication lifetime. See
+the
+[transactional API-shape reevaluation](document-metadata-api-shape-reevaluation.md)
+for the executable call sites, browser hashes, hard-gate matrix, candidate-only
+sizes, and current decision.
 
-Separate lifecycle research now confirms Result B for a private, build-tagged
-bounded application-update handoff that removes the baseline interval. Result
-B resolves this record's lifecycle-foundation blocker, but it does not select
-one of these public API shapes or authorize a release or compatibility
-guarantee. See
-[transactional document-state handoff](document-state-transactional-handoff.md).
+The final component evidence mounts the real non-DOM component, stages its
+metadata publication, and fails in a descendant inside its subtree. Failed
+initial render rolls that publication back without a committed token, owner ID,
+or document write. Failed replacement retains A, and retry with a fresh B
+component commits exact `A -> B`. The focused CDP client rejects pending and
+future calls deterministically when its socket terminates; no browser retry is
+part of that correction.
 
-## Context
+No public API, release authorization, stability tier, or compatibility
+guarantee is added by this research.
+
+The sections below preserve PR #122's corrected historical evidence unless a
+section explicitly identifies the transactional reevaluation.
+
+## Historical PR #122 Context
 
 The document-state fixture and the server-backed example independently
 implement the same title and description ownership model. Each application
@@ -622,26 +635,36 @@ owner-handoff counters.
 | integrated projection | 0 | 0 | 0 |
 | **Total** | **30** | **34** | **25** |
 
-## Decision
+## Current Decision
 
-Result D remains selected for the API-shape comparison: no implementation
-candidate.
+API-shape Result D remains selected: no implementation candidate.
 
-The component remains the clearest call-site shape and the narrowest integrated
-patch. The private Result B foundation now hands ownership between component
-lifetimes without an authored-baseline interval and without moving owner
-creation back into render. The hook, component, and handle candidates have not
-been reevaluated against that foundation, so this evidence does not select
-among them.
+The transactional reevaluation removes the historical shared initialization
+blocker and proves that hook and component projections can publish from their
+first successful render, replace A directly with B, preserve failed-render
+isolation after actual candidate participation, and remount conditional
+ownership while the composition host remains mounted. The result therefore
+rests on candidate-specific tradeoffs rather than a missing lifecycle
+foundation.
 
-No proposed public spelling or stability tier is assigned. The unresolved API
-shape remains an Experimental Frontier question, not a Public-Candidate or
-compatibility promise.
+The hook is smallest but implicit and positional. The component expresses
+conditional ownership directly in GOX, but Go cannot use `DocumentMetadata` as
+both the value type and component function name. The handle supports explicit
+helper forwarding, but after its final forwarded publication releases the
+underlying owner, the stable handle's next render panics with the exact
+diagnostic `goframe: document metadata owner is already released`. The
+rejected reuse leaves the authored baseline and coordinator unchanged.
+Automatic owner renewal was not added because it would weaken
+one-handle/one-owner identity; deferred final release was not added because it
+would retain stale metadata with zero publications. The handle is therefore
+disqualified rather than repaired.
 
-The transactional-handoff research demonstrates that a private bounded
-application-update batch can coordinate outgoing cleanup with incoming
-publication. Result D remains the API-shape decision: the public
-hook/component/handle question is unresolved and outside Result B.
+The hook and component remain materially tied on different ergonomic axes.
+Neither has a material evidence-backed advantage sufficient to select a public
+surface.
+
+Lifecycle Result B remains confirmed. API-shape Result B is not selected. No
+proposed public spelling or stability tier is assigned.
 
 ## Rejected Alternatives
 
@@ -659,16 +682,20 @@ hook/component/handle question is unresolved and outside Result B.
 
 ## Public Surface Boundary
 
-This branch does not add:
+No ordinary build adds:
 
 ```text
 gf.DocumentMetadata
+gf.DocumentMetadataComponent
 gf.UseDocumentMetadata
 gf.UseDocumentMetadataOwner
 gf.UseOwnedDocumentMetadata
 ```
 
-No production implementation is authorized by this record.
+The reevaluation uses fixture-only exports behind
+`goframe_document_state_experiment`; they are absent from ordinary source
+selection and package documentation. No production implementation is
+authorized by this record.
 
 The private Result B foundation does not assign compatibility guarantees or
 authorize a public release.
