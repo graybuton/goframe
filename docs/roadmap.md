@@ -186,8 +186,8 @@ application-workflow evidence over existing public primitives
 The checkpoint includes:
 
 - `goxc dev` with serialized full-package rebuilds, last-successful-generation
-  preservation, verified generation activation, and successful-build page
-  reload;
+  preservation, post-start browser build-error presentation, verified
+  generation activation, and successful-build page reload;
 - server-backed and async-navigation evidence using existing router, resource,
   lifecycle, and example-local request coordination;
 - history-routing deployment characterization without changing the public hash
@@ -217,9 +217,10 @@ existing router, component ownership, resource lifecycle, and example-local
 request coordination sufficient for the audited flows. Those stages did not
 select a public route-loader, Action, Mutation, or cache-invalidation API.
 
-Browser build-error presentation remains a separate candidate. The current
-development loop reports failed builds in the terminal and keeps serving the
-last successful generation.
+Post-start browser build-error presentation is **Current / shipped**. The
+development loop keeps serving the last successful interactive generation,
+shows the latest failed package attempt in connected pages, retains terminal
+diagnostics, and clears the presentation on successful recovery.
 
 ## `v0.4.0-preview.*` - Modular Delivery & Bundle Splitting
 
@@ -335,9 +336,9 @@ Resumability, server components, and selective or streaming hydration remain
 
 ## `v0.7.0-preview.*` - Dev Loop & Language Services
 
-Status: **Candidate**, with the bounded watched development command and
-successful-build browser reload now **Current / shipped**. Browser build-error
-presentation remains **Candidate**.
+Status: **Candidate**, with the bounded watched development command,
+post-start browser build-error presentation, and successful-build browser
+reload now **Current / shipped**.
 
 The CLI-backed saved-source diagnostics in current `main` are
 **Current / shipped**. Semantic tooling remains future language-service work.
@@ -347,7 +348,7 @@ Candidate sequence:
 | Planning slot | Candidate capability |
 |---|---|
 | `preview.1` | Watched development command with serialized full-package rebuilds. |
-| `preview.2` | Successful-build browser reload is current; browser build-error overlay remains candidate. |
+| `preview.2` | Post-start browser build-error presentation and successful-build browser reload are current. |
 | `preview.3` | GOX-to-generated source maps. |
 | `preview.4` | Deterministic formatter. |
 | `preview.5` | LSP baseline. |
@@ -359,7 +360,8 @@ Potential surface, subject to design and evidence:
   work requiring separate evidence;
 - the current completed-generation serving and successful-build full-page
   reload workflow;
-- browser compiler and source error presentation as a separate candidate;
+- the current browser presentation for non-fatal post-start package and build
+  failures;
 - GOX-to-generated source maps shared by compiler and editor tooling;
 - a deterministic formatter with explicit syntax-governance rules;
 - diagnostics, hover, completion, definition, and references;
@@ -537,12 +539,12 @@ that defines behavior boundaries, evidence, cost, and non-goals.
 
 ## Immediate Sequence
 
-1. Retain the bounded watched `goxc dev`, completed-generation serving, and
-   successful-build reload contracts as current behavior.
+1. Retain the bounded watched `goxc dev`, completed-generation serving,
+   post-start browser build-error presentation, and successful-build reload
+   contracts as current behavior.
 2. Keep route loaders, transitions, mutations, document metadata, and history
    routing unselected until separate evidence justifies a public API.
 3. Keep issue #117 independent and non-blocking.
-4. Keep browser build-error presentation as a separate later candidate.
 
 The application-model evidence does not justify adding a loader, Action, or
 Mutation API. The selected development-loop slice does not imply incremental

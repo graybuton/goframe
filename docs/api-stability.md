@@ -119,11 +119,13 @@ These are public-candidate because examples and docs rely on them, but their
 exact shapes can still change before stable 1.0.
 
 The high-level `goxc dev` contract is a loopback-only development server over
-verified completed full-package generations. Failed rebuilds preserve the last
-successful generation, and successful rebuilds trigger a full-page reload.
-Polling intervals, quiet-period timing, reload transport internals, and terminal
-wording are not compatibility contracts. `goxc dev` does not establish HMR,
-incremental compilation, a browser error overlay, or production hosting.
+verified completed full-package generations. Failed post-start builds preserve
+the last successful generation and present the failure in connected browsers;
+successful recovery activates a completed generation and triggers the normal
+full-page reload. Polling intervals, quiet-period timing, reload transport
+internals, and terminal wording are not compatibility contracts. `goxc dev`
+does not establish HMR, browser state preservation, incremental compilation,
+source maps, clickable diagnostics, or production hosting.
 
 The `goxc check --format=json` schema version 1 transport is a versioned
 tooling process contract. Consumers should reject unsupported schema versions,
@@ -284,8 +286,9 @@ VS Code extension:
 - Package manifest field stability.
 - Browser smoke scripts and debug probe output.
 - VS Code extension commands, snippets, and CLI-backed diagnostics behavior.
-- `goxc dev` watcher timing, reload transport, and generation bookkeeping below
-  the documented high-level command behavior.
+- `goxc dev` watcher timing; reload and build-error event names; private JSON
+  payload fields; presentation DOM, CSS, and build-number formatting; and
+  reload/error broker storage below the documented high-level command behavior.
 - `pkg/gox` AST/lexer/parser structures.
 
 These surfaces should be hardened, tested, and documented before wider

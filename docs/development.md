@@ -96,9 +96,16 @@ until the manifest can be parsed and the effective assets recomputed.
 After a successful package, ordinary GOX diagnostics, Go compiler errors, and
 manifest errors leave the last completed generation available. The server
 remains on the same listener, the failed snapshot is not retried indefinitely,
-and a later authored change starts a new package attempt. Successful recovery
-publishes and verifies the canonical package, activates a new completed
-generation, and reloads connected pages.
+and a later authored change starts a new package attempt. Connected pages show
+one development-only build-error presentation containing the latest failed
+build number and error text. A later failure replaces that presentation rather
+than stacking another one. The terminal still reports the build failure, and
+the running application remains mounted and interactive.
+
+Successful recovery publishes and verifies the canonical package, clears the
+retained failure, activates a new completed generation, removes the old-page
+presentation, and reloads each connected page once. The newly loaded page does
+not replay the cleared failure.
 
 This preservation guarantee does not override existing package publication or
 filesystem failure semantics. A failure that invalidates package ownership,
@@ -114,11 +121,13 @@ page connects without reloading itself. Every later successful accepted build
 activates one completed generation before publishing one reload event, and the
 browser performs an ordinary full-document reload.
 
-Failed builds publish no event, so the current page and last completed
-generation remain available. A successful recovery activates a new generation
-and reloads connected pages. A page reconnecting with the current generation
-waits for a later build; a page reconnecting with an older generation receives
-one catch-up reload.
+Post-start package and build failures publish a private browser event instead
+of a reload event, so the current page and last completed generation remain
+available. The injected client appends one alert-style, scrollable presentation
+outside the application root and renders multiline diagnostics as text. A page
+reconnecting with the current generation receives the latest active failure. A
+page reconnecting with an older generation first receives its required catch-up
+reload and then receives the failure on its current-generation connection.
 
 Reload injection changes only development HTTP responses. It does not modify
 the canonical `index.html`, asset manifest, package metadata, exported packages,
@@ -139,13 +148,16 @@ Each accepted change batch performs a full development package. The command
 does not provide:
 
 - browser auto-open;
-- an error overlay;
 - HMR or browser state preservation; a full-page reload resets browser state;
 - incremental compilation or an incremental build cache;
 - source maps;
+- source-code frames or clickable diagnostics;
 - file watching outside the effective app and module inputs;
 - remote-network binding, history-routing fallback, or production compression
   negotiation.
 
-Build failures are terminal output only. Release asset hashing, preload hints,
-gzip, and Brotli remain explicit `goxc package` concerns.
+Initial failures before the development server exists and watch-input scan
+errors that prevent a package attempt remain terminal-only. Browser
+presentation is limited to non-fatal package and build failures after a
+successful generation is active. Release asset hashing, preload hints, gzip,
+and Brotli remain explicit `goxc package` concerns.
