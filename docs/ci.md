@@ -55,10 +55,11 @@ fail-closed legacy ownership, and dev-server symlink entries.
 
 The same Core `go test` gate covers the watched `goxc dev` workflow. Pure tests
 exercise option parsing, content snapshots, debounce, serialized coordination,
-failure recovery, and shutdown with injected dependencies. A focused integration
-test uses the real standard Go WASM package and static-server path in a temporary
-external application and workspace. Core CI does not claim a TinyGo dev-loop
-automation pass.
+retained browser build-error delivery, reload precedence, failure recovery, and
+shutdown with injected dependencies. A focused integration test uses the real
+standard Go WASM package and static-server path in a temporary external
+application and workspace. Core CI does not claim a TinyGo dev-loop automation
+pass.
 
 ### WASM Size
 
@@ -140,11 +141,14 @@ isolation scenario; its trap-style panic path makes the three recover-based
 validation cases not applicable.
 The suite also runs a focused `goxc dev` reload lifecycle against a temporary
 standard-Go browser/WASM application. It verifies the initial non-reloading
-connection, GOX, Go, and asset rebuild reloads, burst coalescing, failure
-preservation and recovery, two connected pages, current and stale generation
-reconnection, completed-generation serving during a later package attempt, and
-shutdown cleanup. This is standard-Go browser evidence; it does not claim a
-TinyGo development-reload pass.
+connection, GOX, Go, and asset rebuild reloads, burst coalescing, completed-
+generation serving during a later package attempt, and shutdown cleanup. Its
+failure matrix verifies one markup-safe alert presentation, application DOM
+identity and interaction during failure, consecutive-failure replacement,
+two-page delivery, current-generation retained-error delivery, stale-generation
+reload precedence, and clearing before the successful recovery reload. This is
+standard-Go browser evidence; it does not claim a TinyGo development-reload
+pass.
 The persistent `examples/server-backed` smoke records a narrow Go `net/http`
 backend integration boundary. A packaged GoFrame browser/WASM app is served by
 a same-origin Go backend and renders data from `/api/greeting` before and after

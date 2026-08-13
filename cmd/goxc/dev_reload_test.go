@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +18,147 @@ import (
 )
 
 const testDevReloadInstance = "0123456789abcdef0123456789abcdef"
+
+func TestDevReloadPublishesBuildErrorToCurrentSubscribers(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	broker.activateBuild(1, 1, false)
+	first := mustDevReloadSubscription(t, broker, 1)
+	second := mustDevReloadSubscription(t, broker, 1)
+	defer first.Close()
+	defer second.Close()
+
+	broker.publishBuildError(2, errors.New("first line\nsecond line"))
+	assertDevBuildError(t, first, 2, "first line\nsecond line")
+	assertDevBuildError(t, second, 2, "first line\nsecond line")
+	assertNoQueuedDevReload(t, first)
+	assertNoQueuedDevReload(t, second)
+}
+
+func TestDevReloadRetainsLatestBuildErrorForCurrentGenerationReconnect(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	broker.activateBuild(4, 4, false)
+	broker.publishBuildError(5, errors.New("retained failure"))
+
+	subscription := mustDevReloadSubscription(t, broker, 4)
+	defer subscription.Close()
+	assertDevBuildError(t, subscription, 5, "retained failure")
+	assertNoQueuedDevReload(t, subscription)
+}
+
+func TestDevReloadLatestBuildErrorReplacesEarlierFailure(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	broker.activateBuild(1, 1, false)
+	subscription := mustDevReloadSubscription(t, broker, 1)
+	defer subscription.Close()
+
+	broker.publishBuildError(2, errors.New("first failure"))
+	broker.publishBuildError(3, errors.New("second failure"))
+	assertDevBuildError(t, subscription, 3, "second failure")
+	assertNoQueuedDevReload(t, subscription)
+
+	reconnected := mustDevReloadSubscription(t, broker, 1)
+	defer reconnected.Close()
+	assertDevBuildError(t, reconnected, 3, "second failure")
+}
+
+func TestDevReloadActivationClearsFailureAndSupersedesPendingError(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	broker.activateBuild(1, 1, false)
+	subscription := mustDevReloadSubscription(t, broker, 1)
+	defer subscription.Close()
+
+	broker.publishBuildError(2, errors.New("broken"))
+	broker.activateBuild(2, 3, true)
+	assertDevReloadGeneration(t, subscription, 2)
+	assertNoQueuedDevReload(t, subscription)
+	if failure, ok := broker.currentBuildError(); ok {
+		t.Fatalf("retained build error after activation = %+v", failure)
+	}
+
+	current := mustDevReloadSubscription(t, broker, 2)
+	defer current.Close()
+	assertNoQueuedDevReload(t, current)
+
+	broker.publishBuildError(2, errors.New("stale failure"))
+	assertNoQueuedDevReload(t, current)
+	if failure, ok := broker.currentBuildError(); ok {
+		t.Fatalf("stale build error became current = %+v", failure)
+	}
+}
+
+func TestDevReloadStaleGenerationCatchesUpBeforeReceivingCurrentFailure(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	broker.activateBuild(3, 3, false)
+	broker.publishBuildError(4, errors.New("current failure"))
+
+	stale := mustDevReloadSubscription(t, broker, 2)
+	defer stale.Close()
+	assertDevReloadGeneration(t, stale, 3)
+	assertNoQueuedDevReload(t, stale)
+
+	broker.publishBuildError(5, errors.New("replacement failure"))
+	assertNoQueuedDevReload(t, stale)
+
+	previousProcess, err := broker.subscribe("fedcba9876543210fedcba9876543210", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer previousProcess.Close()
+	assertDevReloadGeneration(t, previousProcess, 3)
+	broker.publishBuildError(6, errors.New("latest failure"))
+	assertNoQueuedDevReload(t, previousProcess)
+
+	current := mustDevReloadSubscription(t, broker, 3)
+	defer current.Close()
+	assertDevBuildError(t, current, 6, "latest failure")
+}
+
+func TestDevReloadBuildErrorSSEEncodesMultilineAndMarkupText(t *testing.T) {
+	failure := devBuildError{
+		Build:   7,
+		Message: "first line\n</pre><img src=x onerror=window.injected=true>",
+	}
+	var output bytes.Buffer
+	if err := writeDevReloadEvent(&output, newDevBuildErrorEvent(failure)); err != nil {
+		t.Fatal(err)
+	}
+	const prefix = "event: build-error\ndata: "
+	content := output.String()
+	if !strings.HasPrefix(content, prefix) || !strings.HasSuffix(content, "\n\n") {
+		t.Fatalf("build-error SSE = %q", content)
+	}
+	data := strings.TrimSuffix(strings.TrimPrefix(content, prefix), "\n\n")
+	if strings.Contains(data, "\n") {
+		t.Fatalf("build-error JSON contains an unescaped newline: %q", data)
+	}
+	var decoded devBuildError
+	if err := json.Unmarshal([]byte(data), &decoded); err != nil {
+		t.Fatalf("decode build-error JSON: %v\n%s", err, data)
+	}
+	if decoded != failure {
+		t.Fatalf("decoded build error = %+v, want %+v", decoded, failure)
+	}
+}
+
+func TestDevReloadBuildErrorStateClearsOnShutdown(t *testing.T) {
+	broker := newDevReloadBroker(testDevReloadInstance)
+	broker.activateBuild(1, 1, false)
+	subscription := mustDevReloadSubscription(t, broker, 1)
+	broker.publishBuildError(2, errors.New("broken"))
+	broker.close()
+
+	if failure, ok := broker.currentBuildError(); ok {
+		t.Fatalf("retained build error after shutdown = %+v", failure)
+	}
+	if _, ok := <-subscription.Events(); ok {
+		t.Fatal("subscriber channel remained open after shutdown")
+	}
+	subscription.Close()
+	broker.publishBuildError(3, errors.New("ignored after shutdown"))
+	if _, err := broker.subscribe(testDevReloadInstance, 1); err == nil {
+		t.Fatal("subscribe after shutdown succeeded")
+	}
+}
 
 func TestDevReloadSameGenerationConnectionWaits(t *testing.T) {
 	broker := newDevReloadBroker(testDevReloadInstance)
@@ -333,9 +477,35 @@ func TestDevReloadClientIsDevelopmentOnlyResponse(t *testing.T) {
 	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("reload client response = %d Cache-Control=%q", response.Code, response.Header().Get("Cache-Control"))
 	}
-	for _, want := range []string{"EventSource", "data-goframe-instance", "data-goframe-generation", "window.location.reload()"} {
+	for _, want := range []string{
+		"EventSource",
+		"data-goframe-instance",
+		"data-goframe-generation",
+		devBuildErrorEventName,
+		devBuildErrorMarker,
+		`setAttribute("role", "alert")`,
+		"textContent",
+		"window.location.reload()",
+	} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatalf("reload client missing %q: %q", want, response.Body.String())
+		}
+	}
+	if strings.Contains(response.Body.String(), "innerHTML") {
+		t.Fatalf("reload client renders build errors through innerHTML: %q", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `document.documentElement.appendChild(buildErrorPanel)`) {
+		t.Fatalf("reload client does not host build errors outside body: %q", response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "document.body") {
+		t.Fatalf("reload client hosts build errors inside body: %q", response.Body.String())
+	}
+	for _, lookup := range []string{
+		`document.querySelector("[` + devBuildErrorMarker + `]")`,
+		`document.querySelectorAll("[` + devBuildErrorMarker + `]")`,
+	} {
+		if strings.Contains(response.Body.String(), lookup) {
+			t.Fatalf("reload client adopts application markup through %q: %q", lookup, response.Body.String())
 		}
 	}
 
@@ -358,20 +528,33 @@ func mustDevReloadSubscription(t *testing.T, broker *devReloadBroker, generation
 func assertDevReloadGeneration(t *testing.T, subscription *devReloadSubscription, want uint64) {
 	t.Helper()
 	select {
-	case got, ok := <-subscription.Events():
-		if !ok || got != want {
-			t.Fatalf("reload event = %d, %v, want %d, true", got, ok, want)
+	case event, ok := <-subscription.Events():
+		if !ok || event.kind != devReloadEventGeneration || event.generation != want {
+			t.Fatalf("reload event = %+v, %v, want generation %d", event, ok, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for generation %d", want)
 	}
 }
 
+func assertDevBuildError(t *testing.T, subscription *devReloadSubscription, build int, message string) {
+	t.Helper()
+	select {
+	case event, ok := <-subscription.Events():
+		want := devBuildError{Build: build, Message: message}
+		if !ok || event.kind != devReloadEventBuildError || event.buildError != want {
+			t.Fatalf("build-error event = %+v, %v, want %+v", event, ok, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for build error %d", build)
+	}
+}
+
 func assertNoQueuedDevReload(t *testing.T, subscription *devReloadSubscription) {
 	t.Helper()
 	select {
-	case generation, ok := <-subscription.Events():
-		t.Fatalf("unexpected reload event = %d, %v", generation, ok)
+	case event, ok := <-subscription.Events():
+		t.Fatalf("unexpected development event = %+v, %v", event, ok)
 	default:
 	}
 }

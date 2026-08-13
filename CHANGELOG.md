@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-No changes have been recorded after `v0.3.0-preview.1`.
+- `goxc dev` now presents post-start package and build failures in connected
+  browsers while preserving the last successful interactive application;
+  later failures replace the message, and successful recovery clears it before
+  the normal full-page reload.
 
 ## v0.3.0-preview.1
 
