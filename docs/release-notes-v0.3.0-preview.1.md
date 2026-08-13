@@ -90,9 +90,15 @@ production-readiness, fullstack, SSR, hydration, or broad browser-support claim.
 - The supported release validation baseline is Go `1.22.12`, `1.25.12`, and
   `1.26.5`; Node.js `24.18.1`; TinyGo `0.41.1`; and Chrome/Chromium browser
   evidence on Linux.
-- All eleven ordinary TinyGo application budgets and their raw, gzip, Brotli,
-  and Zstandard ratio limits remain enforced without a release-branch budget
-  change.
+- All eleven ordinary TinyGo applications remain covered by raw, gzip, Brotli,
+  and Zstandard absolute ceilings and the existing compression-ratio limits.
+  Relative to `v0.2.0-preview.6`, absolute ceilings were evidence-backed
+  rebaselined for seven applications across fifteen cells to reflect the
+  supported toolchain baseline and measured runtime correctness costs.
+  Compression-ratio limits remained unchanged, and this release-preparation
+  branch changes no size budget. See the
+  [WASM size headroom audit](wasm-size-headroom-audit.md) for per-stage
+  measurements and attribution.
 - Private document-state research confirmed that a bounded transactional
   ownership handoff is technically viable. A follow-up comparison did not
   select a public hook, component, or owner-handle API. The experiment remains
