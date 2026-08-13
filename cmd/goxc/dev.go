@@ -200,7 +200,7 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 		if ctx.Err() != nil {
 			return nil
 		}
-		if _, err := server.activatePackageWithCommit(func() {
+		if _, err := server.activatePackageWithCommit(request.Number, func() {
 			if haveAttemptPlan {
 				collector.finishEmbedBuild(attemptPlan, true)
 			}
@@ -218,6 +218,16 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 		return nil
 	}
 
+	coordinatorHooks := dependencies.hooks
+	buildFinished := coordinatorHooks.BuildFinished
+	coordinatorHooks.BuildFinished = func(event devBuildEvent) {
+		if event.Err != nil && server.started() {
+			server.reload.publishBuildError(event.Request.Number, event.Err)
+		}
+		if buildFinished != nil {
+			buildFinished(event)
+		}
+	}
 	runErr := runDevCoordinator(ctx, devCoordinatorConfig{
 		scan:              collector.collect,
 		build:             build,
@@ -226,7 +236,7 @@ func runDev(ctx context.Context, options devOptions, dependencies devDependencie
 		debounce:          dependencies.debounce,
 		stdout:            dependencies.stdout,
 		stderr:            dependencies.stderr,
-		hooks:             dependencies.hooks,
+		hooks:             coordinatorHooks,
 		reconcileSnapshot: collector.reconcileEmbedSnapshot,
 	})
 	shutdownErr := server.shutdown()
@@ -305,7 +315,7 @@ func newDevServer(packageDir string, port int, dependencies devDependencies) (*d
 	}, nil
 }
 
-func (server *devServer) activatePackageWithCommit(commit func()) (uint64, error) {
+func (server *devServer) activatePackageWithCommit(build int, commit func()) (uint64, error) {
 	notify := server.started()
 	generation, err := server.generations.activatePackage(server.packageDir)
 	if err != nil {
@@ -317,7 +327,7 @@ func (server *devServer) activatePackageWithCommit(commit func()) (uint64, error
 	if commit != nil {
 		commit()
 	}
-	server.reload.activate(generation, notify)
+	server.reload.activateBuild(generation, build, notify)
 	if notify && server.hooks.ReloadPublished != nil {
 		server.hooks.ReloadPublished(generation)
 	}

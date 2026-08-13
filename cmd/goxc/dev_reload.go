@@ -3,8 +3,10 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,9 +16,19 @@ import (
 )
 
 const (
-	devEventsPath       = "/_goframe/dev/events"
-	devReloadScriptPath = "/_goframe/dev/reload.js"
-	devReloadMarker     = "data-goframe-dev-reload"
+	devEventsPath          = "/_goframe/dev/events"
+	devReloadScriptPath    = "/_goframe/dev/reload.js"
+	devReloadMarker        = "data-goframe-dev-reload"
+	devBuildErrorMarker    = "data-goframe-dev-build-error"
+	devReloadEventName     = "reload"
+	devBuildErrorEventName = "build-error"
+)
+
+type devReloadEventKind uint8
+
+const (
+	devReloadEventGeneration devReloadEventKind = iota + 1
+	devReloadEventBuildError
 )
 
 const devReloadClient = `(function () {
@@ -26,9 +38,45 @@ const devReloadClient = `(function () {
     if (!instance || !generation || typeof window.EventSource !== "function") return;
     var source = new EventSource("/_goframe/dev/events?instance=" + encodeURIComponent(instance) + "&generation=" + encodeURIComponent(generation));
     var reloading = false;
+    function removeBuildError() {
+        var current = document.querySelector("[data-goframe-dev-build-error]");
+        if (current) current.remove();
+    }
+    function showBuildError(event) {
+        var failure;
+        try {
+            failure = JSON.parse(event.data);
+        } catch (_) {
+            return;
+        }
+        if (!failure || !Number.isInteger(failure.build) || failure.build <= 0 || typeof failure.message !== "string") return;
+        var panel = document.querySelector("[data-goframe-dev-build-error]");
+        if (!panel) {
+            panel = document.createElement("section");
+            panel.setAttribute("data-goframe-dev-build-error", "");
+            panel.setAttribute("role", "alert");
+            panel.setAttribute("aria-live", "assertive");
+            panel.setAttribute("aria-atomic", "true");
+            panel.style.cssText = "position:fixed;right:1rem;bottom:1rem;z-index:2147483647;box-sizing:border-box;width:min(42rem,calc(100vw - 2rem));max-height:min(50vh,32rem);overflow:auto;padding:1rem;border:2px solid #f87171;border-radius:.5rem;background:#1f1013;color:#fff;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 1rem 3rem rgba(0,0,0,.45);";
+            var heading = document.createElement("strong");
+            heading.setAttribute("data-goframe-dev-build-error-heading", "");
+            heading.style.cssText = "display:block;margin:0 0 .75rem;color:#fca5a5;font:600 15px/1.3 system-ui,sans-serif;";
+            var message = document.createElement("pre");
+            message.setAttribute("data-goframe-dev-build-error-message", "");
+            message.style.cssText = "margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;";
+            panel.appendChild(heading);
+            panel.appendChild(message);
+            (document.body || document.documentElement).appendChild(panel);
+        }
+        panel.setAttribute("data-goframe-dev-build", String(failure.build));
+        panel.querySelector("[data-goframe-dev-build-error-heading]").textContent = "Build " + failure.build + " failed";
+        panel.querySelector("[data-goframe-dev-build-error-message]").textContent = failure.message;
+    }
+    source.addEventListener("build-error", showBuildError);
     source.addEventListener("reload", function () {
         if (reloading) return;
         reloading = true;
+        removeBuildError();
         source.close();
         window.location.reload();
     });
@@ -36,10 +84,23 @@ const devReloadClient = `(function () {
 })();
 `
 
+type devBuildError struct {
+	Build   int    `json:"build"`
+	Message string `json:"message"`
+}
+
+type devReloadEvent struct {
+	kind       devReloadEventKind
+	generation uint64
+	buildError devBuildError
+}
+
 type devReloadBroker struct {
 	mu             sync.Mutex
 	instance       string
 	current        uint64
+	latestBuild    int
+	buildError     *devBuildError
 	nextSubscriber uint64
 	subscribers    map[uint64]*devReloadSubscriber
 	closed         bool
@@ -47,14 +108,15 @@ type devReloadBroker struct {
 
 type devReloadSubscriber struct {
 	id              uint64
-	events          chan uint64
+	events          chan devReloadEvent
 	generationFloor uint64
+	reloadRequired  bool
 }
 
 type devReloadSubscription struct {
 	broker *devReloadBroker
 	id     uint64
-	events <-chan uint64
+	events <-chan devReloadEvent
 	once   sync.Once
 }
 
@@ -74,18 +136,55 @@ func newDevReloadBroker(instance string) *devReloadBroker {
 }
 
 func (broker *devReloadBroker) activate(generation uint64, notify bool) {
+	broker.activateBuild(generation, 0, notify)
+}
+
+func (broker *devReloadBroker) activateBuild(generation uint64, build int, notify bool) {
 	broker.mu.Lock()
 	defer broker.mu.Unlock()
 	if broker.closed || generation <= broker.current {
 		return
 	}
+	if build > 0 && build <= broker.latestBuild {
+		return
+	}
 	broker.current = generation
+	if build > 0 {
+		broker.latestBuild = build
+	}
+	broker.buildError = nil
 	if !notify {
 		return
 	}
 	for _, subscriber := range broker.subscribers {
-		broker.queueLocked(subscriber, generation)
+		broker.queueReloadLocked(subscriber, generation)
 	}
+}
+
+func (broker *devReloadBroker) publishBuildError(build int, err error) {
+	if err == nil {
+		return
+	}
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+	if broker.closed || build <= broker.latestBuild {
+		return
+	}
+	broker.latestBuild = build
+	failure := devBuildError{Build: build, Message: err.Error()}
+	broker.buildError = &failure
+	for _, subscriber := range broker.subscribers {
+		broker.queueBuildErrorLocked(subscriber, failure)
+	}
+}
+
+func (broker *devReloadBroker) currentBuildError() (devBuildError, bool) {
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+	if broker.buildError == nil {
+		return devBuildError{}, false
+	}
+	return *broker.buildError, true
 }
 
 func (broker *devReloadBroker) subscribe(instance string, generation uint64) (*devReloadSubscription, error) {
@@ -101,12 +200,14 @@ func (broker *devReloadBroker) subscribe(instance string, generation uint64) (*d
 	broker.nextSubscriber++
 	subscriber := &devReloadSubscriber{
 		id:              broker.nextSubscriber,
-		events:          make(chan uint64, 1),
+		events:          make(chan devReloadEvent, 1),
 		generationFloor: generationFloor,
 	}
 	broker.subscribers[subscriber.id] = subscriber
 	if generationFloor < broker.current {
-		broker.queueLocked(subscriber, broker.current)
+		broker.queueReloadLocked(subscriber, broker.current)
+	} else if generationFloor == broker.current && broker.buildError != nil {
+		broker.queueBuildErrorLocked(subscriber, *broker.buildError)
 	}
 	return &devReloadSubscription{
 		broker: broker,
@@ -115,19 +216,39 @@ func (broker *devReloadBroker) subscribe(instance string, generation uint64) (*d
 	}, nil
 }
 
-func (broker *devReloadBroker) queueLocked(subscriber *devReloadSubscriber, generation uint64) {
+func (broker *devReloadBroker) queueReloadLocked(subscriber *devReloadSubscriber, generation uint64) {
 	if generation <= subscriber.generationFloor {
 		return
 	}
+	broker.replaceQueuedEventLocked(subscriber, newDevReloadEvent(generation))
+	subscriber.generationFloor = generation
+	subscriber.reloadRequired = true
+}
+
+func (broker *devReloadBroker) queueBuildErrorLocked(subscriber *devReloadSubscriber, failure devBuildError) {
+	if subscriber.reloadRequired || subscriber.generationFloor != broker.current {
+		return
+	}
+	broker.replaceQueuedEventLocked(subscriber, newDevBuildErrorEvent(failure))
+}
+
+func (broker *devReloadBroker) replaceQueuedEventLocked(subscriber *devReloadSubscriber, event devReloadEvent) {
 	select {
 	case <-subscriber.events:
 	default:
 	}
-	subscriber.events <- generation
-	subscriber.generationFloor = generation
+	subscriber.events <- event
 }
 
-func (subscription *devReloadSubscription) Events() <-chan uint64 {
+func newDevReloadEvent(generation uint64) devReloadEvent {
+	return devReloadEvent{kind: devReloadEventGeneration, generation: generation}
+}
+
+func newDevBuildErrorEvent(failure devBuildError) devReloadEvent {
+	return devReloadEvent{kind: devReloadEventBuildError, buildError: failure}
+}
+
+func (subscription *devReloadSubscription) Events() <-chan devReloadEvent {
 	return subscription.events
 }
 
@@ -161,8 +282,13 @@ func (broker *devReloadBroker) close() {
 		return
 	}
 	broker.closed = true
+	broker.buildError = nil
 	for id, subscriber := range broker.subscribers {
 		delete(broker.subscribers, id)
+		select {
+		case <-subscriber.events:
+		default:
+		}
 		close(subscriber.events)
 	}
 }
@@ -233,15 +359,32 @@ func serveDevEvents(response http.ResponseWriter, request *http.Request, broker 
 		select {
 		case <-request.Context().Done():
 			return
-		case generation, ok := <-subscription.Events():
+		case event, ok := <-subscription.Events():
 			if !ok {
 				return
 			}
-			if _, err := fmt.Fprintf(response, "event: reload\ndata: %d\n\n", generation); err != nil {
+			if err := writeDevReloadEvent(response, event); err != nil {
 				return
 			}
 			flusher.Flush()
 		}
+	}
+}
+
+func writeDevReloadEvent(output io.Writer, event devReloadEvent) error {
+	switch event.kind {
+	case devReloadEventGeneration:
+		_, err := fmt.Fprintf(output, "event: %s\ndata: %d\n\n", devReloadEventName, event.generation)
+		return err
+	case devReloadEventBuildError:
+		payload, err := json.Marshal(event.buildError)
+		if err != nil {
+			return fmt.Errorf("encode development build error: %w", err)
+		}
+		_, err = fmt.Fprintf(output, "event: %s\ndata: %s\n\n", devBuildErrorEventName, payload)
+		return err
+	default:
+		return errors.New("unknown development reload event")
 	}
 }
 

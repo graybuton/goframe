@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -20,6 +21,94 @@ const (
 	devIntegrationPoll     = 10 * time.Millisecond
 	devIntegrationDebounce = 50 * time.Millisecond
 )
+
+func TestDevRealWorkflowPublishesBuildErrorAndRecovers(t *testing.T) {
+	appDir := filepath.Join(t.TempDir(), "app")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	writeTestFile(t, appDir, manifestName, `{"compiler":"go"}`)
+	writeTestFile(t, appDir, "main.go", "package main\n\nvar version = 1\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	builds := make(chan devBuildEvent, 8)
+	serverURLs := make(chan string, 1)
+	generations := make(chan uint64, 4)
+	reloads := make(chan uint64, 4)
+	packageCalls := 0
+	dependencies := devIntegrationDependencies(builds, serverURLs)
+	dependencies.hooks.GenerationActivated = func(generation uint64) {
+		generations <- generation
+	}
+	dependencies.hooks.ReloadPublished = func(generation uint64) {
+		reloads <- generation
+	}
+	dependencies.packageApp = func(options packageOptions) error {
+		packageCalls++
+		if packageCalls == 2 {
+			return errors.New("fixture build failed\n<em data-build-error-injection>literal markup</em>")
+		}
+		layout, err := newBuildLayout(layoutOptions{
+			appDir:    options.appDir,
+			compiler:  "go",
+			workspace: options.workspace,
+		})
+		if err != nil {
+			return err
+		}
+		if err := os.RemoveAll(layout.PackageDir); err != nil {
+			return err
+		}
+		writeCompleteCurrentPackage(t, layout.PackageDir)
+		return nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runDev(ctx, devOptions{
+			appDir: appDir, compiler: "go", workspace: workspace, port: 0,
+		}, dependencies)
+	}()
+
+	assertDevEvent(t, waitDevEvent(t, builds), 1, true, false)
+	assertDevGenerationEvent(t, generations, 1)
+	assertNoDevGenerationEvent(t, reloads)
+	serverURL := waitDevServerURL(t, serverURLs)
+	instance := devReloadInstanceFromIndex(t, readDevHTTPBody(t, serverURL+"/"))
+	response, reader := openDevIntegrationEventStream(t, serverURL, instance, 1)
+	defer response.Body.Close()
+
+	writeTestFile(t, appDir, "main.go", "package main\n\nvar version = 2\n")
+	failed := waitDevEvent(t, builds)
+	assertDevEvent(t, failed, 2, false, true)
+	event, data := readDevIntegrationSSEEvent(t, reader)
+	if event != devBuildErrorEventName {
+		t.Fatalf("failed build SSE event = %q, want %q", event, devBuildErrorEventName)
+	}
+	var failure devBuildError
+	if err := json.Unmarshal([]byte(data), &failure); err != nil {
+		t.Fatalf("decode failed build SSE payload: %v\n%s", err, data)
+	}
+	if failure.Build != 2 || failure.Message != failed.Err.Error() {
+		t.Fatalf("failed build SSE payload = %+v, want build 2 message %q", failure, failed.Err)
+	}
+	assertNoDevGenerationEvent(t, generations)
+	assertNoDevGenerationEvent(t, reloads)
+
+	writeTestFile(t, appDir, "main.go", "package main\n\nvar version = 3\n")
+	assertDevEvent(t, waitDevEvent(t, builds), 3, false, false)
+	assertDevGenerationEvent(t, generations, 2)
+	assertDevGenerationEvent(t, reloads, 2)
+	event, data = readDevIntegrationSSEEvent(t, reader)
+	if event != devReloadEventName || data != "2" {
+		t.Fatalf("recovery SSE event = %q data=%q, want reload data=2", event, data)
+	}
+
+	cancel()
+	if err := waitDevRun(t, done); err != nil {
+		t.Fatalf("runDev() shutdown error: %v", err)
+	}
+	waitDevListenerClosed(t, serverURL)
+}
 
 func TestDevRealWorkflow(t *testing.T) {
 	repositoryRoot, ok := findRepositoryRoot(".")
@@ -892,6 +981,68 @@ func assertDevInjectedHTTPBody(t *testing.T, url, canonical string, generation u
 	if end := strings.IndexByte(instanceValue, '"'); end <= 0 {
 		t.Fatalf("GET %s body has an empty reload instance: %q", url, got)
 	}
+}
+
+func devReloadInstanceFromIndex(t *testing.T, content string) string {
+	t.Helper()
+	const prefix = `data-goframe-instance="`
+	start := strings.Index(content, prefix)
+	if start < 0 {
+		t.Fatalf("development index has no reload instance: %q", content)
+	}
+	value := content[start+len(prefix):]
+	end := strings.IndexByte(value, '"')
+	if end <= 0 {
+		t.Fatalf("development index has an empty reload instance: %q", content)
+	}
+	return value[:end]
+}
+
+func openDevIntegrationEventStream(t *testing.T, serverURL, instance string, generation uint64) (*http.Response, *bufio.Reader) {
+	t.Helper()
+	client := &http.Client{Timeout: 10 * time.Second}
+	response, err := client.Get(fmt.Sprintf(
+		"%s%s?instance=%s&generation=%d",
+		serverURL,
+		devEventsPath,
+		instance,
+		generation,
+	))
+	if err != nil {
+		t.Fatalf("connect development event stream: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		t.Fatalf("development event stream status = %d, want 200", response.StatusCode)
+	}
+	reader := bufio.NewReader(response.Body)
+	if line, err := reader.ReadString('\n'); err != nil || line != ": connected\n" {
+		response.Body.Close()
+		t.Fatalf("development event stream greeting = %q, %v", line, err)
+	}
+	if line, err := reader.ReadString('\n'); err != nil || line != "\n" {
+		response.Body.Close()
+		t.Fatalf("development event stream greeting separator = %q, %v", line, err)
+	}
+	return response, reader
+}
+
+func readDevIntegrationSSEEvent(t *testing.T, reader *bufio.Reader) (string, string) {
+	t.Helper()
+	eventLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read development SSE event: %v", err)
+	}
+	dataLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read development SSE data: %v", err)
+	}
+	separator, err := reader.ReadString('\n')
+	if err != nil || separator != "\n" {
+		t.Fatalf("read development SSE separator = %q, %v", separator, err)
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(eventLine, "event: "), "\n"),
+		strings.TrimSuffix(strings.TrimPrefix(dataLine, "data: "), "\n")
 }
 
 func assertDevHTTPContains(t *testing.T, url, want string) {
