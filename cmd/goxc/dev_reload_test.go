@@ -494,6 +494,12 @@ func TestDevReloadClientIsDevelopmentOnlyResponse(t *testing.T) {
 	if strings.Contains(response.Body.String(), "innerHTML") {
 		t.Fatalf("reload client renders build errors through innerHTML: %q", response.Body.String())
 	}
+	if !strings.Contains(response.Body.String(), `document.documentElement.appendChild(buildErrorPanel)`) {
+		t.Fatalf("reload client does not host build errors outside body: %q", response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "document.body") {
+		t.Fatalf("reload client hosts build errors inside body: %q", response.Body.String())
+	}
 	for _, lookup := range []string{
 		`document.querySelector("[` + devBuildErrorMarker + `]")`,
 		`document.querySelectorAll("[` + devBuildErrorMarker + `]")`,

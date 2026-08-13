@@ -47,8 +47,9 @@ const devReloadClient = `(function () {
         buildErrorMessage = null;
     }
     function ensureBuildErrorPanel() {
-        if (buildErrorPanel && buildErrorPanel.isConnected) return;
+        if (buildErrorPanel && buildErrorPanel.isConnected) return true;
         clearBuildErrorReferences();
+        if (!document.documentElement) return false;
         buildErrorPanel = document.createElement("section");
         buildErrorPanel.setAttribute("data-goframe-dev-build-error", "");
         buildErrorPanel.setAttribute("role", "alert");
@@ -63,7 +64,8 @@ const devReloadClient = `(function () {
         buildErrorMessage.style.cssText = "margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;";
         buildErrorPanel.appendChild(buildErrorHeading);
         buildErrorPanel.appendChild(buildErrorMessage);
-        (document.body || document.documentElement).appendChild(buildErrorPanel);
+        document.documentElement.appendChild(buildErrorPanel);
+        return true;
     }
     function removeBuildError() {
         if (buildErrorPanel && buildErrorPanel.isConnected) buildErrorPanel.remove();
@@ -77,7 +79,7 @@ const devReloadClient = `(function () {
             return;
         }
         if (!failure || !Number.isInteger(failure.build) || failure.build <= 0 || typeof failure.message !== "string") return;
-        ensureBuildErrorPanel();
+        if (!ensureBuildErrorPanel()) return;
         buildErrorPanel.setAttribute("data-goframe-dev-build", String(failure.build));
         buildErrorHeading.textContent = "Build " + failure.build + " failed";
         buildErrorMessage.textContent = failure.message;

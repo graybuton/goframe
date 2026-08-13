@@ -28,6 +28,7 @@ let activationGapProbe = null;
 let devOutput = "";
 let browserError = "";
 let buildErrorEvidence = null;
+let bodyRootEvidence = null;
 const lines = [];
 const counters = {
     successfulPackageAttempts: 0,
@@ -452,6 +453,7 @@ try {
     console.log("same-generation reconnect: ok");
 
     await reconnectReloadClient(client1, activeInstance, activeGeneration - 1);
+    await waitForEventSourceOpen(client1, afterCurrentReconnect.eventSourceOpens + 1);
     const caughtUp = await waitForPageState(client1, {
         gox: "recovered",
         go: "activation-gap-follow-up",
@@ -467,6 +469,7 @@ try {
     const previousProcessBaseline = caughtUp;
     const previousInstance = activeInstance === "f".repeat(32) ? "e".repeat(32) : "f".repeat(32);
     await reconnectReloadClient(client1, previousInstance, activeGeneration + 1000);
+    await waitForEventSourceOpen(client1, previousProcessBaseline.eventSourceOpens + 1);
     const previousProcessCaughtUp = await waitForPageState(client1, {
         gox: "recovered",
         go: "activation-gap-follow-up",
@@ -493,15 +496,117 @@ try {
     assertAuthoredMarker(client2Final, "final page 2");
     assert(client1.runtimeErrors.length === 0 && client2.runtimeErrors.length === 0,
         `browser runtime errors = ${JSON.stringify({ page1: client1.runtimeErrors, page2: client2.runtimeErrors })}`);
+
+    await closeEventSources(client2);
+    await waitForNoEventStreams(client2);
+    await client1.call("Target.closeTarget", { targetId: secondTarget.targetId });
+    client2.close();
+    client2 = null;
+
+    const bodyRootTransitionBaseline = client1Final;
+    await writeBodyRootIndex("body-root-index");
+    await waitForBuild(nextBuild, "succeeded");
+    const bodyRootGeneration = ++activeGeneration;
+    const bodyRootInitial = await waitForBodyRootState(client1, {
+        bodyRootVersion: "body-root-initial",
+        bodyRootAppVisible: true,
+        pageLoads: bodyRootTransitionBaseline.pageLoads + 1,
+        reloadEvents: bodyRootTransitionBaseline.reloadEvents + 1,
+        generation: bodyRootGeneration,
+    });
+    recordSuccessfulReload();
+    nextBuild++;
+    assert(bodyRootInitial.bodyRoot, `body-root fixture did not mount into body: ${JSON.stringify(bodyRootInitial)}`);
+    assert(bodyRootInitial.eventSourceCount === 1 && bodyRootInitial.eventSourceOpens === bodyRootTransitionBaseline.eventSourceOpens + 1,
+        `body-root reload client state = ${JSON.stringify(bodyRootInitial)}`);
+    assert(bodyRootInitial.buildErrorPresentations === 0,
+        `body-root fixture started with a build-error presentation: ${JSON.stringify(bodyRootInitial)}`);
+    const bodyRootInteractive = await exerciseBodyRootInteraction(client1, bodyRootInitial);
+
+    const bodyRootFailureBuild = nextBuild;
+    await writeBrokenBodyRootGo();
+    await waitForBuild(bodyRootFailureBuild, "failed");
+    counters.failedPackageAttempts++;
+    nextBuild++;
+    const bodyRootFailure = await waitForBodyRootBuildError(client1, bodyRootFailureBuild, "go WASM build failed");
+    assert(bodyRootFailure.pageLoads === bodyRootInteractive.pageLoads
+        && bodyRootFailure.reloadEvents === bodyRootInteractive.reloadEvents
+        && bodyRootFailure.generation === bodyRootGeneration,
+        `body-root failure changed the active page: ${JSON.stringify({ bodyRootInteractive, bodyRootFailure })}`);
+    assert(bodyRootFailure.buildErrorEvents === bodyRootInteractive.buildErrorEvents + 1,
+        `body-root failure events = ${bodyRootFailure.buildErrorEvents}, want ${bodyRootInteractive.buildErrorEvents + 1}`);
+    assert(bodyRootFailure.eventSourceCount === bodyRootInteractive.eventSourceCount
+        && bodyRootFailure.eventSourceOpens === bodyRootInteractive.eventSourceOpens,
+        `body-root failure reconnected EventSource: ${JSON.stringify({ bodyRootInteractive, bodyRootFailure })}`);
+
+    await client1.evaluate(`document.querySelector("#body-root-replace-control").click()`);
+    const bodyRootReplacement = await waitForBodyRootState(client1, {
+        bodyRootReplacementVisible: true,
+        bodyRootCleanupCount: 1,
+        pageLoads: bodyRootFailure.pageLoads,
+        reloadEvents: bodyRootFailure.reloadEvents,
+        buildErrorEvents: bodyRootFailure.buildErrorEvents,
+        eventSourceOpens: bodyRootFailure.eventSourceOpens,
+        eventSourceCount: bodyRootFailure.eventSourceCount,
+        generation: bodyRootGeneration,
+    });
+    assert(bodyRootReplacement.devPanelIdentity === bodyRootFailure.devPanelIdentity,
+        `body-root build-error presentation disappeared after repeated Mount: ${JSON.stringify({ bodyRootFailure, bodyRootReplacement })}`);
+    assert(bodyRootFailure.devPanelParent === "documentElement" && !bodyRootFailure.devPanelInsideBody,
+        `body-root failure panel was not outside body: ${JSON.stringify(bodyRootFailure)}`);
+    assert(bodyRootReplacement.devPanelParent === "documentElement" && !bodyRootReplacement.devPanelInsideBody,
+        `body-root replacement panel entered body: ${JSON.stringify(bodyRootReplacement)}`);
+    assert(bodyRootReplacement.buildErrorBuild === bodyRootFailureBuild
+        && bodyRootReplacement.buildErrorMessage === bodyRootFailure.buildErrorMessage,
+        `body-root replacement changed the retained failure: ${JSON.stringify({ bodyRootFailure, bodyRootReplacement })}`);
+    const bodyRootReplacementInteractive = await exerciseBodyRootReplacementInteraction(client1, bodyRootReplacement);
+
+    await writeBodyRootStatus("body-root-recovered");
+    await waitForBuild(nextBuild, "succeeded");
+    const bodyRootRecoveryGeneration = ++activeGeneration;
+    const bodyRootRecovered = await waitForBodyRootState(client1, {
+        bodyRootVersion: "body-root-recovered",
+        bodyRootAppVisible: true,
+        pageLoads: bodyRootReplacementInteractive.pageLoads + 1,
+        reloadEvents: bodyRootReplacementInteractive.reloadEvents + 1,
+        buildErrorEvents: bodyRootReplacementInteractive.buildErrorEvents,
+        eventSourceOpens: bodyRootReplacementInteractive.eventSourceOpens + 1,
+        eventSourceCount: 1,
+        generation: bodyRootRecoveryGeneration,
+        buildErrorPresentations: 0,
+    });
+    recordSuccessfulReload();
+    nextBuild++;
+    assert(bodyRootRecovered.panelCountBeforeUnload === 0,
+        `body-root panel remained when recovery reload began: ${JSON.stringify(bodyRootRecovered)}`);
+    assert(client1.runtimeErrors.length === 0,
+        `body-root scenario caused browser runtime errors: ${JSON.stringify(client1.runtimeErrors)}`);
+    bodyRootEvidence = {
+        failureBuild: bodyRootFailureBuild,
+        failureGeneration: bodyRootGeneration,
+        recoveryGeneration: bodyRootRecoveryGeneration,
+        buildErrorEvents: bodyRootRecovered.buildErrorEvents,
+        eventSourceOpens: bodyRootRecovered.eventSourceOpens,
+        pageLoads: bodyRootRecovered.pageLoads,
+        reloadEvents: bodyRootRecovered.reloadEvents,
+        initialInteractionCount: bodyRootInteractive.bodyRootInteractionCount,
+        replacementInteractionCount: bodyRootReplacementInteractive.bodyRootReplacementInteractionCount,
+        cleanupCount: bodyRootReplacementInteractive.bodyRootCleanupCount,
+        runtimeErrors: 0,
+    };
+    console.log("body-root build-error persistence and recovery: ok");
+
     const generationRoots = [...await listGenerationRoots()].filter((entry) => !generationRootsBefore.has(entry));
     assert(generationRoots.length === 1, `development generation roots = ${JSON.stringify(generationRoots)}, want one`);
+    const shutdownBaseline = await pageState(client1);
+    await closeEventSourcesOnError(client1);
     dev.kill("SIGINT");
     const devExit = await waitForExit(dev, 15_000);
     assert(devExit.code === 0, `goxc dev exited with ${JSON.stringify(devExit)}\n${devOutput}`);
     dev = null;
     await waitForHTTPShutdown(serverURL);
+    await waitForEventSourceError(client1, shutdownBaseline.eventSourceErrors + 1);
     await waitForNoEventStreams(client1);
-    await waitForNoEventStreams(client2);
     for (const generationRoot of generationRoots) {
         assert(!existsSync(join(tmpdir(), generationRoot)), `generation root remained after shutdown: ${generationRoot}`);
     }
@@ -525,6 +630,7 @@ try {
     console.log(`404 responses during rebuild: ${counters.responses404DuringBuild}`);
     console.log(`partial responses during rebuild: ${counters.partialResponsesDuringBuild}`);
     console.log(`build error evidence: ${JSON.stringify(buildErrorEvidence)}`);
+    console.log(`body-root evidence: ${JSON.stringify(bodyRootEvidence)}`);
     console.log("goxc dev reload browser smoke: ok");
 } catch (error) {
     throw new Error(`${error.message}\n\nDevelopment output:\n${devOutput.slice(-12000)}\n\nChrome stderr:\n${browserError.slice(-6000)}`);
@@ -552,11 +658,13 @@ async function writeApplication(gox, go, index) {
     await mkdir(join(appDir, "assets"), { recursive: true });
     await writeFile(join(appDir, "go.mod"), `module example.com/goframe-dev-reload\n\ngo 1.22\n\nrequire github.com/graybuton/goframe v0.0.0\n\nreplace github.com/graybuton/goframe => ${repositoryRoot}\n`);
     await writeFile(join(appDir, "goframe.json"), `{"name":"dev-reload-smoke","entry":".","compiler":"go","assets":"assets"}\n`);
-    await writeFile(join(appDir, "main.go"), `//go:build js && wasm\n\npackage main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc main() {\n    done := make(chan struct{})\n    gf.Mount("root", App)\n    <-done\n}\n`);
+    await writeFile(join(appDir, "main.go"), `//go:build js && wasm\n\npackage main\n\nimport (\n    "syscall/js"\n\n    gf "github.com/graybuton/goframe/pkg/goframe"\n)\n\nfunc main() {\n    done := make(chan struct{})\n    app := App\n    body := js.Global().Get("document").Get("body")\n    if !body.IsUndefined() && !body.IsNull() && body.Get("id").String() == "root" {\n        app = BodyRootApp\n    }\n    gf.Mount("root", app)\n    <-done\n}\n`);
     await writeGoMessage(go);
     await writeFile(join(appDir, "embedded.go"), `package main\n\nimport _ "embed"\n\n//go:embed embedded-message.txt\nvar embeddedMessage string\n`);
     await writeEmbeddedMessage("embed-alpha");
     await writeGOX(gox);
+    await writeBodyRootGOX();
+    await writeBodyRootStatus("body-root-initial");
     await writeIndex(index);
     await writeFile(join(appDir, "assets", "marker.txt"), "complete asset\n");
 }
@@ -587,6 +695,34 @@ func App() gf.Node {
 `);
 }
 
+async function writeBodyRootGOX() {
+    await writeFile(join(appDir, "body_root.gox"), `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+var bodyRootCleanupCount int
+
+func BodyRootApp() gf.Node {
+    interactionCount, setInteractionCount := gf.UseState(0)
+    gf.UseUnmount(func() { bodyRootCleanupCount++ })
+    return <main id="body-root-app"><span id="body-root-version">{bodyRootBuildStatus()}</span><button id="body-root-interaction" type="button" onClick={func() { setInteractionCount(interactionCount + 1) }}>Initial interaction <span id="body-root-interaction-count">{interactionCount}</span></button><button id="body-root-replace-control" type="button" onClick={func() { gf.Mount("root", BodyRootReplacementApp) }}>Replace body application</button></main>
+}
+
+func BodyRootReplacementApp() gf.Node {
+    interactionCount, setInteractionCount := gf.UseState(0)
+    return <main id="body-root-replacement"><span id="body-root-cleanup-count">{bodyRootCleanupCount}</span><button id="body-root-replacement-interaction" type="button" onClick={func() { setInteractionCount(interactionCount + 1) }}>Replacement interaction <span id="body-root-replacement-interaction-count">{interactionCount}</span></button></main>
+}
+`);
+}
+
+async function writeBrokenBodyRootGo() {
+    await writeFile(join(appDir, "body_root_status.go"), `package main\n\nfunc bodyRootBuildStatus() string { return bodyRootBroken }\n`);
+}
+
+async function writeBodyRootStatus(value) {
+    await writeFile(join(appDir, "body_root_status.go"), `package main\n\nfunc bodyRootBuildStatus() string { return ${JSON.stringify(value)} }\n`);
+}
+
 async function writeGoMessage(value) {
     await writeFile(join(appDir, "message.go"), `package main\n\nfunc message() string { return ${JSON.stringify(value)} }\n`);
 }
@@ -608,6 +744,22 @@ document.querySelector("#page-load-count").textContent = String(count);
 </script>
 <script src="wasm_exec.js"></script>
 <script>var go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then(function (result) { go.run(result.instance); });</script>
+</body></html>
+`);
+}
+
+async function writeBodyRootIndex(value) {
+    await writeFile(join(appDir, "assets", "index.html"), `<!doctype html>
+<html><body id="root">
+<div id="index-version">${value}</div>
+<div id="page-load-count"></div>
+<script>
+var count = Number(sessionStorage.getItem("goframe-dev-page-loads") || "0") + 1;
+sessionStorage.setItem("goframe-dev-page-loads", String(count));
+document.querySelector("#page-load-count").textContent = String(count);
+</script>
+<script src="wasm_exec.js"></script>
+<script>window.addEventListener("load", function () { var go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then(function (result) { go.run(result.instance); }); }, { once: true });</script>
 </body></html>
 `);
 }
@@ -677,6 +829,7 @@ function reloadEvidenceScript() {
             const source = options === undefined ? new NativeEventSource(url) : new NativeEventSource(url, options);
             window.__goframeDevEventSources.push(source);
             source.addEventListener("open", () => increment("goframe-dev-event-source-opens"));
+            source.addEventListener("error", () => increment("goframe-dev-event-source-errors"));
             source.addEventListener("build-error", (event) => {
                 try {
                     const failure = JSON.parse(event.data);
@@ -697,6 +850,12 @@ function reloadEvidenceScript() {
 async function pageState(client) {
     return await client.evaluate(`(() => {
         const script = document.querySelector("script[data-goframe-dev-reload]");
+        const eventSources = window.__goframeDevEventSources || [];
+        const activeEventSource = eventSources[eventSources.length - 1];
+        let activeEventSourceURL = null;
+        try {
+            activeEventSourceURL = activeEventSource ? new URL(activeEventSource.url, location.href) : null;
+        } catch (_) {}
         const applicationRoot = document.querySelector("#app-version");
         const authoredMarker = document.querySelector("#authored-build-error-marker");
         const buildErrorMarkers = [...document.querySelectorAll("[data-goframe-dev-build-error]")];
@@ -713,14 +872,16 @@ async function pageState(client) {
             reloadEvents: Number(sessionStorage.getItem("goframe-dev-reload-events") || "0"),
             buildErrorEvents: Number(sessionStorage.getItem("goframe-dev-build-error-events") || "0"),
             eventSourceOpens: Number(sessionStorage.getItem("goframe-dev-event-source-opens") || "0"),
+            eventSourceErrors: Number(sessionStorage.getItem("goframe-dev-event-source-errors") || "0"),
             panelCountBeforeUnload: Number(sessionStorage.getItem("goframe-dev-panel-count-before-unload") || "-1"),
             authoredMarkerCountBeforeUnload: Number(sessionStorage.getItem("goframe-dev-authored-marker-count-before-unload") || "-1"),
             authoredMarkerIdentityBeforeUnload: Number(sessionStorage.getItem("goframe-dev-authored-marker-identity-before-unload") || "0"),
             authoredHeadingBeforeUnload: sessionStorage.getItem("goframe-dev-authored-heading-before-unload") || "",
             authoredMessageBeforeUnload: sessionStorage.getItem("goframe-dev-authored-message-before-unload") || "",
-            generation: Number(script?.getAttribute("data-goframe-generation") || "0"),
-            instance: script?.getAttribute("data-goframe-instance") || "",
+            generation: Number(script?.getAttribute("data-goframe-generation") || activeEventSourceURL?.searchParams.get("generation") || "0"),
+            instance: script?.getAttribute("data-goframe-instance") || activeEventSourceURL?.searchParams.get("instance") || "",
             reloadTags: document.querySelectorAll("script[data-goframe-dev-reload]").length,
+            eventSourceCount: eventSources.length,
             appRootIdentity: window.__goframeDevNodeIdentity?.(applicationRoot) || 0,
             appRootCount: document.querySelectorAll("#app-version").length,
             interactionCount: Number(document.querySelector("#interaction-count")?.textContent || "0"),
@@ -732,6 +893,12 @@ async function pageState(client) {
             buildErrorMarkers: buildErrorMarkers.length,
             buildErrorPresentations: devPanels.length,
             devPanelIdentity: window.__goframeDevNodeIdentity?.(panel) || 0,
+            devPanelParent: panel?.parentNode === document.documentElement
+                ? "documentElement"
+                : panel?.parentNode === document.body
+                    ? "body"
+                    : "",
+            devPanelInsideBody: Boolean(panel && document.body?.contains(panel)),
             buildErrorBuild: Number(panel?.getAttribute("data-goframe-dev-build") || "0"),
             buildErrorHeading: panel?.querySelector("[data-goframe-dev-build-error-heading]")?.textContent || "",
             buildErrorMessage: panel?.querySelector("[data-goframe-dev-build-error-message]")?.textContent || "",
@@ -740,8 +907,26 @@ async function pageState(client) {
             buildErrorInsideAppRoot: Boolean(panel?.closest("#app-version")),
             injectedDiagnosticElements: document.querySelectorAll("[data-goframe-diagnostic-injected]").length,
             diagnosticExecuted: Boolean(window.__goframeDevDiagnosticExecuted),
+            bodyRoot: document.body?.id === "root",
+            bodyRootAppVisible: Boolean(document.querySelector("#body-root-app")),
+            bodyRootVersion: document.querySelector("#body-root-version")?.textContent || "",
+            bodyRootInteractionCount: Number(document.querySelector("#body-root-interaction-count")?.textContent || "0"),
+            bodyRootReplacementVisible: Boolean(document.querySelector("#body-root-replacement")),
+            bodyRootReplacementInteractionCount: Number(document.querySelector("#body-root-replacement-interaction-count")?.textContent || "0"),
+            bodyRootCleanupCount: Number(document.querySelector("#body-root-cleanup-count")?.textContent || "0"),
         };
     })()`);
+}
+
+async function waitForBodyRootState(client, expected) {
+    let last = null;
+    for (let attempt = 0; attempt < 300; attempt++) {
+        last = await pageState(client);
+        const matches = Object.entries(expected).every(([key, value]) => last[key] === value);
+        if (matches && last.readyState === "complete" && last.bodyRoot) return last;
+        await wait(50);
+    }
+    throw new Error(`HARNESS FAILURE: body-root state did not match ${JSON.stringify(expected)}; last=${JSON.stringify(last)}`);
 }
 
 async function waitForPageState(client, expected) {
@@ -789,6 +974,25 @@ async function waitForBuildError(client, build, messageFragment) {
     throw new Error(`HARNESS FAILURE: build ${build} presentation did not contain ${JSON.stringify(messageFragment)}; last=${JSON.stringify(last)}`);
 }
 
+async function waitForBodyRootBuildError(client, build, messageFragment) {
+    let last = null;
+    for (let attempt = 0; attempt < 200; attempt++) {
+        last = await pageState(client);
+        if (last.bodyRoot
+            && last.buildErrorPresentations === 1
+            && last.buildErrorBuild === build
+            && last.buildErrorMessage.includes(messageFragment)) {
+            assert(last.buildErrorHeading === `Build ${build} failed`,
+                `body-root build error heading = ${JSON.stringify(last.buildErrorHeading)}, want build ${build}`);
+            assert(last.buildErrorRole === "alert" && last.buildErrorLive === "assertive",
+                `body-root build error accessibility = ${JSON.stringify({ role: last.buildErrorRole, live: last.buildErrorLive })}`);
+            return last;
+        }
+        await wait(25);
+    }
+    throw new Error(`HARNESS FAILURE: body-root build ${build} presentation did not contain ${JSON.stringify(messageFragment)}; last=${JSON.stringify(last)}`);
+}
+
 function assertFailedBuildPreserved(baseline, state, generation, label) {
     assert(state.pageLoads === baseline.pageLoads && state.reloadEvents === baseline.reloadEvents,
         `${label} reloaded the browser: ${JSON.stringify({ baseline, state })}`);
@@ -817,6 +1021,27 @@ async function exerciseInteraction(client, baseline) {
         reloadEvents: baseline.reloadEvents,
         generation: baseline.generation,
         appRootIdentity: baseline.appRootIdentity,
+    });
+}
+
+async function exerciseBodyRootInteraction(client, baseline) {
+    await client.evaluate(`document.querySelector("#body-root-interaction").click()`);
+    return await waitForBodyRootState(client, {
+        bodyRootInteractionCount: baseline.bodyRootInteractionCount + 1,
+        pageLoads: baseline.pageLoads,
+        reloadEvents: baseline.reloadEvents,
+        generation: baseline.generation,
+    });
+}
+
+async function exerciseBodyRootReplacementInteraction(client, baseline) {
+    await client.evaluate(`document.querySelector("#body-root-replacement-interaction").click()`);
+    return await waitForBodyRootState(client, {
+        bodyRootReplacementVisible: true,
+        bodyRootReplacementInteractionCount: baseline.bodyRootReplacementInteractionCount + 1,
+        pageLoads: baseline.pageLoads,
+        reloadEvents: baseline.reloadEvents,
+        generation: baseline.generation,
     });
 }
 
@@ -862,6 +1087,29 @@ async function waitForEventSourceOpen(client, want) {
         await wait(25);
     }
     throw new Error(`HARNESS FAILURE: EventSource open count did not reach ${want}`);
+}
+
+async function waitForEventSourceError(client, want) {
+    for (let attempt = 0; attempt < 200; attempt++) {
+        const state = await pageState(client);
+        if (state.eventSourceErrors >= want) return;
+        await wait(25);
+    }
+    throw new Error(`HARNESS FAILURE: EventSource error count did not reach ${want}`);
+}
+
+async function closeEventSources(client) {
+    await client.evaluate(`(() => {
+        for (const source of window.__goframeDevEventSources || []) source.close();
+    })()`);
+}
+
+async function closeEventSourcesOnError(client) {
+    await client.evaluate(`(() => {
+        for (const source of window.__goframeDevEventSources || []) {
+            source.addEventListener("error", () => source.close(), { once: true });
+        }
+    })()`);
 }
 
 async function probeCompletedGenerationUntilBuildCompletes(serverURL, wasmPath, generation, build) {
@@ -1171,7 +1419,7 @@ async function connect(url) {
 }
 
 async function waitForNoEventStreams(client) {
-    for (let attempt = 0; attempt < 100; attempt++) {
+    for (let attempt = 0; attempt < 400; attempt++) {
         if (client.eventStreams.size === 0) return;
         await wait(25);
     }
