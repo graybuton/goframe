@@ -5,8 +5,8 @@
 `v0.3.0-preview.1` is an experimental browser/WASM pre-release and an
 application-workflow and development-loop checkpoint. It covers the merged
 changes after `v0.2.0-preview.6`, from
-`9548345776e6398cd70e8fc58435dd5dab687c7d` through the prepared release
-candidate based on `c9983314aec7bc8bc8eb08a9687681da2c24cb2b`.
+`9548345776e6398cd70e8fc58435dd5dab687c7d` through the release baseline at
+`c9983314aec7bc8bc8eb08a9687681da2c24cb2b`.
 
 The validated surface remains interactive browser/WASM applications built with
 the GoFrame runtime, GOX, `goxc`, and standard Go or TinyGo WebAssembly output.
@@ -15,10 +15,10 @@ and toolchain ownership boundaries, and records integrated application evidence
 without adding public route-loader, transition, mutation, document-metadata, or
 history-routing APIs.
 
-The tag and GitHub pre-release do not exist until the maintainer completes the
-publication steps. GoFrame remains pre-1.0 and experimental. This preview is
-not a production-readiness, fullstack, SSR, hydration, or broad browser-support
-claim.
+This versioned document records the `v0.3.0-preview.1` release contract. Git
+tags and GitHub Releases are authoritative for publication and availability.
+GoFrame remains pre-1.0 and experimental. This preview is not a
+production-readiness, fullstack, SSR, hydration, or broad browser-support claim.
 
 ## Highlights
 
@@ -123,7 +123,7 @@ claim.
 
 ## Validation
 
-The prepared release candidate passed the local release gate with:
+The release baseline passed the local release gate with:
 
 - ordinary, `goframe_debug`, and vet lanes on Go `1.22.12`, `1.25.12`, and
   `1.26.5`;
@@ -141,9 +141,9 @@ The prepared release candidate passed the local release gate with:
   hints, matching manifests and completion metadata, and verified gzip/Brotli
   sidecars.
 
-The release pull request must still pass the normal Core, Browser Smoke, WASM
-Size, and VS Code Extension workflows after it is opened. This document does
-not claim that release-branch workflows ran before a pull request existed.
+Publication requires the release pull request to pass the normal Core, Browser
+Smoke, WASM Size, and VS Code Extension workflows. The local evidence above
+does not substitute for those workflows.
 
 ## Known Limitations And Follow-Ups
 
@@ -171,15 +171,15 @@ not claim that release-branch workflows ran before a pull request existed.
 
 ## Install
 
-After the maintainer publishes the signed tag and GitHub pre-release, install
-the exact preview with:
+Install the exact preview with:
 
 ```bash
-go install github.com/graybuton/goframe/cmd/goxc@v0.3.0-preview.1
+go install \
+  github.com/graybuton/goframe/cmd/goxc@v0.3.0-preview.1
 ```
 
-Before publication, use a source checkout of the prepared release branch
-instead of treating the tag as available.
+Availability of this exact command is determined by the published tag shown in
+GitHub Releases.
 
 ## Verification
 

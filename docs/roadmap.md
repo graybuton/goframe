@@ -124,7 +124,7 @@ Future features do not become delivery promises by appearing in this document.
 | Version line | Theme | Intended capability class | Status |
 |---|---|---|---|
 | `v0.2.0-preview.6` | Diagnostics & Editor DX checkpoint | Published the CLI/editor diagnostic boundary as a bounded preview checkpoint. | **Current / shipped** |
-| `v0.3.0-preview.1` | Application workflow & dev loop checkpoint | Packages the watched full-build development loop and integrated application evidence without selecting new application-model APIs. | **Next checkpoint** |
+| `v0.3.0-preview.1` | Application workflow & dev loop checkpoint | Watched full-build development loop and integrated application evidence without selected new application-model APIs. | **Current / shipped** |
 | Later `v0.3.0-preview.*` slots | Application Model II | Route-driven data, transitions, loaders, mutations, and document state remain unselected directions. | **Research** |
 | `v0.4.0-preview.*` | Modular Delivery & Bundle Splitting | Explicit asset, multi-entry WASM, and route-lazy delivery boundaries. | **Candidate** |
 | `v0.5.0-preview.*` | Server Rendering & Prerender | A DOM-independent HTML-rendering subset, static prerender, and evaluated SSR adapters. | **Research** |
@@ -165,14 +165,16 @@ validation evidence are recorded in the
 [dedicated release document](release-notes-v0.2.0-preview.6.md).
 
 `v0.2.0-preview.7` should exist only for a real maintenance, compatibility, or
-security need. Normal feature progression should move to
-`v0.3.0-preview.1`.
+security need. Feature progression from that diagnostics checkpoint is
+represented by the `v0.3.0-preview.1` capability scope below.
 
 ## `v0.3.0-preview.1` - Application Workflow And Dev Loop Checkpoint
 
-Status: **Next checkpoint**. The release candidate packages behavior already
-present on current `main`; it does not select an Application Model II public
-API.
+Status: **Current / shipped** capability scope. The application workflow and
+development-loop behavior exists on current `main`; this status does not assert
+that the versioned tag is published. Git tags and GitHub Releases are
+authoritative for publication state. No Application Model II public API is
+selected.
 
 Purpose:
 
@@ -535,14 +537,12 @@ that defines behavior boundaries, evidence, cost, and non-goals.
 
 ## Immediate Sequence
 
-1. Publish `v0.3.0-preview.1` only after its release pull request and normal
-   workflows pass.
-2. Retain the bounded watched `goxc dev`, completed-generation serving, and
+1. Retain the bounded watched `goxc dev`, completed-generation serving, and
    successful-build reload contracts as current behavior.
-3. Keep route loaders, transitions, mutations, document metadata, and history
+2. Keep route loaders, transitions, mutations, document metadata, and history
    routing unselected until separate evidence justifies a public API.
-4. Keep issue #117 independent and non-blocking.
-5. Keep browser build-error presentation as a separate later candidate.
+3. Keep issue #117 independent and non-blocking.
+4. Keep browser build-error presentation as a separate later candidate.
 
 The application-model evidence does not justify adding a loader, Action, or
 Mutation API. The selected development-loop slice does not imply incremental

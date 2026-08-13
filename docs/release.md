@@ -1,35 +1,26 @@
 # Release Hygiene
 
-goframe is still an experimental MVP project. The current tags are milestone
-tags, not stable public API releases.
+GoFrame is experimental and pre-1.0.
+
+Historical MVP tags are milestone tags. Preview tags are Go module pre-release
+tags. Neither creates a stable public API guarantee.
 
 ## Tag Style
 
-Current milestone tag:
+Historical milestone tag example:
 
 ```text
 v0.1.0-mvp10
 ```
 
-Latest published preview tag:
-
-```text
-v0.2.0-preview.6
-```
-
-Prepared release candidate:
-
-```text
-v0.3.0-preview.1
-```
-
-Git tags and GitHub Releases are authoritative for publication state. A release
-note file or release branch does not make a preview published.
+Git tags and GitHub Releases are authoritative for publication state. The
+presence of a release-notes file or release branch does not make a preview
+published.
 
 Subsequent previews should increment the pre-release number.
 
-The current MVP tags remain historical milestone tags. They are not public API
-release tags.
+MVP tags remain historical milestone tags. They are not public API release
+tags.
 
 Use annotated, signed tags when possible for future previews:
 
@@ -99,7 +90,7 @@ is published.
 ## After Tagging
 
 Use the dedicated release notes document for the preview tag being released.
-Current preview release note documents:
+Versioned preview release records in this repository:
 
 - `docs/release-notes-v0.1.0-preview.1.md`
 - `docs/release-notes-v0.1.0-preview.2.md`
@@ -110,6 +101,9 @@ Current preview release note documents:
 - `docs/release-notes-v0.2.0-preview.5.md`
 - `docs/release-notes-v0.2.0-preview.6.md`
 - `docs/release-notes-v0.3.0-preview.1.md`
+
+This list identifies repository records; Git tags and GitHub Releases determine
+whether each version is published.
 
 `CHANGELOG.md` remains the factual change log; release notes should summarize
 preview scope, maturity tiers, validation evidence, compatibility notes, and

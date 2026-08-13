@@ -17,9 +17,9 @@ No changes have been recorded after `v0.3.0-preview.1`.
   `PackageSource`, `PackageGenerateOptions`, and
   `GeneratePackageWithOptions`, including deterministic private identifier
   allocation against authored package declarations.
-- Generated-workspace `go:embed` discovery and materialization, with effective
-  source selection shared by generation, build, package, check, and development
-  workflows.
+- Generated-workspace `go:embed` discovery and materialization for browser
+  build and package workflows, with effective embedded-payload changes tracked
+  by `goxc dev`.
 - Integrated standard-Go and TinyGo browser evidence for server-backed data and
   mutations, async navigation ownership, history-routing deployment pressure,
   repeated application mounting, controlled selects, context topology, state
