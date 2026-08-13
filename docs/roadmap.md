@@ -123,8 +123,9 @@ Future features do not become delivery promises by appearing in this document.
 
 | Version line | Theme | Intended capability class | Status |
 |---|---|---|---|
-| `v0.2.0-preview.6` | Diagnostics & Editor DX checkpoint | Published the current CLI/editor diagnostic boundary as a bounded preview checkpoint. | **Current / shipped** |
-| `v0.3.0-preview.*` | Application Model II | Route-driven data, transitions, loaders, mutations, and document state. | **Planned direction** |
+| `v0.2.0-preview.6` | Diagnostics & Editor DX checkpoint | Published the CLI/editor diagnostic boundary as a bounded preview checkpoint. | **Current / shipped** |
+| `v0.3.0-preview.1` | Application workflow & dev loop checkpoint | Watched full-build development loop and integrated application evidence without selected new application-model APIs. | **Current / shipped** |
+| Later `v0.3.0-preview.*` slots | Application Model II | Route-driven data, transitions, loaders, mutations, and document state remain unselected directions. | **Research** |
 | `v0.4.0-preview.*` | Modular Delivery & Bundle Splitting | Explicit asset, multi-entry WASM, and route-lazy delivery boundaries. | **Candidate** |
 | `v0.5.0-preview.*` | Server Rendering & Prerender | A DOM-independent HTML-rendering subset, static prerender, and evaluated SSR adapters. | **Research** |
 | `v0.6.0-preview.*` | Hydration & Islands | Deterministic attachment, state handoff, recovery, and partial activation. | **Research** |
@@ -164,31 +165,37 @@ validation evidence are recorded in the
 [dedicated release document](release-notes-v0.2.0-preview.6.md).
 
 `v0.2.0-preview.7` should exist only for a real maintenance, compatibility, or
-security need. Normal feature progression should move to
-`v0.3.0-preview.1`.
+security need. Feature progression from that diagnostics checkpoint is
+represented by the `v0.3.0-preview.1` capability scope below.
 
-## `v0.3.0-preview.*` - Application Model II
+## `v0.3.0-preview.1` - Application Workflow And Dev Loop Checkpoint
 
-Status: **Planned direction**. The exact public API is not selected by this
-roadmap.
+Status: **Current / shipped** capability scope. The application workflow and
+development-loop behavior exists on current `main`; this status does not assert
+that the versioned tag is published. Git tags and GitHub Releases are
+authoritative for publication state. No Application Model II public API is
+selected.
 
 Purpose:
 
 ```text
-route-driven data applications with explicit transition,
-loader, mutation, and document-state boundaries
+an observable full-package development loop plus integrated
+application-workflow evidence over existing public primitives
 ```
 
-Candidate preview slots:
+The checkpoint includes:
 
-| Planning slot | Candidate capability |
-|---|---|
-| `preview.1` | Route transition state and cancellation. |
-| `preview.2` | Optional history/path routing and its deployment contract. |
-| `preview.3` | Narrow route loaders. |
-| `preview.4` | Actions and mutations. |
-| `preview.5` | Document head/meta and an integrated reference flow. |
-| `preview.6` | Application-model checkpoint. |
+- `goxc dev` with serialized full-package rebuilds, last-successful-generation
+  preservation, verified generation activation, and successful-build page
+  reload;
+- server-backed and async-navigation evidence using existing router, resource,
+  lifecycle, and example-local request coordination;
+- history-routing deployment characterization without changing the public hash
+  router contract;
+- private document-ownership research that confirms a bounded lifecycle
+  foundation while selecting no public hook, component, or handle API shape;
+- runtime, GOX, generated-publication, filesystem-ownership, and toolchain
+  corrections required by the integrated evidence.
 
 Design boundaries:
 
@@ -201,13 +208,18 @@ Design boundaries:
 - no file-based router is promised;
 - no final route, loader, action, or mutation API signature is chosen here.
 
-The line remains subject to focused design and executable evidence before any
-public contract is selected.
+Issue [#117](https://github.com/graybuton/goframe/issues/117) remains an
+independent external evaluator task. It is non-blocking for this checkpoint and
+has no external submission recorded in the release evidence.
 
 The completed async-navigation and server-backed mutation evidence found the
 existing router, component ownership, resource lifecycle, and example-local
 request coordination sufficient for the audited flows. Those stages did not
 select a public route-loader, Action, Mutation, or cache-invalidation API.
+
+Browser build-error presentation remains a separate candidate. The current
+development loop reports failed builds in the terminal and keeps serving the
+last successful generation.
 
 ## `v0.4.0-preview.*` - Modular Delivery & Bundle Splitting
 
@@ -525,10 +537,12 @@ that defines behavior boundaries, evidence, cost, and non-goals.
 
 ## Immediate Sequence
 
-1. Retain the bounded watched `goxc dev` command as **Current / shipped**.
-2. Retain completed-generation serving and successful-build browser reload as
-   **Current / shipped** after focused Go and browser evidence.
-3. Keep browser build-error presentation as a separate later candidate.
+1. Retain the bounded watched `goxc dev`, completed-generation serving, and
+   successful-build reload contracts as current behavior.
+2. Keep route loaders, transitions, mutations, document metadata, and history
+   routing unselected until separate evidence justifies a public API.
+3. Keep issue #117 independent and non-blocking.
+4. Keep browser build-error presentation as a separate later candidate.
 
 The application-model evidence does not justify adding a loader, Action, or
 Mutation API. The selected development-loop slice does not imply incremental

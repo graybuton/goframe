@@ -2,16 +2,74 @@
 
 ## Unreleased
 
+No changes have been recorded after `v0.3.0-preview.1`.
+
+## v0.3.0-preview.1
+
 ### Added
 
-- Supported CI baselines for Go `1.22.12`, `1.25.12`, and `1.26.5`, Node.js
-  `24.18.1`, and the Go `1.26.5`/TinyGo `0.41.1` browser and WASM-size lanes,
-  with three reproducibly measured size-budget cells aligned to that baseline.
 - Watched `goxc dev` workflow with serialized full-package rebuilds, effective
   authored-input polling, quiet-period debounce, verified process-private
   generation serving, last-successful-generation failure preservation,
-  loopback-only no-store serving, and successful-build full-page browser reload
-  without HMR or a browser error overlay.
+  loopback-only no-store serving, and successful-build full-page browser
+  reload without HMR or a browser error overlay.
+- Coordinated compiler-facing `pkg/gox` package generation through
+  `PackageSource`, `PackageGenerateOptions`, and
+  `GeneratePackageWithOptions`, including deterministic private identifier
+  allocation against authored package declarations.
+- Generated-workspace `go:embed` discovery and materialization for browser
+  build and package workflows, with effective embedded-payload changes tracked
+  by `goxc dev`.
+- Integrated standard-Go and TinyGo browser evidence for server-backed data and
+  mutations, async navigation ownership, history-routing deployment pressure,
+  repeated application mounting, controlled selects, context topology, state
+  render transactions, and document ownership research fixtures.
+- Supported CI baselines for Go `1.22.12`, `1.25.12`, and `1.26.5`, Node.js
+  `24.18.1`, and the Go `1.26.5`/TinyGo `0.41.1` browser and WASM-size lanes.
+
+### Fixed
+
+- Recover-capable renders now stage new state slots and reducer replacements,
+  preserve the latest committed reducer for existing dispatch closures, and
+  discard closures created only by a failed render.
+- Runtime ownership fixes cover protected ErrorBoundary teardown, failed
+  context-selector topology rebinds, controlled select reconciliation, and
+  repeated `gf.Mount` replacement. Nested replacement targets are rejected
+  before teardown, and stale listeners or queued updates cannot cross
+  application ownership.
+- GOX now rejects duplicate or effectively colliding component props, DOM
+  attributes, events, and `Children` destinations; normalizes all HTML
+  attribute destinations consistently with the runtime; and reports authored
+  source diagnostics before invalid generated Go or ambiguous DOM behavior.
+- GOX package generation now handles Unicode source boundaries, declaration
+  insertion, package-safe private identifier collisions, and production source
+  selection consistently across supported standard-Go and TinyGo contexts.
+- Coordinated generated-source publication restores the prior managed set when
+  a detected write, replacement, or inactive-output removal fails.
+- Adjacent generated-file cleanup now verifies generated ownership,
+  containment, filesystem identity, and content before destructive removal.
+- Generated-workspace compiler commands no longer inherit a parent `go.work`,
+  ambient `GOFLAGS`, or persisted flags that could change application source
+  selection or dependency resolution.
+
+### Research
+
+- Route-transition, saved-mutation, and history-routing experiments found the
+  existing router and component lifecycle sufficient for the audited flows;
+  they did not select public loader, transition, mutation, or history-router
+  APIs.
+- Private document-metadata research confirmed a bounded transactional
+  lifecycle handoff while a follow-up hook/component/handle comparison selected
+  no public API shape. Experiment files and symbols remain excluded from
+  ordinary builds.
+- Repository hygiene and analyzer-led cleanup removed confirmed dead private
+  code without changing public APIs, CLI output, generated output contracts, or
+  ordinary WASM budgets.
+
+## Earlier Preview History
+
+### Added
+
 - `v0.2.0-preview.6` release notes documenting structured `goxc check`
   diagnostics, the schema-v1 tooling transport, saved-source VS Code
   diagnostics, Unicode position mapping, multi-root and stale-run handling,
@@ -192,39 +250,6 @@
 
 ### Fixed
 
-- Failed recover-capable renders no longer commit newly observed state slots or
-  reducer replacements. State transactions are allocated lazily, commit before
-  generic resource participants, preserve the latest committed reducer for old
-  dispatch closures, and discard new-slot closures on rollback. Standard-Go
-  browser evidence covers failure and retry; standard Go and TinyGo both cover
-  the successful state/reducer/resource path.
-- Coordinated `goxc generate` publication now stages all active outputs and
-  recovers the prior generated-source set when a detected write, replacement,
-  or managed inactive-removal failure occurs. Rollback failures retain the
-  original error, while successful bytes, no-active-source cleanup, and
-  single-file sibling verification remain unchanged.
-- GOX now rejects duplicate DOM attributes and component props, normalized DOM
-  attribute or event collisions, and explicit `Children` combined with nested
-  renderable children. HTML attribute destinations are ASCII-lowercased before
-  the `className` and `htmlFor` aliases in both GOX validation and runtime prop
-  splitting, including boolean ARIA values. Authored diagnostics are reported
-  before generation can emit duplicate Go fields or ambiguous runtime
-  destinations, and direct codegen validates manually constructed ASTs
-  defensively.
-- `goxc clean --generated` and `--legacy` now verify adjacent `.gox.go`
-  ownership before cleanup, retain filesystem identity and content fingerprints,
-  and revalidate the complete set plus each file immediately before removal.
-  Unmarked, replaced, modified, or unsafe files are preserved instead of being
-  deleted by filename or stale preflight evidence.
-- Valid repeated `gf.Mount` calls now release the previous application and
-  remove its exact mounted DOM range before mounting into the same or an
-  independent root, without removing unrelated host siblings from an inactive
-  root. A different target inside the current root is rejected before the
-  current application is destroyed.
-- Context selector subscriptions now rebind to the new nearest provider during
-  topology refresh even when selector evaluation fails, preserving the previous
-  selected value while allowing safe updates from the new provider to recover.
-- Controlled select values are restored after dynamic option reconciliation.
 - `splitProps` allocation behavior was characterized and reduced for common
   runtime prop paths while preserving nil and empty zero-allocation behavior.
 - `VirtualTable` runtime code was reduced to recover dashboard WASM size
