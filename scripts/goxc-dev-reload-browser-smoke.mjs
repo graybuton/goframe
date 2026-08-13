@@ -27,6 +27,7 @@ let client2 = null;
 let activationGapProbe = null;
 let devOutput = "";
 let browserError = "";
+let buildErrorEvidence = null;
 const lines = [];
 const counters = {
     successfulPackageAttempts: 0,
@@ -162,27 +163,171 @@ try {
 
     const failureBaseline = await pageState(client1);
     const failureStart = lines.length;
-    await writeFile(join(appDir, "app.gox"), `package main\n\nfunc App() { return <main>broken</main> }\n`);
-    await waitForBuild(nextBuild, "failed", failureStart);
+    const firstFailureBuild = nextBuild;
+    await writeBrokenGOX();
+    await waitForBuild(firstFailureBuild, "failed", failureStart);
     counters.failedPackageAttempts++;
     nextBuild++;
     const failureRoot = await fetch(`${serverURL}/`, { cache: "no-store" });
     const failureMetadata = await fetch(`${serverURL}/goframe-package.json`, { cache: "no-store" });
     assert(failureRoot.ok && failureMetadata.ok, `last successful package unavailable after failure: ${failureRoot.status}/${failureMetadata.status}`);
-    await wait(250);
-    const afterFailure = await pageState(client1);
-    assert(afterFailure.pageLoads === failureBaseline.pageLoads && afterFailure.reloadEvents === failureBaseline.reloadEvents,
-        `failed build reloaded the browser: ${JSON.stringify({ failureBaseline, afterFailure })}`);
-    assert(afterFailure.generation === activeGeneration, `failed build changed generation to ${afterFailure.generation}`);
-    console.log("failed build preservation: ok");
+    const failureRootText = await failureRoot.text();
+    const failureMetadataJSON = await failureMetadata.json();
+    assert(!failureRootText.includes("data-goframe-dev-build-error"), "development error presentation entered the served package index");
+    assert(failureMetadataJSON.version === 1, `last successful package metadata changed after failure: ${JSON.stringify(failureMetadataJSON)}`);
+    assert(!(await readFile(join(packageDir, "index.html"), "utf8")).includes("data-goframe-dev-build-error"),
+        "development error presentation entered the canonical package index");
 
-    const recoveryBaseline = afterFailure;
+    const afterFailure = await waitForBuildError(client1, firstFailureBuild, "empty expression for attribute");
+    assertFailedBuildPreserved(failureBaseline, afterFailure, activeGeneration, "first failed build");
+    assert(afterFailure.buildErrorEvents === failureBaseline.buildErrorEvents + 1,
+        `first failed build events = ${afterFailure.buildErrorEvents}, want ${failureBaseline.buildErrorEvents + 1}`);
+    assert(afterFailure.buildErrorMessage.includes("<img data-goframe-diagnostic-injected"),
+        `first failure omitted markup-like source text: ${JSON.stringify(afterFailure.buildErrorMessage)}`);
+    assert(afterFailure.injectedDiagnosticElements === 0 && !afterFailure.diagnosticExecuted,
+        `first failure executed markup-like diagnostic text: ${JSON.stringify(afterFailure)}`);
+    const interactiveAfterFailure = await exerciseInteraction(client1, afterFailure);
+    assert(interactiveAfterFailure.appRootIdentity === failureBaseline.appRootIdentity,
+        `first failed build replaced the application root: ${JSON.stringify({ failureBaseline, interactiveAfterFailure })}`);
+    console.log("first failed build presentation and interaction: ok");
+
+    const failureSecondTarget = await client1.call("Target.createTarget", { url: "about:blank" });
+    const failureSecondPage = await waitForTarget(debugPort, failureSecondTarget.targetId);
+    client2 = await connect(failureSecondPage.webSocketDebuggerUrl);
+    await prepareClient(client2);
+    await navigate(client2, `${serverURL}/?smoke=build-error-second-client`);
+    const failureSecondInitial = await waitForPageState(client2, {
+        gox: "burst-final",
+        go: "go-rebuild",
+        index: "index-rebuild",
+        generation: activeGeneration,
+    });
+    const failureSecondRetained = await waitForBuildError(client2, firstFailureBuild, "empty expression for attribute");
+    assert(failureSecondRetained.pageLoads === failureSecondInitial.pageLoads
+        && failureSecondRetained.reloadEvents === failureSecondInitial.reloadEvents,
+        `retained failure reloaded the second page: ${JSON.stringify(failureSecondRetained)}`);
+    assert(failureSecondRetained.buildErrorEvents === 1,
+        `second page retained failure events = ${failureSecondRetained.buildErrorEvents}, want 1`);
+
+    const replacementBaseline1 = await pageState(client1);
+    const replacementBaseline2 = await pageState(client2);
+    const replacementFailureBuild = nextBuild;
+    await writeReplacementBrokenGOX();
+    await waitForBuild(replacementFailureBuild, "failed");
+    counters.failedPackageAttempts++;
+    nextBuild++;
+    const [replacementFailure1, replacementFailure2] = await Promise.all([
+        waitForBuildError(client1, replacementFailureBuild, "data-replacement"),
+        waitForBuildError(client2, replacementFailureBuild, "data-replacement"),
+    ]);
+    assertFailedBuildPreserved(replacementBaseline1, replacementFailure1, activeGeneration, "replacement failed build on page 1");
+    assertFailedBuildPreserved(replacementBaseline2, replacementFailure2, activeGeneration, "replacement failed build on page 2");
+    for (const [label, state] of [["page 1", replacementFailure1], ["page 2", replacementFailure2]]) {
+        assert(state.buildErrorMessage !== afterFailure.buildErrorMessage,
+            `${label} retained the first failure message`);
+        assert(!state.buildErrorMessage.includes("data-goframe-diagnostic-injected"),
+            `${label} retained markup from the first failure`);
+    }
+    const interactiveSecondPage = await exerciseInteraction(client2, replacementFailure2);
+    assert(interactiveSecondPage.appRootIdentity === replacementFailure2.appRootIdentity,
+        `replacement failure interaction replaced page 2 root: ${JSON.stringify(interactiveSecondPage)}`);
+    console.log("consecutive failure replacement on two pages: ok");
+
+    const reconnectBaseline = await pageState(client1);
+    await reconnectReloadClient(client1, activeInstance, activeGeneration, true);
+    await waitForEventSourceOpen(client1, reconnectBaseline.eventSourceOpens + 1);
+    const afterFailureReconnect = await waitForBuildError(client1, replacementFailureBuild, "data-replacement");
+    assertFailedBuildPreserved(reconnectBaseline, afterFailureReconnect, activeGeneration, "current-generation failure reconnect");
+    assert(afterFailureReconnect.buildErrorEvents === reconnectBaseline.buildErrorEvents + 1,
+        `current-generation reconnect events = ${afterFailureReconnect.buildErrorEvents}, want ${reconnectBaseline.buildErrorEvents + 1}`);
+    console.log("current-generation failure reconnect: ok");
+
+    const malformedBaseline = await pageState(client1);
+    await dispatchMalformedBuildError(client1);
+    const afterMalformed = await pageState(client1);
+    assert(afterMalformed.buildErrorEvents === malformedBaseline.buildErrorEvents
+        && afterMalformed.buildErrorBuild === malformedBaseline.buildErrorBuild
+        && afterMalformed.buildErrorMessage === malformedBaseline.buildErrorMessage,
+        `malformed private event changed the presentation: ${JSON.stringify({ malformedBaseline, afterMalformed })}`);
+    assert(client1.runtimeErrors.length === 0, `malformed private event caused runtime errors: ${JSON.stringify(client1.runtimeErrors)}`);
+
+    const staleFailureBaseline = afterMalformed;
+    await reconnectReloadClient(client1, activeInstance, activeGeneration - 1, true);
+    const staleFailureCaughtUp = await waitForPageState(client1, {
+        gox: "burst-final",
+        go: "go-rebuild",
+        index: "index-rebuild",
+        pageLoads: staleFailureBaseline.pageLoads + 1,
+        reloadEvents: staleFailureBaseline.reloadEvents + 1,
+        generation: activeGeneration,
+    });
+    counters.catchUpReloads++;
+    const failureAfterCatchUp = await waitForBuildError(client1, replacementFailureBuild, "data-replacement");
+    assert(failureAfterCatchUp.buildErrorEvents === staleFailureBaseline.buildErrorEvents + 1,
+        `stale catch-up failure events = ${failureAfterCatchUp.buildErrorEvents}, want ${staleFailureBaseline.buildErrorEvents + 1}`);
+    assert(failureAfterCatchUp.pageLoads === staleFailureCaughtUp.pageLoads
+        && failureAfterCatchUp.reloadEvents === staleFailureCaughtUp.reloadEvents,
+        `current failure caused a second reload after stale catch-up: ${JSON.stringify(failureAfterCatchUp)}`);
+    console.log("stale-generation reload precedes retained failure: ok");
+
+    const recoveryBaseline1 = failureAfterCatchUp;
+    const recoveryBaseline2 = interactiveSecondPage;
     await writeGOX("recovered");
     await waitForBuild(nextBuild, "succeeded");
-    await assertSuccessfulReload(client1, recoveryBaseline, { gox: "recovered", go: "go-rebuild", index: "index-rebuild" }, ++activeGeneration);
+    const recoveryGeneration = ++activeGeneration;
+    const [recovered1, recovered2] = await Promise.all([
+        assertSuccessfulReload(client1, recoveryBaseline1, { gox: "recovered", go: "go-rebuild", index: "index-rebuild" }, recoveryGeneration),
+        assertSuccessfulReload(client2, recoveryBaseline2, { gox: "recovered", go: "go-rebuild", index: "index-rebuild" }, recoveryGeneration),
+    ]);
     recordSuccessfulReload();
     nextBuild++;
-    console.log("failed build recovery reload: ok");
+    await Promise.all([
+        waitForEventSourceOpen(client1, recoveryBaseline1.eventSourceOpens + 1),
+        waitForEventSourceOpen(client2, recoveryBaseline2.eventSourceOpens + 1),
+    ]);
+    const stableRecovery1 = await pageState(client1);
+    const stableRecovery2 = await pageState(client2);
+    for (const [label, baseline, state] of [
+        ["page 1", recoveryBaseline1, stableRecovery1],
+        ["page 2", recoveryBaseline2, stableRecovery2],
+    ]) {
+        assert(state.buildErrorPresentations === 0, `${label} retained an error presentation after recovery: ${JSON.stringify(state)}`);
+        assert(state.buildErrorEvents === baseline.buildErrorEvents,
+            `${label} replayed a cleared failure after recovery: ${JSON.stringify({ baseline, state })}`);
+        assert(state.panelCountBeforeUnload === 0,
+            `${label} still had an error presentation when recovery reload was initiated: ${JSON.stringify(state)}`);
+    }
+    assert(recovered1.generation === recoveryGeneration && recovered2.generation === recoveryGeneration,
+        `recovery generations = ${recovered1.generation}/${recovered2.generation}, want ${recoveryGeneration}`);
+
+    const clearedReconnectBaseline = stableRecovery1;
+    await reconnectReloadClient(client1, activeInstance, activeGeneration, true);
+    await waitForEventSourceOpen(client1, clearedReconnectBaseline.eventSourceOpens + 1);
+    await wait(100);
+    const afterClearedReconnect = await pageState(client1);
+    assert(afterClearedReconnect.pageLoads === clearedReconnectBaseline.pageLoads
+        && afterClearedReconnect.reloadEvents === clearedReconnectBaseline.reloadEvents
+        && afterClearedReconnect.buildErrorEvents === clearedReconnectBaseline.buildErrorEvents
+        && afterClearedReconnect.buildErrorPresentations === 0,
+        `cleared failure replayed on current-generation reconnect: ${JSON.stringify(afterClearedReconnect)}`);
+    assert(client1.runtimeErrors.length === 0 && client2.runtimeErrors.length === 0,
+        `application runtime errors during failed-build recovery: ${JSON.stringify({ page1: client1.runtimeErrors, page2: client2.runtimeErrors })}`);
+    buildErrorEvidence = {
+        builds: [firstFailureBuild, replacementFailureBuild],
+        firstPageEvents: afterClearedReconnect.buildErrorEvents,
+        secondPageEvents: stableRecovery2.buildErrorEvents,
+        recoveryGeneration,
+        firstPageLoads: stableRecovery1.pageLoads,
+        secondPageLoads: stableRecovery2.pageLoads,
+        firstPageReloads: stableRecovery1.reloadEvents,
+        secondPageReloads: stableRecovery2.reloadEvents,
+        interactionCounts: [interactiveAfterFailure.interactionCount, interactiveSecondPage.interactionCount],
+        runtimeErrors: 0,
+    };
+    client2.close();
+    await client1.call("Target.closeTarget", { targetId: failureSecondTarget.targetId });
+    client2 = null;
+    console.log("failed build recovery reload on two pages: ok");
 
     const embedBaseline = await pageState(client1);
     await writeEmbeddedMessage("embed-beta");
@@ -318,6 +463,10 @@ try {
 
     const client1Final = await pageState(client1);
     const client2Final = await pageState(client2);
+    assert(client1Final.buildErrorPresentations === 0 && client2Final.buildErrorPresentations === 0,
+        `final pages retained build-error presentations: ${JSON.stringify({ client1Final, client2Final })}`);
+    assert(client1.runtimeErrors.length === 0 && client2.runtimeErrors.length === 0,
+        `browser runtime errors = ${JSON.stringify({ page1: client1.runtimeErrors, page2: client2.runtimeErrors })}`);
     const generationRoots = [...await listGenerationRoots()].filter((entry) => !generationRootsBefore.has(entry));
     assert(generationRoots.length === 1, `development generation roots = ${JSON.stringify(generationRoots)}, want one`);
     dev.kill("SIGINT");
@@ -349,6 +498,7 @@ try {
     console.log(`new-generation index responses: ${counters.newGenerationIndexResponses}`);
     console.log(`404 responses during rebuild: ${counters.responses404DuringBuild}`);
     console.log(`partial responses during rebuild: ${counters.partialResponsesDuringBuild}`);
+    console.log(`build error evidence: ${JSON.stringify(buildErrorEvidence)}`);
     console.log("goxc dev reload browser smoke: ok");
 } catch (error) {
     throw new Error(`${error.message}\n\nDevelopment output:\n${devOutput.slice(-12000)}\n\nChrome stderr:\n${browserError.slice(-6000)}`);
@@ -386,7 +536,29 @@ async function writeApplication(gox, go, index) {
 }
 
 async function writeGOX(value) {
-    await writeFile(join(appDir, "app.gox"), `package main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc App() gf.Node {\n    return <main id="app-version"><span id="gox-version">${value}</span><span id="go-version">{message()}</span><span id="embedded-value">{embeddedMessage}</span></main>\n}\n`);
+    await writeFile(join(appDir, "app.gox"), `package main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc App() gf.Node {\n    interactionCount, setInteractionCount := gf.UseState(0)\n    return <main id="app-version"><span id="gox-version">${value}</span><span id="go-version">{message()}</span><span id="embedded-value">{embeddedMessage}</span><button id="interaction-control" type="button" onClick={func() { setInteractionCount(interactionCount + 1) }}>Interaction <span id="interaction-count">{interactionCount}</span></button></main>\n}\n`);
+}
+
+async function writeBrokenGOX() {
+    await writeFile(join(appDir, "app.gox"), `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+    return <main data-broken={}><img data-goframe-diagnostic-injected src="missing" onerror="window.__goframeDevDiagnosticExecuted=true" /></main>
+}
+`);
+}
+
+async function writeReplacementBrokenGOX() {
+    await writeFile(join(appDir, "app.gox"), `package main
+
+import gf "github.com/graybuton/goframe/pkg/goframe"
+
+func App() gf.Node {
+    return <main data-replacement={}></main>
+}
+`);
 }
 
 async function writeGoMessage(value) {
@@ -415,6 +587,10 @@ document.querySelector("#page-load-count").textContent = String(count);
 }
 
 async function prepareClient(client) {
+    client.runtimeErrors = [];
+    client.on("Runtime.exceptionThrown", ({ exceptionDetails }) => {
+        client.runtimeErrors.push(exceptionDetails?.text || "unknown browser exception");
+    });
     await client.call("Runtime.enable");
     await client.call("Page.enable");
     await client.call("Network.enable");
@@ -433,6 +609,24 @@ function reloadEvidenceScript() {
         const NativeEventSource = window.EventSource;
         if (typeof NativeEventSource !== "function") return;
         window.__goframeDevEventSources = [];
+        window.__goframeDevDiagnosticExecuted = false;
+        window.addEventListener("beforeunload", () => {
+            sessionStorage.setItem(
+                "goframe-dev-panel-count-before-unload",
+                String(document.querySelectorAll("[data-goframe-dev-build-error]").length),
+            );
+        });
+        const nodeIDs = new WeakMap();
+        window.__goframeDevNodeIdentity = (node) => {
+            if (!node) return 0;
+            let identity = nodeIDs.get(node);
+            if (!identity) {
+                identity = Number(sessionStorage.getItem("goframe-dev-next-node-identity") || "0") + 1;
+                sessionStorage.setItem("goframe-dev-next-node-identity", String(identity));
+                nodeIDs.set(node, identity);
+            }
+            return identity;
+        };
         const increment = (key) => {
             const next = Number(sessionStorage.getItem(key) || "0") + 1;
             sessionStorage.setItem(key, String(next));
@@ -441,6 +635,14 @@ function reloadEvidenceScript() {
             const source = options === undefined ? new NativeEventSource(url) : new NativeEventSource(url, options);
             window.__goframeDevEventSources.push(source);
             source.addEventListener("open", () => increment("goframe-dev-event-source-opens"));
+            source.addEventListener("build-error", (event) => {
+                try {
+                    const failure = JSON.parse(event.data);
+                    if (failure && Number.isInteger(failure.build) && failure.build > 0 && typeof failure.message === "string") {
+                        increment("goframe-dev-build-error-events");
+                    }
+                } catch (_) {}
+            });
             source.addEventListener("reload", () => increment("goframe-dev-reload-events"));
             return source;
         }
@@ -453,6 +655,8 @@ function reloadEvidenceScript() {
 async function pageState(client) {
     return await client.evaluate(`(() => {
         const script = document.querySelector("script[data-goframe-dev-reload]");
+        const applicationRoot = document.querySelector("#app-version");
+        const panel = document.querySelector("[data-goframe-dev-build-error]");
         return {
             href: location.href,
             readyState: document.readyState,
@@ -462,10 +666,24 @@ async function pageState(client) {
             index: document.querySelector("#index-version")?.textContent || "",
             pageLoads: Number(sessionStorage.getItem("goframe-dev-page-loads") || "0"),
             reloadEvents: Number(sessionStorage.getItem("goframe-dev-reload-events") || "0"),
+            buildErrorEvents: Number(sessionStorage.getItem("goframe-dev-build-error-events") || "0"),
             eventSourceOpens: Number(sessionStorage.getItem("goframe-dev-event-source-opens") || "0"),
+            panelCountBeforeUnload: Number(sessionStorage.getItem("goframe-dev-panel-count-before-unload") || "-1"),
             generation: Number(script?.getAttribute("data-goframe-generation") || "0"),
             instance: script?.getAttribute("data-goframe-instance") || "",
             reloadTags: document.querySelectorAll("script[data-goframe-dev-reload]").length,
+            appRootIdentity: window.__goframeDevNodeIdentity?.(applicationRoot) || 0,
+            appRootCount: document.querySelectorAll("#app-version").length,
+            interactionCount: Number(document.querySelector("#interaction-count")?.textContent || "0"),
+            buildErrorPresentations: document.querySelectorAll("[data-goframe-dev-build-error]").length,
+            buildErrorBuild: Number(panel?.getAttribute("data-goframe-dev-build") || "0"),
+            buildErrorHeading: panel?.querySelector("[data-goframe-dev-build-error-heading]")?.textContent || "",
+            buildErrorMessage: panel?.querySelector("[data-goframe-dev-build-error-message]")?.textContent || "",
+            buildErrorRole: panel?.getAttribute("role") || "",
+            buildErrorLive: panel?.getAttribute("aria-live") || "",
+            buildErrorInsideAppRoot: Boolean(panel?.closest("#app-version")),
+            injectedDiagnosticElements: document.querySelectorAll("[data-goframe-diagnostic-injected]").length,
+            diagnosticExecuted: Boolean(window.__goframeDevDiagnosticExecuted),
         };
     })()`);
 }
@@ -489,11 +707,65 @@ async function assertSuccessfulReload(client, baseline, expected, generation) {
         generation,
     });
     assert(state.reloadTags === 1, `reload tag count = ${state.reloadTags}, want 1`);
+    return state;
 }
 
-async function reconnectReloadClient(client, instance, generation) {
+async function waitForBuildError(client, build, messageFragment) {
+    let last = null;
+    for (let attempt = 0; attempt < 200; attempt++) {
+        last = await pageState(client);
+        if (last.buildErrorPresentations === 1
+            && last.buildErrorBuild === build
+            && last.buildErrorMessage.includes(messageFragment)) {
+            assert(last.buildErrorHeading === `Build ${build} failed`,
+                `build error heading = ${JSON.stringify(last.buildErrorHeading)}, want build ${build}`);
+            assert(last.buildErrorRole === "alert" && last.buildErrorLive === "assertive",
+                `build error accessibility = ${JSON.stringify({ role: last.buildErrorRole, live: last.buildErrorLive })}`);
+            assert(!last.buildErrorInsideAppRoot, "build error presentation entered the application root");
+            assert(last.appRootCount === 1, `application root count = ${last.appRootCount}, want 1`);
+            return last;
+        }
+        await wait(25);
+    }
+    throw new Error(`HARNESS FAILURE: build ${build} presentation did not contain ${JSON.stringify(messageFragment)}; last=${JSON.stringify(last)}`);
+}
+
+function assertFailedBuildPreserved(baseline, state, generation, label) {
+    assert(state.pageLoads === baseline.pageLoads && state.reloadEvents === baseline.reloadEvents,
+        `${label} reloaded the browser: ${JSON.stringify({ baseline, state })}`);
+    assert(state.generation === generation, `${label} changed generation to ${state.generation}, want ${generation}`);
+    assert(state.appRootIdentity === baseline.appRootIdentity,
+        `${label} replaced the application root: ${JSON.stringify({ baseline, state })}`);
+    assert(state.gox === baseline.gox && state.go === baseline.go && state.index === baseline.index,
+        `${label} changed active application content: ${JSON.stringify({ baseline, state })}`);
+}
+
+async function exerciseInteraction(client, baseline) {
+    await client.evaluate(`document.querySelector("#interaction-control").click()`);
+    return await waitForPageState(client, {
+        interactionCount: baseline.interactionCount + 1,
+        pageLoads: baseline.pageLoads,
+        reloadEvents: baseline.reloadEvents,
+        generation: baseline.generation,
+        appRootIdentity: baseline.appRootIdentity,
+    });
+}
+
+async function dispatchMalformedBuildError(client) {
+    await client.evaluate(`(() => {
+        const sources = window.__goframeDevEventSources || [];
+        const source = sources[sources.length - 1];
+        if (!source) throw new Error("no development EventSource to probe");
+        source.dispatchEvent(new MessageEvent("build-error", { data: "{malformed" }));
+    })()`);
+}
+
+async function reconnectReloadClient(client, instance, generation, removeBuildError = false) {
     await client.evaluate(`(() => {
         for (const source of window.__goframeDevEventSources || []) source.close();
+        if (${JSON.stringify(removeBuildError)}) {
+            document.querySelector("[data-goframe-dev-build-error]")?.remove();
+        }
         const script = document.createElement("script");
         script.src = ${JSON.stringify("/_goframe/dev/reload.js")} + "?reconnect=" + Date.now();
         script.setAttribute("data-goframe-instance", ${JSON.stringify(String(instance))});
