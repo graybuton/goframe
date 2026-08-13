@@ -494,6 +494,14 @@ func TestDevReloadClientIsDevelopmentOnlyResponse(t *testing.T) {
 	if strings.Contains(response.Body.String(), "innerHTML") {
 		t.Fatalf("reload client renders build errors through innerHTML: %q", response.Body.String())
 	}
+	for _, lookup := range []string{
+		`document.querySelector("[` + devBuildErrorMarker + `]")`,
+		`document.querySelectorAll("[` + devBuildErrorMarker + `]")`,
+	} {
+		if strings.Contains(response.Body.String(), lookup) {
+			t.Fatalf("reload client adopts application markup through %q: %q", lookup, response.Body.String())
+		}
+	}
 
 	head := httptest.NewRecorder()
 	serveDevReloadClient(head, httptest.NewRequest(http.MethodHead, devReloadScriptPath, nil))

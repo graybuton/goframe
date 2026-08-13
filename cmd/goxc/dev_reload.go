@@ -38,9 +38,36 @@ const devReloadClient = `(function () {
     if (!instance || !generation || typeof window.EventSource !== "function") return;
     var source = new EventSource("/_goframe/dev/events?instance=" + encodeURIComponent(instance) + "&generation=" + encodeURIComponent(generation));
     var reloading = false;
+    var buildErrorPanel = null;
+    var buildErrorHeading = null;
+    var buildErrorMessage = null;
+    function clearBuildErrorReferences() {
+        buildErrorPanel = null;
+        buildErrorHeading = null;
+        buildErrorMessage = null;
+    }
+    function ensureBuildErrorPanel() {
+        if (buildErrorPanel && buildErrorPanel.isConnected) return;
+        clearBuildErrorReferences();
+        buildErrorPanel = document.createElement("section");
+        buildErrorPanel.setAttribute("data-goframe-dev-build-error", "");
+        buildErrorPanel.setAttribute("role", "alert");
+        buildErrorPanel.setAttribute("aria-live", "assertive");
+        buildErrorPanel.setAttribute("aria-atomic", "true");
+        buildErrorPanel.style.cssText = "position:fixed;right:1rem;bottom:1rem;z-index:2147483647;box-sizing:border-box;width:min(42rem,calc(100vw - 2rem));max-height:min(50vh,32rem);overflow:auto;padding:1rem;border:2px solid #f87171;border-radius:.5rem;background:#1f1013;color:#fff;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 1rem 3rem rgba(0,0,0,.45);";
+        buildErrorHeading = document.createElement("strong");
+        buildErrorHeading.setAttribute("data-goframe-dev-build-error-heading", "");
+        buildErrorHeading.style.cssText = "display:block;margin:0 0 .75rem;color:#fca5a5;font:600 15px/1.3 system-ui,sans-serif;";
+        buildErrorMessage = document.createElement("pre");
+        buildErrorMessage.setAttribute("data-goframe-dev-build-error-message", "");
+        buildErrorMessage.style.cssText = "margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;";
+        buildErrorPanel.appendChild(buildErrorHeading);
+        buildErrorPanel.appendChild(buildErrorMessage);
+        (document.body || document.documentElement).appendChild(buildErrorPanel);
+    }
     function removeBuildError() {
-        var current = document.querySelector("[data-goframe-dev-build-error]");
-        if (current) current.remove();
+        if (buildErrorPanel && buildErrorPanel.isConnected) buildErrorPanel.remove();
+        clearBuildErrorReferences();
     }
     function showBuildError(event) {
         var failure;
@@ -50,27 +77,10 @@ const devReloadClient = `(function () {
             return;
         }
         if (!failure || !Number.isInteger(failure.build) || failure.build <= 0 || typeof failure.message !== "string") return;
-        var panel = document.querySelector("[data-goframe-dev-build-error]");
-        if (!panel) {
-            panel = document.createElement("section");
-            panel.setAttribute("data-goframe-dev-build-error", "");
-            panel.setAttribute("role", "alert");
-            panel.setAttribute("aria-live", "assertive");
-            panel.setAttribute("aria-atomic", "true");
-            panel.style.cssText = "position:fixed;right:1rem;bottom:1rem;z-index:2147483647;box-sizing:border-box;width:min(42rem,calc(100vw - 2rem));max-height:min(50vh,32rem);overflow:auto;padding:1rem;border:2px solid #f87171;border-radius:.5rem;background:#1f1013;color:#fff;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 1rem 3rem rgba(0,0,0,.45);";
-            var heading = document.createElement("strong");
-            heading.setAttribute("data-goframe-dev-build-error-heading", "");
-            heading.style.cssText = "display:block;margin:0 0 .75rem;color:#fca5a5;font:600 15px/1.3 system-ui,sans-serif;";
-            var message = document.createElement("pre");
-            message.setAttribute("data-goframe-dev-build-error-message", "");
-            message.style.cssText = "margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;";
-            panel.appendChild(heading);
-            panel.appendChild(message);
-            (document.body || document.documentElement).appendChild(panel);
-        }
-        panel.setAttribute("data-goframe-dev-build", String(failure.build));
-        panel.querySelector("[data-goframe-dev-build-error-heading]").textContent = "Build " + failure.build + " failed";
-        panel.querySelector("[data-goframe-dev-build-error-message]").textContent = failure.message;
+        ensureBuildErrorPanel();
+        buildErrorPanel.setAttribute("data-goframe-dev-build", String(failure.build));
+        buildErrorHeading.textContent = "Build " + failure.build + " failed";
+        buildErrorMessage.textContent = failure.message;
     }
     source.addEventListener("build-error", showBuildError);
     source.addEventListener("reload", function () {

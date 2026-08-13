@@ -189,6 +189,9 @@ try {
     const interactiveAfterFailure = await exerciseInteraction(client1, afterFailure);
     assert(interactiveAfterFailure.appRootIdentity === failureBaseline.appRootIdentity,
         `first failed build replaced the application root: ${JSON.stringify({ failureBaseline, interactiveAfterFailure })}`);
+    assertAuthoredMarker(interactiveAfterFailure, "first failed build interaction");
+    assert(interactiveAfterFailure.authoredMarkerIdentity === failureBaseline.authoredMarkerIdentity,
+        `first failed build interaction replaced the authored marker: ${JSON.stringify({ failureBaseline, interactiveAfterFailure })}`);
     console.log("first failed build presentation and interaction: ok");
 
     const failureSecondTarget = await client1.call("Target.createTarget", { url: "about:blank" });
@@ -209,7 +212,13 @@ try {
     assert(failureSecondRetained.buildErrorEvents === 1,
         `second page retained failure events = ${failureSecondRetained.buildErrorEvents}, want 1`);
 
+    await removeDevBuildErrorPanel(client1);
     const replacementBaseline1 = await pageState(client1);
+    assert(replacementBaseline1.buildErrorPresentations === 0 && replacementBaseline1.buildErrorMarkers === 1,
+        `external removal did not leave only the authored marker: ${JSON.stringify(replacementBaseline1)}`);
+    assertAuthoredMarker(replacementBaseline1, "external development-panel removal");
+    assert(replacementBaseline1.authoredMarkerIdentity === afterFailure.authoredMarkerIdentity,
+        `external development-panel removal replaced the authored marker: ${JSON.stringify({ afterFailure, replacementBaseline1 })}`);
     const replacementBaseline2 = await pageState(client2);
     const replacementFailureBuild = nextBuild;
     await writeReplacementBrokenGOX();
@@ -228,9 +237,16 @@ try {
         assert(!state.buildErrorMessage.includes("data-goframe-diagnostic-injected"),
             `${label} retained markup from the first failure`);
     }
+    assert(replacementFailure1.devPanelIdentity !== afterFailure.devPanelIdentity,
+        `page 1 reused its disconnected development panel: ${JSON.stringify({ afterFailure, replacementFailure1 })}`);
+    assert(replacementFailure2.devPanelIdentity === replacementBaseline2.devPanelIdentity,
+        `page 2 replaced its connected development panel: ${JSON.stringify({ replacementBaseline2, replacementFailure2 })}`);
     const interactiveSecondPage = await exerciseInteraction(client2, replacementFailure2);
     assert(interactiveSecondPage.appRootIdentity === replacementFailure2.appRootIdentity,
         `replacement failure interaction replaced page 2 root: ${JSON.stringify(interactiveSecondPage)}`);
+    assertAuthoredMarker(interactiveSecondPage, "replacement failure interaction");
+    assert(interactiveSecondPage.authoredMarkerIdentity === replacementFailure2.authoredMarkerIdentity,
+        `replacement failure interaction replaced page 2 authored marker: ${JSON.stringify({ replacementFailure2, interactiveSecondPage })}`);
     console.log("consecutive failure replacement on two pages: ok");
 
     const reconnectBaseline = await pageState(client1);
@@ -240,6 +256,8 @@ try {
     assertFailedBuildPreserved(reconnectBaseline, afterFailureReconnect, activeGeneration, "current-generation failure reconnect");
     assert(afterFailureReconnect.buildErrorEvents === reconnectBaseline.buildErrorEvents + 1,
         `current-generation reconnect events = ${afterFailureReconnect.buildErrorEvents}, want ${reconnectBaseline.buildErrorEvents + 1}`);
+    assert(afterFailureReconnect.devPanelIdentity !== reconnectBaseline.devPanelIdentity,
+        `current-generation reconnect adopted the removed development panel: ${JSON.stringify({ reconnectBaseline, afterFailureReconnect })}`);
     console.log("current-generation failure reconnect: ok");
 
     const malformedBaseline = await pageState(client1);
@@ -296,6 +314,12 @@ try {
             `${label} replayed a cleared failure after recovery: ${JSON.stringify({ baseline, state })}`);
         assert(state.panelCountBeforeUnload === 0,
             `${label} still had an error presentation when recovery reload was initiated: ${JSON.stringify(state)}`);
+        assert(state.authoredMarkerCountBeforeUnload === 1
+            && state.authoredMarkerIdentityBeforeUnload === baseline.authoredMarkerIdentity
+            && state.authoredHeadingBeforeUnload === "authored heading"
+            && state.authoredMessageBeforeUnload === "authored message",
+        `${label} changed the authored marker before recovery reload: ${JSON.stringify({ baseline, state })}`);
+        assertAuthoredMarker(state, `${label} recovery`);
     }
     assert(recovered1.generation === recoveryGeneration && recovered2.generation === recoveryGeneration,
         `recovery generations = ${recovered1.generation}/${recovered2.generation}, want ${recoveryGeneration}`);
@@ -465,6 +489,8 @@ try {
     const client2Final = await pageState(client2);
     assert(client1Final.buildErrorPresentations === 0 && client2Final.buildErrorPresentations === 0,
         `final pages retained build-error presentations: ${JSON.stringify({ client1Final, client2Final })}`);
+    assertAuthoredMarker(client1Final, "final page 1");
+    assertAuthoredMarker(client2Final, "final page 2");
     assert(client1.runtimeErrors.length === 0 && client2.runtimeErrors.length === 0,
         `browser runtime errors = ${JSON.stringify({ page1: client1.runtimeErrors, page2: client2.runtimeErrors })}`);
     const generationRoots = [...await listGenerationRoots()].filter((entry) => !generationRootsBefore.has(entry));
@@ -536,7 +562,7 @@ async function writeApplication(gox, go, index) {
 }
 
 async function writeGOX(value) {
-    await writeFile(join(appDir, "app.gox"), `package main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc App() gf.Node {\n    interactionCount, setInteractionCount := gf.UseState(0)\n    return <main id="app-version"><span id="gox-version">${value}</span><span id="go-version">{message()}</span><span id="embedded-value">{embeddedMessage}</span><button id="interaction-control" type="button" onClick={func() { setInteractionCount(interactionCount + 1) }}>Interaction <span id="interaction-count">{interactionCount}</span></button></main>\n}\n`);
+    await writeFile(join(appDir, "app.gox"), `package main\n\nimport gf "github.com/graybuton/goframe/pkg/goframe"\n\nfunc App() gf.Node {\n    interactionCount, setInteractionCount := gf.UseState(0)\n    return <main id="app-version"><span id="gox-version">${value}</span><span id="go-version">{message()}</span><span id="embedded-value">{embeddedMessage}</span><section id="authored-build-error-marker" data-goframe-dev-build-error=""><strong data-goframe-dev-build-error-heading="">authored heading</strong><pre data-goframe-dev-build-error-message="">authored message</pre><button id="interaction-control" type="button" onClick={func() { setInteractionCount(interactionCount + 1) }}>Interaction <span id="interaction-count">{interactionCount}</span></button></section></main>\n}\n`);
 }
 
 async function writeBrokenGOX() {
@@ -611,9 +637,25 @@ function reloadEvidenceScript() {
         window.__goframeDevEventSources = [];
         window.__goframeDevDiagnosticExecuted = false;
         window.addEventListener("beforeunload", () => {
+            const authoredMarker = document.querySelector("#authored-build-error-marker");
+            const devPanels = [...document.querySelectorAll("[data-goframe-dev-build-error]")]
+                .filter((node) => node !== authoredMarker);
             sessionStorage.setItem(
                 "goframe-dev-panel-count-before-unload",
-                String(document.querySelectorAll("[data-goframe-dev-build-error]").length),
+                String(devPanels.length),
+            );
+            sessionStorage.setItem("goframe-dev-authored-marker-count-before-unload", String(authoredMarker ? 1 : 0));
+            sessionStorage.setItem(
+                "goframe-dev-authored-marker-identity-before-unload",
+                String(window.__goframeDevNodeIdentity?.(authoredMarker) || 0),
+            );
+            sessionStorage.setItem(
+                "goframe-dev-authored-heading-before-unload",
+                authoredMarker?.querySelector("[data-goframe-dev-build-error-heading]")?.textContent || "",
+            );
+            sessionStorage.setItem(
+                "goframe-dev-authored-message-before-unload",
+                authoredMarker?.querySelector("[data-goframe-dev-build-error-message]")?.textContent || "",
             );
         });
         const nodeIDs = new WeakMap();
@@ -656,7 +698,10 @@ async function pageState(client) {
     return await client.evaluate(`(() => {
         const script = document.querySelector("script[data-goframe-dev-reload]");
         const applicationRoot = document.querySelector("#app-version");
-        const panel = document.querySelector("[data-goframe-dev-build-error]");
+        const authoredMarker = document.querySelector("#authored-build-error-marker");
+        const buildErrorMarkers = [...document.querySelectorAll("[data-goframe-dev-build-error]")];
+        const devPanels = buildErrorMarkers.filter((node) => node !== authoredMarker);
+        const panel = devPanels[0] || null;
         return {
             href: location.href,
             readyState: document.readyState,
@@ -669,13 +714,24 @@ async function pageState(client) {
             buildErrorEvents: Number(sessionStorage.getItem("goframe-dev-build-error-events") || "0"),
             eventSourceOpens: Number(sessionStorage.getItem("goframe-dev-event-source-opens") || "0"),
             panelCountBeforeUnload: Number(sessionStorage.getItem("goframe-dev-panel-count-before-unload") || "-1"),
+            authoredMarkerCountBeforeUnload: Number(sessionStorage.getItem("goframe-dev-authored-marker-count-before-unload") || "-1"),
+            authoredMarkerIdentityBeforeUnload: Number(sessionStorage.getItem("goframe-dev-authored-marker-identity-before-unload") || "0"),
+            authoredHeadingBeforeUnload: sessionStorage.getItem("goframe-dev-authored-heading-before-unload") || "",
+            authoredMessageBeforeUnload: sessionStorage.getItem("goframe-dev-authored-message-before-unload") || "",
             generation: Number(script?.getAttribute("data-goframe-generation") || "0"),
             instance: script?.getAttribute("data-goframe-instance") || "",
             reloadTags: document.querySelectorAll("script[data-goframe-dev-reload]").length,
             appRootIdentity: window.__goframeDevNodeIdentity?.(applicationRoot) || 0,
             appRootCount: document.querySelectorAll("#app-version").length,
             interactionCount: Number(document.querySelector("#interaction-count")?.textContent || "0"),
-            buildErrorPresentations: document.querySelectorAll("[data-goframe-dev-build-error]").length,
+            authoredMarkerPresent: Boolean(authoredMarker),
+            authoredMarkerIdentity: window.__goframeDevNodeIdentity?.(authoredMarker) || 0,
+            authoredHeading: authoredMarker?.querySelector("[data-goframe-dev-build-error-heading]")?.textContent || "",
+            authoredMessage: authoredMarker?.querySelector("[data-goframe-dev-build-error-message]")?.textContent || "",
+            authoredMarkerInsideAppRoot: Boolean(authoredMarker?.closest("#app-version")),
+            buildErrorMarkers: buildErrorMarkers.length,
+            buildErrorPresentations: devPanels.length,
+            devPanelIdentity: window.__goframeDevNodeIdentity?.(panel) || 0,
             buildErrorBuild: Number(panel?.getAttribute("data-goframe-dev-build") || "0"),
             buildErrorHeading: panel?.querySelector("[data-goframe-dev-build-error-heading]")?.textContent || "",
             buildErrorMessage: panel?.querySelector("[data-goframe-dev-build-error-message]")?.textContent || "",
@@ -723,6 +779,9 @@ async function waitForBuildError(client, build, messageFragment) {
                 `build error accessibility = ${JSON.stringify({ role: last.buildErrorRole, live: last.buildErrorLive })}`);
             assert(!last.buildErrorInsideAppRoot, "build error presentation entered the application root");
             assert(last.appRootCount === 1, `application root count = ${last.appRootCount}, want 1`);
+            assertAuthoredMarker(last, `build ${build}`);
+            assert(last.buildErrorMarkers === 2,
+                `build ${build} marker count = ${last.buildErrorMarkers}, want authored marker plus one development panel`);
             return last;
         }
         await wait(25);
@@ -738,6 +797,16 @@ function assertFailedBuildPreserved(baseline, state, generation, label) {
         `${label} replaced the application root: ${JSON.stringify({ baseline, state })}`);
     assert(state.gox === baseline.gox && state.go === baseline.go && state.index === baseline.index,
         `${label} changed active application content: ${JSON.stringify({ baseline, state })}`);
+    assertAuthoredMarker(state, label);
+    assert(state.authoredMarkerIdentity === baseline.authoredMarkerIdentity,
+        `${label} replaced the authored marker: ${JSON.stringify({ baseline, state })}`);
+}
+
+function assertAuthoredMarker(state, label) {
+    assert(state.authoredMarkerPresent && state.authoredMarkerInsideAppRoot,
+        `${label} removed the authored build-error marker: ${JSON.stringify(state)}`);
+    assert(state.authoredHeading === "authored heading" && state.authoredMessage === "authored message",
+        `${label} changed authored build-error content: ${JSON.stringify(state)}`);
 }
 
 async function exerciseInteraction(client, baseline) {
@@ -760,11 +829,23 @@ async function dispatchMalformedBuildError(client) {
     })()`);
 }
 
+async function removeDevBuildErrorPanel(client) {
+    await client.evaluate(`(() => {
+        const authoredMarker = document.querySelector("#authored-build-error-marker");
+        for (const panel of document.querySelectorAll("[data-goframe-dev-build-error]")) {
+            if (panel !== authoredMarker) panel.remove();
+        }
+    })()`);
+}
+
 async function reconnectReloadClient(client, instance, generation, removeBuildError = false) {
     await client.evaluate(`(() => {
         for (const source of window.__goframeDevEventSources || []) source.close();
         if (${JSON.stringify(removeBuildError)}) {
-            document.querySelector("[data-goframe-dev-build-error]")?.remove();
+            const authoredMarker = document.querySelector("#authored-build-error-marker");
+            for (const panel of document.querySelectorAll("[data-goframe-dev-build-error]")) {
+                if (panel !== authoredMarker) panel.remove();
+            }
         }
         const script = document.createElement("script");
         script.src = ${JSON.stringify("/_goframe/dev/reload.js")} + "?reconnect=" + Date.now();
