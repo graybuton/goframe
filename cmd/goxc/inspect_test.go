@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -270,6 +271,162 @@ Summary
 	if strings.Contains(output.String(), fixture.root) {
 		t.Fatalf("text report contains absolute root:\n%s", output.String())
 	}
+}
+
+func TestInspectTextValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "ordinary ASCII", value: "assets/styles.css", want: "assets/styles.css"},
+		{name: "spaces", value: "images/my logo.svg", want: "images/my logo.svg"},
+		{name: "graphic Unicode", value: "демо/界.css", want: "демо/界.css"},
+		{name: "newline", value: "line\nvalue", want: strconv.QuoteToGraphic("line\nvalue")},
+		{name: "carriage return", value: "line\rvalue", want: strconv.QuoteToGraphic("line\rvalue")},
+		{name: "tab", value: "line\tvalue", want: strconv.QuoteToGraphic("line\tvalue")},
+		{name: "NUL", value: "line\x00value", want: strconv.QuoteToGraphic("line\x00value")},
+		{name: "ESC sequence", value: "line\x1b[2J", want: strconv.QuoteToGraphic("line\x1b[2J")},
+		{name: "C1 control", value: "line\u0085value", want: strconv.QuoteToGraphic("line\u0085value")},
+		{name: "line separator", value: "line\u2028value", want: strconv.QuoteToGraphic("line\u2028value")},
+		{name: "paragraph separator", value: "line\u2029value", want: strconv.QuoteToGraphic("line\u2029value")},
+		{name: "bidi override", value: "line\u202evalue", want: strconv.QuoteToGraphic("line\u202evalue")},
+		{name: "zero-width joiner", value: "line\u200dvalue", want: strconv.QuoteToGraphic("line\u200dvalue")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := inspectTextValue(test.value); got != test.want {
+				t.Fatalf("inspectTextValue(%q) = %q, want %q", test.value, got, test.want)
+			}
+		})
+	}
+}
+
+func TestInspectTextReportEscapesPackageControlledValues(t *testing.T) {
+	values := struct {
+		name             string
+		toolchainVersion string
+		html             string
+		wasm             string
+		runtime          string
+		style            string
+		artifactPath     string
+		mediaType        string
+		edgeFrom         string
+		edgeTo           string
+	}{
+		name:             "name\nvalue",
+		toolchainVersion: "tool\x1b[2J",
+		html:             "html\rvalue",
+		wasm:             "wasm\tvalue",
+		runtime:          "runtime\u2028value",
+		style:            "style\u2029value",
+		artifactPath:     "artifact\x00value",
+		mediaType:        "media\u0085value",
+		edgeFrom:         "from\u202evalue",
+		edgeTo:           "to\u200dvalue",
+	}
+	report := inspectReport{
+		SchemaVersion: inspectSchemaVersion,
+		Package: inspectPackage{
+			Name:             values.name,
+			Compiler:         "go",
+			ToolchainVersion: values.toolchainVersion,
+		},
+		Entrypoints: inspectEntrypoints{
+			HTML:    values.html,
+			WASM:    values.wasm,
+			Runtime: values.runtime,
+			Styles:  []string{values.style},
+		},
+		Artifacts: []inspectArtifact{{
+			Path:         values.artifactPath,
+			LogicalName:  "logical\nname",
+			MediaType:    values.mediaType,
+			Bytes:        1,
+			SHA256:       strings.Repeat("a", sha256.Size*2),
+			DeclaredHash: "hash\rvalue",
+			Encoding:     "encoding\tvalue",
+			Roles:        []string{"asset"},
+		}},
+		Edges: []inspectEdge{{
+			From:     values.edgeFrom,
+			To:       values.edgeTo,
+			Kind:     "compressed",
+			Encoding: "gzip\nvalue",
+		}},
+		Summary: inspectSummary{ArtifactCount: 1, EdgeCount: 1, TotalBytes: 1},
+	}
+
+	var output bytes.Buffer
+	if err := writeInspectText(&output, report); err != nil {
+		t.Fatalf("writeInspectText() error: %v", err)
+	}
+	wantFragments := []string{
+		"  Name: " + strconv.QuoteToGraphic(values.name) + "\n",
+		"  Toolchain version: " + strconv.QuoteToGraphic(values.toolchainVersion) + "\n",
+		"  HTML: " + strconv.QuoteToGraphic(values.html) + "\n",
+		"  WASM: " + strconv.QuoteToGraphic(values.wasm) + "\n",
+		"  Runtime: " + strconv.QuoteToGraphic(values.runtime) + "\n",
+		"    - " + strconv.QuoteToGraphic(values.style) + "\n",
+		"  - " + strconv.QuoteToGraphic(values.artifactPath) + "\n",
+		"    Media type: " + strconv.QuoteToGraphic(values.mediaType) + "\n",
+		"  - " + strconv.QuoteToGraphic(values.edgeFrom) + " -> " + strconv.QuoteToGraphic(values.edgeTo) + "\n",
+	}
+	for _, fragment := range wantFragments {
+		if !strings.Contains(output.String(), fragment) {
+			t.Errorf("text report missing escaped fragment %q; output = %q", fragment, output.String())
+		}
+	}
+	for _, unsafe := range []rune{'\r', '\t', '\x00', '\x1b', '\u0085', '\u2028', '\u2029', '\u202e', '\u200d'} {
+		if strings.ContainsRune(output.String(), unsafe) {
+			t.Errorf("text report contains raw non-graphic rune %U; output = %q", unsafe, output.String())
+		}
+	}
+	if got, want := strings.Count(output.String(), "\n"), 33; got != want {
+		t.Errorf("text report structural newline count = %d, want %d; output = %q", got, want, output.String())
+	}
+	for _, fragment := range []string{
+		"  Compiler: go\n",
+		"    Logical name: \"logical\\nname\"\n",
+		"    Declared hash: \"hash\\rvalue\"\n",
+		"    Encoding: \"encoding\\tvalue\"\n",
+		"    Roles: asset\n",
+		"    Kind: compressed\n",
+		"    Encoding: \"gzip\\nvalue\"\n",
+	} {
+		if !strings.Contains(output.String(), fragment) {
+			t.Errorf("text report changed an already-safe field %q; output = %q", fragment, output.String())
+		}
+	}
+}
+
+func TestInspectTextReportEscapesCurrentPackageName(t *testing.T) {
+	fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+	const packageName = "demo\n\x1b[2J"
+	mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+		metadata.Name = packageName
+	})
+
+	textOutput := runInspectForTest(t, []string{"--dir", fixture.root})
+	wantNameLine := "  Name: " + strconv.QuoteToGraphic(packageName) + "\n"
+	if !strings.Contains(textOutput, wantNameLine) {
+		t.Errorf("text report does not safely render current package name %q; output = %q", wantNameLine, textOutput)
+	}
+	if strings.ContainsRune(textOutput, '\x1b') {
+		t.Errorf("text report contains raw ESC; output = %q", textOutput)
+	}
+
+	jsonOutput := runInspectForTest(t, []string{"--dir", fixture.root, "--format=json"})
+	var report inspectReport
+	if err := json.Unmarshal([]byte(jsonOutput), &report); err != nil {
+		t.Fatalf("decode inspect JSON: %v; output = %q", err, jsonOutput)
+	}
+	if report.SchemaVersion != inspectSchemaVersion || report.Package.Name != packageName {
+		t.Fatalf("JSON package = %+v schemaVersion=%d, want original name and schema %d", report.Package, report.SchemaVersion, inspectSchemaVersion)
+	}
+	t.Logf("JSON round trip preserved schema=%d packageName=%q outputBytes=%d", report.SchemaVersion, report.Package.Name, len(jsonOutput))
 }
 
 func TestInspectStylesHashesAndCompression(t *testing.T) {

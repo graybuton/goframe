@@ -12,7 +12,9 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 const inspectSchemaVersion = 1
@@ -807,26 +809,35 @@ func writeInspectJSON(output io.Writer, report inspectReport) error {
 	return encoder.Encode(report)
 }
 
+func inspectTextValue(value string) string {
+	for _, current := range value {
+		if !unicode.IsGraphic(current) {
+			return strconv.QuoteToGraphic(value)
+		}
+	}
+	return value
+}
+
 func writeInspectText(output io.Writer, report inspectReport) error {
 	var text strings.Builder
 	fmt.Fprintln(&text, "Package")
-	fmt.Fprintf(&text, "  Name: %s\n", report.Package.Name)
+	fmt.Fprintf(&text, "  Name: %s\n", inspectTextValue(report.Package.Name))
 	fmt.Fprintf(&text, "  Compiler: %s\n", report.Package.Compiler)
-	fmt.Fprintf(&text, "  Toolchain version: %s\n", report.Package.ToolchainVersion)
+	fmt.Fprintf(&text, "  Toolchain version: %s\n", inspectTextValue(report.Package.ToolchainVersion))
 	fmt.Fprintf(&text, "  Hash assets: %t\n", report.Package.HashAssets)
 	fmt.Fprintf(&text, "  Preload: %t\n", report.Package.Preload)
 	fmt.Fprintln(&text)
 
 	fmt.Fprintln(&text, "Entrypoints")
-	fmt.Fprintf(&text, "  HTML: %s\n", report.Entrypoints.HTML)
-	fmt.Fprintf(&text, "  WASM: %s\n", report.Entrypoints.WASM)
-	fmt.Fprintf(&text, "  Runtime: %s\n", report.Entrypoints.Runtime)
+	fmt.Fprintf(&text, "  HTML: %s\n", inspectTextValue(report.Entrypoints.HTML))
+	fmt.Fprintf(&text, "  WASM: %s\n", inspectTextValue(report.Entrypoints.WASM))
+	fmt.Fprintf(&text, "  Runtime: %s\n", inspectTextValue(report.Entrypoints.Runtime))
 	if len(report.Entrypoints.Styles) == 0 {
 		fmt.Fprintln(&text, "  Styles: (none)")
 	} else {
 		fmt.Fprintln(&text, "  Styles:")
 		for _, style := range report.Entrypoints.Styles {
-			fmt.Fprintf(&text, "    - %s\n", style)
+			fmt.Fprintf(&text, "    - %s\n", inspectTextValue(style))
 		}
 	}
 	fmt.Fprintln(&text)
@@ -836,9 +847,9 @@ func writeInspectText(output io.Writer, report inspectReport) error {
 		fmt.Fprintln(&text, "  (none)")
 	}
 	for _, artifact := range report.Artifacts {
-		fmt.Fprintf(&text, "  - %s\n", artifact.Path)
+		fmt.Fprintf(&text, "  - %s\n", inspectTextValue(artifact.Path))
 		fmt.Fprintf(&text, "    Logical name: %q\n", artifact.LogicalName)
-		fmt.Fprintf(&text, "    Media type: %s\n", artifact.MediaType)
+		fmt.Fprintf(&text, "    Media type: %s\n", inspectTextValue(artifact.MediaType))
 		fmt.Fprintf(&text, "    Bytes: %d\n", artifact.Bytes)
 		fmt.Fprintf(&text, "    SHA-256: %s\n", artifact.SHA256)
 		fmt.Fprintf(&text, "    Declared hash: %q\n", artifact.DeclaredHash)
@@ -852,7 +863,7 @@ func writeInspectText(output io.Writer, report inspectReport) error {
 		fmt.Fprintln(&text, "  (none)")
 	}
 	for _, edge := range report.Edges {
-		fmt.Fprintf(&text, "  - %s -> %s\n", edge.From, edge.To)
+		fmt.Fprintf(&text, "  - %s -> %s\n", inspectTextValue(edge.From), inspectTextValue(edge.To))
 		fmt.Fprintf(&text, "    Kind: %s\n", edge.Kind)
 		fmt.Fprintf(&text, "    Encoding: %q\n", edge.Encoding)
 	}
