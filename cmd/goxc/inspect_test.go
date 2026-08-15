@@ -1038,6 +1038,100 @@ func TestInspectWriterFailures(t *testing.T) {
 	}
 }
 
+func TestInspectRejectsPackageReplacementBeforeOutput(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, root string)
+	}{
+		{name: "marker removed", mutate: func(t *testing.T, root string) {
+			if err := os.Remove(filepath.Join(root, packageMetadataName)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "marker replaced with identical bytes", mutate: func(t *testing.T, root string) {
+			markerPath := filepath.Join(root, packageMetadataName)
+			content, err := os.ReadFile(markerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Lstat(markerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replacementPath := filepath.Join(root, ".replacement-package-metadata")
+			if err := os.WriteFile(replacementPath, content, before.Mode().Perm()); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(markerPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(replacementPath, markerPath); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.Lstat(markerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if os.SameFile(before, after) {
+				t.Fatal("replacement marker retained the original filesystem identity")
+			}
+		}},
+		{name: "marker content changed", mutate: func(t *testing.T, root string) {
+			markerPath := filepath.Join(root, packageMetadataName)
+			before, err := os.Lstat(markerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.GeneratedAt = "2026-08-16T00:00:00Z"
+			})
+			after, err := os.Lstat(markerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !os.SameFile(before, after) {
+				t.Fatal("content mutation unexpectedly replaced the marker")
+			}
+			if before.Size() != after.Size() {
+				t.Fatalf("content mutation changed marker length from %d to %d", before.Size(), after.Size())
+			}
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{hashAssets: true, styles: true})
+			var afterHook map[string]inspectSnapshotEntry
+			hookCalls := 0
+			var output bytes.Buffer
+			err := runInspectCommandWithHooks(
+				[]string{"--dir", fixture.root, "--format=json"},
+				&output,
+				inspectCommandHooks{BeforeFinalFence: func(packageRoot string) {
+					hookCalls++
+					if packageRoot != fixture.root {
+						t.Fatalf("hook package root = %q, want %q", packageRoot, fixture.root)
+					}
+					test.mutate(t, packageRoot)
+					afterHook = snapshotInspectTree(t, packageRoot)
+				}},
+			)
+			if err == nil || !strings.Contains(err.Error(), "package changed during inspection; retry") {
+				t.Errorf("runInspectCommandWithHooks() error = %v, want package replacement rejection", err)
+			}
+			if output.Len() != 0 {
+				t.Errorf("package replacement emitted partial output: %d bytes", output.Len())
+			}
+			if hookCalls != 1 {
+				t.Errorf("hook calls = %d, want 1", hookCalls)
+			}
+			if got := snapshotInspectTree(t, fixture.root); !reflect.DeepEqual(got, afterHook) {
+				t.Errorf("inspect changed the hook-mutated fixture\nafter hook: %#v\nafter inspect: %#v", afterHook, got)
+			}
+		})
+	}
+}
+
 type inspectFailWriter struct {
 	err error
 }

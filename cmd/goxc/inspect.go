@@ -84,6 +84,21 @@ func inspectCommand(args []string) error {
 }
 
 func runInspectCommand(args []string, stdout io.Writer) error {
+	return runInspectCommandWithHooks(args, stdout, inspectCommandHooks{})
+}
+
+type inspectCommandHooks struct {
+	BeforeFinalFence func(packageRoot string)
+}
+
+type inspectPackageGenerationFence struct {
+	path   string
+	info   os.FileInfo
+	bytes  int64
+	digest [sha256.Size]byte
+}
+
+func runInspectCommandWithHooks(args []string, stdout io.Writer, hooks inspectCommandHooks) error {
 	options, err := parseInspectOptions(args)
 	if err != nil {
 		return err
@@ -92,24 +107,102 @@ func runInspectCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	report, err := inspectPackageGraph(packageRoot)
+	fence, err := captureInspectPackageGenerationFence(packageRoot)
 	if err != nil {
 		return err
 	}
+	report, err := inspectPackageGraph(packageRoot)
+	if err != nil {
+		if fenceErr := verifyInspectPackageGenerationFence(fence); fenceErr != nil {
+			return fenceErr
+		}
+		return err
+	}
 
+	var output bytes.Buffer
 	switch options.format {
 	case inspectFormatText:
-		if err := writeInspectText(stdout, report); err != nil {
+		if err := writeInspectText(&output, report); err != nil {
 			return fmt.Errorf("write inspect text report: %w", err)
 		}
 	case inspectFormatJSON:
-		if err := writeInspectJSON(stdout, report); err != nil {
+		if err := writeInspectJSON(&output, report); err != nil {
 			return fmt.Errorf("write inspect json report: %w", err)
 		}
 	default:
 		return fmt.Errorf("unsupported inspect format %q", options.format)
 	}
+	if hooks.BeforeFinalFence != nil {
+		hooks.BeforeFinalFence(packageRoot)
+	}
+	if err := verifyInspectPackageGenerationFence(fence); err != nil {
+		return err
+	}
+	written, err := stdout.Write(output.Bytes())
+	if err == nil && written != output.Len() {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		return fmt.Errorf("write inspect %s report: %w", options.format, err)
+	}
 	return nil
+}
+
+func captureInspectPackageGenerationFence(packageRoot string) (inspectPackageGenerationFence, error) {
+	markerPath := filepath.Join(packageRoot, packageMetadataName)
+	info, err := regularFileNoFollow(markerPath, "package completion marker")
+	if err != nil {
+		return inspectPackageGenerationFence{}, packageChangedDuringInspectionError(err)
+	}
+	content, err := os.ReadFile(markerPath)
+	if err != nil {
+		return inspectPackageGenerationFence{}, packageChangedDuringInspectionError(fmt.Errorf("read package completion marker %s: %w", markerPath, err))
+	}
+	current, err := regularFileNoFollow(markerPath, "package completion marker")
+	if err != nil {
+		return inspectPackageGenerationFence{}, packageChangedDuringInspectionError(err)
+	}
+	if !os.SameFile(info, current) || info.Size() != current.Size() || current.Size() != int64(len(content)) {
+		return inspectPackageGenerationFence{}, packageChangedDuringInspectionError(errors.New("package completion marker changed while it was captured"))
+	}
+	return inspectPackageGenerationFence{
+		path:   markerPath,
+		info:   current,
+		bytes:  int64(len(content)),
+		digest: sha256.Sum256(content),
+	}, nil
+}
+
+func verifyInspectPackageGenerationFence(fence inspectPackageGenerationFence) error {
+	info, err := regularFileNoFollow(fence.path, "package completion marker")
+	if err != nil {
+		return packageChangedDuringInspectionError(err)
+	}
+	if !os.SameFile(fence.info, info) {
+		return packageChangedDuringInspectionError(errors.New("package completion marker identity changed"))
+	}
+	if info.Size() != fence.bytes {
+		return packageChangedDuringInspectionError(errors.New("package completion marker length changed"))
+	}
+	content, err := os.ReadFile(fence.path)
+	if err != nil {
+		return packageChangedDuringInspectionError(fmt.Errorf("read package completion marker %s: %w", fence.path, err))
+	}
+	if int64(len(content)) != fence.bytes || sha256.Sum256(content) != fence.digest {
+		return packageChangedDuringInspectionError(errors.New("package completion marker content changed"))
+	}
+	current, err := regularFileNoFollow(fence.path, "package completion marker")
+	if err != nil {
+		return packageChangedDuringInspectionError(err)
+	}
+	if !os.SameFile(fence.info, current) || current.Size() != fence.bytes {
+		return packageChangedDuringInspectionError(errors.New("package completion marker changed during final verification"))
+	}
+	return nil
+}
+
+func packageChangedDuringInspectionError(cause error) error {
+	return fmt.Errorf("package changed during inspection; retry: %w", cause)
 }
 
 func parseInspectOptions(args []string) (inspectOptions, error) {
