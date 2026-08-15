@@ -195,6 +195,18 @@ bytes. Artifact paths and roles use that order, and edges compare `from`,
 `kind`, `encoding`, and `to` field by field. The schema fields and both generated
 metadata schemas remain unchanged.
 
+For graph inspection, every asset logical key must use the exact canonical
+relative-name representation returned by the current package producer helper
+before an asset destination is derived. This tightens inspector acceptance of
+damaged or externally produced metadata without changing either generated
+package schema.
+
+The default text report preserves all-graphic package-controlled values and
+quotes a complete value when it contains a non-graphic rune. This is a
+human-readable presentation rule only. Inspect JSON schema version 1 is
+unchanged, and JSON escaping and decoded values continue to be defined by
+`encoding/json`.
+
 Stable package generation is guarded by the current `goframe-package.json`
 completion marker. Inspection retains the marker's filesystem identity, exact
 byte length, and full SHA-256, buffers the report, and verifies the marker again

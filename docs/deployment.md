@@ -258,6 +258,15 @@ runtime, and style entrypoints must respectively resolve to `.wasm`, `.js`, and
 asset path must exactly match the current content-addressed filename produced
 from its logical name and declared hash.
 
+Before any final asset path is derived, inspection validates each logical asset
+key with the same canonical relative-name helper used by the package producer
+and requires the authored key to equal that canonical result. Parent traversal,
+absolute names, dot-only names, and non-canonical spellings such as repeated
+separators, dot components, or trailing separators are rejected. Canonical
+nested names, spaces, graphic Unicode, leading-dot child names such as
+`.well-known/config.json`, and case differences remain valid when the resulting
+package graph is otherwise valid.
+
 Schema-version-1 string ordering is ascending lexical order of the raw UTF-8
 bytes. This applies to style entrypoints, artifact paths and roles, and each
 edge field in `from`, `kind`, `encoding`, `to` order.
@@ -318,6 +327,13 @@ are excluded rather than promoted into the graph. Inspection does not parse
 custom HTML or CSS, infer Go or GOX source dependencies, or imply asset
 splitting, multi-entry WASM, route-lazy delivery, or shared-runtime code
 splitting.
+
+Text reports preserve package-controlled values exactly when every rune is
+graphic. If a value contains a control, format character, or line/paragraph
+separator, the complete value is emitted as a quoted Go string with graphic
+characters preserved and non-graphic runes escaped. JSON output continues to
+use `encoding/json`; its schema and decoded string values are unchanged by this
+human-readable presentation rule.
 
 ## Clean App Workspace
 

@@ -60,7 +60,14 @@ sidecars, collisions, containment, and symlinks. The focused matrix also covers
 WASM/runtime/style extension and media-type roles, the exact content-addressed
 path formula, Go/Node UTF-8 collation, completion-marker removal, identity
 replacement and content changes, zero partial output, and stable valid-package
-text and JSON. The tests run deterministic reports at high count.
+text and JSON. Logical-name tests reject traversal, dot-only, absolute, and
+non-canonical spellings before path derivation while retaining nested, space,
+graphic-Unicode, leading-dot, and case-different controls. Text-format tests
+cover every package-controlled field that was otherwise rendered raw, including
+control and format characters and Unicode line/paragraph separators. They also
+preserve the ordinary text golden, JSON schema and decoded-value round trips,
+and zero-output/no-mutation behavior for invalid graphs. The tests run
+deterministic reports at high count.
 
 The same Core `go test` gate covers the watched `goxc dev` workflow. Pure tests
 exercise option parsing, content snapshots, debounce, serialized coordination,
