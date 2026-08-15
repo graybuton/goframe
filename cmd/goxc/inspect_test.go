@@ -1058,6 +1058,15 @@ func TestInspectRejectsPackageReplacementBeforeOutput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			beforeAnchor, err := os.Lstat(markerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Windows may resolve FileInfo identity lazily, so materialize it
+			// before replacing the path that os.SameFile could otherwise reopen.
+			if !os.SameFile(before, beforeAnchor) {
+				t.Fatal("original marker identity is not stable")
+			}
 			replacementPath := filepath.Join(root, ".replacement-package-metadata")
 			if err := os.WriteFile(replacementPath, content, before.Mode().Perm()); err != nil {
 				t.Fatal(err)
