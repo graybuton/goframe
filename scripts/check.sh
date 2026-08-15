@@ -68,6 +68,9 @@ echo "== Package examples with TinyGo =="
 "$GOXC" generate ./examples/resource
 "$GOXC" package ./examples/resource --compiler=tinygo
 
+echo "== Package graph inspection =="
+GOXC="$GOXC" node scripts/package-graph-inspection.mjs
+
 echo "== Size budgets =="
 scripts/size-budget.sh
 
