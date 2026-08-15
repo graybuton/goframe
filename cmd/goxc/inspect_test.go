@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -844,6 +845,122 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			}
 			if !reflect.DeepEqual(after, before) {
 				t.Errorf("invalid inspection mutated filesystem\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
+func TestInspectRejectsNonCanonicalLogicalAssetNames(t *testing.T) {
+	tests := []struct {
+		name        string
+		logicalName string
+		assetPath   string
+	}{
+		{name: "parent traversal", logicalName: "../logo.svg", assetPath: path.Join(assetDirectoryName, "../logo.svg")},
+		{name: "nested parent traversal", logicalName: "images/../logo.svg", assetPath: path.Join(assetDirectoryName, "images/../logo.svg")},
+		{name: "dot only", logicalName: ".", assetPath: "assets/dot-asset"},
+		{name: "repeated separator", logicalName: "images//logo.svg", assetPath: path.Join(assetDirectoryName, "images//logo.svg")},
+		{name: "dot component", logicalName: "images/./logo.svg", assetPath: path.Join(assetDirectoryName, "images/./logo.svg")},
+		{name: "leading dot component", logicalName: "./images/logo.svg", assetPath: path.Join(assetDirectoryName, "./images/logo.svg")},
+		{name: "trailing separator", logicalName: "images/logo.svg/", assetPath: path.Join(assetDirectoryName, "images/logo.svg/")},
+		{name: "absolute", logicalName: "/logo.svg", assetPath: path.Join(assetDirectoryName, "/logo.svg")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+			writeInspectRaw(t, fixture.root, test.assetPath, []byte("logical-name fixture\n"))
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				manifest.Assets[test.logicalName] = packageAsset{
+					Path: test.assetPath,
+					Type: "image/svg+xml",
+				}
+			})
+			before := snapshotInspectTree(t, fixture.root)
+			var output bytes.Buffer
+			err := runInspectCommand([]string{"--dir", fixture.root, "--format=json"}, &output)
+			after := snapshotInspectTree(t, fixture.root)
+			if err == nil {
+				var report inspectReport
+				if decodeErr := json.Unmarshal(output.Bytes(), &report); decodeErr != nil {
+					t.Errorf("inspection accepted logical name %q with undecodable output (%d bytes): %v", test.logicalName, output.Len(), decodeErr)
+				} else {
+					var emitted *inspectArtifact
+					for index := range report.Artifacts {
+						if report.Artifacts[index].LogicalName == test.logicalName {
+							emitted = &report.Artifacts[index]
+							break
+						}
+					}
+					t.Errorf("inspection accepted non-canonical logical name %q: output bytes=%d artifact=%+v summary=%+v", test.logicalName, output.Len(), emitted, report.Summary)
+				}
+			} else if !strings.Contains(err.Error(), "logical asset name") {
+				t.Errorf("runInspectCommand() error = %v, want logical asset name rejection", err)
+			}
+			if err != nil && output.Len() != 0 {
+				t.Errorf("invalid logical name emitted partial output: %q", output.String())
+			}
+			if !reflect.DeepEqual(after, before) {
+				t.Errorf("logical-name inspection mutated filesystem\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
+func TestInspectAcceptsCanonicalLogicalAssetNames(t *testing.T) {
+	tests := []struct {
+		logicalName string
+		mediaType   string
+	}{
+		{logicalName: "images/icons/logo.svg", mediaType: "image/svg+xml"},
+		{logicalName: "styles/theme.css", mediaType: "text/css"},
+		{logicalName: "images/my logo.svg", mediaType: "image/svg+xml"},
+		{logicalName: "styles/界.css", mediaType: "text/css"},
+		{logicalName: ".well-known/config.json", mediaType: "application/json"},
+		{logicalName: "WASM_EXEC.js", mediaType: "text/javascript"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.logicalName, func(t *testing.T) {
+			cleaned, err := cleanPackageAssetName(test.logicalName)
+			if err != nil {
+				t.Fatalf("cleanPackageAssetName(%q) error: %v", test.logicalName, err)
+			}
+			if cleaned != test.logicalName {
+				t.Fatalf("cleanPackageAssetName(%q) = %q, want unchanged", test.logicalName, cleaned)
+			}
+
+			fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+			assetPath := path.Join(assetDirectoryName, test.logicalName)
+			if test.logicalName == "WASM_EXEC.js" {
+				relocateInspectAsset(t, fixture.root, fixture.assetPaths[runtimeAssetName], assetPath)
+				mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+					asset := manifest.Assets[runtimeAssetName]
+					asset.Path = assetPath
+					delete(manifest.Assets, runtimeAssetName)
+					manifest.Assets[test.logicalName] = asset
+					manifest.Entrypoints.Runtime = assetPath
+				})
+				mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+					metadata.Entrypoints.Runtime = assetPath
+				})
+			} else {
+				writeInspectRaw(t, fixture.root, assetPath, []byte("canonical logical-name fixture\n"))
+				mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+					manifest.Assets[test.logicalName] = packageAsset{Path: assetPath, Type: test.mediaType}
+				})
+			}
+
+			report, err := inspectPackageGraph(fixture.root)
+			if err != nil {
+				t.Fatalf("inspectPackageGraph() error: %v", err)
+			}
+			artifact, ok := inspectArtifactsByPath(t, report)[assetPath]
+			if !ok {
+				t.Fatalf("canonical artifact %q missing", assetPath)
+			}
+			if artifact.LogicalName != test.logicalName || artifact.MediaType != test.mediaType {
+				t.Fatalf("canonical artifact = %+v, want logicalName %q mediaType %q", artifact, test.logicalName, test.mediaType)
 			}
 		})
 	}

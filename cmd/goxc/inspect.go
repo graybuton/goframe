@@ -447,8 +447,8 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	assets := make([]inspectAssetSpec, 0, len(logicalNames))
 	assetByPath := make(map[string]int, len(logicalNames))
 	for _, logicalName := range logicalNames {
-		if logicalName == "" {
-			return inspectReport{}, errors.New("asset manifest logical asset name is empty")
+		if err := validateInspectLogicalAssetName(logicalName); err != nil {
+			return inspectReport{}, err
 		}
 		asset := manifest.Assets[logicalName]
 		assetPath, err := normalizeInspectPath(asset.Path, fmt.Sprintf("declared asset %q", logicalName))
@@ -646,6 +646,20 @@ func validateInspectEntrypointAsset(role, finalPath string, asset packageAsset, 
 	}
 	if asset.Type != requiredMediaType {
 		return fmt.Errorf("%s entrypoint %q must declare media type %q, got %q", role, finalPath, requiredMediaType, asset.Type)
+	}
+	return nil
+}
+
+func validateInspectLogicalAssetName(logicalName string) error {
+	cleaned, err := cleanPackageAssetName(logicalName)
+	if err != nil {
+		if logicalName == "" {
+			return errors.New("asset manifest logical asset name is empty")
+		}
+		return fmt.Errorf("invalid logical asset name %q: %w", logicalName, err)
+	}
+	if cleaned != logicalName {
+		return fmt.Errorf("logical asset name %q must use canonical form %q", logicalName, cleaned)
 	}
 	return nil
 }
