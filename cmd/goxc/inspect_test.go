@@ -490,6 +490,14 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			writeInspectFixture(t, root, inspectFixtureOptions{})
 			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) { metadata.Version = 2 })
 		}, want: "unsupported version"},
+		{name: "empty toolchain version", prepare: func(t *testing.T, root string) {
+			writeInspectFixture(t, root, inspectFixtureOptions{})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) { metadata.ToolchainVersion = "" })
+		}, want: "toolchainVersion must not be empty"},
+		{name: "whitespace toolchain version", prepare: func(t *testing.T, root string) {
+			writeInspectFixture(t, root, inspectFixtureOptions{})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) { metadata.ToolchainVersion = "   " })
+		}, want: "toolchainVersion must not be empty"},
 		{name: "unsupported asset manifest version", prepare: func(t *testing.T, root string) {
 			writeInspectFixture(t, root, inspectFixtureOptions{})
 			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) { manifest.Version = 2 })
@@ -528,6 +536,29 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) { manifest.Entrypoints.Runtime = "assets/other.js" })
 			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) { metadata.Entrypoints.Runtime = "assets/other.js" })
 		}, want: "not declared as exactly one asset"},
+		{name: "shared WASM and runtime entrypoint", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				manifest.Entrypoints.Runtime = fixture.assetPaths["bundle.wasm"]
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.Runtime = fixture.assetPaths["bundle.wasm"]
+			})
+		}, want: "WASM and runtime entrypoints must resolve to distinct assets"},
+		{name: "WASM entrypoint is not a WASM file", prepare: func(t *testing.T, root string) {
+			writeInspectFixture(t, root, inspectFixtureOptions{})
+			const nonWASMPath = "assets/bundle.txt"
+			writeInspectRaw(t, root, nonWASMPath, []byte("not wasm"))
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["bundle.wasm"]
+				asset.Path = nonWASMPath
+				manifest.Assets["bundle.wasm"] = asset
+				manifest.Entrypoints.WASM = nonWASMPath
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.WASM = nonWASMPath
+			})
+		}, want: "WASM entrypoint must end in .wasm"},
 		{name: "missing ordinary asset", prepare: func(t *testing.T, root string) {
 			fixture := writeInspectFixture(t, root, inspectFixtureOptions{extraAsset: true})
 			if err := os.Remove(filepath.Join(root, filepath.FromSlash(fixture.assetPaths["images/logo.svg"]))); err != nil {
@@ -556,14 +587,12 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			})
 		}, want: "logical asset name is empty"},
 		{name: "duplicate final asset paths", prepare: func(t *testing.T, root string) {
-			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{extraAsset: true})
 			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
-				runtimeAsset := manifest.Assets[runtimeAssetName]
-				runtimeAsset.Path = fixture.assetPaths["bundle.wasm"]
-				manifest.Assets[runtimeAssetName] = runtimeAsset
-				manifest.Entrypoints.Runtime = fixture.assetPaths["bundle.wasm"]
+				logo := manifest.Assets["images/logo.svg"]
+				logo.Path = fixture.assetPaths["bundle.wasm"]
+				manifest.Assets["images/logo.svg"] = logo
 			})
-			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) { metadata.Entrypoints.Runtime = fixture.assetPaths["bundle.wasm"] })
 		}, want: "declared by more than one asset"},
 		{name: "asset and compressed collision", prepare: func(t *testing.T, root string) {
 			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
@@ -607,6 +636,15 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 				manifest.Assets[runtimeAssetName] = asset
 			})
 		}, want: "requires a declared hash"},
+		{name: "unhashed package declares asset hash", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
+			_, actualHash := inspectFileEvidence(t, root, fixture.assetPaths["bundle.wasm"])
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["bundle.wasm"]
+				asset.Hash = actualHash[:packageHashLength]
+				manifest.Assets["bundle.wasm"] = asset
+			})
+		}, want: "hashAssets=false requires an empty declared hash"},
 		{name: "empty compressed encoding", prepare: func(t *testing.T, root string) {
 			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
 			sidecar := fixture.assetPaths["bundle.wasm"] + ".sidecar"
@@ -647,15 +685,54 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			before := snapshotInspectTree(t, root)
 			var output bytes.Buffer
 			err := runInspectCommand([]string{"--dir", root, "--format=json"}, &output)
+			after := snapshotInspectTree(t, root)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("runInspectCommand() error = %v, want %q", err, test.want)
+				t.Errorf("runInspectCommand() error = %v, want %q; output bytes = %d", err, test.want, output.Len())
 			}
 			if output.Len() != 0 {
-				t.Fatalf("invalid graph emitted partial output: %q", output.String())
+				t.Errorf("invalid graph emitted partial output: %q", output.String())
 			}
-			after := snapshotInspectTree(t, root)
 			if !reflect.DeepEqual(after, before) {
-				t.Fatalf("invalid inspection mutated filesystem\nbefore: %#v\nafter:  %#v", before, after)
+				t.Errorf("invalid inspection mutated filesystem\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
+func TestInspectAcceptsReviewedInvariantControls(t *testing.T) {
+	tests := []struct {
+		name    string
+		options inspectFixtureOptions
+		prepare func(t *testing.T, fixture inspectFixture)
+	}{
+		{name: "development toolchain"},
+		{name: "tagged toolchain", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+				metadata.ToolchainVersion = "v0.3.0-preview.1"
+			})
+		}},
+		{name: "unhashed package without declared hashes"},
+		{name: "hashed package", options: inspectFixtureOptions{hashAssets: true}},
+		{name: "hashed WASM filename", options: inspectFixtureOptions{hashAssets: true}},
+		{name: "future compression encoding", prepare: func(t *testing.T, fixture inspectFixture) {
+			const sidecarPath = "assets/bundle.wasm.future"
+			writeInspectRaw(t, fixture.root, sidecarPath, []byte("future encoding"))
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				asset := manifest.Assets["bundle.wasm"]
+				asset.Compressed = map[string]string{"future": sidecarPath}
+				manifest.Assets["bundle.wasm"] = asset
+			})
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := writeInspectFixture(t, t.TempDir(), test.options)
+			if test.prepare != nil {
+				test.prepare(t, fixture)
+			}
+			if _, err := inspectPackageGraph(fixture.root); err != nil {
+				t.Fatalf("inspectPackageGraph() error: %v", err)
 			}
 		})
 	}

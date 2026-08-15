@@ -287,6 +287,9 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	if err != nil {
 		return inspectReport{}, err
 	}
+	if strings.TrimSpace(metadata.ToolchainVersion) == "" {
+		return inspectReport{}, errors.New("package metadata toolchainVersion must not be empty")
+	}
 	manifest, err := readAssetManifestMetadata(filepath.Join(root, assetManifestName))
 	if err != nil {
 		return inspectReport{}, err
@@ -309,6 +312,12 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	runtimePath, err := normalizeInspectPath(manifest.Entrypoints.Runtime, "runtime entrypoint")
 	if err != nil {
 		return inspectReport{}, err
+	}
+	if !strings.EqualFold(path.Ext(wasmPath), ".wasm") {
+		return inspectReport{}, fmt.Errorf("WASM entrypoint must end in .wasm: %q", wasmPath)
+	}
+	if wasmPath == runtimePath {
+		return inspectReport{}, errors.New("WASM and runtime entrypoints must resolve to distinct assets")
 	}
 
 	occupied := map[string]string{
@@ -449,6 +458,12 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	}
 
 	for _, asset := range assets {
+		if metadata.HashAssets != (asset.asset.Hash != "") {
+			if metadata.HashAssets {
+				return inspectReport{}, fmt.Errorf("hashAssets=true requires a declared hash for asset %q", asset.logicalName)
+			}
+			return inspectReport{}, fmt.Errorf("hashAssets=false requires an empty declared hash for asset %q", asset.logicalName)
+		}
 		artifact, err := inspectArtifactAt(root, asset.path, asset.logicalName, asset.asset.Type, asset.asset.Hash, "", asset.roles, fmt.Sprintf("declared asset %q", asset.logicalName))
 		if err != nil {
 			return inspectReport{}, err
@@ -460,8 +475,6 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 			if artifact.SHA256[:packageHashLength] != asset.asset.Hash {
 				return inspectReport{}, fmt.Errorf("declared hash %q for asset %q does not match actual SHA-256 %s", asset.asset.Hash, asset.logicalName, artifact.SHA256)
 			}
-		} else if metadata.HashAssets {
-			return inspectReport{}, fmt.Errorf("hashAssets=true requires a declared hash for asset %q", asset.logicalName)
 		}
 		report.Artifacts = append(report.Artifacts, artifact)
 	}
