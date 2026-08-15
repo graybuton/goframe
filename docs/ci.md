@@ -56,8 +56,11 @@ fail-closed legacy ownership, and dev-server symlink entries.
 Focused `goxc inspect` tests cover CLI resolution, deterministic text and
 schema-v1 JSON, copy-root byte identity, read-only filesystem behavior, writer
 failures, and an invalid-graph matrix for metadata, entrypoints, hashes,
-sidecars, collisions, containment, and symlinks. The tests run deterministic
-reports at high count.
+sidecars, collisions, containment, and symlinks. The focused matrix also covers
+WASM/runtime/style extension and media-type roles, the exact content-addressed
+path formula, Go/Node UTF-8 collation, completion-marker removal, identity
+replacement and content changes, zero partial output, and stable valid-package
+text and JSON. The tests run deterministic reports at high count.
 
 The same Core `go test` gate covers the watched `goxc dev` workflow. Pure tests
 exercise option parsing, content snapshots, debounce, serialized coordination,
@@ -88,7 +91,8 @@ The canonical local `scripts/check.sh` path runs
 `scripts/package-graph-inspection.mjs` after packaging all eleven ordinary
 TinyGo applications and before size enforcement. It inspects each package
 twice, validates graph and summary invariants, compares app, explicit-directory,
-and copied-root reports, and prints a combined SHA-256. Focused package evidence
+and copied-root reports, exercises BMP/supplementary-plane UTF-8 ordering in a
+temporary copied package, and prints a combined SHA-256. Focused package evidence
 also covers release-style counter, router-dashboard, and resource packages with
 hashed assets, preload, gzip and Brotli sidecar edges, plus a standard-Go
 server-backed package.

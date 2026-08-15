@@ -190,6 +190,18 @@ in generated package metadata are not rejected merely because the report does
 not expose them. `generatedAt` is intentionally omitted so the same package
 copied to another safe root produces byte-identical JSON.
 
+Schema-version-1 ordered strings use ascending lexical order of their raw UTF-8
+bytes. Artifact paths and roles use that order, and edges compare `from`,
+`kind`, `encoding`, and `to` field by field. The schema fields and both generated
+metadata schemas remain unchanged.
+
+Stable package generation is guarded by the current `goframe-package.json`
+completion marker. Inspection retains the marker's filesystem identity, exact
+byte length, and full SHA-256, buffers the report, and verifies the marker again
+before output. A missing, replaced, or changed marker returns a retry error with
+no report. This does not add a package lock or cover external artifact mutation
+that bypasses the completion-marker protocol.
+
 Legacy `manifest.json` packages remain supported only for the documented
 fail-closed cleanup and migration boundary. They are not supported inspection
 inputs; `goxc inspect` reports migration guidance instead.

@@ -251,7 +251,27 @@ The package metadata, asset manifest, and the declared files are the graph's
 source of truth. The report includes package-relative metadata, HTML, ordinary
 assets, entrypoint edges, and compressed-sidecar edges. It verifies contained
 regular files, actual byte counts and full SHA-256 values, declared short
-hashes, unique paths, and matching entrypoints before emitting output.
+hashes, unique paths, and matching entrypoints before emitting output. WASM,
+runtime, and style entrypoints must respectively resolve to `.wasm`, `.js`, and
+`.css` assets with the current producer media types `application/wasm`,
+`text/javascript`, and `text/css`. When `hashAssets` is true, every ordinary
+asset path must exactly match the current content-addressed filename produced
+from its logical name and declared hash.
+
+Schema-version-1 string ordering is ascending lexical order of the raw UTF-8
+bytes. This applies to style entrypoints, artifact paths and roles, and each
+edge field in `from`, `kind`, `encoding`, `to` order.
+
+Inspection captures the regular non-symlink `goframe-package.json` marker's
+filesystem identity, byte length, and full SHA-256 before graph construction.
+The complete text or JSON report is buffered, then the marker is revalidated
+immediately before stdout. If package or development publication removes,
+replaces, or changes the marker during inspection, the command reports
+`package changed during inspection; retry` and emits no report. Retrying after
+package publication completes is supported. This fence relies on GoFrame's
+completion-marker publication protocol; external mutation of arbitrary package
+artifacts that bypasses that protocol remains outside the static inspection
+guarantee.
 
 JSON output uses schema version 1. This complete minimal package example uses
 illustrative sizes and hashes:
