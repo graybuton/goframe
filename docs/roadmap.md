@@ -529,7 +529,6 @@ entries are deliberately not sequenced or assigned to releases.
 - deployment adapters;
 - reproducible packages;
 - SBOM and signing evaluation;
-- package inspection.
 
 ### Browser Platform
 

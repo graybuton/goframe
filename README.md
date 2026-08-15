@@ -51,8 +51,6 @@ export PATH="$goxc_bin:$PATH"
 
 goxc doctor
 goxc package ./examples/counter --compiler=tinygo
-goxc inspect ./examples/counter
-goxc inspect ./examples/counter --format=json
 goxc serve ./examples/counter --port=8080
 ```
 
