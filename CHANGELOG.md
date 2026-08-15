@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added read-only `goxc inspect` package graph reports with deterministic text
+  output and a versioned schema-v1 JSON process contract.
 - `goxc dev` now presents post-start package and build failures in connected
   browsers while preserving the last successful interactive application;
   later failures replace the message, and successful recovery clears it before

@@ -53,6 +53,12 @@ namespace collisions, lexical and physical source/output overlap, partial
 publication metadata, custom/generated standalone `index.html` integrity,
 fail-closed legacy ownership, and dev-server symlink entries.
 
+Focused `goxc inspect` tests cover CLI resolution, deterministic text and
+schema-v1 JSON, copy-root byte identity, read-only filesystem behavior, writer
+failures, and an invalid-graph matrix for metadata, entrypoints, hashes,
+sidecars, collisions, containment, and symlinks. The tests run deterministic
+reports at high count.
+
 The same Core `go test` gate covers the watched `goxc dev` workflow. Pure tests
 exercise option parsing, content snapshots, debounce, serialized coordination,
 retained browser build-error delivery, reload precedence, failure recovery, and
@@ -78,6 +84,15 @@ scripts/size-budget.sh
 
 The workflow uploads the printed size report as an artifact.
 
+The canonical local `scripts/check.sh` path runs
+`scripts/package-graph-inspection.mjs` after packaging all eleven ordinary
+TinyGo applications and before size enforcement. It inspects each package
+twice, validates graph and summary invariants, compares app, explicit-directory,
+and copied-root reports, and prints a combined SHA-256. Focused package evidence
+also covers release-style counter, router-dashboard, and resource packages with
+hashed assets, preload, gzip and Brotli sidecar edges, plus a standard-Go
+server-backed package.
+
 The size gate measures the packaged WASM entrypoint under
 `.goframe/package/standalone/assets/bundle*.wasm`, with a legacy fallback for
 older `main.wasm` packages.
@@ -99,6 +114,10 @@ Chrome with a remote debugging port and use the Chrome DevTools Protocol over
 WebSocket for DOM probes, event simulation, runtime error collection, and DOM
 pressure metrics. Firefox, Safari/WebKit, and other non-Chrome engines do not
 have automated browser-smoke evidence in the current preview CI contract.
+
+Package graph inspection is a host-side package-artifact command. It adds no
+Browser Smoke behavior and makes no TinyGo runtime claim; TinyGo identifies the
+compiler that produced the inspected files.
 
 The smoke script chooses dynamic ports, verifies the expected app origin before
 storage cleanup, checks WASM MIME type, and separates harness failures from app
@@ -283,7 +302,7 @@ Public-preview readiness spot checks:
 
 ```bash
 go test ./pkg/gox -run 'Identity|Package|Golden|ErrorGolden|Qualified'
-go test ./cmd/goxc -run 'Physical|Canonical|Alias|Overlap|Build|Generate|Ownership|Completion|Marker|Legacy|Partial|Publish|Cleanup|Manifest|Symlink|Path'
+go test ./cmd/goxc -run 'Physical|Canonical|Alias|Overlap|Build|Generate|Inspect|Ownership|Completion|Marker|Legacy|Partial|Publish|Cleanup|Manifest|Symlink|Path'
 ```
 
 GOX parser/codegen fuzz smoke, for manual use during compiler work:

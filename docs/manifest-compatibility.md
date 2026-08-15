@@ -174,6 +174,26 @@ Compatibility policy:
   required for a safety fix;
 - exact timestamps are not stable.
 
+## Package Inspection Schema
+
+`goxc inspect --format=json` is a separate schema-version-1 tooling process
+contract. It does not add fields to or change the schemas of
+`asset-manifest.json` or `goframe-package.json`. Incompatible inspection field
+or semantic changes require an inspection schema-version increment; consumers
+should reject unsupported versions. No separate machine-readable JSON Schema
+document is provided.
+
+Inspection validates the declared current package graph, including assets,
+entrypoints, hashes, and compressed sidecars, but does not grant ownership or
+change package, export, or cleanup ownership semantics. Unknown additive fields
+in generated package metadata are not rejected merely because the report does
+not expose them. `generatedAt` is intentionally omitted so the same package
+copied to another safe root produces byte-identical JSON.
+
+Legacy `manifest.json` packages remain supported only for the documented
+fail-closed cleanup and migration boundary. They are not supported inspection
+inputs; `goxc inspect` reports migration guidance instead.
+
 ## Legacy Metadata
 
 Status: Ready with limitations.

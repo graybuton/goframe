@@ -226,6 +226,79 @@ before printing success. If verification fails, goxc removes
 `goframe-package.json` so the directory is not marked as a completed current
 package.
 
+## Package Graph Inspection
+
+`goxc inspect` reads and validates the declared graph of an existing current
+standalone package. It does not build, repair, or otherwise write package or
+workspace state.
+
+```bash
+goxc inspect ./examples/todo
+goxc inspect ./examples/todo --format=json
+goxc inspect ./examples/todo/.goframe/package/standalone
+goxc inspect --dir ./dist --format=json
+```
+
+An application argument resolves through its current workspace, including
+`--workspace` and `GOFRAME_WORKSPACE`, to
+`.goframe/package/standalone`. A positional current package root, an exported
+package root, or `--dir <package-root>` is inspected directly. Direct roots
+must be real non-symlink directories. Only the current
+`goframe-package.json` plus `asset-manifest.json` package format is supported;
+recognized legacy packages receive migration guidance rather than a report.
+
+The package metadata, asset manifest, and the declared files are the graph's
+source of truth. The report includes package-relative metadata, HTML, ordinary
+assets, entrypoint edges, and compressed-sidecar edges. It verifies contained
+regular files, actual byte counts and full SHA-256 values, declared short
+hashes, unique paths, and matching entrypoints before emitting output.
+
+JSON output uses schema version 1. This complete minimal package example uses
+illustrative sizes and hashes:
+
+```json
+{
+  "schemaVersion": 1,
+  "package": {
+    "name": "counter",
+    "compiler": "tinygo",
+    "toolchainVersion": "devel",
+    "hashAssets": false,
+    "preload": false
+  },
+  "entrypoints": {
+    "html": "index.html",
+    "wasm": "assets/bundle.wasm",
+    "runtime": "assets/wasm_exec.js",
+    "styles": []
+  },
+  "artifacts": [
+    {"path":"asset-manifest.json","logicalName":"","mediaType":"application/json","bytes":300,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","declaredHash":"","encoding":"","roles":["asset-metadata"]},
+    {"path":"assets/bundle.wasm","logicalName":"bundle.wasm","mediaType":"application/wasm","bytes":1000,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","declaredHash":"","encoding":"","roles":["asset","wasm-entrypoint"]},
+    {"path":"assets/wasm_exec.js","logicalName":"wasm_exec.js","mediaType":"text/javascript","bytes":800,"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","declaredHash":"","encoding":"","roles":["asset","runtime-entrypoint"]},
+    {"path":"goframe-package.json","logicalName":"","mediaType":"application/json","bytes":200,"sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","declaredHash":"","encoding":"","roles":["package-metadata"]},
+    {"path":"index.html","logicalName":"","mediaType":"text/html; charset=utf-8","bytes":500,"sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","declaredHash":"","encoding":"","roles":["html-entrypoint"]}
+  ],
+  "edges": [
+    {"from":"index.html","to":"assets/wasm_exec.js","kind":"runtime-entrypoint","encoding":""},
+    {"from":"index.html","to":"assets/bundle.wasm","kind":"wasm-entrypoint","encoding":""}
+  ],
+  "summary": {
+    "artifactCount": 5,
+    "edgeCount": 2,
+    "totalBytes": 2800
+  }
+}
+```
+
+Text is the default human-readable format. Both formats use deterministic
+ordering and package-relative paths; JSON excludes `generatedAt`, roots,
+timestamps, modes, and other location-specific state. Undeclared extra files
+are excluded rather than promoted into the graph. Inspection does not parse
+custom HTML or CSS, infer Go or GOX source dependencies, or imply asset
+splitting, multi-entry WASM, route-lazy delivery, or shared-runtime code
+splitting.
+
 ## Clean App Workspace
 
 GoFrame toolchain internals live in an app-local hidden workspace:
@@ -246,6 +319,8 @@ Default command outputs:
 - `goxc build <app>` writes raw WASM to `.goframe/build/<compiler>/dev`;
 - `goxc package <app>` writes standalone output to
   `.goframe/package/standalone`;
+- `goxc inspect <app>` reads and validates the declared current standalone
+  package graph without writing;
 - `goxc serve <app>` serves `.goframe/package/standalone`;
 - `goxc dev <app>` rebuilds and serves the latest completed development package
   from `.goframe/package/standalone`;

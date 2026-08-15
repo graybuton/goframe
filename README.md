@@ -51,6 +51,8 @@ export PATH="$goxc_bin:$PATH"
 
 goxc doctor
 goxc package ./examples/counter --compiler=tinygo
+goxc inspect ./examples/counter
+goxc inspect ./examples/counter --format=json
 goxc serve ./examples/counter --port=8080
 ```
 
@@ -96,8 +98,8 @@ it does not write generated `.gox.go` files next to authored source by default.
   context, events, reconciliation, resources, routing, and fixed-height
   virtualization.
 - `pkg/gox`: GOX lexer/parser/codegen with source-oriented diagnostics.
-- `cmd/goxc`: check, generate, build, package, export, serve, dev, size, clean,
-  doctor, and version commands.
+- `cmd/goxc`: check, generate, build, package, inspect, export, serve, dev, size,
+  clean, doctor, and version commands.
 - Examples and scripts that exercise the runtime, compiler, package workflow,
   browser smoke paths, and WASM size budgets.
 - A lightweight VS Code GOX extension in `extensions/vscode-gox`.
@@ -191,7 +193,7 @@ goxc export ./examples/counter --out ./dist
 | GOX language | JSX-like declarative markup embedded in Go source. |
 | `pkg/goframe` runtime | Nodes, component instances, hooks, context, events, reconciliation, resources, routing, and browser mounting. |
 | `pkg/gox` compiler | GOX lexer/parser/codegen plus diagnostics and golden tests. |
-| `cmd/goxc` toolchain | Generate, build, package, export, serve, size, clean, doctor, and version commands. |
+| `cmd/goxc` toolchain | Generate, build, package, inspect, export, serve, size, clean, doctor, and version commands. |
 | examples and scripts | Integration probes, browser smoke, size budgets, and package/artifact gates. |
 | VS Code extension | Syntax highlighting, snippets, file icons, and commands over the same `goxc` workflow. |
 
@@ -408,6 +410,7 @@ Common commands:
 | `goxc generate <app>` | Generate `.gox.go` compiler output under `.goframe/gen`. |
 | `goxc build <app>` | Compile raw WASM under `.goframe/build/<compiler>/dev`. |
 | `goxc package <app>` | Build a runnable `.goframe/package/standalone` bundle. |
+| `goxc inspect <app-or-package>` | Read and validate the declared graph of an existing current standalone package. |
 | `goxc export <app> --out <dir>` | Copy the latest package to an explicit deploy directory. |
 | `goxc size <app>` | Report size from `.goframe/package/standalone`. |
 | `goxc serve <app>` | Serve the local package for development. |
