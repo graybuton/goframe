@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,17 +14,34 @@ import (
 
 func TestInspectRejectsCaseOnlyPhysicalArtifactAlias(t *testing.T) {
 	fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+	const aliasLogicalName = "WASM_EXEC.js"
+	aliasPath := path.Join(assetDirectoryName, aliasLogicalName)
+	runtimePath := fixture.assetPaths[runtimeAssetName]
+	if aliasLogicalName == runtimeAssetName {
+		t.Fatal("case-only alias logical name matches the runtime logical name")
+	}
+	if aliasPath == runtimePath {
+		t.Fatal("case-only alias path matches the reported runtime path")
+	}
+	if want := path.Join(assetDirectoryName, aliasLogicalName); aliasPath != want {
+		t.Fatalf("case-only alias path = %q, want package path %q", aliasPath, want)
+	}
+
+	// Both declarations satisfy the package-path formula, while Windows resolves
+	// their case-only paths to one physical runtime file.
 	mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
-		manifest.Assets["runtime-alias.js"] = packageAsset{
-			Path: "assets/WASM_EXEC.js",
+		manifest.Assets[aliasLogicalName] = packageAsset{
+			Path: aliasPath,
 			Type: "text/javascript",
 		}
 	})
-	actualInfo, err := os.Stat(filepath.Join(fixture.root, filepath.FromSlash(fixture.assetPaths[runtimeAssetName])))
+	actualRuntimePath := filepath.Join(fixture.root, filepath.FromSlash(runtimePath))
+	aliasFilesystemPath := filepath.Join(fixture.root, filepath.FromSlash(aliasPath))
+	actualInfo, err := os.Stat(actualRuntimePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliasInfo, err := os.Stat(filepath.Join(fixture.root, filepath.FromSlash("assets/WASM_EXEC.js")))
+	aliasInfo, err := os.Stat(aliasFilesystemPath)
 	if os.IsNotExist(err) {
 		t.Skip("filesystem resolves case-different paths as distinct")
 	}
