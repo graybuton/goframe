@@ -738,6 +738,81 @@ func TestInspectAcceptsReviewedInvariantControls(t *testing.T) {
 	}
 }
 
+func TestInspectRejectsPhysicalArtifactAliases(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, fixture inspectFixture)
+	}{
+		{name: "ordinary assets", prepare: func(t *testing.T, fixture inspectFixture) {
+			aliasInspectFile(t, fixture.root, fixture.assetPaths["bundle.wasm"], fixture.assetPaths["images/logo.svg"])
+		}},
+		{name: "HTML and ordinary asset", prepare: func(t *testing.T, fixture inspectFixture) {
+			aliasInspectFile(t, fixture.root, indexHTMLAssetName, fixture.assetPaths["images/logo.svg"])
+		}},
+		{name: "ordinary asset and compressed sidecar", prepare: func(t *testing.T, fixture inspectFixture) {
+			aliasInspectFile(t, fixture.root, fixture.assetPaths["bundle.wasm"], fixture.assetPaths["bundle.wasm"]+".gz")
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{
+				compressed: true,
+				extraAsset: true,
+			})
+			test.prepare(t, fixture)
+			before := snapshotInspectTree(t, fixture.root)
+			var output bytes.Buffer
+			err := runInspectCommand([]string{"--dir", fixture.root, "--format=json"}, &output)
+			after := snapshotInspectTree(t, fixture.root)
+			if err == nil || !strings.Contains(err.Error(), "physical alias") {
+				t.Errorf("runInspectCommand() error = %v, want physical alias rejection; output bytes = %d", err, output.Len())
+			}
+			if output.Len() != 0 {
+				t.Errorf("physical alias emitted partial output: %q", output.String())
+			}
+			if !reflect.DeepEqual(after, before) {
+				t.Errorf("physical alias inspection mutated filesystem\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
+func TestInspectAcceptsDistinctCaseDifferentFiles(t *testing.T) {
+	fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+	const upperPath = "assets/App.js"
+	const lowerPath = "assets/app.js"
+	writeInspectRaw(t, fixture.root, upperPath, []byte("upper"))
+	writeInspectRaw(t, fixture.root, lowerPath, []byte("lower"))
+	upperInfo, err := os.Stat(filepath.Join(fixture.root, filepath.FromSlash(upperPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lowerInfo, err := os.Stat(filepath.Join(fixture.root, filepath.FromSlash(lowerPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(upperInfo, lowerInfo) {
+		t.Skip("filesystem does not support distinct case-different files")
+	}
+	mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+		manifest.Assets["App.js"] = packageAsset{Path: upperPath, Type: "text/javascript"}
+		manifest.Assets["app.js"] = packageAsset{Path: lowerPath, Type: "text/javascript"}
+	})
+
+	report, err := inspectPackageGraph(fixture.root)
+	if err != nil {
+		t.Fatalf("inspectPackageGraph() error: %v", err)
+	}
+	artifacts := inspectArtifactsByPath(t, report)
+	if _, ok := artifacts[upperPath]; !ok {
+		t.Fatalf("artifact %q missing", upperPath)
+	}
+	if _, ok := artifacts[lowerPath]; !ok {
+		t.Fatalf("artifact %q missing", lowerPath)
+	}
+}
+
 func TestInspectRejectsSymlinkedRootsMetadataAndAssets(t *testing.T) {
 	requireSymlinkSupport(t)
 	t.Run("package root", func(t *testing.T) {
@@ -918,6 +993,18 @@ func writeInspectRaw(t *testing.T, root, relative string, content []byte) {
 	}
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func aliasInspectFile(t *testing.T, root, targetRelative, aliasRelative string) {
+	t.Helper()
+	target := filepath.Join(root, filepath.FromSlash(targetRelative))
+	alias := filepath.Join(root, filepath.FromSlash(aliasRelative))
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(target, alias); err != nil {
+		t.Skipf("hard links are unavailable: %v", err)
 	}
 }
 

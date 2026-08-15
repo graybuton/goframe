@@ -278,6 +278,23 @@ type inspectSidecarSpec struct {
 	parentPath  string
 }
 
+type inspectPhysicalArtifact struct {
+	path string
+	info os.FileInfo
+}
+
+type inspectPhysicalArtifactRegistry []inspectPhysicalArtifact
+
+func (registry *inspectPhysicalArtifactRegistry) add(reportedPath string, info os.FileInfo) error {
+	for _, existing := range *registry {
+		if existing.path != reportedPath && os.SameFile(existing.info, info) {
+			return fmt.Errorf("artifact path %q is a physical alias of %q", reportedPath, existing.path)
+		}
+	}
+	*registry = append(*registry, inspectPhysicalArtifact{path: reportedPath, info: info})
+	return nil
+}
+
 func inspectPackageGraph(root string) (inspectReport, error) {
 	root, err := validateInspectPackageRoot(root)
 	if err != nil {
@@ -440,6 +457,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 		Artifacts: make([]inspectArtifact, 0, len(occupied)),
 		Edges:     make([]inspectEdge, 0, 2+len(stylePaths)+len(sidecars)),
 	}
+	physicalArtifacts := inspectPhysicalArtifactRegistry{}
 
 	for _, fixed := range []struct {
 		path      string
@@ -450,7 +468,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 		{assetManifestName, "application/json", "asset-metadata"},
 		{htmlPath, "text/html; charset=utf-8", "html-entrypoint"},
 	} {
-		artifact, err := inspectArtifactAt(root, fixed.path, "", fixed.mediaType, "", "", []string{fixed.role}, fixed.role)
+		artifact, err := inspectArtifactAt(root, fixed.path, "", fixed.mediaType, "", "", []string{fixed.role}, fixed.role, &physicalArtifacts)
 		if err != nil {
 			return inspectReport{}, err
 		}
@@ -464,7 +482,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 			}
 			return inspectReport{}, fmt.Errorf("hashAssets=false requires an empty declared hash for asset %q", asset.logicalName)
 		}
-		artifact, err := inspectArtifactAt(root, asset.path, asset.logicalName, asset.asset.Type, asset.asset.Hash, "", asset.roles, fmt.Sprintf("declared asset %q", asset.logicalName))
+		artifact, err := inspectArtifactAt(root, asset.path, asset.logicalName, asset.asset.Type, asset.asset.Hash, "", asset.roles, fmt.Sprintf("declared asset %q", asset.logicalName), &physicalArtifacts)
 		if err != nil {
 			return inspectReport{}, err
 		}
@@ -480,7 +498,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	}
 
 	for _, sidecar := range sidecars {
-		artifact, err := inspectArtifactAt(root, sidecar.path, sidecar.logicalName, sidecar.mediaType, "", sidecar.encoding, []string{"compressed"}, fmt.Sprintf("compressed asset %q for %q", sidecar.encoding, sidecar.logicalName))
+		artifact, err := inspectArtifactAt(root, sidecar.path, sidecar.logicalName, sidecar.mediaType, "", sidecar.encoding, []string{"compressed"}, fmt.Sprintf("compressed asset %q for %q", sidecar.encoding, sidecar.logicalName), &physicalArtifacts)
 		if err != nil {
 			return inspectReport{}, err
 		}
@@ -516,7 +534,7 @@ func normalizeInspectPath(value, description string) (string, error) {
 	return path.Clean(manifestPath(value)), nil
 }
 
-func inspectArtifactAt(root, relative, logicalName, mediaType, declaredHash, encoding string, roles []string, description string) (inspectArtifact, error) {
+func inspectArtifactAt(root, relative, logicalName, mediaType, declaredHash, encoding string, roles []string, description string, physicalArtifacts *inspectPhysicalArtifactRegistry) (inspectArtifact, error) {
 	if mediaType == "" {
 		return inspectArtifact{}, fmt.Errorf("%s %q has an empty media type", description, relative)
 	}
@@ -524,7 +542,11 @@ func inspectArtifactAt(root, relative, logicalName, mediaType, declaredHash, enc
 		return inspectArtifact{}, err
 	}
 	fullPath := filepath.Join(root, filepath.FromSlash(relative))
-	if _, err := regularFileNoFollow(fullPath, description); err != nil {
+	info, err := regularFileNoFollow(fullPath, description)
+	if err != nil {
+		return inspectArtifact{}, err
+	}
+	if err := physicalArtifacts.add(relative, info); err != nil {
 		return inspectArtifact{}, err
 	}
 	content, err := os.ReadFile(fullPath)
