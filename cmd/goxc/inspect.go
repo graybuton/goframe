@@ -330,9 +330,6 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	if err != nil {
 		return inspectReport{}, err
 	}
-	if !strings.EqualFold(path.Ext(wasmPath), ".wasm") {
-		return inspectReport{}, fmt.Errorf("WASM entrypoint must end in .wasm: %q", wasmPath)
-	}
 	if wasmPath == runtimePath {
 		return inspectReport{}, errors.New("WASM and runtime entrypoints must resolve to distinct assets")
 	}
@@ -382,10 +379,16 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	if !ok {
 		return inspectReport{}, fmt.Errorf("WASM entrypoint %q is not declared as exactly one asset", wasmPath)
 	}
+	if err := validateInspectEntrypointAsset("WASM", wasmPath, assets[wasmIndex].asset, ".wasm", "application/wasm"); err != nil {
+		return inspectReport{}, err
+	}
 	assets[wasmIndex].roles = append(assets[wasmIndex].roles, "wasm-entrypoint")
 	runtimeIndex, ok := assetByPath[runtimePath]
 	if !ok {
 		return inspectReport{}, fmt.Errorf("runtime entrypoint %q is not declared as exactly one asset", runtimePath)
+	}
+	if err := validateInspectEntrypointAsset("runtime", runtimePath, assets[runtimeIndex].asset, ".js", "text/javascript"); err != nil {
+		return inspectReport{}, err
 	}
 	assets[runtimeIndex].roles = append(assets[runtimeIndex].roles, "runtime-entrypoint")
 
@@ -403,6 +406,9 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 		styleIndex, ok := assetByPath[stylePath]
 		if !ok {
 			return inspectReport{}, fmt.Errorf("style entrypoint %q is not declared as exactly one asset", stylePath)
+		}
+		if err := validateInspectEntrypointAsset("style", stylePath, assets[styleIndex].asset, ".css", "text/css"); err != nil {
+			return inspectReport{}, err
 		}
 		assets[styleIndex].roles = append(assets[styleIndex].roles, "style-entrypoint")
 		stylePaths = append(stylePaths, stylePath)
@@ -482,14 +488,20 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 			}
 			return inspectReport{}, fmt.Errorf("hashAssets=false requires an empty declared hash for asset %q", asset.logicalName)
 		}
+		if asset.asset.Hash != "" {
+			if !validInspectShortHash(asset.asset.Hash) {
+				return inspectReport{}, fmt.Errorf("declared hash %q for asset %q must be exactly eight lowercase hexadecimal characters", asset.asset.Hash, asset.logicalName)
+			}
+			expectedPath := path.Join(assetDirectoryName, hashedAssetName(asset.logicalName, asset.asset.Hash))
+			if asset.path != expectedPath {
+				return inspectReport{}, fmt.Errorf("asset %q with declared hash %q must use content-addressed path %q, got %q", asset.logicalName, asset.asset.Hash, expectedPath, asset.path)
+			}
+		}
 		artifact, err := inspectArtifactAt(root, asset.path, asset.logicalName, asset.asset.Type, asset.asset.Hash, "", asset.roles, fmt.Sprintf("declared asset %q", asset.logicalName), &physicalArtifacts)
 		if err != nil {
 			return inspectReport{}, err
 		}
 		if asset.asset.Hash != "" {
-			if !validInspectShortHash(asset.asset.Hash) {
-				return inspectReport{}, fmt.Errorf("declared hash %q for asset %q must be exactly eight lowercase hexadecimal characters", asset.asset.Hash, asset.logicalName)
-			}
 			if artifact.SHA256[:packageHashLength] != asset.asset.Hash {
 				return inspectReport{}, fmt.Errorf("declared hash %q for asset %q does not match actual SHA-256 %s", asset.asset.Hash, asset.logicalName, artifact.SHA256)
 			}
@@ -525,6 +537,16 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	report.Summary.ArtifactCount = len(report.Artifacts)
 	report.Summary.EdgeCount = len(report.Edges)
 	return report, nil
+}
+
+func validateInspectEntrypointAsset(role, finalPath string, asset packageAsset, requiredExtension, requiredMediaType string) error {
+	if !strings.EqualFold(path.Ext(finalPath), requiredExtension) {
+		return fmt.Errorf("%s entrypoint must end in %s: %q", role, requiredExtension, finalPath)
+	}
+	if asset.Type != requiredMediaType {
+		return fmt.Errorf("%s entrypoint %q must declare media type %q, got %q", role, finalPath, requiredMediaType, asset.Type)
+	}
+	return nil
 }
 
 func normalizeInspectPath(value, description string) (string, error) {

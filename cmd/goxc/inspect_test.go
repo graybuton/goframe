@@ -559,6 +559,58 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 				metadata.Entrypoints.WASM = nonWASMPath
 			})
 		}, want: "WASM entrypoint must end in .wasm"},
+		{name: "WASM entrypoint has wrong media type", prepare: func(t *testing.T, root string) {
+			writeInspectFixture(t, root, inspectFixtureOptions{})
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["bundle.wasm"]
+				asset.Type = "application/octet-stream"
+				manifest.Assets["bundle.wasm"] = asset
+			})
+		}, want: "must declare media type \"application/wasm\""},
+		{name: "runtime entrypoint is CSS", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
+			const cssRuntimePath = "assets/wasm_exec.css"
+			relocateInspectAsset(t, root, fixture.assetPaths[runtimeAssetName], cssRuntimePath)
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets[runtimeAssetName]
+				asset.Path = cssRuntimePath
+				asset.Type = "text/css"
+				manifest.Assets[runtimeAssetName] = asset
+				manifest.Entrypoints.Runtime = cssRuntimePath
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.Runtime = cssRuntimePath
+			})
+		}, want: "runtime entrypoint must end in .js"},
+		{name: "runtime entrypoint has wrong media type", prepare: func(t *testing.T, root string) {
+			writeInspectFixture(t, root, inspectFixtureOptions{})
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets[runtimeAssetName]
+				asset.Type = "text/css"
+				manifest.Assets[runtimeAssetName] = asset
+			})
+		}, want: "must declare media type \"text/javascript\""},
+		{name: "style entrypoint is JavaScript", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{styles: true})
+			const scriptStylePath = "assets/styles/a.js"
+			relocateInspectAsset(t, root, fixture.assetPaths["styles/a.css"], scriptStylePath)
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["styles/a.css"]
+				asset.Path = scriptStylePath
+				asset.Type = "text/javascript"
+				manifest.Assets["styles/a.css"] = asset
+				manifest.Entrypoints.Styles = []string{scriptStylePath, fixture.assetPaths["styles/z.css"]}
+			})
+		}, want: "style entrypoint must end in .css"},
+		{name: "style entrypoint has wrong media type", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{styles: true})
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["styles/a.css"]
+				asset.Type = "text/javascript"
+				manifest.Assets["styles/a.css"] = asset
+				manifest.Entrypoints.Styles = []string{fixture.assetPaths["styles/a.css"]}
+			})
+		}, want: "must declare media type \"text/css\""},
 		{name: "missing ordinary asset", prepare: func(t *testing.T, root string) {
 			fixture := writeInspectFixture(t, root, inspectFixtureOptions{extraAsset: true})
 			if err := os.Remove(filepath.Join(root, filepath.FromSlash(fixture.assetPaths["images/logo.svg"]))); err != nil {
@@ -621,11 +673,18 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			})
 		}, want: "eight lowercase hexadecimal"},
 		{name: "declared hash mismatch", prepare: func(t *testing.T, root string) {
-			writeInspectFixture(t, root, inspectFixtureOptions{hashAssets: true})
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{hashAssets: true})
+			const mismatchedPath = "assets/bundle.00000000.wasm"
+			relocateInspectAsset(t, root, fixture.assetPaths["bundle.wasm"], mismatchedPath)
 			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
 				asset := manifest.Assets["bundle.wasm"]
 				asset.Hash = "00000000"
+				asset.Path = mismatchedPath
 				manifest.Assets["bundle.wasm"] = asset
+				manifest.Entrypoints.WASM = mismatchedPath
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.WASM = mismatchedPath
 			})
 		}, want: "does not match"},
 		{name: "hash assets missing declared hash", prepare: func(t *testing.T, root string) {
@@ -645,6 +704,20 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 				manifest.Assets["bundle.wasm"] = asset
 			})
 		}, want: "hashAssets=false requires an empty declared hash"},
+		{name: "hashed package uses unversioned asset path", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{hashAssets: true})
+			const unversionedPath = "assets/bundle.wasm"
+			relocateInspectAsset(t, root, fixture.assetPaths["bundle.wasm"], unversionedPath)
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["bundle.wasm"]
+				asset.Path = unversionedPath
+				manifest.Assets["bundle.wasm"] = asset
+				manifest.Entrypoints.WASM = unversionedPath
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.WASM = unversionedPath
+			})
+		}, want: "content-addressed path"},
 		{name: "empty compressed encoding", prepare: func(t *testing.T, root string) {
 			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
 			sidecar := fixture.assetPaths["bundle.wasm"] + ".sidecar"
@@ -714,6 +787,35 @@ func TestInspectAcceptsReviewedInvariantControls(t *testing.T) {
 		{name: "unhashed package without declared hashes"},
 		{name: "hashed package", options: inspectFixtureOptions{hashAssets: true}},
 		{name: "hashed WASM filename", options: inspectFixtureOptions{hashAssets: true}},
+		{name: "nested hashed CSS path", options: inspectFixtureOptions{hashAssets: true, styles: true}},
+		{name: "case-insensitive entrypoint extensions", options: inspectFixtureOptions{styles: true}, prepare: func(t *testing.T, fixture inspectFixture) {
+			const (
+				wasmPath    = "assets/APP.WASM"
+				runtimePath = "assets/RUNTIME.JS"
+				stylePath   = "assets/styles/STYLE.CSS"
+			)
+			relocateInspectAsset(t, fixture.root, fixture.assetPaths["bundle.wasm"], wasmPath)
+			relocateInspectAsset(t, fixture.root, fixture.assetPaths[runtimeAssetName], runtimePath)
+			relocateInspectAsset(t, fixture.root, fixture.assetPaths["styles/a.css"], stylePath)
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				wasm := manifest.Assets["bundle.wasm"]
+				wasm.Path = wasmPath
+				manifest.Assets["bundle.wasm"] = wasm
+				runtimeAsset := manifest.Assets[runtimeAssetName]
+				runtimeAsset.Path = runtimePath
+				manifest.Assets[runtimeAssetName] = runtimeAsset
+				style := manifest.Assets["styles/a.css"]
+				style.Path = stylePath
+				manifest.Assets["styles/a.css"] = style
+				manifest.Entrypoints.WASM = wasmPath
+				manifest.Entrypoints.Runtime = runtimePath
+				manifest.Entrypoints.Styles = []string{stylePath, fixture.assetPaths["styles/z.css"]}
+			})
+			mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.WASM = wasmPath
+				metadata.Entrypoints.Runtime = runtimePath
+			})
+		}},
 		{name: "future compression encoding", prepare: func(t *testing.T, fixture inspectFixture) {
 			const sidecarPath = "assets/bundle.wasm.future"
 			writeInspectRaw(t, fixture.root, sidecarPath, []byte("future encoding"))
@@ -992,6 +1094,18 @@ func writeInspectRaw(t *testing.T, root, relative string, content []byte) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func relocateInspectAsset(t *testing.T, root, fromRelative, toRelative string) {
+	t.Helper()
+	from := filepath.Join(root, filepath.FromSlash(fromRelative))
+	to := filepath.Join(root, filepath.FromSlash(toRelative))
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(from, to); err != nil {
 		t.Fatal(err)
 	}
 }
