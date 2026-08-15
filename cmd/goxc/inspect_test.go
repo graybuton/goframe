@@ -558,6 +558,14 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
 			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) { metadata.Entrypoints.WASM = fixture.assetPaths[runtimeAssetName] })
 		}, want: "entrypoints do not match"},
+		{name: "HTML entrypoint is not HTML", prepare: func(t *testing.T, root string) {
+			writeInspectFixture(t, root, inspectFixtureOptions{})
+			const htmlPath = "shell.js"
+			writeInspectRaw(t, root, htmlPath, []byte("console.log('not html');\n"))
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.HTML = htmlPath
+			})
+		}, want: "HTML entrypoint must end in .html"},
 		{name: "missing HTML", prepare: func(t *testing.T, root string) {
 			writeInspectFixture(t, root, inspectFixtureOptions{})
 			if err := os.Remove(filepath.Join(root, indexHTMLAssetName)); err != nil {
@@ -756,6 +764,16 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 				manifest.Assets["bundle.wasm"] = asset
 			})
 		}, want: "hashAssets=false requires an empty declared hash"},
+		{name: "unhashed asset outside assets directory", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{extraAsset: true})
+			const relocatedPath = "images/logo.svg"
+			relocateInspectAsset(t, root, fixture.assetPaths["images/logo.svg"], relocatedPath)
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["images/logo.svg"]
+				asset.Path = relocatedPath
+				manifest.Assets["images/logo.svg"] = asset
+			})
+		}, want: "must use package path"},
 		{name: "hashed package uses unversioned asset path", prepare: func(t *testing.T, root string) {
 			fixture := writeInspectFixture(t, root, inspectFixtureOptions{hashAssets: true})
 			const unversionedPath = "assets/bundle.wasm"
@@ -790,9 +808,16 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 			})
 			_ = fixture
 		}, want: "compressed path"},
-		{name: "HTML metadata path collision", prepare: func(t *testing.T, root string) {
+		{name: "HTML asset path collision", prepare: func(t *testing.T, root string) {
 			writeInspectFixture(t, root, inspectFixtureOptions{})
-			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) { metadata.Entrypoints.HTML = packageMetadataName })
+			const htmlPath = "assets/shell.html"
+			writeInspectRaw(t, root, htmlPath, []byte("<!doctype html>\n"))
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				manifest.Assets["shell.html"] = packageAsset{Path: htmlPath, Type: "text/html; charset=utf-8"}
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.HTML = htmlPath
+			})
 		}, want: "collides"},
 		{name: "duplicate logical name", prepare: func(t *testing.T, root string) {
 			writeInspectFixture(t, root, inspectFixtureOptions{})
@@ -842,9 +867,12 @@ func TestInspectAcceptsReviewedInvariantControls(t *testing.T) {
 		{name: "nested hashed CSS path", options: inspectFixtureOptions{hashAssets: true, styles: true}},
 		{name: "case-insensitive entrypoint extensions", options: inspectFixtureOptions{styles: true}, prepare: func(t *testing.T, fixture inspectFixture) {
 			const (
-				wasmPath    = "assets/APP.WASM"
-				runtimePath = "assets/RUNTIME.JS"
-				stylePath   = "assets/styles/STYLE.CSS"
+				wasmLogical    = "APP.WASM"
+				runtimeLogical = "RUNTIME.JS"
+				styleLogical   = "styles/STYLE.CSS"
+				wasmPath       = "assets/APP.WASM"
+				runtimePath    = "assets/RUNTIME.JS"
+				stylePath      = "assets/styles/STYLE.CSS"
 			)
 			relocateInspectAsset(t, fixture.root, fixture.assetPaths["bundle.wasm"], wasmPath)
 			relocateInspectAsset(t, fixture.root, fixture.assetPaths[runtimeAssetName], runtimePath)
@@ -852,13 +880,16 @@ func TestInspectAcceptsReviewedInvariantControls(t *testing.T) {
 			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
 				wasm := manifest.Assets["bundle.wasm"]
 				wasm.Path = wasmPath
-				manifest.Assets["bundle.wasm"] = wasm
+				delete(manifest.Assets, "bundle.wasm")
+				manifest.Assets[wasmLogical] = wasm
 				runtimeAsset := manifest.Assets[runtimeAssetName]
 				runtimeAsset.Path = runtimePath
-				manifest.Assets[runtimeAssetName] = runtimeAsset
+				delete(manifest.Assets, runtimeAssetName)
+				manifest.Assets[runtimeLogical] = runtimeAsset
 				style := manifest.Assets["styles/a.css"]
 				style.Path = stylePath
-				manifest.Assets["styles/a.css"] = style
+				delete(manifest.Assets, "styles/a.css")
+				manifest.Assets[styleLogical] = style
 				manifest.Entrypoints.WASM = wasmPath
 				manifest.Entrypoints.Runtime = runtimePath
 				manifest.Entrypoints.Styles = []string{stylePath, fixture.assetPaths["styles/z.css"]}
@@ -890,6 +921,53 @@ func TestInspectAcceptsReviewedInvariantControls(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInspectAcceptsHTMLAndUnhashedPathControls(t *testing.T) {
+	t.Run("case-insensitive HTML extension", func(t *testing.T) {
+		fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+		const htmlPath = "SHELL.HTML"
+		relocateInspectAsset(t, fixture.root, indexHTMLAssetName, htmlPath)
+		mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+			metadata.Entrypoints.HTML = htmlPath
+		})
+
+		report, err := inspectPackageGraph(fixture.root)
+		if err != nil {
+			t.Fatalf("inspectPackageGraph() error: %v", err)
+		}
+		if report.Entrypoints.HTML != htmlPath {
+			t.Fatalf("HTML entrypoint = %q, want %q", report.Entrypoints.HTML, htmlPath)
+		}
+		artifact := inspectArtifactsByPath(t, report)[htmlPath]
+		if artifact.MediaType != "text/html; charset=utf-8" || !reflect.DeepEqual(artifact.Roles, []string{"html-entrypoint"}) {
+			t.Fatalf("HTML artifact = %+v", artifact)
+		}
+	})
+
+	t.Run("nested unhashed asset", func(t *testing.T) {
+		fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+		const (
+			logicalName = "images/icons/logo.svg"
+			assetPath   = "assets/images/icons/logo.svg"
+		)
+		writeInspectRaw(t, fixture.root, assetPath, []byte("<svg></svg>\n"))
+		mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+			manifest.Assets[logicalName] = packageAsset{Path: assetPath, Type: "image/svg+xml"}
+		})
+
+		report, err := inspectPackageGraph(fixture.root)
+		if err != nil {
+			t.Fatalf("inspectPackageGraph() error: %v", err)
+		}
+		if report.Package.HashAssets {
+			t.Fatal("unhashed control reported hashAssets=true")
+		}
+		artifact := inspectArtifactsByPath(t, report)[assetPath]
+		if artifact.LogicalName != logicalName || artifact.DeclaredHash != "" || artifact.MediaType != "image/svg+xml" {
+			t.Fatalf("nested unhashed artifact = %+v", artifact)
+		}
+	})
 }
 
 func TestInspectRejectsPhysicalArtifactAliases(t *testing.T) {

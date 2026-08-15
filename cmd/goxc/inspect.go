@@ -415,6 +415,9 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	if err != nil {
 		return inspectReport{}, err
 	}
+	if !strings.EqualFold(path.Ext(htmlPath), ".html") {
+		return inspectReport{}, fmt.Errorf("HTML entrypoint must end in .html: %q", htmlPath)
+	}
 	wasmPath, err := normalizeInspectPath(manifest.Entrypoints.WASM, "WASM entrypoint")
 	if err != nil {
 		return inspectReport{}, err
@@ -581,14 +584,19 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 			}
 			return inspectReport{}, fmt.Errorf("hashAssets=false requires an empty declared hash for asset %q", asset.logicalName)
 		}
+		outputName := asset.logicalName
 		if asset.asset.Hash != "" {
 			if !validInspectShortHash(asset.asset.Hash) {
 				return inspectReport{}, fmt.Errorf("declared hash %q for asset %q must be exactly eight lowercase hexadecimal characters", asset.asset.Hash, asset.logicalName)
 			}
-			expectedPath := path.Join(assetDirectoryName, hashedAssetName(asset.logicalName, asset.asset.Hash))
-			if asset.path != expectedPath {
+			outputName = hashedAssetName(asset.logicalName, asset.asset.Hash)
+		}
+		expectedPath := path.Join(assetDirectoryName, outputName)
+		if asset.path != expectedPath {
+			if asset.asset.Hash != "" {
 				return inspectReport{}, fmt.Errorf("asset %q with declared hash %q must use content-addressed path %q, got %q", asset.logicalName, asset.asset.Hash, expectedPath, asset.path)
 			}
+			return inspectReport{}, fmt.Errorf("asset %q must use package path %q, got %q", asset.logicalName, expectedPath, asset.path)
 		}
 		artifact, err := inspectArtifactAt(root, asset.path, asset.logicalName, asset.asset.Type, asset.asset.Hash, "", asset.roles, fmt.Sprintf("declared asset %q", asset.logicalName), &physicalArtifacts)
 		if err != nil {
