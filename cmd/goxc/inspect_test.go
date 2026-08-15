@@ -370,6 +370,58 @@ func TestInspectOutputIsPathIndependentAndRepeatable(t *testing.T) {
 	}
 }
 
+func TestInspectOrdersUnicodePathsByUTF8Bytes(t *testing.T) {
+	fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
+	const (
+		bmpLogical           = "styles/\uE000.css"
+		supplementaryLogical = "styles/\U00010000.css"
+		bmpPath              = "assets/styles/\uE000.css"
+		supplementaryPath    = "assets/styles/\U00010000.css"
+	)
+	if bytes.Compare([]byte(bmpPath), []byte(supplementaryPath)) >= 0 {
+		t.Fatal("test paths do not exercise UTF-8 byte ordering")
+	}
+	writeInspectRaw(t, fixture.root, bmpPath, []byte(".bmp {}\n"))
+	writeInspectRaw(t, fixture.root, supplementaryPath, []byte(".supplementary {}\n"))
+	mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+		manifest.Assets[bmpLogical] = packageAsset{Path: bmpPath, Type: "text/css"}
+		manifest.Assets[supplementaryLogical] = packageAsset{Path: supplementaryPath, Type: "text/css"}
+		manifest.Entrypoints.Styles = []string{supplementaryPath, bmpPath}
+	})
+
+	report, err := inspectPackageGraph(fixture.root)
+	if err != nil {
+		t.Fatalf("inspectPackageGraph() error: %v", err)
+	}
+	want := []string{bmpPath, supplementaryPath}
+	if !reflect.DeepEqual(report.Entrypoints.Styles, want) {
+		t.Fatalf("styles = %#v, want UTF-8 byte order %#v", report.Entrypoints.Styles, want)
+	}
+	var artifactPaths []string
+	for _, artifact := range report.Artifacts {
+		if artifact.Path == bmpPath || artifact.Path == supplementaryPath {
+			artifactPaths = append(artifactPaths, artifact.Path)
+		}
+	}
+	if !reflect.DeepEqual(artifactPaths, want) {
+		t.Fatalf("Unicode artifacts = %#v, want %#v", artifactPaths, want)
+	}
+	var styleTargets []string
+	for _, edge := range report.Edges {
+		if edge.Kind == "style-entrypoint" {
+			styleTargets = append(styleTargets, edge.To)
+		}
+	}
+	if !reflect.DeepEqual(styleTargets, want) {
+		t.Fatalf("Unicode style edges = %#v, want %#v", styleTargets, want)
+	}
+	first := runInspectForTest(t, []string{"--dir", fixture.root, "--format=json"})
+	second := runInspectForTest(t, []string{"--dir", fixture.root, "--format=json"})
+	if first != second {
+		t.Fatal("Unicode JSON reports differ")
+	}
+}
+
 func TestInspectResolvesAppPackageDirectoryAndExternalWorkspace(t *testing.T) {
 	appDir := filepath.Join(t.TempDir(), "app")
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
