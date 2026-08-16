@@ -69,6 +69,19 @@ preserve the ordinary text golden, JSON schema and decoded-value round trips,
 and zero-output/no-mutation behavior for invalid graphs. The tests run
 deterministic reports at high count.
 
+Browser-extension controls use one ASCII-only case matrix across manifest,
+package, inspect, legacy, and static-serving paths. They retain uppercase and
+mixed-case ASCII `.WASM`, `.JS`, `.CSS`, and `.HTML` spellings while rejecting
+Unicode long-s lookalikes as browser entrypoints even when metadata supplies a
+forged role media type. A real package fixture keeps `theme.csſ` as an ordinary
+uncompressed asset and retains `theme.css`, `theme.CsS`, and `THEME.CSS` as CSS
+entrypoints with `text/css` and existing compression behavior. Serving controls
+verify exact uppercase WASM, JavaScript, and CSS response types. A matched-path
+comparison preserves all deterministic package files for the eleven ordinary
+applications, byte-identical text and JSON reports from fixed package bytes,
+and all 44 raw, gzip, Brotli, and Zstandard WASM streams; size budgets are
+unchanged.
+
 The same Core `go test` gate covers the watched `goxc dev` workflow. Pure tests
 exercise option parsing, content snapshots, debounce, serialized coordination,
 retained browser build-error delivery, reload precedence, failure recovery, and

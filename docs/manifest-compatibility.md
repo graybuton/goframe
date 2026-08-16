@@ -117,6 +117,15 @@ Current fields:
 - `entrypoints.runtime`;
 - `entrypoints.styles`.
 
+Browser entrypoint extensions use ASCII-only case-insensitive matching. The
+same private classification governs authored and generated WASM validation,
+CSS entrypoint discovery, special browser media types, compression eligibility,
+inspection, legacy WASM recognition, and static package serving. ASCII variants
+such as `.WASM`, `.JS`, `.CSS`, and `.HTML` remain valid; Unicode simple-fold
+lookalikes do not acquire those roles. This interpretation adds no generated
+metadata field, changes neither generated metadata schema, and leaves the
+inspection schema at version 1.
+
 Evidence:
 
 - `cmd/goxc/package.go`

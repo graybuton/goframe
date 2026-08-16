@@ -88,6 +88,12 @@ examples/todo/.goframe/package/standalone/
 CSS assets are emitted under `assets/` too, for example
 `assets/styles.77a1de20.css`.
 
+Browser asset extensions are matched case-insensitively for ASCII letters
+only. ASCII variants such as `.WASM`, `.JS`, `.CSS`, and `.HTML` retain their
+WASM, JavaScript, CSS, and HTML semantics. Unicode lookalikes such as `.waſm`,
+`.jſ`, and `.csſ` do not receive those browser roles; otherwise valid files
+remain ordinary assets.
+
 Before packaging, goxc builds an asset namespace plan. Manifest assets cannot
 collide with generated names such as `bundle.wasm`, `wasm_exec.js`, generated
 metadata, or `.gz`/`.br` sidecars. Duplicate assets after path normalization
