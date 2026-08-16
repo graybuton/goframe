@@ -676,7 +676,7 @@ func normalizeInspectPath(value, description string) (string, error) {
 	if !safeChildPath(value) {
 		return "", fmt.Errorf("%s %q must be a safe package-relative path", description, value)
 	}
-	normalized := path.Clean(manifestPath(value))
+	normalized := path.Clean(filepath.ToSlash(value))
 	if value != normalized {
 		return "", fmt.Errorf("%s %q must use canonical form %q", description, value, normalized)
 	}

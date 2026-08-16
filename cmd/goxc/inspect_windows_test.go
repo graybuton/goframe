@@ -12,6 +12,17 @@ import (
 	"testing"
 )
 
+func TestNormalizeInspectPathRejectsWindowsSeparator(t *testing.T) {
+	const declared = `assets\bundle.wasm`
+	got, err := normalizeInspectPath(declared, "declared path")
+	if err == nil {
+		t.Fatalf("normalizeInspectPath(%q) = %q, want canonical-form rejection", declared, got)
+	}
+	if !strings.Contains(err.Error(), `must use canonical form "assets/bundle.wasm"`) {
+		t.Fatalf("normalizeInspectPath(%q) error = %v, want slash-separated canonical form", declared, err)
+	}
+}
+
 func TestInspectRejectsCaseOnlyPhysicalArtifactAlias(t *testing.T) {
 	fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
 	const aliasLogicalName = "WASM_EXEC.js"

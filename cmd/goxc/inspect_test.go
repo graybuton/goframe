@@ -1034,7 +1034,6 @@ func TestNormalizeInspectPath(t *testing.T) {
 		{name: "leading dot component", value: "./index.html", want: "index.html", wantError: true},
 		{name: "repeated asset separator", value: "assets//bundle.wasm", want: "assets/bundle.wasm", wantError: true},
 		{name: "asset dot component", value: "assets/./bundle.wasm", want: "assets/bundle.wasm", wantError: true},
-		{name: "backslash separator", value: `assets\bundle.wasm`, want: "assets/bundle.wasm", wantError: true},
 		{name: "trailing separator", value: "assets/styles.css/", want: "assets/styles.css", wantError: true},
 		{name: "repeated nested separator", value: "assets/styles//theme.css", want: "assets/styles/theme.css", wantError: true},
 		{name: "nested dot component", value: "assets/styles/./theme.css", want: "assets/styles/theme.css", wantError: true},
