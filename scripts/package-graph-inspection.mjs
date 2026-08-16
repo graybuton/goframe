@@ -4,8 +4,10 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
     cpSync,
+    lstatSync,
     mkdirSync,
     mkdtempSync,
+    readdirSync,
     readFileSync,
     rmSync,
     writeFileSync,
@@ -70,6 +72,8 @@ try {
 }
 
 validateUnicodeOrderingFixture(counterRoot);
+validateLiteralBackslashFixture(counterRoot);
+validateSchemaPathCharacterization();
 
 const combined = createHash("sha256");
 for (const application of applications) {
@@ -136,6 +140,126 @@ function validateUnicodeOrderingFixture(sourceRoot) {
         console.log("package graph inspection: Unicode UTF-8 ordering: ok");
     } finally {
         rmSync(tempRoot, { recursive: true, force: true });
+    }
+}
+
+function validateLiteralBackslashFixture(sourceRoot) {
+    if (process.platform === "win32") {
+        console.log("package graph inspection: literal-backslash package fixture: skipped on Windows");
+        return;
+    }
+
+    const tempRoot = mkdtempSync(join(tmpdir(), "goframe-package-graph-backslash-"));
+    try {
+        const packageRoot = join(tempRoot, "standalone");
+        cpSync(sourceRoot, packageRoot, { recursive: true });
+        const logicalName = String.raw`foo\bar.txt`;
+        const artifactPath = `assets/${logicalName}`;
+        const physicalPath = join(packageRoot, "assets", logicalName);
+        try {
+            writeFileSync(physicalPath, "literal Unix backslash\n");
+        } catch (error) {
+            if (error?.code === "EINVAL" || error?.code === "ENOTSUP") {
+                console.log(
+                    "package graph inspection: literal-backslash package fixture: " +
+                    `skipped: ${error.message}`,
+                );
+                return;
+            }
+            throw error;
+        }
+
+        const manifestPath = join(packageRoot, "asset-manifest.json");
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        manifest.assets[logicalName] = {
+            path: artifactPath,
+            type: "text/plain",
+        };
+        writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+        const before = snapshotPackageTree(packageRoot);
+        const args = ["--dir", packageRoot, "--format=json"];
+        const first = inspect(args);
+        const second = inspect(args);
+        assert(first === second, "literal-backslash JSON is not byte-identical");
+        const after = snapshotPackageTree(packageRoot);
+        assert(after === before, "literal-backslash inspection mutated its package");
+
+        const report = JSON.parse(first);
+        const matches = report.artifacts.filter(
+            (artifact) => artifact.logicalName === logicalName,
+        );
+        assert(matches.length === 1,
+            `literal-backslash artifact count for ${JSON.stringify(logicalName)} must be 1`);
+        assert(matches[0].path === artifactPath,
+            `literal-backslash path must remain ${JSON.stringify(artifactPath)}`);
+        assert(!posix.isAbsolute(matches[0].path),
+            "literal-backslash artifact path must remain package-relative");
+        console.log(
+            "package graph inspection: literal-backslash report: " +
+            `logicalName=${JSON.stringify(logicalName)} ` +
+            `path=${JSON.stringify(matches[0].path)} bytes=${Buffer.byteLength(first, "utf8")}`,
+        );
+
+        validateReport("literal-backslash", report);
+        console.log("package graph inspection: literal-backslash package fixture: ok");
+    } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+    }
+}
+
+function validateSchemaPathCharacterization() {
+    assertSafePath(String.raw`assets/foo\bar.txt`, "literal-backslash schema path");
+    for (const value of [
+        "/index.html",
+        "C:/package/file.txt",
+        ".",
+        "assets//file.txt",
+        "assets/./file.txt",
+        "assets/../file.txt",
+        "../file.txt",
+    ]) {
+        let rejected = false;
+        try {
+            assertSafePath(value, "invalid schema path");
+        } catch {
+            rejected = true;
+        }
+        assert(rejected, `schema path ${JSON.stringify(value)} must be rejected`);
+    }
+    console.log("package graph inspection: schema path characterization: ok");
+}
+
+function snapshotPackageTree(packageRoot) {
+    const snapshot = createHash("sha256");
+    visit(packageRoot, "");
+    return snapshot.digest("hex");
+
+    function visit(directory, relative) {
+        const entries = readdirSync(directory, { withFileTypes: true })
+            .sort((left, right) => compareUTF8(left.name, right.name));
+        for (const entry of entries) {
+            const entryRelative = relative === ""
+                ? entry.name
+                : `${relative}/${entry.name}`;
+            const entryPath = join(directory, entry.name);
+            const info = lstatSync(entryPath);
+            snapshot.update(entry.isDirectory() ? "directory" : "file");
+            snapshot.update("\0");
+            snapshot.update(entryRelative);
+            snapshot.update("\0");
+            snapshot.update(String(info.mode));
+            snapshot.update("\0");
+            if (entry.isDirectory()) {
+                visit(entryPath, entryRelative);
+            } else if (entry.isFile()) {
+                snapshot.update(readFileSync(entryPath));
+            } else {
+                throw new Error(
+                    `package graph inspection: unsupported temporary package entry ${entryRelative}`,
+                );
+            }
+        }
     }
 }
 
@@ -287,7 +411,8 @@ function assertSafePath(value, description) {
     assertString(value, description);
     assert(!value.startsWith("/") && !/^[A-Za-z]:/.test(value),
         `${description} must be relative`);
-    assert(!value.includes("\\"), `${description} must use slash separators`);
+    // Schema paths use "/" as their separator. A backslash may be a literal
+    // character inside one segment and must not be reinterpreted here.
     assert(value !== "." && posix.normalize(value) === value,
         `${description} must be normalized`);
     assert(!value.split("/").includes(".."), `${description} must remain contained`);
