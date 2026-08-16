@@ -139,12 +139,12 @@ func staticHandler(directory string) http.Handler {
 			response.Header().Set("Content-Encoding", "gzip")
 			path = strings.TrimSuffix(path, ".gz")
 		}
-		switch {
-		case strings.HasSuffix(path, ".wasm"):
+		switch classifyBrowserAsset(path) {
+		case browserAssetWASM:
 			response.Header().Set("Content-Type", "application/wasm")
-		case strings.HasSuffix(path, ".js"):
+		case browserAssetJavaScript:
 			response.Header().Set("Content-Type", "text/javascript")
-		case strings.HasSuffix(path, ".css"):
+		case browserAssetCSS:
 			response.Header().Set("Content-Type", "text/css")
 		}
 		sanitizedRequest := request.Clone(request.Context())

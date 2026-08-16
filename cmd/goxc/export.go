@@ -324,12 +324,12 @@ type legacyPackageMetadata struct {
 }
 
 func validLegacyPackageSignature(directory string) bool {
-	manifestPath := filepath.Join(directory, legacyPackageManifest)
-	if exists, err := pathExistsNoFollow(manifestPath); err != nil || !exists {
+	legacyManifestPath := filepath.Join(directory, legacyPackageManifest)
+	if exists, err := pathExistsNoFollow(legacyManifestPath); err != nil || !exists {
 		return false
 	}
 	var legacy legacyPackageMetadata
-	if err := readJSONRegular(manifestPath, "legacy package manifest", &legacy); err != nil {
+	if err := readJSONRegular(legacyManifestPath, "legacy package manifest", &legacy); err != nil {
 		return false
 	}
 	if legacy.Name == "" || legacy.ToolchainVersion == "" {
@@ -338,7 +338,7 @@ func validLegacyPackageSignature(directory string) bool {
 	if legacy.Compiler != "go" && legacy.Compiler != "tinygo" {
 		return false
 	}
-	if !safeChildPath(legacy.WASM) || strings.ToLower(filepath.Ext(legacy.WASM)) != ".wasm" {
+	if !safeChildPath(legacy.WASM) || classifyBrowserAsset(manifestPath(legacy.WASM)) != browserAssetWASM {
 		return false
 	}
 	if err := validatePackageOwnedPath(directory, legacy.WASM, "legacy package WASM"); err != nil {

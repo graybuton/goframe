@@ -787,6 +787,25 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 				metadata.Entrypoints.WASM = nonWASMPath
 			})
 		}, want: "WASM entrypoint must end in .wasm"},
+		{name: "WASM entrypoint uses Unicode fold lookalike", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
+			const (
+				logicalName = "bundle.waſm"
+				assetPath   = "assets/bundle.waſm"
+			)
+			relocateInspectAsset(t, root, fixture.assetPaths["bundle.wasm"], assetPath)
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["bundle.wasm"]
+				asset.Path = assetPath
+				asset.Type = "application/wasm"
+				delete(manifest.Assets, "bundle.wasm")
+				manifest.Assets[logicalName] = asset
+				manifest.Entrypoints.WASM = assetPath
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.WASM = assetPath
+			})
+		}, want: "WASM entrypoint must end in .wasm"},
 		{name: "WASM entrypoint has wrong media type", prepare: func(t *testing.T, root string) {
 			writeInspectFixture(t, root, inspectFixtureOptions{})
 			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
@@ -810,6 +829,25 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 				metadata.Entrypoints.Runtime = cssRuntimePath
 			})
 		}, want: "runtime entrypoint must end in .js"},
+		{name: "runtime entrypoint uses Unicode fold lookalike", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{})
+			const (
+				logicalName = "runtime.jſ"
+				assetPath   = "assets/runtime.jſ"
+			)
+			relocateInspectAsset(t, root, fixture.assetPaths[runtimeAssetName], assetPath)
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets[runtimeAssetName]
+				asset.Path = assetPath
+				asset.Type = "text/javascript"
+				delete(manifest.Assets, runtimeAssetName)
+				manifest.Assets[logicalName] = asset
+				manifest.Entrypoints.Runtime = assetPath
+			})
+			mutateInspectPackageMetadata(t, root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.Runtime = assetPath
+			})
+		}, want: "runtime entrypoint must end in .js"},
 		{name: "runtime entrypoint has wrong media type", prepare: func(t *testing.T, root string) {
 			writeInspectFixture(t, root, inspectFixtureOptions{})
 			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
@@ -828,6 +866,22 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 				asset.Type = "text/javascript"
 				manifest.Assets["styles/a.css"] = asset
 				manifest.Entrypoints.Styles = []string{scriptStylePath, fixture.assetPaths["styles/z.css"]}
+			})
+		}, want: "style entrypoint must end in .css"},
+		{name: "style entrypoint uses Unicode fold lookalike", prepare: func(t *testing.T, root string) {
+			fixture := writeInspectFixture(t, root, inspectFixtureOptions{styles: true})
+			const (
+				logicalName = "theme.csſ"
+				assetPath   = "assets/theme.csſ"
+			)
+			relocateInspectAsset(t, root, fixture.assetPaths["styles/a.css"], assetPath)
+			mutateInspectAssetManifest(t, root, func(manifest *assetManifest) {
+				asset := manifest.Assets["styles/a.css"]
+				asset.Path = assetPath
+				asset.Type = "text/css"
+				delete(manifest.Assets, "styles/a.css")
+				manifest.Assets[logicalName] = asset
+				manifest.Entrypoints.Styles = []string{assetPath, fixture.assetPaths["styles/z.css"]}
 			})
 		}, want: "style entrypoint must end in .css"},
 		{name: "style entrypoint has wrong media type", prepare: func(t *testing.T, root string) {

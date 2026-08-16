@@ -423,7 +423,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	if err != nil {
 		return inspectReport{}, err
 	}
-	if !strings.EqualFold(path.Ext(htmlPath), ".html") {
+	if classifyBrowserAsset(htmlPath) != browserAssetHTML {
 		return inspectReport{}, fmt.Errorf("HTML entrypoint must end in .html: %q", htmlPath)
 	}
 	wasmPath, err := normalizeInspectPath(manifest.Entrypoints.WASM, "WASM entrypoint")
@@ -649,7 +649,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 }
 
 func validateInspectEntrypointAsset(role, finalPath string, asset packageAsset, requiredExtension, requiredMediaType string) error {
-	if !strings.EqualFold(path.Ext(finalPath), requiredExtension) {
+	if !hasASCIIExtension(finalPath, requiredExtension) {
 		return fmt.Errorf("%s entrypoint must end in %s: %q", role, requiredExtension, finalPath)
 	}
 	if asset.Type != requiredMediaType {

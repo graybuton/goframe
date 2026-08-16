@@ -187,7 +187,7 @@ func packageApp(options packageOptions) error {
 		return err
 	}
 	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
-	if strings.ToLower(path.Ext(filepath.ToSlash(manifest.WASM))) != ".wasm" || strings.ToLower(path.Ext(wasmLogicalName)) != ".wasm" {
+	if classifyBrowserAsset(filepath.ToSlash(manifest.WASM)) != browserAssetWASM || classifyBrowserAsset(wasmLogicalName) != browserAssetWASM {
 		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
 	}
 	if wasmLogicalName == runtimeAssetName {
@@ -285,7 +285,7 @@ func packageApp(options packageOptions) error {
 			return err
 		}
 		assets[planned.LogicalName] = packaged
-		if strings.EqualFold(path.Ext(planned.LogicalName), ".css") {
+		if classifyBrowserAsset(planned.LogicalName) == browserAssetCSS {
 			entrypoints.Styles = append(entrypoints.Styles, packaged.Path)
 			styleRewrites[planned.LogicalName] = packaged.Path
 		}
@@ -934,14 +934,14 @@ func hashedAssetName(name, hash string) string {
 }
 
 func contentTypeForAsset(name string) string {
-	switch strings.ToLower(path.Ext(name)) {
-	case ".wasm":
+	switch classifyBrowserAsset(name) {
+	case browserAssetWASM:
 		return "application/wasm"
-	case ".js":
+	case browserAssetJavaScript:
 		return "text/javascript"
-	case ".css":
+	case browserAssetCSS:
 		return "text/css"
-	case ".html":
+	case browserAssetHTML:
 		return "text/html; charset=utf-8"
 	}
 	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
@@ -951,8 +951,8 @@ func contentTypeForAsset(name string) string {
 }
 
 func isCompressiblePackageAsset(name string) bool {
-	switch strings.ToLower(path.Ext(name)) {
-	case ".wasm", ".js", ".css":
+	switch classifyBrowserAsset(name) {
+	case browserAssetWASM, browserAssetJavaScript, browserAssetCSS:
 		return true
 	default:
 		return false
