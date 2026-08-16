@@ -419,21 +419,12 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 		return inspectReport{}, errors.New("package metadata and asset manifest entrypoints do not match")
 	}
 
-	htmlPath, err := normalizeInspectPath(metadata.Entrypoints.HTML, "HTML entrypoint")
-	if err != nil {
-		return inspectReport{}, err
-	}
+	htmlPath := metadata.Entrypoints.HTML
 	if classifyBrowserAsset(htmlPath) != browserAssetHTML {
 		return inspectReport{}, fmt.Errorf("HTML entrypoint must end in .html: %q", htmlPath)
 	}
-	wasmPath, err := normalizeInspectPath(manifest.Entrypoints.WASM, "WASM entrypoint")
-	if err != nil {
-		return inspectReport{}, err
-	}
-	runtimePath, err := normalizeInspectPath(manifest.Entrypoints.Runtime, "runtime entrypoint")
-	if err != nil {
-		return inspectReport{}, err
-	}
+	wasmPath := manifest.Entrypoints.WASM
+	runtimePath := manifest.Entrypoints.Runtime
 	if wasmPath == runtimePath {
 		return inspectReport{}, errors.New("WASM and runtime entrypoints must resolve to distinct assets")
 	}
@@ -455,14 +446,8 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	assets := make([]inspectAssetSpec, 0, len(logicalNames))
 	assetByPath := make(map[string]int, len(logicalNames))
 	for _, logicalName := range logicalNames {
-		if err := validateInspectLogicalAssetName(logicalName); err != nil {
-			return inspectReport{}, err
-		}
 		asset := manifest.Assets[logicalName]
-		assetPath, err := normalizeInspectPath(asset.Path, fmt.Sprintf("declared asset %q", logicalName))
-		if err != nil {
-			return inspectReport{}, err
-		}
+		assetPath := asset.Path
 		if previous, exists := occupied[assetPath]; exists {
 			if strings.HasPrefix(previous, "ordinary asset ") {
 				return inspectReport{}, fmt.Errorf("asset path %q is declared by more than one asset: %s and %q", assetPath, previous, logicalName)
@@ -499,10 +484,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 	stylePaths := make([]string, 0, len(manifest.Entrypoints.Styles))
 	styleSet := make(map[string]struct{}, len(manifest.Entrypoints.Styles))
 	for _, declared := range manifest.Entrypoints.Styles {
-		stylePath, err := normalizeInspectPath(declared, "style entrypoint")
-		if err != nil {
-			return inspectReport{}, err
-		}
+		stylePath := declared
 		if _, exists := styleSet[stylePath]; exists {
 			return inspectReport{}, fmt.Errorf("duplicate style entrypoint %q", stylePath)
 		}
@@ -531,10 +513,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 			if encoding == "" {
 				return inspectReport{}, fmt.Errorf("compressed asset encoding name is empty for %q", asset.logicalName)
 			}
-			sidecarPath, err := normalizeInspectPath(asset.asset.Compressed[encoding], fmt.Sprintf("compressed asset %q for %q", encoding, asset.logicalName))
-			if err != nil {
-				return inspectReport{}, err
-			}
+			sidecarPath := asset.asset.Compressed[encoding]
 			if previous, exists := occupied[sidecarPath]; exists {
 				return inspectReport{}, fmt.Errorf("compressed path %q for %q encoding %q collides with %s", sidecarPath, asset.logicalName, encoding, previous)
 			}
@@ -656,24 +635,6 @@ func validateInspectEntrypointAsset(role, finalPath string, asset packageAsset, 
 		return fmt.Errorf("%s entrypoint %q must declare media type %q, got %q", role, finalPath, requiredMediaType, asset.Type)
 	}
 	return nil
-}
-
-func validateInspectLogicalAssetName(logicalName string) error {
-	cleaned, err := cleanPackageAssetName(logicalName)
-	if err != nil {
-		if logicalName == "" {
-			return errors.New("asset manifest logical asset name is empty")
-		}
-		return fmt.Errorf("invalid logical asset name %q: %w", logicalName, err)
-	}
-	if cleaned != logicalName {
-		return fmt.Errorf("logical asset name %q must use canonical form %q", logicalName, cleaned)
-	}
-	return nil
-}
-
-func normalizeInspectPath(value, description string) (string, error) {
-	return normalizeGeneratedPackagePath(value, description)
 }
 
 func inspectArtifactAt(root, relative, logicalName, mediaType, declaredHash, encoding string, roles []string, description string, physicalArtifacts *inspectPhysicalArtifactRegistry) (inspectArtifact, error) {

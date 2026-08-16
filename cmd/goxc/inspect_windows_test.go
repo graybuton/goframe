@@ -12,25 +12,25 @@ import (
 	"testing"
 )
 
-func TestNormalizeInspectPathRejectsWindowsSeparator(t *testing.T) {
+func TestValidateGeneratedPackagePathRejectsWindowsSeparator(t *testing.T) {
 	const declared = `assets\bundle.wasm`
-	got, err := normalizeInspectPath(declared, "declared path")
+	err := validateGeneratedPackagePath(declared, "declared path")
 	if err == nil {
-		t.Fatalf("normalizeInspectPath(%q) = %q, want slash-only rejection", declared, got)
+		t.Fatalf("validateGeneratedPackagePath(%q) accepted a Windows separator", declared)
 	}
 	if !strings.Contains(err.Error(), "must use slash-only package paths") {
-		t.Fatalf("normalizeInspectPath(%q) error = %v, want slash-only rejection", declared, err)
+		t.Fatalf("validateGeneratedPackagePath(%q) error = %v, want slash-only rejection", declared, err)
 	}
 }
 
-func TestCleanPackageAssetNameNormalizesWindowsSeparators(t *testing.T) {
+func TestNormalizePackageAssetLogicalNameNormalizesWindowsSeparators(t *testing.T) {
 	const declared = `styles\theme.css`
-	got, err := cleanPackageAssetName(declared)
+	got, err := normalizePackageAssetLogicalName(declared)
 	if err != nil {
-		t.Fatalf("cleanPackageAssetName(%q) error: %v", declared, err)
+		t.Fatalf("normalizePackageAssetLogicalName(%q) error: %v", declared, err)
 	}
 	if got != "styles/theme.css" {
-		t.Fatalf("cleanPackageAssetName(%q) = %q, want %q", declared, got, "styles/theme.css")
+		t.Fatalf("normalizePackageAssetLogicalName(%q) = %q, want %q", declared, got, "styles/theme.css")
 	}
 }
 

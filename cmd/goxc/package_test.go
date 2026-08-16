@@ -4,8 +4,68 @@ import (
 	"bytes"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
+
+func TestPackageAssetLogicalNameNormalization(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		want      string
+		wantError bool
+	}{
+		{name: "base", input: "logo.svg", want: "logo.svg"},
+		{name: "nested", input: "images/logo.svg", want: "images/logo.svg"},
+		{name: "space", input: "my logo.svg", want: "my logo.svg"},
+		{name: "graphic Unicode", input: "界.svg", want: "界.svg"},
+		{name: "leading dot child", input: ".well-known/config.json", want: ".well-known/config.json"},
+		{name: "drive-like base", input: "C:logo.svg", want: "C:logo.svg"},
+		{name: "drive-like segment", input: "C:/icons/logo.svg", want: "C:/icons/logo.svg"},
+		{name: "colon data", input: "a:b:c.svg", want: "a:b:c.svg"},
+		{name: "repeated separator", input: "images//logo.svg", want: "images/logo.svg"},
+		{name: "dot component", input: "images/./logo.svg", want: "images/logo.svg"},
+		{name: "absolute", input: "/logo.svg", wantError: true},
+		{name: "dot", input: ".", wantError: true},
+		{name: "parent", input: "..", wantError: true},
+		{name: "parent prefix", input: "../logo.svg", wantError: true},
+		{name: "nested parent", input: "images/../logo.svg", wantError: true},
+		{name: "empty", input: "", wantError: true},
+	}
+	if runtime.GOOS == "windows" {
+		tests = append(tests, struct {
+			name      string
+			input     string
+			want      string
+			wantError bool
+		}{name: "native separator", input: `foo\bar.svg`, want: "foo/bar.svg"})
+	} else {
+		tests = append(tests, struct {
+			name      string
+			input     string
+			want      string
+			wantError bool
+		}{name: "literal backslash", input: `foo\bar.svg`, wantError: true})
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := normalizePackageAssetLogicalName(test.input)
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("normalizePackageAssetLogicalName(%q) = %q, want error", test.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizePackageAssetLogicalName(%q) error: %v", test.input, err)
+			}
+			if got != test.want {
+				t.Fatalf("normalizePackageAssetLogicalName(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
 
 func TestBrowserAssetProducerIntegration(t *testing.T) {
 	appDir := t.TempDir()

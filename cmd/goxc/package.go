@@ -361,7 +361,7 @@ func packageApp(options packageOptions) error {
 }
 
 func resolvePackageAssetSource(appDir, asset string) (string, string, bool, error) {
-	asset, err := cleanPackageAssetName(asset)
+	asset, err := normalizePackageAssetLogicalName(asset)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -497,7 +497,7 @@ func (planner *packageAssetPlanner) addDirectoryAssets(directory string) error {
 
 func (planner *packageAssetPlanner) addListedAssets(assets []string) error {
 	for _, raw := range assets {
-		asset, err := cleanPackageAssetName(raw)
+		asset, err := normalizePackageAssetLogicalName(raw)
 		if err != nil {
 			return err
 		}
@@ -522,7 +522,7 @@ func (planner *packageAssetPlanner) addListedAssets(assets []string) error {
 }
 
 func (planner *packageAssetPlanner) addAsset(logicalName, sourcePath string, exists bool) error {
-	logicalName, err := cleanPackageAssetName(logicalName)
+	logicalName, err := normalizePackageAssetLogicalName(logicalName)
 	if err != nil {
 		return err
 	}
@@ -538,7 +538,7 @@ func (planner *packageAssetPlanner) addAsset(logicalName, sourcePath string, exi
 }
 
 func (planner *packageAssetPlanner) reserveAsset(name, owner string) error {
-	name, err := cleanPackageAssetName(name)
+	name, err := normalizePackageAssetLogicalName(name)
 	if err != nil {
 		return err
 	}
@@ -562,7 +562,7 @@ func (planner *packageAssetPlanner) reserveAsset(name, owner string) error {
 }
 
 func (planner *packageAssetPlanner) reserveSidecar(name, owner string) error {
-	name, err := cleanPackageAssetName(name)
+	name, err := normalizePackageAssetLogicalName(name)
 	if err != nil {
 		return err
 	}
@@ -828,7 +828,7 @@ func replaceHTMLBlock(content, name, replacement string) (string, bool) {
 }
 
 func writePackageAsset(sourcePath, assetsDir, logicalName string, options packageOptions) (packageAsset, error) {
-	logicalName, err := cleanPackageAssetName(logicalName)
+	logicalName, err := normalizePackageAssetLogicalName(logicalName)
 	if err != nil {
 		return packageAsset{}, err
 	}
@@ -886,7 +886,7 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 	return asset, nil
 }
 
-func cleanPackageAssetName(name string) (string, error) {
+func normalizePackageAssetLogicalName(name string) (string, error) {
 	logicalName := filepath.ToSlash(name)
 	if strings.Contains(logicalName, `\`) {
 		return "", fmt.Errorf("package asset logical name %q must not contain backslashes", name)
@@ -903,21 +903,21 @@ func cleanPackageAssetName(name string) (string, error) {
 	return clean, nil
 }
 
-func normalizeGeneratedPackagePath(value, description string) (string, error) {
+func validateGeneratedPackagePath(value, description string) error {
 	if value == "" {
-		return "", fmt.Errorf("%s must not be empty", description)
+		return fmt.Errorf("%s must not be empty", description)
 	}
 	if strings.Contains(value, `\`) {
-		return "", fmt.Errorf("%s %q must use slash-only package paths", description, value)
+		return fmt.Errorf("%s %q must use slash-only package paths", description, value)
 	}
 	if !safeChildPath(value) {
-		return "", fmt.Errorf("%s %q must be a safe package-relative path", description, value)
+		return fmt.Errorf("%s %q must be a safe package-relative path", description, value)
 	}
 	normalized := path.Clean(value)
 	if value != normalized {
-		return "", fmt.Errorf("%s %q must use canonical form %q", description, value, normalized)
+		return fmt.Errorf("%s %q must use canonical form %q", description, value, normalized)
 	}
-	return value, nil
+	return nil
 }
 
 func shortContentHash(content []byte) string {

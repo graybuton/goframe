@@ -244,7 +244,7 @@ func readCurrentPackageMetadata(path string) (packageMetadata, error) {
 		{metadata.Entrypoints.WASM, "package metadata WASM entrypoint"},
 		{metadata.Entrypoints.Runtime, "package metadata runtime entrypoint"},
 	} {
-		if _, err := normalizeGeneratedPackagePath(entry.value, entry.description); err != nil {
+		if err := validateGeneratedPackagePath(entry.value, entry.description); err != nil {
 			return packageMetadata{}, err
 		}
 	}
@@ -266,12 +266,12 @@ func readAssetManifestMetadata(path string) (assetManifest, error) {
 		{manifest.Entrypoints.WASM, "asset manifest WASM entrypoint"},
 		{manifest.Entrypoints.Runtime, "asset manifest runtime entrypoint"},
 	} {
-		if _, err := normalizeGeneratedPackagePath(entry.value, entry.description); err != nil {
+		if err := validateGeneratedPackagePath(entry.value, entry.description); err != nil {
 			return assetManifest{}, err
 		}
 	}
 	for _, style := range manifest.Entrypoints.Styles {
-		if _, err := normalizeGeneratedPackagePath(style, "asset manifest style entrypoint"); err != nil {
+		if err := validateGeneratedPackagePath(style, "asset manifest style entrypoint"); err != nil {
 			return assetManifest{}, err
 		}
 	}
@@ -279,21 +279,21 @@ func readAssetManifestMetadata(path string) (assetManifest, error) {
 		if logicalName == "" {
 			return assetManifest{}, fmt.Errorf("asset manifest logical asset name is empty")
 		}
-		cleaned, err := cleanPackageAssetName(logicalName)
+		cleaned, err := normalizePackageAssetLogicalName(logicalName)
 		if err != nil {
 			return assetManifest{}, fmt.Errorf("asset manifest contains invalid logical asset name %q: %w", logicalName, err)
 		}
 		if cleaned != logicalName {
 			return assetManifest{}, fmt.Errorf("asset manifest logical asset name %q must use canonical form %q", logicalName, cleaned)
 		}
-		if _, err := normalizeGeneratedPackagePath(asset.Path, fmt.Sprintf("asset manifest path for %q", logicalName)); err != nil {
+		if err := validateGeneratedPackagePath(asset.Path, fmt.Sprintf("asset manifest path for %q", logicalName)); err != nil {
 			return assetManifest{}, fmt.Errorf("asset manifest contains an invalid asset path for %q: %w", logicalName, err)
 		}
 		if asset.Type == "" {
 			return assetManifest{}, fmt.Errorf("asset manifest contains an empty asset type for %q", logicalName)
 		}
 		for encoding, compressed := range asset.Compressed {
-			if _, err := normalizeGeneratedPackagePath(compressed, fmt.Sprintf("asset manifest compressed path %q for %q", encoding, logicalName)); err != nil {
+			if err := validateGeneratedPackagePath(compressed, fmt.Sprintf("asset manifest compressed path %q for %q", encoding, logicalName)); err != nil {
 				return assetManifest{}, fmt.Errorf("asset manifest contains an invalid compressed asset path for %q: %w", logicalName, err)
 			}
 		}

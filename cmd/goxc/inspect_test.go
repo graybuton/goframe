@@ -1071,59 +1071,55 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 	}
 }
 
-func TestNormalizeInspectPath(t *testing.T) {
+func TestValidateGeneratedPackagePath(t *testing.T) {
 	tests := []struct {
 		name      string
 		value     string
-		want      string
 		wantError bool
 	}{
-		{name: "HTML", value: "index.html", want: "index.html"},
-		{name: "WASM", value: "assets/bundle.wasm", want: "assets/bundle.wasm"},
-		{name: "space", value: "assets/my file.svg", want: "assets/my file.svg"},
-		{name: "graphic Unicode", value: "assets/界.svg", want: "assets/界.svg"},
-		{name: "case difference", value: "assets/WASM_EXEC.js", want: "assets/WASM_EXEC.js"},
-		{name: "leading dot child", value: "assets/.well-known/config.json", want: "assets/.well-known/config.json"},
-		{name: "nested style", value: "assets/styles/theme.css", want: "assets/styles/theme.css"},
-		{name: "leading dot component", value: "./index.html", want: "index.html", wantError: true},
-		{name: "repeated asset separator", value: "assets//bundle.wasm", want: "assets/bundle.wasm", wantError: true},
-		{name: "asset dot component", value: "assets/./bundle.wasm", want: "assets/bundle.wasm", wantError: true},
-		{name: "trailing separator", value: "assets/styles.css/", want: "assets/styles.css", wantError: true},
-		{name: "repeated nested separator", value: "assets/styles//theme.css", want: "assets/styles/theme.css", wantError: true},
-		{name: "nested dot component", value: "assets/styles/./theme.css", want: "assets/styles/theme.css", wantError: true},
+		{name: "HTML", value: "index.html"},
+		{name: "WASM", value: "assets/bundle.wasm"},
+		{name: "space", value: "assets/my file.svg"},
+		{name: "graphic Unicode", value: "assets/界.svg"},
+		{name: "case difference", value: "assets/WASM_EXEC.js"},
+		{name: "leading dot child", value: "assets/.well-known/config.json"},
+		{name: "nested style", value: "assets/styles/theme.css"},
+		{name: "leading dot component", value: "./index.html", wantError: true},
+		{name: "repeated asset separator", value: "assets//bundle.wasm", wantError: true},
+		{name: "asset dot component", value: "assets/./bundle.wasm", wantError: true},
+		{name: "trailing separator", value: "assets/styles.css/", wantError: true},
+		{name: "repeated nested separator", value: "assets/styles//theme.css", wantError: true},
+		{name: "nested dot component", value: "assets/styles/./theme.css", wantError: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := normalizeInspectPath(test.value, "declared path")
+			err := validateGeneratedPackagePath(test.value, "declared path")
 			if test.wantError {
 				if err == nil {
-					t.Errorf("normalizeInspectPath(%q) accepted non-canonical spelling as %q", test.value, got)
+					t.Errorf("validateGeneratedPackagePath(%q) accepted non-canonical spelling", test.value)
 				} else if !strings.Contains(err.Error(), "must use canonical form") {
-					t.Errorf("normalizeInspectPath(%q) error = %v, want canonical-form rejection", test.value, err)
+					t.Errorf("validateGeneratedPackagePath(%q) error = %v, want canonical-form rejection", test.value, err)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("normalizeInspectPath(%q) error: %v", test.value, err)
-			}
-			if got != test.want {
-				t.Fatalf("normalizeInspectPath(%q) = %q, want %q", test.value, got, test.want)
+				t.Fatalf("validateGeneratedPackagePath(%q) error: %v", test.value, err)
 			}
 		})
 	}
 }
 
-func TestNormalizeInspectPathRejectsBackslashes(t *testing.T) {
+func TestValidateGeneratedPackagePathRejectsBackslashes(t *testing.T) {
 	for _, value := range []string{
 		`assets/foo\bar.txt`,
 		`assets/foo\..\bar.txt`,
 		`assets\bundle.wasm`,
 	} {
 		t.Run(value, func(t *testing.T) {
-			got, err := normalizeInspectPath(value, "declared path")
+			err := validateGeneratedPackagePath(value, "declared path")
 			if err == nil || !strings.Contains(err.Error(), "must use slash-only package paths") {
-				t.Fatalf("normalizeInspectPath(%q) = %q, %v; want slash-only rejection", value, got, err)
+				t.Fatalf("validateGeneratedPackagePath(%q) error = %v; want slash-only rejection", value, err)
 			}
 		})
 	}
@@ -1448,12 +1444,12 @@ func TestInspectAcceptsCanonicalLogicalAssetNames(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.logicalName, func(t *testing.T) {
-			cleaned, err := cleanPackageAssetName(test.logicalName)
+			cleaned, err := normalizePackageAssetLogicalName(test.logicalName)
 			if err != nil {
-				t.Fatalf("cleanPackageAssetName(%q) error: %v", test.logicalName, err)
+				t.Fatalf("normalizePackageAssetLogicalName(%q) error: %v", test.logicalName, err)
 			}
 			if cleaned != test.logicalName {
-				t.Fatalf("cleanPackageAssetName(%q) = %q, want unchanged", test.logicalName, cleaned)
+				t.Fatalf("normalizePackageAssetLogicalName(%q) = %q, want unchanged", test.logicalName, cleaned)
 			}
 
 			fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
