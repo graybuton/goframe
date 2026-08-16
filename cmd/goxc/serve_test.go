@@ -70,6 +70,68 @@ func TestStaticHandlerServesCompressedWASMHeaders(t *testing.T) {
 	}
 }
 
+func TestServeContentTypeUsesASCIIOnlyExtensions(t *testing.T) {
+	directory := t.TempDir()
+	for name, content := range map[string]string{
+		"assets/APP.WASM":    "uppercase wasm",
+		"assets/RUNTIME.JS":  "uppercase javascript",
+		"assets/THEME.CSS":   "uppercase css",
+		"assets/APP.WASM.gz": "compressed uppercase wasm",
+		"assets/app.waſm":    "confusable wasm",
+		"assets/runtime.jſ":  "confusable javascript",
+		"assets/theme.csſ":   "confusable css",
+	} {
+		writeServeFixture(t, directory, name, content)
+	}
+
+	for _, test := range []struct {
+		name         string
+		requestPath  string
+		wantType     string
+		wantEncoding string
+	}{
+		{name: "uppercase WASM", requestPath: "/assets/APP.WASM", wantType: "application/wasm"},
+		{name: "uppercase JavaScript", requestPath: "/assets/RUNTIME.JS", wantType: "text/javascript"},
+		{name: "uppercase CSS", requestPath: "/assets/THEME.CSS", wantType: "text/css"},
+		{name: "compressed uppercase WASM", requestPath: "/assets/APP.WASM.gz", wantType: "application/wasm", wantEncoding: "gzip"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			staticHandler(directory).ServeHTTP(response, httptest.NewRequest("GET", test.requestPath, nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", response.Code)
+			}
+			if got := response.Header().Get("Content-Type"); got != test.wantType {
+				t.Fatalf("Content-Type = %q, want %q", got, test.wantType)
+			}
+			if got := response.Header().Get("Content-Encoding"); got != test.wantEncoding {
+				t.Fatalf("Content-Encoding = %q, want %q", got, test.wantEncoding)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name        string
+		requestPath string
+		specialType string
+	}{
+		{name: "WASM long s", requestPath: "/assets/app.waſm", specialType: "application/wasm"},
+		{name: "JavaScript long s", requestPath: "/assets/runtime.jſ", specialType: "text/javascript"},
+		{name: "CSS long s", requestPath: "/assets/theme.csſ", specialType: "text/css"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			staticHandler(directory).ServeHTTP(response, httptest.NewRequest("GET", test.requestPath, nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", response.Code)
+			}
+			if got := response.Header().Get("Content-Type"); got == test.specialType {
+				t.Fatalf("Unicode lookalike received special Content-Type %q", got)
+			}
+		})
+	}
+}
+
 func TestStaticHandlerRejectsTraversalPaths(t *testing.T) {
 	root := t.TempDir()
 	directory := filepath.Join(root, "serve")

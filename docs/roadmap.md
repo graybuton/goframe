@@ -39,8 +39,9 @@ The current baseline includes:
 - the GOX language and compiler, including typed component boundaries,
   package-qualified component tags, fragments, expression-oriented rendering,
   nested markup in Go callbacks, and source-oriented diagnostics;
-- the `goxc` check, generate, build, package, export, serve, dev, size, clean,
-  doctor, and version workflow for standard Go and TinyGo WebAssembly output;
+- the `goxc` check, generate, build, package, inspect, export, serve, dev, size,
+  clean, doctor, and version workflow for standard Go and TinyGo WebAssembly
+  output;
 - generated component identity based on Go package identity where available,
   plus multi-package and child-entry application evidence;
 - a hash router with params and query helpers, component-scoped resources,
@@ -224,7 +225,22 @@ diagnostics, and clears the presentation on successful recovery.
 
 ## `v0.4.0-preview.*` - Modular Delivery & Bundle Splitting
 
-Status: **Candidate**. This line must keep distinct delivery concepts separate.
+Status: **Current / shipped** for read-only standalone package graph inspection;
+**Candidate** for asset splitting, multi-entry WASM, and route-lazy bundles.
+These delivery concepts remain separate.
+
+### Package Graph Inspection
+
+Current scope:
+
+- deterministic text and schema-v1 JSON for one existing current standalone
+  package;
+- package metadata, declared assets, entrypoints, compression sidecars, full
+  content hashes, and metadata-declared edges;
+- read-only validation with package-relative output and copied-root identity.
+
+The current graph is the declared graph of one standalone package. It does not
+infer source dependencies, split assets or WASM, or define lazy loading.
 
 ### Asset Splitting
 
@@ -269,7 +285,7 @@ Candidate preview slots:
 
 | Planning slot | Candidate capability |
 |---|---|
-| `preview.1` | Package/bundle graph and inspection. |
+| `preview.1` | Unselected checkpoint; standalone package graph inspection is current behavior. |
 | `preview.2` | Lazy static chunks. |
 | `preview.3` | Multi-entry WASM packaging. |
 | `preview.4` | Route-lazy bundles. |
@@ -513,7 +529,6 @@ entries are deliberately not sequenced or assigned to releases.
 - deployment adapters;
 - reproducible packages;
 - SBOM and signing evaluation;
-- package inspection.
 
 ### Browser Platform
 

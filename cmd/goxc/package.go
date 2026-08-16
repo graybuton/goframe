@@ -187,7 +187,7 @@ func packageApp(options packageOptions) error {
 		return err
 	}
 	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
-	if strings.ToLower(path.Ext(filepath.ToSlash(manifest.WASM))) != ".wasm" || strings.ToLower(path.Ext(wasmLogicalName)) != ".wasm" {
+	if classifyBrowserAsset(filepath.ToSlash(manifest.WASM)) != browserAssetWASM || classifyBrowserAsset(wasmLogicalName) != browserAssetWASM {
 		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
 	}
 	if wasmLogicalName == runtimeAssetName {
@@ -285,7 +285,7 @@ func packageApp(options packageOptions) error {
 			return err
 		}
 		assets[planned.LogicalName] = packaged
-		if strings.EqualFold(path.Ext(planned.LogicalName), ".css") {
+		if classifyBrowserAsset(planned.LogicalName) == browserAssetCSS {
 			entrypoints.Styles = append(entrypoints.Styles, packaged.Path)
 			styleRewrites[planned.LogicalName] = packaged.Path
 		}
@@ -361,7 +361,7 @@ func packageApp(options packageOptions) error {
 }
 
 func resolvePackageAssetSource(appDir, asset string) (string, string, bool, error) {
-	asset, err := cleanPackageAssetName(asset)
+	asset, err := normalizePackageAssetLogicalName(asset)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -497,7 +497,7 @@ func (planner *packageAssetPlanner) addDirectoryAssets(directory string) error {
 
 func (planner *packageAssetPlanner) addListedAssets(assets []string) error {
 	for _, raw := range assets {
-		asset, err := cleanPackageAssetName(raw)
+		asset, err := normalizePackageAssetLogicalName(raw)
 		if err != nil {
 			return err
 		}
@@ -522,7 +522,7 @@ func (planner *packageAssetPlanner) addListedAssets(assets []string) error {
 }
 
 func (planner *packageAssetPlanner) addAsset(logicalName, sourcePath string, exists bool) error {
-	logicalName, err := cleanPackageAssetName(logicalName)
+	logicalName, err := normalizePackageAssetLogicalName(logicalName)
 	if err != nil {
 		return err
 	}
@@ -538,7 +538,7 @@ func (planner *packageAssetPlanner) addAsset(logicalName, sourcePath string, exi
 }
 
 func (planner *packageAssetPlanner) reserveAsset(name, owner string) error {
-	name, err := cleanPackageAssetName(name)
+	name, err := normalizePackageAssetLogicalName(name)
 	if err != nil {
 		return err
 	}
@@ -562,7 +562,7 @@ func (planner *packageAssetPlanner) reserveAsset(name, owner string) error {
 }
 
 func (planner *packageAssetPlanner) reserveSidecar(name, owner string) error {
-	name, err := cleanPackageAssetName(name)
+	name, err := normalizePackageAssetLogicalName(name)
 	if err != nil {
 		return err
 	}
@@ -828,7 +828,7 @@ func replaceHTMLBlock(content, name, replacement string) (string, bool) {
 }
 
 func writePackageAsset(sourcePath, assetsDir, logicalName string, options packageOptions) (packageAsset, error) {
-	logicalName, err := cleanPackageAssetName(logicalName)
+	logicalName, err := normalizePackageAssetLogicalName(logicalName)
 	if err != nil {
 		return packageAsset{}, err
 	}
@@ -886,17 +886,38 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 	return asset, nil
 }
 
-func cleanPackageAssetName(name string) (string, error) {
-	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
+func normalizePackageAssetLogicalName(name string) (string, error) {
+	logicalName := filepath.ToSlash(name)
+	if strings.Contains(logicalName, `\`) {
+		return "", fmt.Errorf("package asset logical name %q must not contain backslashes", name)
+	}
+	for _, part := range strings.Split(logicalName, "/") {
 		if part == ".." {
 			return "", fmt.Errorf("package asset logical name %q must not contain .. components", name)
 		}
 	}
-	clean := path.Clean(filepath.ToSlash(name))
+	clean := path.Clean(logicalName)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
 		return "", fmt.Errorf("package asset logical name %q must be a relative child path", name)
 	}
 	return clean, nil
+}
+
+func validateGeneratedPackagePath(value, description string) error {
+	if value == "" {
+		return fmt.Errorf("%s must not be empty", description)
+	}
+	if strings.Contains(value, `\`) {
+		return fmt.Errorf("%s %q must use slash-only package paths", description, value)
+	}
+	if !safeChildPath(value) {
+		return fmt.Errorf("%s %q must be a safe package-relative path", description, value)
+	}
+	normalized := path.Clean(value)
+	if value != normalized {
+		return fmt.Errorf("%s %q must use canonical form %q", description, value, normalized)
+	}
+	return nil
 }
 
 func shortContentHash(content []byte) string {
@@ -913,14 +934,14 @@ func hashedAssetName(name, hash string) string {
 }
 
 func contentTypeForAsset(name string) string {
-	switch strings.ToLower(path.Ext(name)) {
-	case ".wasm":
+	switch classifyBrowserAsset(name) {
+	case browserAssetWASM:
 		return "application/wasm"
-	case ".js":
+	case browserAssetJavaScript:
 		return "text/javascript"
-	case ".css":
+	case browserAssetCSS:
 		return "text/css"
-	case ".html":
+	case browserAssetHTML:
 		return "text/html; charset=utf-8"
 	}
 	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
@@ -930,8 +951,8 @@ func contentTypeForAsset(name string) string {
 }
 
 func isCompressiblePackageAsset(name string) bool {
-	switch strings.ToLower(path.Ext(name)) {
-	case ".wasm", ".js", ".css":
+	switch classifyBrowserAsset(name) {
+	case browserAssetWASM, browserAssetJavaScript, browserAssetCSS:
 		return true
 	default:
 		return false

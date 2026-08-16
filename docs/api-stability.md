@@ -107,6 +107,7 @@ Tooling:
 - `goxc generate`
 - `goxc build`
 - `goxc package`
+- `goxc inspect`
 - `goxc export`
 - `goxc serve`
 - `goxc dev`
@@ -133,6 +134,18 @@ and incompatible field or semantic changes require a schema version increment.
 The official lightweight VS Code extension consumes this contract for
 CLI-backed source diagnostics. Exact diagnostic wording remains experimental,
 and this editor integration does not create an LSP compatibility promise.
+
+The separate `goxc inspect --format=json` schema version 1 report is also a
+versioned tooling process contract. It describes the declared graph of one
+existing current standalone package with deterministic package-relative paths.
+Its path fields and edge endpoints are canonical slash-only package paths;
+`artifact.logicalName` is instead a canonical generated namespace key. A
+drive-looking prefix can be key data while remaining invalid at the start of a
+package path. The report does not promise that every producer-supported
+filename is portable across host filesystems.
+Incompatible field or semantic changes require a schema version increment.
+The default text report is human-facing and its exact formatting remains
+experimental; consumers should parse JSON rather than text.
 
 ### Exported Compiler-Facing / Low-Level
 
@@ -328,6 +341,9 @@ These are not part of the current preview promise.
 - exact generated `.goframe/gen` filenames;
 - browser debug global object shapes;
 - package/export staging temporary directories.
+- private inspect report structs, filesystem traversal, sorting and SHA helper
+  implementations, and package-root resolution details below the documented
+  command behavior;
 - build-tagged document metadata coordinators, candidate adapters, fixture
   telemetry, and transactional ownership research symbols;
 

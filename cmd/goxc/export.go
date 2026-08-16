@@ -236,8 +236,17 @@ func readCurrentPackageMetadata(path string) (packageMetadata, error) {
 	if metadata.Compiler != "go" && metadata.Compiler != "tinygo" {
 		return packageMetadata{}, fmt.Errorf("package metadata compiler %q is not supported", metadata.Compiler)
 	}
-	if !safeChildPath(metadata.Entrypoints.HTML) || !safeChildPath(metadata.Entrypoints.WASM) || !safeChildPath(metadata.Entrypoints.Runtime) {
-		return packageMetadata{}, fmt.Errorf("package metadata entrypoints must stay inside the package")
+	for _, entry := range []struct {
+		value       string
+		description string
+	}{
+		{metadata.Entrypoints.HTML, "package metadata HTML entrypoint"},
+		{metadata.Entrypoints.WASM, "package metadata WASM entrypoint"},
+		{metadata.Entrypoints.Runtime, "package metadata runtime entrypoint"},
+	} {
+		if err := validateGeneratedPackagePath(entry.value, entry.description); err != nil {
+			return packageMetadata{}, err
+		}
 	}
 	return metadata, nil
 }
@@ -250,16 +259,42 @@ func readAssetManifestMetadata(path string) (assetManifest, error) {
 	if manifest.Version != 1 || len(manifest.Assets) == 0 {
 		return assetManifest{}, fmt.Errorf("asset manifest has unsupported version or no assets")
 	}
-	if !safeChildPath(manifest.Entrypoints.WASM) || !safeChildPath(manifest.Entrypoints.Runtime) {
-		return assetManifest{}, fmt.Errorf("asset manifest entrypoints must stay inside the package")
-	}
-	for _, asset := range manifest.Assets {
-		if !safeChildPath(asset.Path) || asset.Type == "" {
-			return assetManifest{}, fmt.Errorf("asset manifest contains an invalid asset path or type")
+	for _, entry := range []struct {
+		value       string
+		description string
+	}{
+		{manifest.Entrypoints.WASM, "asset manifest WASM entrypoint"},
+		{manifest.Entrypoints.Runtime, "asset manifest runtime entrypoint"},
+	} {
+		if err := validateGeneratedPackagePath(entry.value, entry.description); err != nil {
+			return assetManifest{}, err
 		}
-		for _, compressed := range asset.Compressed {
-			if !safeChildPath(compressed) {
-				return assetManifest{}, fmt.Errorf("asset manifest contains an invalid compressed asset path")
+	}
+	for _, style := range manifest.Entrypoints.Styles {
+		if err := validateGeneratedPackagePath(style, "asset manifest style entrypoint"); err != nil {
+			return assetManifest{}, err
+		}
+	}
+	for logicalName, asset := range manifest.Assets {
+		if logicalName == "" {
+			return assetManifest{}, fmt.Errorf("asset manifest logical asset name is empty")
+		}
+		cleaned, err := normalizePackageAssetLogicalName(logicalName)
+		if err != nil {
+			return assetManifest{}, fmt.Errorf("asset manifest contains invalid logical asset name %q: %w", logicalName, err)
+		}
+		if cleaned != logicalName {
+			return assetManifest{}, fmt.Errorf("asset manifest logical asset name %q must use canonical form %q", logicalName, cleaned)
+		}
+		if err := validateGeneratedPackagePath(asset.Path, fmt.Sprintf("asset manifest path for %q", logicalName)); err != nil {
+			return assetManifest{}, fmt.Errorf("asset manifest contains an invalid asset path for %q: %w", logicalName, err)
+		}
+		if asset.Type == "" {
+			return assetManifest{}, fmt.Errorf("asset manifest contains an empty asset type for %q", logicalName)
+		}
+		for encoding, compressed := range asset.Compressed {
+			if err := validateGeneratedPackagePath(compressed, fmt.Sprintf("asset manifest compressed path %q for %q", encoding, logicalName)); err != nil {
+				return assetManifest{}, fmt.Errorf("asset manifest contains an invalid compressed asset path for %q: %w", logicalName, err)
 			}
 		}
 	}
@@ -289,12 +324,12 @@ type legacyPackageMetadata struct {
 }
 
 func validLegacyPackageSignature(directory string) bool {
-	manifestPath := filepath.Join(directory, legacyPackageManifest)
-	if exists, err := pathExistsNoFollow(manifestPath); err != nil || !exists {
+	legacyManifestPath := filepath.Join(directory, legacyPackageManifest)
+	if exists, err := pathExistsNoFollow(legacyManifestPath); err != nil || !exists {
 		return false
 	}
 	var legacy legacyPackageMetadata
-	if err := readJSONRegular(manifestPath, "legacy package manifest", &legacy); err != nil {
+	if err := readJSONRegular(legacyManifestPath, "legacy package manifest", &legacy); err != nil {
 		return false
 	}
 	if legacy.Name == "" || legacy.ToolchainVersion == "" {
@@ -303,7 +338,7 @@ func validLegacyPackageSignature(directory string) bool {
 	if legacy.Compiler != "go" && legacy.Compiler != "tinygo" {
 		return false
 	}
-	if !safeChildPath(legacy.WASM) || strings.ToLower(filepath.Ext(legacy.WASM)) != ".wasm" {
+	if !safeChildPath(legacy.WASM) || classifyBrowserAsset(manifestPath(legacy.WASM)) != browserAssetWASM {
 		return false
 	}
 	if err := validatePackageOwnedPath(directory, legacy.WASM, "legacy package WASM"); err != nil {

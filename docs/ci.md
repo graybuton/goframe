@@ -53,6 +53,38 @@ namespace collisions, lexical and physical source/output overlap, partial
 publication metadata, custom/generated standalone `index.html` integrity,
 fail-closed legacy ownership, and dev-server symlink entries.
 
+Focused `goxc inspect` tests cover CLI resolution, deterministic text and
+schema-v1 JSON, copy-root byte identity, read-only filesystem behavior, writer
+failures, and an invalid-graph matrix for metadata, entrypoints, hashes,
+sidecars, collisions, containment, and symlinks. The focused matrix also covers
+WASM/runtime/style extension and media-type roles, the exact content-addressed
+path formula, Go/Node UTF-8 collation, completion-marker removal, identity
+replacement and content changes, zero partial output, and stable valid-package
+text and JSON. Logical-name tests reject traversal, dot-only, slash-rooted, and
+non-canonical spellings before path derivation while retaining nested, space,
+graphic-Unicode, leading-dot, case-different, colon-containing, and drive-looking
+namespace controls. A Unix end-to-end control packages `C:logo.svg` from an
+asset directory, verifies current ownership, inspects the exact logical name
+and `assets/C:logo.svg` path without mutation, and serves the same bytes. Text
+format tests cover every package-controlled field that was otherwise rendered
+raw, including control and format characters and Unicode line/paragraph
+separators. They also preserve the ordinary text golden, JSON schema and
+decoded-value round trips, and zero-output/no-mutation behavior for invalid
+graphs. The tests run deterministic reports at high count.
+
+Browser-extension controls use one ASCII-only case matrix across manifest,
+package, inspect, legacy, and static-serving paths. They retain uppercase and
+mixed-case ASCII `.WASM`, `.JS`, `.CSS`, and `.HTML` spellings while rejecting
+Unicode long-s lookalikes as browser entrypoints even when metadata supplies a
+forged role media type. A real package fixture keeps `theme.csſ` as an ordinary
+uncompressed asset and retains `theme.css`, `theme.CsS`, and `THEME.CSS` as CSS
+entrypoints with `text/css` and existing compression behavior. Serving controls
+verify exact uppercase WASM, JavaScript, and CSS response types. A matched-path
+comparison preserves all deterministic package files for the eleven ordinary
+applications, byte-identical text and JSON reports from fixed package bytes,
+and all 44 raw, gzip, Brotli, and Zstandard WASM streams; size budgets are
+unchanged.
+
 The same Core `go test` gate covers the watched `goxc dev` workflow. Pure tests
 exercise option parsing, content snapshots, debounce, serialized coordination,
 retained browser build-error delivery, reload precedence, failure recovery, and
@@ -78,6 +110,30 @@ scripts/size-budget.sh
 
 The workflow uploads the printed size report as an artifact.
 
+The canonical local `scripts/check.sh` path runs
+`scripts/package-graph-inspection.mjs` after packaging all eleven ordinary
+TinyGo applications and before size enforcement. It inspects each package
+twice, validates graph and summary invariants, compares app, explicit-directory,
+and copied-root reports, exercises BMP/supplementary-plane UTF-8 ordering in a
+temporary copied package, and prints a combined SHA-256. Focused package evidence
+also covers release-style counter, router-dashboard, and resource packages with
+hashed assets, preload, gzip and Brotli sidecar edges, plus a standard-Go
+server-backed package.
+
+The same gate distinguishes schema-version-1 package paths from generated
+logical asset names. Both are canonical and slash-only, but drive-prefix
+rejection applies to package paths; a drive-looking logical key remains
+namespace data under `assets/`. Focused Unix tests verify that the package
+producer rejects literal-backslash names such as `foo\bar.txt` before publishing
+a completion marker, while a directory-discovered `C:logo.svg` completes the
+producer, ownership, inspect, Node-consumer, and serving chain. A Windows
+control verifies that native separators are converted to `/`; no cross-
+filesystem portability is claimed for colon-containing Unix filenames.
+Current-package metadata tests cover package and manifest entrypoints, ordinary
+assets, compressed sidecars, and logical keys; invalid metadata remains
+incomplete, and inspection emits zero output without changing the package.
+Reports and combined hashes for the eleven ordinary packages remain unchanged.
+
 The size gate measures the packaged WASM entrypoint under
 `.goframe/package/standalone/assets/bundle*.wasm`, with a legacy fallback for
 older `main.wasm` packages.
@@ -99,6 +155,10 @@ Chrome with a remote debugging port and use the Chrome DevTools Protocol over
 WebSocket for DOM probes, event simulation, runtime error collection, and DOM
 pressure metrics. Firefox, Safari/WebKit, and other non-Chrome engines do not
 have automated browser-smoke evidence in the current preview CI contract.
+
+Package graph inspection is a host-side package-artifact command. It adds no
+Browser Smoke behavior and makes no TinyGo runtime claim; TinyGo identifies the
+compiler that produced the inspected files.
 
 The smoke script chooses dynamic ports, verifies the expected app origin before
 storage cleanup, checks WASM MIME type, and separates harness failures from app
@@ -283,7 +343,7 @@ Public-preview readiness spot checks:
 
 ```bash
 go test ./pkg/gox -run 'Identity|Package|Golden|ErrorGolden|Qualified'
-go test ./cmd/goxc -run 'Physical|Canonical|Alias|Overlap|Build|Generate|Ownership|Completion|Marker|Legacy|Partial|Publish|Cleanup|Manifest|Symlink|Path'
+go test ./cmd/goxc -run 'Physical|Canonical|Alias|Overlap|Build|Generate|Inspect|Ownership|Completion|Marker|Legacy|Partial|Publish|Cleanup|Manifest|Symlink|Path'
 ```
 
 GOX parser/codegen fuzz smoke, for manual use during compiler work:

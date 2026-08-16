@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,6 +72,40 @@ func TestExportForceAllowsNonEmptyUnownedDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "assets", "bundle.wasm")); err != nil {
 		t.Fatalf("forced export bundle missing: %v", err)
+	}
+}
+
+func TestLegacyWASMExtensionUsesASCIIOnlyCaseFolding(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		wasm   string
+		accept bool
+	}{
+		{name: "uppercase", wasm: "APP.WASM", accept: true},
+		{name: "mixed ASCII case", wasm: "App.WaSm", accept: true},
+		{name: "Unicode long s", wasm: "app.waſm", accept: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			manifest := fmt.Sprintf(`{
+  "name": "demo",
+  "compiler": "go",
+  "wasm": %q,
+  "toolchainVersion": "test"
+}`, test.wasm)
+			if err := os.WriteFile(filepath.Join(directory, legacyPackageManifest), []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, test.wasm), []byte("wasm"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, runtimeAssetName), []byte("js"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := validLegacyPackageSignature(directory); got != test.accept {
+				t.Fatalf("validLegacyPackageSignature(%q) = %v, want %v", test.wasm, got, test.accept)
+			}
+		})
 	}
 }
 

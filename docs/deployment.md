@@ -88,6 +88,12 @@ examples/todo/.goframe/package/standalone/
 CSS assets are emitted under `assets/` too, for example
 `assets/styles.77a1de20.css`.
 
+Browser asset extensions are matched case-insensitively for ASCII letters
+only. ASCII variants such as `.WASM`, `.JS`, `.CSS`, and `.HTML` retain their
+WASM, JavaScript, CSS, and HTML semantics. Unicode lookalikes such as `.waſm`,
+`.jſ`, and `.csſ` do not receive those browser roles; otherwise valid files
+remain ordinary assets.
+
 Before packaging, goxc builds an asset namespace plan. Manifest assets cannot
 collide with generated names such as `bundle.wasm`, `wasm_exec.js`, generated
 metadata, or `.gz`/`.br` sidecars. Duplicate assets after path normalization
@@ -226,6 +232,127 @@ before printing success. If verification fails, goxc removes
 `goframe-package.json` so the directory is not marked as a completed current
 package.
 
+## Package Graph Inspection
+
+`goxc inspect` reads and validates the declared graph of an existing current
+standalone package. It does not build, repair, or otherwise write package or
+workspace state.
+
+```bash
+goxc inspect ./examples/todo
+goxc inspect ./examples/todo --format=json
+goxc inspect ./examples/todo/.goframe/package/standalone
+goxc inspect --dir ./dist --format=json
+```
+
+An application argument resolves through its current workspace, including
+`--workspace` and `GOFRAME_WORKSPACE`, to
+`.goframe/package/standalone`. A positional current package root, an exported
+package root, or `--dir <package-root>` is inspected directly. Direct roots
+must be real non-symlink directories. Only the current
+`goframe-package.json` plus `asset-manifest.json` package format is supported;
+recognized legacy packages receive migration guidance rather than a report.
+
+The package metadata, asset manifest, and the declared files are the graph's
+source of truth. The report includes package-relative metadata, HTML, ordinary
+assets, entrypoint edges, and compressed-sidecar edges. It verifies contained
+regular files, actual byte counts and full SHA-256 values, declared short
+hashes, unique paths, and matching entrypoints before emitting output. WASM,
+runtime, and style entrypoints must respectively resolve to `.wasm`, `.js`, and
+`.css` assets with the current producer media types `application/wasm`,
+`text/javascript`, and `text/css`. When `hashAssets` is true, every ordinary
+asset path must exactly match the current content-addressed filename produced
+from its logical name and declared hash.
+
+Generated logical asset names are namespace keys. The producer normalizes
+native separators with `filepath.ToSlash`, and current-package readers require
+each generated key to equal that canonical result. Parent components,
+slash-rooted names, dot-only names, remaining backslashes, and non-canonical
+spellings such as repeated separators, dot components, or trailing separators
+are rejected. Canonical nested names, spaces, graphic Unicode, leading-dot
+child names such as `.well-known/config.json`, case differences, and colons
+remain valid. A drive-looking key such as `C:logo.svg` is data in this namespace,
+not an independent package path.
+
+Generated package paths are a separate entity. They use `/` exclusively, must
+be canonical and package-relative, and reject absolute or drive-prefixed forms.
+An asset with logical name `C:logo.svg` therefore has the contained package path
+`assets/C:logo.svg`. Authored `goframe.json` entries remain filesystem paths and
+retain their existing absolute and drive-prefix checks; the drive-looking name
+is produced when such a filename is discovered below an asset directory on a
+filesystem that permits it. A package containing that filename is not promised
+to be portable to Windows or another filesystem that reserves the character.
+Inspection schema-version-1 path fields and edge endpoints use the same
+slash-only package-path representation.
+
+Schema-version-1 string ordering is ascending lexical order of the raw UTF-8
+bytes. This applies to style entrypoints, artifact paths and roles, and each
+edge field in `from`, `kind`, `encoding`, `to` order.
+
+Inspection captures the regular non-symlink `goframe-package.json` marker's
+filesystem identity, byte length, and full SHA-256 before graph construction.
+The complete text or JSON report is buffered, then the marker is revalidated
+immediately before stdout. If package or development publication removes,
+replaces, or changes the marker during inspection, the command reports
+`package changed during inspection; retry` and emits no report. Retrying after
+package publication completes is supported. This fence relies on GoFrame's
+completion-marker publication protocol; external mutation of arbitrary package
+artifacts that bypasses that protocol remains outside the static inspection
+guarantee.
+
+JSON output uses schema version 1. This complete minimal package example uses
+illustrative sizes and hashes:
+
+```json
+{
+  "schemaVersion": 1,
+  "package": {
+    "name": "counter",
+    "compiler": "tinygo",
+    "toolchainVersion": "devel",
+    "hashAssets": false,
+    "preload": false
+  },
+  "entrypoints": {
+    "html": "index.html",
+    "wasm": "assets/bundle.wasm",
+    "runtime": "assets/wasm_exec.js",
+    "styles": []
+  },
+  "artifacts": [
+    {"path":"asset-manifest.json","logicalName":"","mediaType":"application/json","bytes":300,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","declaredHash":"","encoding":"","roles":["asset-metadata"]},
+    {"path":"assets/bundle.wasm","logicalName":"bundle.wasm","mediaType":"application/wasm","bytes":1000,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","declaredHash":"","encoding":"","roles":["asset","wasm-entrypoint"]},
+    {"path":"assets/wasm_exec.js","logicalName":"wasm_exec.js","mediaType":"text/javascript","bytes":800,"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","declaredHash":"","encoding":"","roles":["asset","runtime-entrypoint"]},
+    {"path":"goframe-package.json","logicalName":"","mediaType":"application/json","bytes":200,"sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","declaredHash":"","encoding":"","roles":["package-metadata"]},
+    {"path":"index.html","logicalName":"","mediaType":"text/html; charset=utf-8","bytes":500,"sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","declaredHash":"","encoding":"","roles":["html-entrypoint"]}
+  ],
+  "edges": [
+    {"from":"index.html","to":"assets/wasm_exec.js","kind":"runtime-entrypoint","encoding":""},
+    {"from":"index.html","to":"assets/bundle.wasm","kind":"wasm-entrypoint","encoding":""}
+  ],
+  "summary": {
+    "artifactCount": 5,
+    "edgeCount": 2,
+    "totalBytes": 2800
+  }
+}
+```
+
+Text is the default human-readable format. Both formats use deterministic
+ordering and package-relative paths; JSON excludes `generatedAt`, roots,
+timestamps, modes, and other location-specific state. Undeclared extra files
+are excluded rather than promoted into the graph. Inspection does not parse
+custom HTML or CSS, infer Go or GOX source dependencies, or imply asset
+splitting, multi-entry WASM, route-lazy delivery, or shared-runtime code
+splitting.
+
+Text reports preserve package-controlled values exactly when every rune is
+graphic. If a value contains a control, format character, or line/paragraph
+separator, the complete value is emitted as a quoted Go string with graphic
+characters preserved and non-graphic runes escaped. JSON output continues to
+use `encoding/json`; its schema and decoded string values are unchanged by this
+human-readable presentation rule.
+
 ## Clean App Workspace
 
 GoFrame toolchain internals live in an app-local hidden workspace:
@@ -246,6 +373,8 @@ Default command outputs:
 - `goxc build <app>` writes raw WASM to `.goframe/build/<compiler>/dev`;
 - `goxc package <app>` writes standalone output to
   `.goframe/package/standalone`;
+- `goxc inspect <app>` reads and validates the declared current standalone
+  package graph without writing;
 - `goxc serve <app>` serves `.goframe/package/standalone`;
 - `goxc dev <app>` rebuilds and serves the latest completed development package
   from `.goframe/package/standalone`;

@@ -117,6 +117,15 @@ Current fields:
 - `entrypoints.runtime`;
 - `entrypoints.styles`.
 
+Browser entrypoint extensions use ASCII-only case-insensitive matching. The
+same private classification governs authored and generated WASM validation,
+CSS entrypoint discovery, special browser media types, compression eligibility,
+inspection, legacy WASM recognition, and static package serving. ASCII variants
+such as `.WASM`, `.JS`, `.CSS`, and `.HTML` remain valid; Unicode simple-fold
+lookalikes do not acquire those roles. This interpretation adds no generated
+metadata field, changes neither generated metadata schema, and leaves the
+inspection schema at version 1.
+
 Evidence:
 
 - `cmd/goxc/package.go`
@@ -173,6 +182,67 @@ Compatibility policy:
 - removing the marker or changing ownership detection is breaking unless it is
   required for a safety fix;
 - exact timestamps are not stable.
+
+## Package Inspection Schema
+
+`goxc inspect --format=json` is a separate schema-version-1 tooling process
+contract. It does not add fields to or change the schemas of
+`asset-manifest.json` or `goframe-package.json`. Incompatible inspection field
+or semantic changes require an inspection schema-version increment; consumers
+should reject unsupported versions. No separate machine-readable JSON Schema
+document is provided.
+
+Inspection validates the declared current package graph, including assets,
+entrypoints, hashes, and compressed sidecars, but does not itself grant
+ownership. The current-package metadata readers shared by ownership
+classification, package verification, export, cleanup, and inspection require
+canonical generated logical names and paths; malformed or non-canonical
+metadata is classified as incomplete. The completion-marker role and the
+publication, export, and cleanup protocols are unchanged. Unknown additive
+fields in generated package metadata are not rejected merely because the
+report does not expose them. `generatedAt` is intentionally omitted so the same
+package copied to another safe root produces byte-identical JSON.
+
+Schema-version-1 ordered strings use ascending lexical order of their raw UTF-8
+bytes. Artifact paths and roles use that order, and edges compare `from`,
+`kind`, `encoding`, and `to` field by field. Path fields and edge endpoints are
+canonical slash-only package-relative paths; leading absolute and drive-prefix
+forms are rejected. Consumers use POSIX/schema path semantics rather than
+platform-native separator rules.
+
+`artifact.logicalName` is a generated asset namespace key rather than an
+independent package path. It is canonical and slash-only, but a colon or a
+drive-looking prefix such as `C:logo.svg` remains literal key data. Its generated
+package path is still contained below `assets/`, for example
+`assets/C:logo.svg`. Platform-native separators are converted before
+publication, while a remaining literal backslash is rejected. This does not
+promise that every generated logical name is portable to filesystems that
+reserve its characters. The inspection schema remains version 1, and its
+fields and both generated metadata schemas remain unchanged. Authored
+`goframe.json` path normalization is unchanged.
+
+For graph inspection, every asset logical key must use the exact canonical
+relative-name representation returned by the current package producer helper
+before an asset destination is derived. This tightens inspector acceptance of
+damaged or externally produced metadata without changing either generated
+package schema.
+
+The default text report preserves all-graphic package-controlled values and
+quotes a complete value when it contains a non-graphic rune. This is a
+human-readable presentation rule only. Inspect JSON schema version 1 is
+unchanged, and JSON escaping and decoded values continue to be defined by
+`encoding/json`.
+
+Stable package generation is guarded by the current `goframe-package.json`
+completion marker. Inspection retains the marker's filesystem identity, exact
+byte length, and full SHA-256, buffers the report, and verifies the marker again
+before output. A missing, replaced, or changed marker returns a retry error with
+no report. This does not add a package lock or cover external artifact mutation
+that bypasses the completion-marker protocol.
+
+Legacy `manifest.json` packages remain supported only for the documented
+fail-closed cleanup and migration boundary. They are not supported inspection
+inputs; `goxc inspect` reports migration guidance instead.
 
 ## Legacy Metadata
 

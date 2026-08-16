@@ -59,6 +59,12 @@ func main() {
 			return
 		}
 		err = exportCommand(os.Args[2:])
+	case "inspect":
+		if commandHelpRequested(os.Args[2:]) {
+			commandUsage(os.Stdout, "inspect")
+			return
+		}
+		err = inspectCommand(os.Args[2:])
 	case "size":
 		if commandHelpRequested(os.Args[2:]) {
 			commandUsage(os.Stdout, "size")
@@ -109,6 +115,7 @@ func usage(output io.Writer) {
 	fmt.Fprintln(output, "  build <app>           compile raw WASM into .goframe/build/")
 	fmt.Fprintln(output, "  package <app>         create a runnable bundle in .goframe/package/")
 	fmt.Fprintln(output, "  export <app> --out    copy the latest standalone package to a deploy directory")
+	fmt.Fprintln(output, "  inspect <app-or-dir>  inspect the declared graph of a standalone package")
 	fmt.Fprintln(output, "  size <app-or-dir>     report artifact sizes")
 	fmt.Fprintln(output, "  serve [app]           serve a packaged application locally")
 	fmt.Fprintln(output, "  dev <app>             package, serve, and rebuild authored changes")
@@ -147,6 +154,10 @@ func commandUsage(output io.Writer, command string) {
 	case "export":
 		fmt.Fprintln(output, "usage: goxc export <app-directory> --out=directory [--workspace=directory] [--force]")
 		fmt.Fprintln(output, "copy the latest standalone package to an explicit deploy directory")
+	case "inspect":
+		fmt.Fprintln(output, "usage: goxc inspect <app-or-package-directory> [--workspace=directory] [--format=text|json]")
+		fmt.Fprintln(output, "       goxc inspect --dir=package-directory [--format=text|json]")
+		fmt.Fprintln(output, "inspect the declared graph of an existing current standalone package")
 	case "serve":
 		fmt.Fprintln(output, "usage: goxc serve <app-directory> [--port=8080] [--workspace=directory]")
 		fmt.Fprintln(output, "       goxc serve --dir=directory [--port=8080]")
