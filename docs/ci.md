@@ -104,15 +104,16 @@ also covers release-style counter, router-dashboard, and resource packages with
 hashed assets, preload, gzip and Brotli sidecar edges, plus a standard-Go
 server-backed package.
 
-The same gate characterizes schema-version-1 paths with `/` as the separator
-and a literal backslash as data inside one segment on every platform where the
-script runs. On non-Windows filesystems, a temporary copied package adds one
-literal-backslash asset, runs `goxc inspect --format=json` twice, and verifies
-byte-identical JSON, exact logical-name and artifact-path preservation,
-canonical-consumer acceptance, summary consistency, and an unchanged package
-snapshot. The temporary fixture is excluded from the eleven ordinary reports,
-so their per-application and combined hashes remain unchanged. A focused Go
-test independently covers the current producer-to-inspector Unix round trip.
+The same gate characterizes schema-version-1 paths as slash-only and rejects
+backslashes in artifact paths and logical names. Focused Unix tests verify that
+the package producer rejects `foo\bar.txt`, `foo\..\bar.txt`, and
+`styles\theme.css` before publishing a completion marker while preserving the
+existing package output. A Windows control verifies that native separators are
+converted to `/`. Current-package metadata tests cover package and manifest
+entrypoints, ordinary assets, compressed sidecars, and logical keys; invalid
+metadata remains incomplete, and inspection emits zero output without changing
+the package. The canonical Node consumer enforces the same rule. Reports and
+combined hashes for the eleven ordinary packages remain unchanged.
 
 The size gate measures the packaged WASM entrypoint under
 `.goframe/package/standalone/assets/bundle*.wasm`, with a legacy fallback for
