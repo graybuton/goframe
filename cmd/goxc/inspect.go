@@ -239,6 +239,9 @@ func parseInspectOptions(args []string) (inspectOptions, error) {
 				return inspectOptions{}, errors.New("--workspace requires a value")
 			}
 			options.workspace = args[index]
+			if options.workspace == "" {
+				return inspectOptions{}, errors.New("--workspace requires a value")
+			}
 		case strings.HasPrefix(arg, "--dir="):
 			options.dir = strings.TrimPrefix(arg, "--dir=")
 			if options.dir == "" {
@@ -250,6 +253,9 @@ func parseInspectOptions(args []string) (inspectOptions, error) {
 				return inspectOptions{}, errors.New("--dir requires a value")
 			}
 			options.dir = args[index]
+			if options.dir == "" {
+				return inspectOptions{}, errors.New("--dir requires a value")
+			}
 		case strings.HasPrefix(arg, "-"):
 			return inspectOptions{}, fmt.Errorf("unknown inspect flag %q", arg)
 		case options.path == "":
