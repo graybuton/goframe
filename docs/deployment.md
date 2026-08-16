@@ -267,6 +267,12 @@ nested names, spaces, graphic Unicode, leading-dot child names such as
 `.well-known/config.json`, and case differences remain valid when the resulting
 package graph is otherwise valid.
 
+Schema-version-1 package paths use `/` as their separator. A backslash may be
+literal filename data inside one segment when the producing filesystem permits
+it, and inspection preserves that value rather than rewriting it. Such a
+filename is filesystem-specific and does not imply portability to Windows or
+another filesystem where backslash is a separator.
+
 Schema-version-1 string ordering is ascending lexical order of the raw UTF-8
 bytes. This applies to style entrypoints, artifact paths and roles, and each
 edge field in `from`, `kind`, `encoding`, `to` order.

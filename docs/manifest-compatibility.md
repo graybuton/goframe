@@ -192,8 +192,11 @@ copied to another safe root produces byte-identical JSON.
 
 Schema-version-1 ordered strings use ascending lexical order of their raw UTF-8
 bytes. Artifact paths and roles use that order, and edges compare `from`,
-`kind`, `encoding`, and `to` field by field. The schema fields and both generated
-metadata schemas remain unchanged.
+`kind`, `encoding`, and `to` field by field. Path fields use `/` as their
+separator. A backslash is literal data inside one path segment, not an
+alternate separator; consumers use POSIX/schema path semantics rather than
+platform-native separator rules. The inspection schema remains version 1, and
+its fields and both generated metadata schemas remain unchanged.
 
 For graph inspection, every asset logical key must use the exact canonical
 relative-name representation returned by the current package producer helper
