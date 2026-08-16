@@ -670,7 +670,11 @@ func normalizeInspectPath(value, description string) (string, error) {
 	if !safeChildPath(value) {
 		return "", fmt.Errorf("%s %q must be a safe package-relative path", description, value)
 	}
-	return path.Clean(manifestPath(value)), nil
+	normalized := path.Clean(manifestPath(value))
+	if value != normalized {
+		return "", fmt.Errorf("%s %q must use canonical form %q", description, value, normalized)
+	}
+	return normalized, nil
 }
 
 func inspectArtifactAt(root, relative, logicalName, mediaType, declaredHash, encoding string, roles []string, description string, physicalArtifacts *inspectPhysicalArtifactRegistry) (inspectArtifact, error) {

@@ -1007,6 +1007,202 @@ func TestInspectRejectsInvalidGraphsWithoutOutputOrMutation(t *testing.T) {
 	}
 }
 
+func TestNormalizeInspectPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		want      string
+		wantError bool
+	}{
+		{name: "HTML", value: "index.html", want: "index.html"},
+		{name: "WASM", value: "assets/bundle.wasm", want: "assets/bundle.wasm"},
+		{name: "space", value: "assets/my file.svg", want: "assets/my file.svg"},
+		{name: "graphic Unicode", value: "assets/界.svg", want: "assets/界.svg"},
+		{name: "case difference", value: "assets/WASM_EXEC.js", want: "assets/WASM_EXEC.js"},
+		{name: "leading dot child", value: "assets/.well-known/config.json", want: "assets/.well-known/config.json"},
+		{name: "nested style", value: "assets/styles/theme.css", want: "assets/styles/theme.css"},
+		{name: "leading dot component", value: "./index.html", want: "index.html", wantError: true},
+		{name: "repeated asset separator", value: "assets//bundle.wasm", want: "assets/bundle.wasm", wantError: true},
+		{name: "asset dot component", value: "assets/./bundle.wasm", want: "assets/bundle.wasm", wantError: true},
+		{name: "backslash separator", value: `assets\bundle.wasm`, want: "assets/bundle.wasm", wantError: true},
+		{name: "trailing separator", value: "assets/styles.css/", want: "assets/styles.css", wantError: true},
+		{name: "repeated nested separator", value: "assets/styles//theme.css", want: "assets/styles/theme.css", wantError: true},
+		{name: "nested dot component", value: "assets/styles/./theme.css", want: "assets/styles/theme.css", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := normalizeInspectPath(test.value, "declared path")
+			if test.wantError {
+				if err == nil {
+					t.Errorf("normalizeInspectPath(%q) accepted non-canonical spelling as %q", test.value, got)
+				} else if !strings.Contains(err.Error(), "must use canonical form") {
+					t.Errorf("normalizeInspectPath(%q) error = %v, want canonical-form rejection", test.value, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeInspectPath(%q) error: %v", test.value, err)
+			}
+			if got != test.want {
+				t.Fatalf("normalizeInspectPath(%q) = %q, want %q", test.value, got, test.want)
+			}
+		})
+	}
+}
+
+func TestInspectRejectsNonCanonicalDeclaredPaths(t *testing.T) {
+	tests := []struct {
+		name         string
+		category     string
+		declared     string
+		reported     string
+		options      inspectFixtureOptions
+		prepare      func(t *testing.T, fixture inspectFixture)
+		reportedPath func(report inspectReport) string
+	}{
+		{
+			name:     "HTML entrypoint",
+			category: "HTML entrypoint",
+			declared: "./index.html",
+			reported: "index.html",
+			prepare: func(t *testing.T, fixture inspectFixture) {
+				mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+					metadata.Entrypoints.HTML = "./index.html"
+				})
+			},
+			reportedPath: func(report inspectReport) string { return report.Entrypoints.HTML },
+		},
+		{
+			name:     "WASM entrypoint",
+			category: "WASM entrypoint",
+			declared: "assets//bundle.wasm",
+			reported: "assets/bundle.wasm",
+			prepare: func(t *testing.T, fixture inspectFixture) {
+				mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+					manifest.Entrypoints.WASM = "assets//bundle.wasm"
+				})
+				mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+					metadata.Entrypoints.WASM = "assets//bundle.wasm"
+				})
+			},
+			reportedPath: func(report inspectReport) string { return report.Entrypoints.WASM },
+		},
+		{
+			name:     "runtime entrypoint",
+			category: "runtime entrypoint",
+			declared: "assets/./wasm_exec.js",
+			reported: "assets/wasm_exec.js",
+			prepare: func(t *testing.T, fixture inspectFixture) {
+				mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+					manifest.Entrypoints.Runtime = "assets/./wasm_exec.js"
+				})
+				mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+					metadata.Entrypoints.Runtime = "assets/./wasm_exec.js"
+				})
+			},
+			reportedPath: func(report inspectReport) string { return report.Entrypoints.Runtime },
+		},
+		{
+			name:     "style entrypoint",
+			category: "style entrypoint",
+			declared: "assets/styles//theme.css",
+			reported: "assets/styles/theme.css",
+			prepare: func(t *testing.T, fixture inspectFixture) {
+				writeInspectRaw(t, fixture.root, "assets/styles/theme.css", []byte("body {}\n"))
+				mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+					manifest.Assets["styles/theme.css"] = packageAsset{
+						Path: "assets/styles/theme.css",
+						Type: "text/css",
+					}
+					manifest.Entrypoints.Styles = []string{"assets/styles//theme.css"}
+				})
+			},
+			reportedPath: func(report inspectReport) string {
+				if len(report.Entrypoints.Styles) == 0 {
+					return "<missing>"
+				}
+				return report.Entrypoints.Styles[0]
+			},
+		},
+		{
+			name:     "ordinary asset",
+			category: "ordinary asset path",
+			declared: "assets/images/./logo.svg",
+			reported: "assets/images/logo.svg",
+			options:  inspectFixtureOptions{extraAsset: true},
+			prepare: func(t *testing.T, fixture inspectFixture) {
+				mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+					asset := manifest.Assets["images/logo.svg"]
+					asset.Path = "assets/images/./logo.svg"
+					manifest.Assets["images/logo.svg"] = asset
+				})
+			},
+			reportedPath: func(report inspectReport) string {
+				for _, artifact := range report.Artifacts {
+					if artifact.LogicalName == "images/logo.svg" && artifact.Encoding == "" {
+						return artifact.Path
+					}
+				}
+				return "<missing>"
+			},
+		},
+		{
+			name:     "compressed sidecar",
+			category: "compressed sidecar path",
+			declared: "assets//bundle.wasm.gz",
+			reported: "assets/bundle.wasm.gz",
+			options:  inspectFixtureOptions{compressed: true},
+			prepare: func(t *testing.T, fixture inspectFixture) {
+				mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+					asset := manifest.Assets["bundle.wasm"]
+					asset.Compressed["gzip"] = "assets//bundle.wasm.gz"
+					manifest.Assets["bundle.wasm"] = asset
+				})
+			},
+			reportedPath: func(report inspectReport) string {
+				for _, artifact := range report.Artifacts {
+					if artifact.LogicalName == "bundle.wasm" && artifact.Encoding == "gzip" {
+						return artifact.Path
+					}
+				}
+				return "<missing>"
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), test.options)
+			test.prepare(t, fixture)
+			before := snapshotInspectTree(t, fixture.root)
+			var output bytes.Buffer
+			err := runInspectCommand([]string{"--dir", fixture.root, "--format=json"}, &output)
+			after := snapshotInspectTree(t, fixture.root)
+			if err == nil {
+				var report inspectReport
+				if decodeErr := json.Unmarshal(output.Bytes(), &report); decodeErr != nil {
+					t.Errorf("%s accepted %q with undecodable output (%d bytes): %v", test.category, test.declared, output.Len(), decodeErr)
+				} else {
+					got := test.reportedPath(report)
+					t.Errorf("%s accepted non-canonical declaration %q as %q; want report rejection before output (output bytes=%d)", test.category, test.declared, got, output.Len())
+					if got != test.reported {
+						t.Errorf("%s reported path = %q, want reproduced canonical path %q", test.category, got, test.reported)
+					}
+				}
+			} else if !strings.Contains(err.Error(), "must use canonical form") {
+				t.Errorf("runInspectCommand() error = %v, want canonical-form rejection", err)
+			}
+			if output.Len() != 0 {
+				t.Errorf("non-canonical %s emitted %d report bytes", test.category, output.Len())
+			}
+			if !reflect.DeepEqual(after, before) {
+				t.Errorf("non-canonical %s inspection mutated filesystem\nbefore: %#v\nafter:  %#v", test.category, before, after)
+			}
+		})
+	}
+}
+
 func TestInspectRejectsNonCanonicalLogicalAssetNames(t *testing.T) {
 	tests := []struct {
 		name        string
