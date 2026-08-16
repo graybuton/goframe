@@ -887,16 +887,37 @@ func writePackageAsset(sourcePath, assetsDir, logicalName string, options packag
 }
 
 func cleanPackageAssetName(name string) (string, error) {
-	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
+	logicalName := filepath.ToSlash(name)
+	if strings.Contains(logicalName, `\`) {
+		return "", fmt.Errorf("package asset logical name %q must not contain backslashes", name)
+	}
+	for _, part := range strings.Split(logicalName, "/") {
 		if part == ".." {
 			return "", fmt.Errorf("package asset logical name %q must not contain .. components", name)
 		}
 	}
-	clean := path.Clean(filepath.ToSlash(name))
+	clean := path.Clean(logicalName)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) {
 		return "", fmt.Errorf("package asset logical name %q must be a relative child path", name)
 	}
 	return clean, nil
+}
+
+func normalizeGeneratedPackagePath(value, description string) (string, error) {
+	if value == "" {
+		return "", fmt.Errorf("%s must not be empty", description)
+	}
+	if strings.Contains(value, `\`) {
+		return "", fmt.Errorf("%s %q must use slash-only package paths", description, value)
+	}
+	if !safeChildPath(value) {
+		return "", fmt.Errorf("%s %q must be a safe package-relative path", description, value)
+	}
+	normalized := path.Clean(value)
+	if value != normalized {
+		return "", fmt.Errorf("%s %q must use canonical form %q", description, value, normalized)
+	}
+	return value, nil
 }
 
 func shortContentHash(content []byte) string {

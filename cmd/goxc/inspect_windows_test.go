@@ -16,10 +16,21 @@ func TestNormalizeInspectPathRejectsWindowsSeparator(t *testing.T) {
 	const declared = `assets\bundle.wasm`
 	got, err := normalizeInspectPath(declared, "declared path")
 	if err == nil {
-		t.Fatalf("normalizeInspectPath(%q) = %q, want canonical-form rejection", declared, got)
+		t.Fatalf("normalizeInspectPath(%q) = %q, want slash-only rejection", declared, got)
 	}
-	if !strings.Contains(err.Error(), `must use canonical form "assets/bundle.wasm"`) {
-		t.Fatalf("normalizeInspectPath(%q) error = %v, want slash-separated canonical form", declared, err)
+	if !strings.Contains(err.Error(), "must use slash-only package paths") {
+		t.Fatalf("normalizeInspectPath(%q) error = %v, want slash-only rejection", declared, err)
+	}
+}
+
+func TestCleanPackageAssetNameNormalizesWindowsSeparators(t *testing.T) {
+	const declared = `styles\theme.css`
+	got, err := cleanPackageAssetName(declared)
+	if err != nil {
+		t.Fatalf("cleanPackageAssetName(%q) error: %v", declared, err)
+	}
+	if got != "styles/theme.css" {
+		t.Fatalf("cleanPackageAssetName(%q) = %q, want %q", declared, got, "styles/theme.css")
 	}
 }
 

@@ -236,8 +236,17 @@ func readCurrentPackageMetadata(path string) (packageMetadata, error) {
 	if metadata.Compiler != "go" && metadata.Compiler != "tinygo" {
 		return packageMetadata{}, fmt.Errorf("package metadata compiler %q is not supported", metadata.Compiler)
 	}
-	if !safeChildPath(metadata.Entrypoints.HTML) || !safeChildPath(metadata.Entrypoints.WASM) || !safeChildPath(metadata.Entrypoints.Runtime) {
-		return packageMetadata{}, fmt.Errorf("package metadata entrypoints must stay inside the package")
+	for _, entry := range []struct {
+		value       string
+		description string
+	}{
+		{metadata.Entrypoints.HTML, "package metadata HTML entrypoint"},
+		{metadata.Entrypoints.WASM, "package metadata WASM entrypoint"},
+		{metadata.Entrypoints.Runtime, "package metadata runtime entrypoint"},
+	} {
+		if _, err := normalizeGeneratedPackagePath(entry.value, entry.description); err != nil {
+			return packageMetadata{}, err
+		}
 	}
 	return metadata, nil
 }
@@ -250,16 +259,42 @@ func readAssetManifestMetadata(path string) (assetManifest, error) {
 	if manifest.Version != 1 || len(manifest.Assets) == 0 {
 		return assetManifest{}, fmt.Errorf("asset manifest has unsupported version or no assets")
 	}
-	if !safeChildPath(manifest.Entrypoints.WASM) || !safeChildPath(manifest.Entrypoints.Runtime) {
-		return assetManifest{}, fmt.Errorf("asset manifest entrypoints must stay inside the package")
-	}
-	for _, asset := range manifest.Assets {
-		if !safeChildPath(asset.Path) || asset.Type == "" {
-			return assetManifest{}, fmt.Errorf("asset manifest contains an invalid asset path or type")
+	for _, entry := range []struct {
+		value       string
+		description string
+	}{
+		{manifest.Entrypoints.WASM, "asset manifest WASM entrypoint"},
+		{manifest.Entrypoints.Runtime, "asset manifest runtime entrypoint"},
+	} {
+		if _, err := normalizeGeneratedPackagePath(entry.value, entry.description); err != nil {
+			return assetManifest{}, err
 		}
-		for _, compressed := range asset.Compressed {
-			if !safeChildPath(compressed) {
-				return assetManifest{}, fmt.Errorf("asset manifest contains an invalid compressed asset path")
+	}
+	for _, style := range manifest.Entrypoints.Styles {
+		if _, err := normalizeGeneratedPackagePath(style, "asset manifest style entrypoint"); err != nil {
+			return assetManifest{}, err
+		}
+	}
+	for logicalName, asset := range manifest.Assets {
+		if logicalName == "" {
+			return assetManifest{}, fmt.Errorf("asset manifest logical asset name is empty")
+		}
+		cleaned, err := cleanPackageAssetName(logicalName)
+		if err != nil {
+			return assetManifest{}, fmt.Errorf("asset manifest contains invalid logical asset name %q: %w", logicalName, err)
+		}
+		if cleaned != logicalName {
+			return assetManifest{}, fmt.Errorf("asset manifest logical asset name %q must use canonical form %q", logicalName, cleaned)
+		}
+		if _, err := normalizeGeneratedPackagePath(asset.Path, fmt.Sprintf("asset manifest path for %q", logicalName)); err != nil {
+			return assetManifest{}, fmt.Errorf("asset manifest contains an invalid asset path for %q: %w", logicalName, err)
+		}
+		if asset.Type == "" {
+			return assetManifest{}, fmt.Errorf("asset manifest contains an empty asset type for %q", logicalName)
+		}
+		for encoding, compressed := range asset.Compressed {
+			if _, err := normalizeGeneratedPackagePath(compressed, fmt.Sprintf("asset manifest compressed path %q for %q", encoding, logicalName)); err != nil {
+				return assetManifest{}, fmt.Errorf("asset manifest contains an invalid compressed asset path for %q: %w", logicalName, err)
 			}
 		}
 	}

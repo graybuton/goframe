@@ -1060,6 +1060,116 @@ func TestNormalizeInspectPath(t *testing.T) {
 	}
 }
 
+func TestNormalizeInspectPathRejectsBackslashes(t *testing.T) {
+	for _, value := range []string{
+		`assets/foo\bar.txt`,
+		`assets/foo\..\bar.txt`,
+		`assets\bundle.wasm`,
+	} {
+		t.Run(value, func(t *testing.T) {
+			got, err := normalizeInspectPath(value, "declared path")
+			if err == nil || !strings.Contains(err.Error(), "must use slash-only package paths") {
+				t.Fatalf("normalizeInspectPath(%q) = %q, %v; want slash-only rejection", value, got, err)
+			}
+		})
+	}
+}
+
+func TestCurrentPackageMetadataRejectsBackslashes(t *testing.T) {
+	tests := []struct {
+		name    string
+		want    string
+		prepare func(t *testing.T, fixture inspectFixture)
+	}{
+		{name: "package HTML entrypoint", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.HTML = `shell\index.html`
+			})
+		}},
+		{name: "package WASM entrypoint", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.WASM = `assets\bundle.wasm`
+			})
+		}},
+		{name: "package runtime entrypoint", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectPackageMetadata(t, fixture.root, func(metadata *packageMetadata) {
+				metadata.Entrypoints.Runtime = `assets\wasm_exec.js`
+			})
+		}},
+		{name: "manifest WASM entrypoint", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				manifest.Entrypoints.WASM = `assets\bundle.wasm`
+			})
+		}},
+		{name: "manifest runtime entrypoint", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				manifest.Entrypoints.Runtime = `assets\wasm_exec.js`
+			})
+		}},
+		{name: "manifest style entrypoint", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				manifest.Entrypoints.Styles = []string{`assets\styles\a.css`}
+			})
+		}},
+		{name: "ordinary asset path", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				asset := manifest.Assets["images/logo.svg"]
+				asset.Path = `assets\images\logo.svg`
+				manifest.Assets["images/logo.svg"] = asset
+			})
+		}},
+		{name: "compressed sidecar path", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				asset := manifest.Assets["bundle.wasm"]
+				asset.Compressed["gzip"] = `assets\bundle.wasm.gz`
+				manifest.Assets["bundle.wasm"] = asset
+			})
+		}},
+		{name: "asset logical key", want: "logical asset name", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				manifest.Assets[`foo\bar.txt`] = manifest.Assets["images/logo.svg"]
+			})
+		}},
+		{name: "asset logical key with dot segment", want: "logical asset name", prepare: func(t *testing.T, fixture inspectFixture) {
+			mutateInspectAssetManifest(t, fixture.root, func(manifest *assetManifest) {
+				manifest.Assets[`foo\..\bar.txt`] = manifest.Assets["images/logo.svg"]
+			})
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			want := test.want
+			if want == "" {
+				want = "must use slash-only package paths"
+			}
+			fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{
+				styles: true, compressed: true, extraAsset: true,
+			})
+			test.prepare(t, fixture)
+			before := snapshotInspectTree(t, fixture.root)
+
+			ownership := inspectPackageOwnership(fixture.root)
+			if ownership.State != packageIncompleteOrInvalid || !strings.Contains(ownership.Reason, want) {
+				t.Errorf("inspectPackageOwnership() = %+v, want slash-only incomplete package", ownership)
+			}
+
+			var output bytes.Buffer
+			err := runInspectCommand([]string{"--dir", fixture.root, "--format=json"}, &output)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("runInspectCommand() error = %v, want slash-only rejection", err)
+			}
+			if output.Len() != 0 {
+				t.Errorf("invalid current metadata emitted %d bytes", output.Len())
+			}
+			after := snapshotInspectTree(t, fixture.root)
+			if !reflect.DeepEqual(after, before) {
+				t.Errorf("metadata rejection mutated filesystem\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
+	}
+}
+
 func TestInspectRejectsNonCanonicalDeclaredPaths(t *testing.T) {
 	tests := []struct {
 		name         string
