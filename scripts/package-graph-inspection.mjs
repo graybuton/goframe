@@ -70,6 +70,7 @@ try {
 }
 
 validateUnicodeOrderingFixture(counterRoot);
+validateDriveLikeLogicalNameFixture(counterRoot);
 validateSchemaPathCharacterization();
 
 const combined = createHash("sha256");
@@ -140,6 +141,44 @@ function validateUnicodeOrderingFixture(sourceRoot) {
     }
 }
 
+function validateDriveLikeLogicalNameFixture(sourceRoot) {
+    if (process.platform === "win32") {
+        console.log("package graph inspection: drive-like Unix filename fixture: not portable to Windows");
+        return;
+    }
+
+    const tempRoot = mkdtempSync(join(tmpdir(), "goframe-package-graph-drive-like-"));
+    try {
+        const packageRoot = join(tempRoot, "standalone");
+        cpSync(sourceRoot, packageRoot, { recursive: true });
+        const logicalName = "C:logo.svg";
+        const artifactPath = `assets/${logicalName}`;
+        writeFileSync(join(packageRoot, "assets", logicalName), "drive-like\n");
+
+        const manifestPath = join(packageRoot, "asset-manifest.json");
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        manifest.assets[logicalName] = {
+            path: artifactPath,
+            type: "image/svg+xml",
+        };
+        writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+        const args = ["--dir", packageRoot, "--format=json"];
+        const first = inspect(args);
+        const second = inspect(args);
+        assert(first === second, "drive-like JSON is not byte-identical");
+        const report = JSON.parse(first);
+        validateReport("drive-like", report);
+        const matches = report.artifacts.filter((artifact) =>
+            artifact.logicalName === logicalName && artifact.path === artifactPath);
+        assert(matches.length === 1, "drive-like artifact is not represented exactly once");
+        assertSchemaPath(matches[0].path, "drive-like artifact.path");
+        console.log(`package graph inspection: drive-like logical name: ${digest(first)}`);
+    } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+    }
+}
+
 function validateSchemaPathCharacterization() {
     for (const value of [
         "index.html",
@@ -148,14 +187,17 @@ function validateSchemaPathCharacterization() {
         "assets/界.svg",
         "assets/.well-known/config.json",
         "assets/WASM_EXEC.js",
+        "assets/C:logo.svg",
+        "assets/C:/icons/logo.svg",
     ]) {
-        assertSafePath(value, "valid schema path");
+        assertSchemaPath(value, "valid schema path");
     }
     for (const value of [
         String.raw`assets/foo\bar.txt`,
         String.raw`assets/foo\..\bar.txt`,
         String.raw`assets\bundle.wasm`,
         "/index.html",
+        "C:logo.svg",
         "C:/package/file.txt",
         ".",
         "assets//file.txt",
@@ -165,13 +207,33 @@ function validateSchemaPathCharacterization() {
     ]) {
         let rejected = false;
         try {
-            assertSafePath(value, "invalid schema path");
+            assertSchemaPath(value, "invalid schema path");
         } catch {
             rejected = true;
         }
         assert(rejected, `schema path ${JSON.stringify(value)} must be rejected`);
     }
     for (const value of [
+        "",
+        "logo.svg",
+        "images/logo.svg",
+        "my logo.svg",
+        "界.svg",
+        ".well-known/config.json",
+        "C:logo.svg",
+        "C:/icons/logo.svg",
+        "a:b:c.svg",
+    ]) {
+        assertArtifactLogicalName(value, "valid artifact logicalName");
+    }
+    for (const value of [
+        "/logo.svg",
+        ".",
+        "..",
+        "../logo.svg",
+        "images/../logo.svg",
+        "images//logo.svg",
+        "images/./logo.svg",
         String.raw`foo\bar.txt`,
         String.raw`foo\..\bar.txt`,
     ]) {
@@ -240,12 +302,12 @@ function validateReport(application, report) {
 
     assertKeys(report.entrypoints, ["html", "wasm", "runtime", "styles"], `${application} entrypoints`);
     for (const name of ["html", "wasm", "runtime"]) {
-        assertSafePath(report.entrypoints[name], `${application} entrypoints.${name}`);
+        assertSchemaPath(report.entrypoints[name], `${application} entrypoints.${name}`);
     }
     assertStringArray(report.entrypoints.styles, `${application} entrypoints.styles`);
     assertSortedUnique(report.entrypoints.styles, `${application} entrypoints.styles`);
     for (const style of report.entrypoints.styles) {
-        assertSafePath(style, `${application} style entrypoint`);
+        assertSchemaPath(style, `${application} style entrypoint`);
     }
 
     assert(Array.isArray(report.artifacts), `${application} artifacts must be an array`);
@@ -263,7 +325,7 @@ function validateReport(application, report) {
             "encoding",
             "roles",
         ], `${application} artifact`);
-        assertSafePath(artifact.path, `${application} artifact.path`);
+        assertSchemaPath(artifact.path, `${application} artifact.path`);
         assert(!artifactPaths.has(artifact.path), `${application} duplicate artifact ${artifact.path}`);
         assert(
             previousPath === null || compareUTF8(previousPath, artifact.path) < 0,
@@ -305,8 +367,8 @@ function validateReport(application, report) {
     let previousEdge = null;
     for (const edge of report.edges) {
         assertKeys(edge, ["from", "to", "kind", "encoding"], `${application} edge`);
-        assertSafePath(edge.from, `${application} edge.from`);
-        assertSafePath(edge.to, `${application} edge.to`);
+        assertSchemaPath(edge.from, `${application} edge.from`);
+        assertSchemaPath(edge.to, `${application} edge.to`);
         assertString(edge.kind, `${application} edge.kind`);
         assertString(edge.encoding, `${application} edge.encoding`, true);
         assert(artifactPaths.has(edge.from), `${application} edge source ${edge.from} is absent`);
@@ -336,7 +398,7 @@ function assertKeys(value, expected, description) {
         `${description} keys differ: ${actual.join(", ")}`);
 }
 
-function assertSafePath(value, description) {
+function assertSchemaPath(value, description) {
     assertString(value, description);
     assert(!value.startsWith("/") && !/^[A-Za-z]:/.test(value),
         `${description} must be relative`);
@@ -349,9 +411,15 @@ function assertSafePath(value, description) {
 
 function assertArtifactLogicalName(value, description) {
     assertString(value, description, true);
-    if (value !== "") {
-        assertSafePath(value, description);
+    if (value === "") {
+        return;
     }
+    // A logical name is a producer namespace key, not an independent package path.
+    assert(!value.startsWith("/"), `${description} must be relative`);
+    assert(!value.includes("\\"), `${description} must use slash-only logical names`);
+    assert(value !== "." && posix.normalize(value) === value,
+        `${description} must be normalized`);
+    assert(!value.split("/").includes(".."), `${description} must not contain parent components`);
 }
 
 function assertString(value, description, allowEmpty = false) {
