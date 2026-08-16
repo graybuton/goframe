@@ -60,14 +60,17 @@ sidecars, collisions, containment, and symlinks. The focused matrix also covers
 WASM/runtime/style extension and media-type roles, the exact content-addressed
 path formula, Go/Node UTF-8 collation, completion-marker removal, identity
 replacement and content changes, zero partial output, and stable valid-package
-text and JSON. Logical-name tests reject traversal, dot-only, absolute, and
+text and JSON. Logical-name tests reject traversal, dot-only, slash-rooted, and
 non-canonical spellings before path derivation while retaining nested, space,
-graphic-Unicode, leading-dot, and case-different controls. Text-format tests
-cover every package-controlled field that was otherwise rendered raw, including
-control and format characters and Unicode line/paragraph separators. They also
-preserve the ordinary text golden, JSON schema and decoded-value round trips,
-and zero-output/no-mutation behavior for invalid graphs. The tests run
-deterministic reports at high count.
+graphic-Unicode, leading-dot, case-different, colon-containing, and drive-looking
+namespace controls. A Unix end-to-end control packages `C:logo.svg` from an
+asset directory, verifies current ownership, inspects the exact logical name
+and `assets/C:logo.svg` path without mutation, and serves the same bytes. Text
+format tests cover every package-controlled field that was otherwise rendered
+raw, including control and format characters and Unicode line/paragraph
+separators. They also preserve the ordinary text golden, JSON schema and
+decoded-value round trips, and zero-output/no-mutation behavior for invalid
+graphs. The tests run deterministic reports at high count.
 
 Browser-extension controls use one ASCII-only case matrix across manifest,
 package, inspect, legacy, and static-serving paths. They retain uppercase and
@@ -117,16 +120,19 @@ also covers release-style counter, router-dashboard, and resource packages with
 hashed assets, preload, gzip and Brotli sidecar edges, plus a standard-Go
 server-backed package.
 
-The same gate characterizes schema-version-1 paths as slash-only and rejects
-backslashes in artifact paths and logical names. Focused Unix tests verify that
-the package producer rejects `foo\bar.txt`, `foo\..\bar.txt`, and
-`styles\theme.css` before publishing a completion marker while preserving the
-existing package output. A Windows control verifies that native separators are
-converted to `/`. Current-package metadata tests cover package and manifest
-entrypoints, ordinary assets, compressed sidecars, and logical keys; invalid
-metadata remains incomplete, and inspection emits zero output without changing
-the package. The canonical Node consumer enforces the same rule. Reports and
-combined hashes for the eleven ordinary packages remain unchanged.
+The same gate distinguishes schema-version-1 package paths from generated
+logical asset names. Both are canonical and slash-only, but drive-prefix
+rejection applies to package paths; a drive-looking logical key remains
+namespace data under `assets/`. Focused Unix tests verify that the package
+producer rejects literal-backslash names such as `foo\bar.txt` before publishing
+a completion marker, while a directory-discovered `C:logo.svg` completes the
+producer, ownership, inspect, Node-consumer, and serving chain. A Windows
+control verifies that native separators are converted to `/`; no cross-
+filesystem portability is claimed for colon-containing Unix filenames.
+Current-package metadata tests cover package and manifest entrypoints, ordinary
+assets, compressed sidecars, and logical keys; invalid metadata remains
+incomplete, and inspection emits zero output without changing the package.
+Reports and combined hashes for the eleven ordinary packages remain unchanged.
 
 The size gate measures the packaged WASM entrypoint under
 `.goframe/package/standalone/assets/bundle*.wasm`, with a legacy fallback for

@@ -193,22 +193,33 @@ should reject unsupported versions. No separate machine-readable JSON Schema
 document is provided.
 
 Inspection validates the declared current package graph, including assets,
-entrypoints, hashes, and compressed sidecars, but does not grant ownership or
-change package, export, or cleanup ownership semantics. Unknown additive fields
-in generated package metadata are not rejected merely because the report does
-not expose them. `generatedAt` is intentionally omitted so the same package
-copied to another safe root produces byte-identical JSON.
+entrypoints, hashes, and compressed sidecars, but does not itself grant
+ownership. The current-package metadata readers shared by ownership
+classification, package verification, export, cleanup, and inspection require
+canonical generated logical names and paths; malformed or non-canonical
+metadata is classified as incomplete. The completion-marker role and the
+publication, export, and cleanup protocols are unchanged. Unknown additive
+fields in generated package metadata are not rejected merely because the
+report does not expose them. `generatedAt` is intentionally omitted so the same
+package copied to another safe root produces byte-identical JSON.
 
 Schema-version-1 ordered strings use ascending lexical order of their raw UTF-8
 bytes. Artifact paths and roles use that order, and edges compare `from`,
-`kind`, `encoding`, and `to` field by field. Path fields use `/` as their
-separator and do not permit backslashes. Generated asset logical names and
-generated metadata path fields use the same slash-only representation;
-platform-native separators are converted before publication. Consumers use
-POSIX/schema path semantics rather than platform-native separator rules. The
-inspection schema remains version 1, and its fields and both generated metadata
-schemas remain unchanged. Authored `goframe.json` path normalization is
-unchanged.
+`kind`, `encoding`, and `to` field by field. Path fields and edge endpoints are
+canonical slash-only package-relative paths; leading absolute and drive-prefix
+forms are rejected. Consumers use POSIX/schema path semantics rather than
+platform-native separator rules.
+
+`artifact.logicalName` is a generated asset namespace key rather than an
+independent package path. It is canonical and slash-only, but a colon or a
+drive-looking prefix such as `C:logo.svg` remains literal key data. Its generated
+package path is still contained below `assets/`, for example
+`assets/C:logo.svg`. Platform-native separators are converted before
+publication, while a remaining literal backslash is rejected. This does not
+promise that every generated logical name is portable to filesystems that
+reserve its characters. The inspection schema remains version 1, and its
+fields and both generated metadata schemas remain unchanged. Authored
+`goframe.json` path normalization is unchanged.
 
 For graph inspection, every asset logical key must use the exact canonical
 relative-name representation returned by the current package producer helper

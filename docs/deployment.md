@@ -264,21 +264,26 @@ runtime, and style entrypoints must respectively resolve to `.wasm`, `.js`, and
 asset path must exactly match the current content-addressed filename produced
 from its logical name and declared hash.
 
-Before any final asset path is derived, inspection validates each logical asset
-key with the same canonical relative-name helper used by the package producer
-and requires the authored key to equal that canonical result. Parent traversal,
-absolute names, dot-only names, and non-canonical spellings such as repeated
-separators, dot components, or trailing separators are rejected. Canonical
-nested names, spaces, graphic Unicode, leading-dot child names such as
-`.well-known/config.json`, and case differences remain valid when the resulting
-package graph is otherwise valid.
+Generated logical asset names are namespace keys. The producer normalizes
+native separators with `filepath.ToSlash`, and current-package readers require
+each generated key to equal that canonical result. Parent components,
+slash-rooted names, dot-only names, remaining backslashes, and non-canonical
+spellings such as repeated separators, dot components, or trailing separators
+are rejected. Canonical nested names, spaces, graphic Unicode, leading-dot
+child names such as `.well-known/config.json`, case differences, and colons
+remain valid. A drive-looking key such as `C:logo.svg` is data in this namespace,
+not an independent package path.
 
-Generated package logical names and path fields use `/` exclusively. The
-package producer converts platform separators with `filepath.ToSlash`, then
-rejects any remaining backslash before publication. Normal Windows separators
-therefore become `/`; a Unix filename containing a literal backslash must be
-renamed before packaging. Inspection schema-version-1 paths enforce the same
-slash-only representation.
+Generated package paths are a separate entity. They use `/` exclusively, must
+be canonical and package-relative, and reject absolute or drive-prefixed forms.
+An asset with logical name `C:logo.svg` therefore has the contained package path
+`assets/C:logo.svg`. Authored `goframe.json` entries remain filesystem paths and
+retain their existing absolute and drive-prefix checks; the drive-looking name
+is produced when such a filename is discovered below an asset directory on a
+filesystem that permits it. A package containing that filename is not promised
+to be portable to Windows or another filesystem that reserves the character.
+Inspection schema-version-1 path fields and edge endpoints use the same
+slash-only package-path representation.
 
 Schema-version-1 string ordering is ascending lexical order of the raw UTF-8
 bytes. This applies to style entrypoints, artifact paths and roles, and each

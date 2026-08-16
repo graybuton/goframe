@@ -138,6 +138,11 @@ and this editor integration does not create an LSP compatibility promise.
 The separate `goxc inspect --format=json` schema version 1 report is also a
 versioned tooling process contract. It describes the declared graph of one
 existing current standalone package with deterministic package-relative paths.
+Its path fields and edge endpoints are canonical slash-only package paths;
+`artifact.logicalName` is instead a canonical generated namespace key. A
+drive-looking prefix can be key data while remaining invalid at the start of a
+package path. The report does not promise that every producer-supported
+filename is portable across host filesystems.
 Incompatible field or semantic changes require a schema version increment.
 The default text report is human-facing and its exact formatting remains
 experimental; consumers should parse JSON rather than text.
