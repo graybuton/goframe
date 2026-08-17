@@ -12,8 +12,8 @@ importers:
         specifier: ^25.9.3
         version: 25.9.3
       '@types/vscode':
-        specifier: ^1.85.0
-        version: 1.120.0
+        specifier: ^1.125.0
+        version: 1.125.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -23,8 +23,8 @@ packages:
   '@types/node@25.9.3':
     resolution: {integrity: sha512-603BddQMv3pUcr4U2dhujk83N2tTDVr/34wII2B6bJy6g+8WD6yUb11jszNs0gdi4PesVWl7ABt8nYMVpnLUcg==}
 
-  '@types/vscode@1.120.0':
-    resolution: {integrity: sha512-feaT4Rst+FkTch5zz/ZbNCxoIvo55YU80Be2kiL7OJcod4+CUYf2lUBPdIJzozNnSEMq1VRTGrWEcCGFB3fBmA==}
+  '@types/vscode@1.125.0':
+    resolution: {integrity: sha512-0icm/ZQAaism87P0ekHqi4/Ju9du+Tm0RUW+y7vqRsxY2cY0FNRX1nAnaW7nT6npPt2tfHiheZ55Zm9UhqonFA==}
 
   typescript@6.0.3:
     resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
@@ -40,7 +40,7 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
-  '@types/vscode@1.120.0': {}
+  '@types/vscode@1.125.0': {}
 
   typescript@6.0.3: {}
 
