@@ -3,9 +3,15 @@
 ## Status / Scope
 
 `v0.4.0-preview.1` is an experimental browser/WASM pre-release and a package
-inspection and development-feedback checkpoint. Its release range is
-`v0.3.0-preview.1` (`898179a15e2fe577992ad557b60cff490ddfa5aa`) through
+inspection and development-feedback checkpoint.
+
+The product changes audited for this checkpoint span `v0.3.0-preview.1`
+(`898179a15e2fe577992ad557b60cff490ddfa5aa`) through
 `0ef6d45b3b715d890731e98010aedfa9458e2e30`.
+
+The signed `v0.4.0-preview.1` Git tag is authoritative for the final release
+boundary. Release-only documentation commits are outside the product-change
+baseline above.
 
 The primary capability is read-only inspection of one existing current
 standalone package. The secondary capability presents post-start `goxc dev`
