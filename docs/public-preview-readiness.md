@@ -4,7 +4,7 @@
 > prepared the first `v0.1.0-preview.1` evaluator preview. Its statements about
 > an uncut first preview tag are historical, not current publication status.
 > Current release scope is recorded in the
-> [v0.3.0-preview.1 release notes](release-notes-v0.3.0-preview.1.md), the
+> [v0.4.0-preview.1 release notes](release-notes-v0.4.0-preview.1.md), the
 > [release process](release.md), the [roadmap](roadmap.md), and the
 > [evaluator guide](evaluator-guide.md). GitHub Releases remains authoritative
 > for published tags.

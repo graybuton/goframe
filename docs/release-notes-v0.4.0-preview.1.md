@@ -24,6 +24,36 @@ GoFrame remains pre-1.0, experimental, and focused on interactive browser/WASM
 applications. This preview is not a production-readiness, stable API,
 fullstack, SSR, hydration, or broad browser-support claim.
 
+## Maturity And Contract Tiers
+
+The existing [API stability tiers](api-stability.md) apply to this release:
+
+- **Public-Candidate:** documented high-level `goxc inspect` and `goxc dev`
+  command behavior. The `goxc inspect --format=json` report is a versioned
+  schema-v1 tooling process contract; incompatible field or semantic changes
+  require a schema version increment.
+- **Experimental Frontier:** default human-readable inspect formatting and
+  exact error wording; generated package metadata field stability and deeper
+  preview package semantics; and `goxc dev` watcher timing, event names,
+  private payload fields, presentation DOM/CSS, and build-number formatting.
+- **Compiler-Facing / Low-Level:** existing `pkg/gox` compiler exports,
+  including the in-memory generation boundary and trusted-filesystem
+  convenience helpers, plus the documented `goframe.json` and generated
+  package metadata tooling boundaries. This release adds no compiler-facing
+  export.
+- **Internal:** private inspect graph structs, package-root resolution,
+  filesystem traversal, sorting, hashing, physical-alias registry,
+  generation-fence implementation, and the development broker transport,
+  storage, and presentation implementation.
+- **Outside Current Contract / Inactive:** source dependency and bundle graphs,
+  asset splitting, multi-entry WASM, route-lazy delivery, HMR, incremental
+  compilation, SSR, hydration, fullstack APIs, LSP or formatter behavior,
+  Player/Engine, and `.gfapp`.
+
+Private implementation details are not compatibility contracts. These tiers
+classify individual surfaces; they do not classify the entire release as
+Public-Candidate.
+
 ## Highlights
 
 ### Package Graph Inspection
@@ -76,6 +106,14 @@ fullstack, SSR, hydration, or broad browser-support claim.
 
 - `pkg/goframe` and `pkg/gox` have no exported API additions, removals, or
   signature changes across the release range.
+- No new deprecations are introduced. Existing legacy and deprecated surfaces
+  retain the replacement guidance in [API stability](api-stability.md) and
+  [compatibility policy](compatibility.md).
+- This release does not expand the existing component-identity promise.
+  Generated identity remains evidenced within the documented application and
+  package composition boundaries of one app/module tree; a broad reusable
+  external package ecosystem and full multi-module identity compatibility
+  remain outside this preview contract.
 - `goxc inspect` is the only CLI command addition. Executable comparisons found
   no help, flag, or unchanged-command exit-behavior differences for the
   previously available commands.
@@ -92,6 +130,12 @@ fullstack, SSR, hydration, or broad browser-support claim.
   the release range. See the
   [v0.4.0-preview.1 migration notes](migration-v0.4.0-preview.1.md) for the
   bounded compatibility actions.
+- Supply-chain and tooling evidence remains lightweight: read-only repository
+  contents permissions, Dependabot coverage for GitHub Actions, Go modules,
+  and the VS Code extension, lockfile-based extension installation, artifact
+  and module gates, and successful CodeQL code-scanning checks. This preview
+  does not claim an SBOM, signed binary distribution, comprehensive dependency
+  attestation, or a general supply-chain or vulnerability-scanner guarantee.
 
 ## Validation
 
@@ -101,9 +145,10 @@ The release baseline passed:
   `1.26.5`, plus race lanes on Go `1.25.12` and `1.26.5`;
 - GOX golden and error-golden tests, `scripts/check.sh`, artifact, module-path,
   documentation, WASM-size, workflow-lint, and clean-diff gates;
-- two complete Chrome `149` Browser Smoke runs and a focused development-loop
-  browser pass covering failure replacement, retained interaction, two-page
-  delivery, reconnects, body-root isolation, recovery, and zero runtime errors;
+- two complete Linux/Chrome `149` Browser Smoke runs and a focused
+  development-loop browser pass covering failure replacement, retained
+  interaction, two-page delivery, reconnects, body-root isolation, recovery,
+  and zero runtime errors;
 - VS Code extension installation and tests under Node.js `24.18.1`, with its
   lockfile unchanged;
 - TinyGo `0.41.1` representative packages for counter and router-dashboard
@@ -112,9 +157,10 @@ The release baseline passed:
 - repeated text/JSON inspection, copied-root identity, exported-package graph
   identity, and valid completion metadata for all three representative
   packages;
-- local Windows amd64 test-binary compilation and successful post-merge Core
-  CI on Windows, alongside green post-merge Core, Browser Smoke, WASM Size,
-  and VS Code Extension workflows for the included feature merges.
+- local Windows amd64 test-binary compilation and successful Go `1.26.5` Core
+  host-evidence lanes on `macos-15-intel` and `windows-latest`. Each host lane
+  runs formatting, ordinary tests, vet, debug-tag tests, and selected GOX
+  golden tests; neither lane claims TinyGo or browser-smoke evidence.
 
 Publication requires the release pull request to pass the normal Core, Browser
 Smoke, WASM Size, and VS Code Extension workflows. Local evidence does not
@@ -131,8 +177,10 @@ substitute for those workflows.
 - `goxc dev` presents post-start package and build failures only. Initial
   package failures and watch or scan failures remain terminal-only, and the
   workflow has no HMR, incremental compilation, or source maps.
-- Chrome/Chromium remains the strongest browser evidence. Firefox and
-  Safari/WebKit do not have equivalent automated coverage.
+- Linux with Chrome/Chromium remains the strongest combined host and browser
+  evidence. macOS and Windows have minimal Core host evidence only; neither has
+  TinyGo or browser-smoke evidence. Firefox and Safari/WebKit do not have
+  equivalent automated coverage.
 - Static package output is not a production server, deployment platform, SSR,
   hydration, bundle-splitting, or fullstack framework.
 - The VS Code extension remains repository-local tooling and is not published
