@@ -980,7 +980,7 @@ func App() gf.Node {
 				t.Fatal(err)
 			}
 			observedGoMod = string(content)
-			if !strings.Contains(observedGoMod, "\ngo 1.22\n") {
+			if !strings.Contains(observedGoMod, "\ngo "+minimumSupportedGoVersion+"\n") {
 				t.Fatalf("generated go.mod has unexpected language version:\n%s", content)
 			}
 			if strings.Contains(observedGoMod, "toolchain go1.25.12") {
