@@ -127,7 +127,8 @@ Future features do not become delivery promises by appearing in this document.
 | `v0.2.0-preview.6` | Diagnostics & Editor DX checkpoint | Published the CLI/editor diagnostic boundary as a bounded preview checkpoint. | **Current / shipped** |
 | `v0.3.0-preview.1` | Application workflow & dev loop checkpoint | Watched full-build development loop and integrated application evidence without selected new application-model APIs. | **Current / shipped** |
 | Later `v0.3.0-preview.*` slots | Application Model II | Route-driven data, transitions, loaders, mutations, and document state remain unselected directions. | **Research** |
-| `v0.4.0-preview.*` | Modular Delivery & Bundle Splitting | Explicit asset, multi-entry WASM, and route-lazy delivery boundaries. | **Candidate** |
+| `v0.4.0-preview.1` | Package inspection & development feedback checkpoint | Read-only standalone package graphs and post-start browser build-error presentation without package splitting. | **Current / shipped** |
+| Later `v0.4.0-preview.*` slots | Modular Delivery & Bundle Splitting | Explicit asset, multi-entry WASM, and route-lazy delivery boundaries. | **Candidate** |
 | `v0.5.0-preview.*` | Server Rendering & Prerender | A DOM-independent HTML-rendering subset, static prerender, and evaluated SSR adapters. | **Research** |
 | `v0.6.0-preview.*` | Hydration & Islands | Deterministic attachment, state handoff, recovery, and partial activation. | **Research** |
 | `v0.7.0-preview.*` | Dev Loop & Language Services | Incremental development, source mapping, formatting, language services, and distribution. | **Candidate** |
@@ -187,8 +188,8 @@ application-workflow evidence over existing public primitives
 The checkpoint includes:
 
 - `goxc dev` with serialized full-package rebuilds, last-successful-generation
-  preservation, post-start browser build-error presentation, verified
-  generation activation, and successful-build page reload;
+  preservation, verified generation activation, and successful-build page
+  reload;
 - server-backed and async-navigation evidence using existing router, resource,
   lifecycle, and example-local request coordination;
 - history-routing deployment characterization without changing the public hash
@@ -218,16 +219,21 @@ existing router, component ownership, resource lifecycle, and example-local
 request coordination sufficient for the audited flows. Those stages did not
 select a public route-loader, Action, Mutation, or cache-invalidation API.
 
-Post-start browser build-error presentation is **Current / shipped**. The
-development loop keeps serving the last successful interactive generation,
-shows the latest failed package attempt in connected pages, retains terminal
-diagnostics, and clears the presentation on successful recovery.
+## `v0.4.0-preview.1` - Package Inspection And Development Feedback Checkpoint
 
-## `v0.4.0-preview.*` - Modular Delivery & Bundle Splitting
+Status: **Current / shipped** capability scope. Read-only standalone package
+graph inspection and post-start browser build-error presentation exist on
+current `main`; this status does not assert that the versioned tag is
+published. Git tags and GitHub Releases are authoritative for publication
+state. Asset splitting, multi-entry WASM, route-lazy bundles, and shared-runtime
+designs remain separate Candidate or Research work.
 
-Status: **Current / shipped** for read-only standalone package graph inspection;
-**Candidate** for asset splitting, multi-entry WASM, and route-lazy bundles.
-These delivery concepts remain separate.
+Purpose:
+
+```text
+one deterministic current-package inspection boundary plus bounded browser
+feedback for failed post-start development builds
+```
 
 ### Package Graph Inspection
 
@@ -241,6 +247,20 @@ Current scope:
 
 The current graph is the declared graph of one standalone package. It does not
 infer source dependencies, split assets or WASM, or define lazy loading.
+
+### Development Failure Presentation
+
+Current scope:
+
+- post-start package and build failures remain in terminal diagnostics and are
+  also presented in connected browser pages;
+- the last successful generation remains served and interactive;
+- later failures replace the message, and successful recovery clears it before
+  the normal full-page reload;
+- initial package failures and watch or scan failures remain terminal-only.
+
+This is still serialized full-package rebuilding and full-page reload. It does
+not add HMR, incremental compilation, or source maps.
 
 ### Asset Splitting
 
@@ -281,11 +301,10 @@ heap/state, and WebAssembly component-model implications. These require
 feasibility, size, lifecycle, and compatibility evidence before an
 implementation commitment.
 
-Candidate preview slots:
+Candidate preview slots after `preview.1`:
 
 | Planning slot | Candidate capability |
 |---|---|
-| `preview.1` | Unselected checkpoint; standalone package graph inspection is current behavior. |
 | `preview.2` | Lazy static chunks. |
 | `preview.3` | Multi-entry WASM packaging. |
 | `preview.4` | Route-lazy bundles. |

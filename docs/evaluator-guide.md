@@ -1,6 +1,6 @@
 # Evaluator Guide
 
-This guide is for evaluating the `v0.3.0-preview.1` browser/WASM layer. GitHub
+This guide is for evaluating the `v0.4.0-preview.1` browser/WASM layer. GitHub
 Releases remains authoritative for whether that exact preview is published. It
 is not a production deployment guide.
 
@@ -22,10 +22,11 @@ Linux/Chrome-first.
 
 ## Install goxc
 
-After the exact preview is published, install it with:
+Git tags and GitHub Releases determine availability of the exact preview.
+Install it with:
 
 ```bash
-go install github.com/graybuton/goframe/cmd/goxc@v0.3.0-preview.1
+go install github.com/graybuton/goframe/cmd/goxc@v0.4.0-preview.1
 goxc doctor
 ```
 
@@ -49,6 +50,31 @@ schemaVersion: 1
 ok: true
 diagnostics: []
 ```
+
+## Evaluate Package Inspection
+
+Create one current standalone package, then inspect its declared graph:
+
+```bash
+goxc package ./examples/counter \
+  --compiler=tinygo \
+  --asset-hash \
+  --preload \
+  --compress=gzip,br
+
+goxc inspect ./examples/counter
+goxc inspect ./examples/counter --format=json
+```
+
+The text report is human-oriented. The JSON report is a separate schema-v1
+tooling process contract; it does not change the schema-v1
+`asset-manifest.json` or `goframe-package.json` files. Repeating the JSON
+command against unchanged package bytes should produce byte-identical output.
+
+Inspection reads one existing current standalone package. It validates the
+declared artifacts, entrypoints, compressed sidecars, hashes, paths, and
+completion marker without building, repairing, or mutating the package. It is
+not a source dependency graph, bundle splitter, or legacy-package reader.
 
 ## Recommended Evaluation Path
 
@@ -108,13 +134,14 @@ goxc dev ./examples/counter --compiler=tinygo --port=8080
 Open the printed loopback URL, edit `examples/counter/app.gox`, and save. A
 successful full-package rebuild activates one verified generation and reloads
 the page. Introduce a temporary GOX or Go compiler error to confirm that the
-terminal reports the failure while the previous successful generation remains
-served; correct the source to confirm recovery and reload.
+terminal reports the failure, the connected page presents it, and the previous
+successful generation remains served and interactive. Correct the source to
+confirm that the presentation clears before recovery reload.
 
 This is serialized full-package rebuilding with full-page reload. It is not
-incremental compilation, HMR, or an in-browser build-error overlay. The
-generated compiler workspace does not inherit a parent `go.work` or ambient
-`GOFLAGS`.
+incremental compilation or HMR. Initial package failures and watch or scan
+failures remain terminal-only. The generated compiler workspace does not
+inherit a parent `go.work` or ambient `GOFLAGS`.
 
 ## Evaluate The Server-Backed Reference
 
@@ -228,11 +255,15 @@ app. It is not a cross-browser certification suite.
 - Resources are component-scoped and do not include cache, dedupe, Suspense, or
   route loaders.
 - `goxc serve` is development-only.
-- `goxc dev` performs full package rebuilds and full-page reload; it does not
-  provide HMR, incremental compilation, or browser build-error presentation.
+- `goxc inspect` reports one declared current standalone package; it does not
+  infer source dependencies or produce a split bundle graph.
+- `goxc dev` performs full package rebuilds and full-page reload. Browser
+  presentation covers post-start package and build failures; initial package
+  failures and watch or scan failures remain terminal-only. There is no HMR,
+  incremental compilation, or source-map contract.
 - Production deployment infrastructure, TLS, cache negotiation, and server
   fallback rules are outside this preview.
 
 For the guided walkthrough, read the [tutorial](tutorial.md). For release scope
 and limitations, read the
-[v0.3.0-preview.1 release notes](release-notes-v0.3.0-preview.1.md).
+[v0.4.0-preview.1 release notes](release-notes-v0.4.0-preview.1.md).

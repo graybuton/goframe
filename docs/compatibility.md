@@ -66,8 +66,10 @@ Migration notes are required when:
 
 Migration notes should follow `docs/migrations.md`.
 
-The release-specific actions for generated-workspace compiler isolation and
-repeated-Mount descendant rejection are recorded in
+The current release-specific actions for malformed generated package metadata
+and browser-extension recognition are recorded in
+[the v0.4.0-preview.1 migration notes](migration-v0.4.0-preview.1.md). The prior
+generated-workspace compiler isolation and repeated-Mount actions remain in
 [the v0.3.0-preview.1 migration notes](migration-v0.3.0-preview.1.md).
 
 ## Exceptions

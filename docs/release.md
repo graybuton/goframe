@@ -101,9 +101,15 @@ Versioned preview release records in this repository:
 - `docs/release-notes-v0.2.0-preview.5.md`
 - `docs/release-notes-v0.2.0-preview.6.md`
 - `docs/release-notes-v0.3.0-preview.1.md`
+- `docs/release-notes-v0.4.0-preview.1.md`
 
 This list identifies repository records; Git tags and GitHub Releases determine
 whether each version is published.
+
+Versioned preview migration records in this repository:
+
+- `docs/migration-v0.3.0-preview.1.md`
+- `docs/migration-v0.4.0-preview.1.md`
 
 `CHANGELOG.md` remains the factual change log; release notes should summarize
 preview scope, maturity tiers, validation evidence, compatibility notes, and

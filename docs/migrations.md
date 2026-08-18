@@ -20,7 +20,12 @@ Security hardening still needs a note when users may see new rejections.
 
 ## Current Preview Migration
 
-The user-action notes for `v0.3.0-preview.1` are in
+The user-action notes for `v0.4.0-preview.1` are in
+[Migrating to v0.4.0-preview.1](migration-v0.4.0-preview.1.md). They cover
+malformed generated package metadata, ASCII-only browser-extension recognition,
+and the bounded post-start development failure presentation.
+
+The previous `v0.3.0-preview.1` actions remain in
 [Migrating to v0.3.0-preview.1](migration-v0.3.0-preview.1.md). They cover
 generated-workspace compiler environment isolation and the narrowed repeated
 Mount descendant-target contract.
