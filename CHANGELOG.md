@@ -2,12 +2,25 @@
 
 ## Unreleased
 
+## v0.4.0-preview.1
+
+### Added
+
 - Added read-only `goxc inspect` package graph reports with deterministic text
   output and a versioned schema-v1 JSON process contract.
+
+### Fixed
+
 - `goxc dev` now presents post-start package and build failures in connected
   browsers while preserving the last successful interactive application;
   later failures replace the message, and successful recovery clears it before
   the normal full-page reload.
+- Current-package verification, ownership classification, export, cleanup, and
+  inspection now agree on canonical generated logical names and package paths.
+- Inspection rejects physical artifact aliases and completion-marker changes
+  before emitting a report.
+- Browser asset extensions now use ASCII-only case-insensitive matching across
+  package, inspection, legacy recognition, compression, and static serving.
 
 ## v0.3.0-preview.1
 
