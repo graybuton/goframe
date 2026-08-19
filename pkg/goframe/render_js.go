@@ -74,7 +74,7 @@ func mountNodeBelow(document js.Value, node Node, owner *componentInstance, sele
 	case ComponentNode:
 		mountComponent(document, mounted, node, owner, selectOwner)
 	default:
-		panic("goframe: unsupported node type")
+		panicRuntimeInvariant("goframe: unsupported node type")
 	}
 	return mounted
 }
@@ -424,7 +424,7 @@ func eventHandler(listener *mountedEvent) js.Func {
 		case func(js.Value):
 			callback(rawEvent)
 		default:
-			panic("goframe: event handler must be func(), func(goframe.Event), func(goframe.InputEvent), func(goframe.ScrollEvent), or func(js.Value)")
+			panicRuntimeInvariant("goframe: event handler must be func(), func(goframe.Event), func(goframe.InputEvent), func(goframe.ScrollEvent), or func(js.Value)")
 		}
 		return nil
 	})

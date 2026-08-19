@@ -212,7 +212,7 @@ func TestUseEffectOutsideComponentPanics(t *testing.T) {
 	resetEffectsForTest()
 	currentComponent = nil
 	defer func() {
-		if recovered := recover(); recovered != "goframe: UseEffect must be called during component render" {
+		if recovered := comparablePanicValue(recover()); recovered != "goframe: UseEffect must be called during component render" {
 			t.Fatalf("panic = %v", recovered)
 		}
 	}()
@@ -223,7 +223,7 @@ func TestUseUnmountOutsideComponentPanics(t *testing.T) {
 	resetEffectsForTest()
 	currentComponent = nil
 	defer func() {
-		if recovered := recover(); recovered != "goframe: UseUnmount must be called during component render" {
+		if recovered := comparablePanicValue(recover()); recovered != "goframe: UseUnmount must be called during component render" {
 			t.Fatalf("panic = %v", recovered)
 		}
 	}()
@@ -435,7 +435,7 @@ func TestLifecycleHookTypeMismatchPanics(t *testing.T) {
 	flushPendingEffects()
 	useMount = true
 	defer func() {
-		if recovered := recover(); recovered != "goframe: lifecycle hook type changed between component renders" {
+		if recovered := comparablePanicValue(recover()); recovered != "goframe: lifecycle hook type changed between component renders" {
 			t.Fatalf("panic = %v", recovered)
 		}
 	}()
@@ -470,7 +470,7 @@ func TestUseEffectUnsupportedDependencyPanics(t *testing.T) {
 	}, nil)
 
 	defer func() {
-		if recovered := recover(); recovered != "goframe: unsupported effect dependency type; reduce complex values to string, id, version, or counter" {
+		if recovered := comparablePanicValue(recover()); recovered != "goframe: unsupported effect dependency type; reduce complex values to string, id, version, or counter" {
 			t.Fatalf("panic = %v", recovered)
 		}
 	}()

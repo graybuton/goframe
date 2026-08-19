@@ -67,7 +67,7 @@ type routeSegment struct {
 // RoutePath creates an exact or parameterized route.
 func RoutePath(pattern string, handler RouteHandler) Route {
 	if handler == nil {
-		panic("goframe: RoutePath requires a handler")
+		panicRuntimeInvariant("goframe: RoutePath requires a handler")
 	}
 	pattern = normalizeRoutePattern(pattern)
 	return Route{
@@ -80,7 +80,7 @@ func RoutePath(pattern string, handler RouteHandler) Route {
 // NotFoundRoute creates a fallback route for unmatched paths.
 func NotFoundRoute(handler RouteHandler) Route {
 	if handler == nil {
-		panic("goframe: NotFoundRoute requires a handler")
+		panicRuntimeInvariant("goframe: NotFoundRoute requires a handler")
 	}
 	return Route{
 		handler:  handler,
@@ -143,7 +143,7 @@ type routerRouteProps struct {
 
 func renderRouterView(props routerViewProps) Node {
 	if props.router == nil {
-		panic("goframe: RouterView requires router")
+		panicRuntimeInvariant("goframe: RouterView requires router")
 	}
 	current, setCurrent := UseState(routerCurrentTarget())
 	UseEffect(func() Cleanup {
@@ -293,7 +293,7 @@ func (values QueryValues) Encode() string {
 
 func normalizeRoutePattern(pattern string) string {
 	if pattern == "" {
-		panic("goframe: route pattern must not be empty")
+		panicRuntimeInvariant("goframe: route pattern must not be empty")
 	}
 	pattern, _ = splitRouteTarget(normalizeRouteTarget(pattern))
 	return pattern
@@ -306,7 +306,7 @@ func parseRoutePattern(pattern string) []routeSegment {
 		if strings.HasPrefix(part, ":") {
 			name := part[1:]
 			if name == "" {
-				panic("goframe: route parameter name must not be empty")
+				panicRuntimeInvariant("goframe: route parameter name must not be empty")
 			}
 			segments[index] = routeSegment{param: name}
 			continue

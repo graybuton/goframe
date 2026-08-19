@@ -124,7 +124,7 @@ type documentMetadataAPIShapeOwner struct {
 func newDocumentMetadataAPIShapeOwner() *documentMetadataAPIShapeOwner {
 	coordinator := activeDocumentMetadataCoordinator
 	if coordinator == nil {
-		panic("goframe: document metadata coordinator is not installed")
+		panicRuntimeInvariant("goframe: document metadata coordinator is not installed")
 	}
 	coordinator.requireActiveUpdate()
 	return &documentMetadataAPIShapeOwner{
@@ -148,16 +148,16 @@ func useDocumentMetadataAPIShapeOwner(
 func (owner *documentMetadataAPIShapeOwner) validate() {
 	coordinator := activeDocumentMetadataCoordinator
 	if owner == nil || owner.owner == nil || owner.owner.coordinator == nil {
-		panic("goframe: document metadata owner is nil")
+		panicRuntimeInvariant("goframe: document metadata owner is nil")
 	}
 	if coordinator == nil {
-		panic("goframe: document metadata coordinator is not installed")
+		panicRuntimeInvariant("goframe: document metadata coordinator is not installed")
 	}
 	if owner.owner.coordinator != coordinator {
-		panic("goframe: document metadata owner belongs to another coordinator")
+		panicRuntimeInvariant("goframe: document metadata owner belongs to another coordinator")
 	}
 	if owner.owner.state == documentMetadataOwnerReleased {
-		panic("goframe: document metadata owner is already released")
+		panicRuntimeInvariant("goframe: document metadata owner is already released")
 	}
 }
 
@@ -167,7 +167,7 @@ func (owner *documentMetadataAPIShapeOwner) prepareRender(
 ) {
 	owner.validate()
 	if owner.pending.attempt != nil {
-		panic("goframe: document metadata owner already participated in this render attempt")
+		panicRuntimeInvariant("goframe: document metadata owner already participated in this render attempt")
 	}
 	owner.pending = documentMetadataRenderState{
 		attempt:  attempt,

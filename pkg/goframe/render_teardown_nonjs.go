@@ -18,7 +18,7 @@ type protectedTeardownState struct {
 
 func (state *protectedTeardownState) begin() {
 	if state.retained != len(state.entries) {
-		panic("goframe: invalid protected subtree transaction")
+		panicRuntimeInvariant("goframe: invalid protected subtree transaction")
 	}
 }
 

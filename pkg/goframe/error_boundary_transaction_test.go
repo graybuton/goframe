@@ -1103,7 +1103,7 @@ func runProtectedSubtreeTestAttempt(boundary *componentInstance, reconcile func(
 		state = boundary.errorBoundary
 	}
 	if state == nil {
-		panic("goframe: test boundary has no protected lifecycle reconcile hook")
+		panicRuntimeInvariant("goframe: test boundary has no protected lifecycle reconcile hook")
 	}
 	previous := beginProtectedLifecycle(state)
 	defer finishProtectedLifecycle(state, previous)

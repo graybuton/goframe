@@ -222,7 +222,7 @@ func TestProtectedTeardownInvariantEscapeRetainsOwnership(t *testing.T) {
 	assertPanic(t, "goframe: protected teardown invariant", func() {
 		runProtectedSubtreeTestAttempt(boundary, func() {
 			stageProtectedSubtreeTeardownForTest(teardown)
-			panic("goframe: protected teardown invariant")
+			panicRuntimeInvariant("goframe: protected teardown invariant")
 		})
 	})
 

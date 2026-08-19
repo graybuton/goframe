@@ -62,7 +62,7 @@ func InstallDocumentMetadataHandoffExperiment(
 	observe func(DocumentMetadataHandoffExperimentEvent),
 ) {
 	if apply == nil {
-		panic("goframe: document metadata experiment requires an apply callback")
+		panicRuntimeInvariant("goframe: document metadata experiment requires an apply callback")
 	}
 	coordinator := newDocumentMetadataCoordinator(
 		documentMetadataExperimentValue(baseline),

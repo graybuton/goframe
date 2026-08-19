@@ -46,7 +46,7 @@ func ErrorBoundary(props ErrorBoundaryProps) Node {
 
 func renderErrorBoundary(props ErrorBoundaryProps) Node {
 	if props.Fallback == nil {
-		panic("goframe: ErrorBoundary requires Fallback")
+		panicRuntimeInvariant("goframe: ErrorBoundary requires Fallback")
 	}
 	instance := requireCurrentComponent("ErrorBoundary")
 	state := ensureErrorBoundaryState(instance)

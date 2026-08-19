@@ -1,6 +1,15 @@
 package goframe
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
+
+type invariantPrefixedUserPanic struct{}
+
+func (invariantPrefixedUserPanic) String() string {
+	return "goframe: user-originated failure"
+}
 
 func TestErrorBoundaryCapturesDescendantRenderPanic(t *testing.T) {
 	resetRuntimeBoundaryTestState()
@@ -224,22 +233,76 @@ func TestErrorBoundaryFallbackComponentPanicWithoutOuterDoesNotSelfCapture(t *te
 	}
 }
 
+func TestErrorBoundaryCapturesInvariantPrefixedUserPanic(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{name: "string", value: "goframe: user-originated failure"},
+		{name: "error", value: errors.New("goframe: user-originated failure")},
+		{name: "stringer", value: invariantPrefixedUserPanic{}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resetRuntimeBoundaryTestState()
+			errors := captureRuntimeErrors(t)
+			var fallbackInfo ErrorInfo
+			boundary := testErrorBoundaryInstance("", func(ctx ErrorBoundaryContext) Node {
+				fallbackInfo = ctx.Info
+				return Text("fallback")
+			}, nil)
+			renderComponentInstance(boundary)
+
+			child := testComponentInstanceWithParent("UserFailure", boundary, func() Node {
+				panic(test.value)
+			})
+			rendered := renderComponentInstance(child)
+			if _, ok := rendered.(EmptyNode); !ok {
+				t.Fatalf("failed render = %#v, want EmptyNode", rendered)
+			}
+			requireRuntimeError(t, errors(), ErrorPhaseRender, "UserFailure", "component render", test.value)
+			if len(errors()) != 1 {
+				t.Fatalf("runtime reports = %d, want 1", len(errors()))
+			}
+
+			fallback := requireKeyedNode(t, renderComponentInstance(boundary))
+			if got := fallback.Node.(TextNode).Value; got != "fallback" {
+				t.Fatalf("fallback text = %q, want fallback", got)
+			}
+			if fallbackInfo.Panic != test.value || fallbackInfo.Phase != ErrorPhaseRender {
+				t.Fatalf("fallback info = %#v, want original render panic", fallbackInfo)
+			}
+		})
+	}
+}
+
 func TestErrorBoundaryDoesNotCatchRuntimeInvariantPanic(t *testing.T) {
 	resetRuntimeBoundaryTestState()
+	errors := captureRuntimeErrors(t)
 	boundary := testErrorBoundaryInstance("", func(ErrorBoundaryContext) Node {
 		return Text("fallback")
 	}, nil)
 	renderComponentInstance(boundary)
 
 	child := testComponentInstanceWithParent("Invariant", boundary, func() Node {
-		panic("goframe: invariant")
+		panicRuntimeInvariant("goframe: invariant")
+		return Empty()
 	})
-	assertPanic(t, "goframe: invariant", func() {
-		renderComponentInstance(child)
-	})
-	if boundary.errorBoundary.phase != errorBoundaryProtected {
-		t.Fatal("boundary should not catch runtime invariant panic")
-	}
+	defer func() {
+		recovered := recover()
+		invariant, ok := recovered.(runtimeInvariantPanic)
+		if !ok || invariant.message != "goframe: invariant" {
+			t.Fatalf("panic = %#v, want typed runtime invariant", recovered)
+		}
+		if boundary.errorBoundary.phase != errorBoundaryProtected {
+			t.Fatal("boundary should not catch runtime invariant panic")
+		}
+		if len(errors()) != 0 {
+			t.Fatalf("runtime invariant reports = %#v, want none", errors())
+		}
+	}()
+	renderComponentInstance(child)
 }
 
 func TestErrorBoundaryManualResetRemountsProtectedSubtree(t *testing.T) {

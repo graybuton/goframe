@@ -43,7 +43,7 @@ type ResourceLoader[T any] func(key string, resolve func(T), reject func(error))
 // returned reload function starts a new generation for the current key.
 func UseResource[T any](key string, loader ResourceLoader[T]) (Resource[T], func()) {
 	if loader == nil {
-		panic("goframe: UseResource requires a loader")
+		panicRuntimeInvariant("goframe: UseResource requires a loader")
 	}
 	slot := useStateSlot[*resourceControl[T]](nil, "UseResource")
 	control := slot.get()
@@ -116,7 +116,7 @@ func (control *resourceControl[T]) prepareRender(
 	loader ResourceLoader[T],
 ) (Resource[T], int) {
 	if control.pending.attempt != nil {
-		panic("goframe: resource already participated in this render attempt")
+		panicRuntimeInvariant("goframe: resource already participated in this render attempt")
 	}
 	pending := resourceRenderState[T]{
 		attempt:    attempt,

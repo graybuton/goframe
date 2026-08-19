@@ -75,14 +75,19 @@ func runtimeComponentName(instance *componentInstance) string {
 	return instance.name
 }
 
-func isRuntimeInvariantPanic(value any) bool {
-	text, ok := value.(string)
-	return ok && hasStringPrefix(text, "goframe:")
+type runtimeInvariantPanic struct {
+	message string
 }
 
-func hasStringPrefix(value string, prefix string) bool {
-	if len(value) < len(prefix) {
-		return false
-	}
-	return value[:len(prefix)] == prefix
+func (invariant runtimeInvariantPanic) Error() string {
+	return invariant.message
+}
+
+func panicRuntimeInvariant(message string) {
+	panic(runtimeInvariantPanic{message: message})
+}
+
+func isRuntimeInvariantPanic(value any) bool {
+	_, ok := value.(runtimeInvariantPanic)
+	return ok
 }

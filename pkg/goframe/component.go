@@ -25,7 +25,7 @@ type ComponentType struct {
 // NewComponentType creates an explicit component identity token.
 func NewComponentType(id string, debugName string) ComponentType {
 	if id == "" {
-		panic("goframe: empty component id")
+		panicRuntimeInvariant("goframe: empty component id")
 	}
 	if debugName == "" {
 		debugName = id
@@ -57,7 +57,7 @@ func Component[P any](name string, props P, render ComponentFunc[P]) Node {
 // component identity token.
 func ComponentT[P any](componentType ComponentType, props P, render ComponentFunc[P]) Node {
 	if componentType.identity.id == "" {
-		panic("goframe: invalid component type")
+		panicRuntimeInvariant("goframe: invalid component type")
 	}
 	return componentNode(componentType.debugName, componentType.identity, props, render)
 }
