@@ -457,10 +457,11 @@ Context selector panics during provider notification keep the previous selected
 value; selector panics during initial render report and flow through render
 containment.
 
-Runtime invariant panics whose message starts with `goframe:` remain hard
-programmer errors. Examples include invalid hook order, calling hooks outside
-render, unsupported effect dependency types, invalid component types, and
-invalid virtualization dimensions.
+Private typed runtime invariant panics remain hard programmer errors. Examples
+include invalid hook order, calling hooks outside render, unsupported effect
+dependency types, invalid component types, and invalid virtualization
+dimensions. Message text is not the discriminator: an application panic whose
+text starts with `goframe:` remains an ordinary user failure.
 
 Error Boundaries are render-only. Event, effect, cleanup, memo, context update,
 and ordinary resource failed states keep their phase-specific behavior and do

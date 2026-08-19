@@ -8,6 +8,15 @@
   browsers while preserving the last successful interactive application;
   later failures replace the message, and successful recovery clears it before
   the normal full-page reload.
+- The minimum supported Go release is now `1.25.12`; Core validates Go
+  `1.25.12` and `1.26.5` as the supported Linux toolchains.
+- Runtime invariants now use a private panic type. Application panic strings,
+  errors, and stringers remain ordinary user failures even when their text
+  starts with `goframe:`.
+- Package publication and export now validate the complete declared package
+  graph, including ordinary assets, styles, compressed sidecars, content
+  hashes, physical identity, and the completion-marker generation. Damaged
+  tool-owned output remains recognizable for safe cleanup.
 
 ## v0.3.0-preview.1
 

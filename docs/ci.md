@@ -16,7 +16,6 @@ It uses an explicit Go and host matrix:
 
 | host | Go | tier | full-only gates |
 | --- | --- | --- | --- |
-| `ubuntu-latest` | `1.22.12` | minimum module compatibility | none |
 | `ubuntu-latest` | `1.25.12` | supported | artifact/module/docs/race |
 | `ubuntu-latest` | `1.26.5` | supported | artifact/module/docs/race |
 | `macos-15-intel` | `1.26.5` | host evidence | none |
@@ -24,9 +23,8 @@ It uses an explicit Go and host matrix:
 
 Every matrix entry runs formatting, ordinary tests, vet, debug-tag tests, and
 selected GOX golden tests. The two supported Linux entries additionally run
-the artifact, module-path, docs, and race gates. Go `1.22.12` verifies the
-module's declared minimum without duplicating the full Linux gate. Every entry
-is required; no matrix lane is advisory.
+the artifact, module-path, docs, and race gates. Every entry is required; no
+matrix lane is advisory.
 
 It checks:
 
@@ -52,6 +50,14 @@ outputs, workspace cleanup behavior, package ownership markers, asset
 namespace collisions, lexical and physical source/output overlap, partial
 publication metadata, custom/generated standalone `index.html` integrity,
 fail-closed legacy ownership, and dev-server symlink entries.
+
+Package ownership and complete-graph integrity have separate controls. A real
+hashed package with ordinary assets, styles, gzip, and Brotli sidecars drives
+an adversarial gate for missing or corrupted artifacts, wrong hashes, symlinks,
+physical aliases, and completion-marker replacement. Package staging fails
+before replacing a prior complete package, export validates its source before
+destination mutation and validates a private stage before publication, and a
+damaged tool-owned package remains eligible for safe cleanup.
 
 Focused `goxc inspect` tests cover CLI resolution, deterministic text and
 schema-v1 JSON, copy-root byte identity, read-only filesystem behavior, writer
@@ -402,8 +408,8 @@ test run is not needed.
 
 Local checks use:
 
-- Go `1.22` or newer; the module declaration remains `go 1.22`;
-- Go `1.22.12` for minimum-version compatibility evidence;
+- Go `1.25.12` or newer; the module declaration requires the exact
+  `1.25.12` minimum patch level;
 - Go `1.25.12` and `1.26.5` for supported full Core evidence;
 - Go `1.26.5` for the browser-smoke and WASM-size baselines;
 - TinyGo `0.41.1` for focused source-selection parity, WASM size, and browser

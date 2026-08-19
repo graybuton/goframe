@@ -206,8 +206,9 @@ Boundary rules:
 - changing `ResetKey` while failed clears the incident and remounts children;
 - new state slots and reducer replacements observed in protected children
   remain speculative until the boundary transaction commits or rolls back;
-- runtime invariant panics whose value starts with `goframe:` bypass boundary
-  containment.
+- private typed runtime invariant panics bypass boundary containment. Plain
+  application strings, errors, and stringers are ordinary failures regardless
+  of whether their text starts with `goframe:`.
 
 Boundaries do not catch event, effect, cleanup, memo comparator, or context
 selector update failures. Those phases keep the phase-specific containment

@@ -173,9 +173,12 @@ Compatibility policy:
   the package root;
 - `goframe-package.json` is published last and removed first during destructive
   package cleanup so partial packages are not marked complete;
-- successful `goxc package` and `goxc export` runs verify the published
-  directory as a complete current package before printing success. If
-  verification fails, the completion marker is removed;
+- ownership remains a cleanup-safety classification, so a current tool-owned
+  package can still be removed when a declared ordinary asset or sidecar has
+  subsequently been damaged;
+- successful `goxc package` and `goxc export` runs apply the stronger complete
+  graph integrity contract before printing success. If published verification
+  fails, the completion marker is removed;
 - `index.html` is a managed package artifact and is removed during package or
   export replacement so stale bootstraps cannot survive a later package run;
 - adding metadata fields is backward-compatible;
@@ -193,15 +196,16 @@ should reject unsupported versions. No separate machine-readable JSON Schema
 document is provided.
 
 Inspection validates the declared current package graph, including assets,
-entrypoints, hashes, and compressed sidecars, but does not itself grant
-ownership. The current-package metadata readers shared by ownership
-classification, package verification, export, cleanup, and inspection require
+entrypoints, hashes, compressed sidecars, physical identity, and the stable
+completion-marker generation, but does not itself grant ownership. Package
+publication and export reuse this strong validator without writing an inspect
+report. Cleanup continues to use the narrower ownership classification, so
+damaged tool-owned output remains removable. Shared metadata readers require
 canonical generated logical names and paths; malformed or non-canonical
-metadata is classified as incomplete. The completion-marker role and the
-publication, export, and cleanup protocols are unchanged. Unknown additive
-fields in generated package metadata are not rejected merely because the
-report does not expose them. `generatedAt` is intentionally omitted so the same
-package copied to another safe root produces byte-identical JSON.
+metadata is classified as incomplete. Unknown additive fields in generated
+package metadata are not rejected merely because the report does not expose
+them. `generatedAt` is intentionally omitted so the same package copied to
+another safe root produces byte-identical JSON.
 
 Schema-version-1 ordered strings use ascending lexical order of their raw UTF-8
 bytes. Artifact paths and roles use that order, and edges compare `from`,
