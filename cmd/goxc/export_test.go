@@ -119,22 +119,10 @@ func createPackagedTestApp(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(layout.PackageDir, "assets"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeCompleteCurrentPackage(t, layout.PackageDir)
-	for path, content := range map[string]string{
-		"index.html":             "<html></html>",
-		"assets/bundle.wasm":     "wasm",
-		"assets/wasm_exec.js":    "js",
-		"assets/styles.app.css":  "body{}",
-		"assets/bundle.wasm.gz":  "gzip",
-		"assets/bundle.wasm.br":  "br",
-		"assets/wasm_exec.js.gz": "js gzip",
-	} {
-		if err := os.WriteFile(filepath.Join(layout.PackageDir, path), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writeInspectFixture(t, layout.PackageDir, inspectFixtureOptions{
+		styles:     true,
+		compressed: true,
+		extraAsset: true,
+	})
 	return appDir
 }

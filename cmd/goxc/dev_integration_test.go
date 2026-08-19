@@ -58,7 +58,7 @@ func TestDevRealWorkflowPublishesBuildErrorAndRecovers(t *testing.T) {
 		if err := os.RemoveAll(layout.PackageDir); err != nil {
 			return err
 		}
-		writeCompleteCurrentPackage(t, layout.PackageDir)
+		writeDevGenerationPackage(t, layout.PackageDir, "<html></html>")
 		return nil
 	}
 
@@ -398,10 +398,10 @@ func TestDevRealWorkflowServesCompletedGenerationDuringPublication(t *testing.T)
 	newPackage := t.TempDir()
 	writeDevGenerationPackage(t, oldPackage, "old completed index")
 	writeDevGenerationPackage(t, newPackage, "new completed index")
-	if err := os.WriteFile(filepath.Join(oldPackage, "assets", "bundle.12345678.wasm"), []byte("old completed wasm"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(oldPackage, "assets", "bundle.wasm"), []byte("old completed wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(newPackage, "assets", "bundle.12345678.wasm"), []byte("new completed wasm"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(newPackage, "assets", "bundle.wasm"), []byte("new completed wasm"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -455,21 +455,21 @@ func TestDevRealWorkflowServesCompletedGenerationDuringPublication(t *testing.T)
 	serverURL := waitDevServerURL(t, serverURLs)
 	oldMetadata := readDevHTTPBody(t, serverURL+"/"+packageMetadataName)
 	assertDevInjectedHTTPBody(t, serverURL+"/", "old completed index", 1)
-	assertDevHTTPBody(t, serverURL+"/assets/bundle.12345678.wasm", "old completed wasm")
+	assertDevHTTPBody(t, serverURL+"/assets/bundle.wasm", "old completed wasm")
 
 	writeTestFile(t, appDir, "main.go", "package main\n\nvar rebuild = true\n")
 	waitDevSignal(t, publicationOpen, "mutable canonical publication")
 	for request := 0; request < 12; request++ {
 		assertDevInjectedHTTPBody(t, serverURL+"/", "old completed index", 1)
 		assertDevHTTPBody(t, serverURL+"/"+packageMetadataName, oldMetadata)
-		assertDevHTTPBody(t, serverURL+"/assets/bundle.12345678.wasm", "old completed wasm")
+		assertDevHTTPBody(t, serverURL+"/assets/bundle.wasm", "old completed wasm")
 	}
 	close(releasePublication)
 	assertDevEvent(t, waitDevEvent(t, builds), 2, false, false)
 	assertDevGenerationEvent(t, generations, 2)
 	assertDevGenerationEvent(t, reloads, 2)
 	assertDevInjectedHTTPBody(t, serverURL+"/", "new completed index", 2)
-	assertDevHTTPBody(t, serverURL+"/assets/bundle.12345678.wasm", "new completed wasm")
+	assertDevHTTPBody(t, serverURL+"/assets/bundle.wasm", "new completed wasm")
 
 	cancel()
 	if err := waitDevRun(t, done); err != nil {

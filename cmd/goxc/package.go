@@ -32,14 +32,15 @@ const (
 )
 
 type packageOptions struct {
-	appDir          string
-	compiler        string
-	outDir          string
-	workspace       string
-	compress        map[string]bool
-	assetHash       bool
-	preload         bool
-	recordEmbedPlan func(embedInputPlan)
+	appDir                string
+	compiler              string
+	outDir                string
+	workspace             string
+	compress              map[string]bool
+	assetHash             bool
+	preload               bool
+	recordEmbedPlan       func(embedInputPlan)
+	beforeStageValidation func(packageRoot string)
 }
 
 type packageAssetPlan struct {
@@ -334,6 +335,15 @@ func packageApp(options packageOptions) error {
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 	}, "package metadata"); err != nil {
 		return err
+	}
+	if options.beforeStageValidation != nil {
+		options.beforeStageValidation(stageDir)
+	}
+	if _, err := inspectPackageGraph(stageDir); err != nil {
+		return invalidatePackageCompletionMarker(
+			stageDir,
+			fmt.Errorf("staged package failed integrity validation: %w", err),
+		)
 	}
 
 	if explicitOutDir {
@@ -668,14 +678,21 @@ func cleanPackageArtifacts(directory, wasmName string) error {
 }
 
 func verifyPublishedPackage(directory string) error {
-	ownership := inspectPackageOwnership(directory)
-	if ownership.State == packageOwnedCurrent {
+	if _, err := inspectPackageGraph(directory); err == nil {
 		return nil
+	} else {
+		return invalidatePackageCompletionMarker(
+			directory,
+			fmt.Errorf("published package failed integrity verification: %w", err),
+		)
 	}
+}
+
+func invalidatePackageCompletionMarker(directory string, failure error) error {
 	if err := os.Remove(filepath.Join(directory, packageMetadataName)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("published package failed integrity verification: %s; remove completion marker: %w", ownership.Reason, err)
+		return fmt.Errorf("%w; remove completion marker: %v", failure, err)
 	}
-	return fmt.Errorf("published package failed integrity verification: %s", ownership.Reason)
+	return failure
 }
 
 func writeJSONFile(path string, value any, description string) error {

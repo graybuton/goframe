@@ -1308,8 +1308,13 @@ func TestVerifyPublishedPackageInvalidatesIncompleteMarker(t *testing.T) {
 }
 
 func TestVerifyPublishedPackageAcceptsCompletePackage(t *testing.T) {
-	directory := t.TempDir()
-	writeCompleteCurrentPackage(t, directory)
+	directory := filepath.Join(t.TempDir(), "package")
+	writeInspectFixture(t, directory, inspectFixtureOptions{
+		hashAssets: true,
+		styles:     true,
+		compressed: true,
+		extraAsset: true,
+	})
 	if err := verifyPublishedPackage(directory); err != nil {
 		t.Fatalf("verifyPublishedPackage() error: %v", err)
 	}

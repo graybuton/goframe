@@ -93,6 +93,10 @@ type inspectCommandHooks struct {
 	BeforeFinalFence func(packageRoot string)
 }
 
+type packageGraphValidationHooks struct {
+	BeforeFinalFence func(packageRoot string)
+}
+
 type inspectPackageGenerationFence struct {
 	path   string
 	info   os.FileInfo
@@ -109,15 +113,10 @@ func runInspectCommandWithHooks(args []string, stdout io.Writer, hooks inspectCo
 	if err != nil {
 		return err
 	}
-	fence, err := captureInspectPackageGenerationFence(packageRoot)
+	report, err := validatePackageGraphWithHooks(packageRoot, packageGraphValidationHooks{
+		BeforeFinalFence: hooks.BeforeFinalFence,
+	})
 	if err != nil {
-		return err
-	}
-	report, err := inspectPackageGraph(packageRoot)
-	if err != nil {
-		if fenceErr := verifyInspectPackageGenerationFence(fence); fenceErr != nil {
-			return fenceErr
-		}
 		return err
 	}
 
@@ -134,12 +133,6 @@ func runInspectCommandWithHooks(args []string, stdout io.Writer, hooks inspectCo
 	default:
 		return fmt.Errorf("unsupported inspect format %q", options.format)
 	}
-	if hooks.BeforeFinalFence != nil {
-		hooks.BeforeFinalFence(packageRoot)
-	}
-	if err := verifyInspectPackageGenerationFence(fence); err != nil {
-		return err
-	}
 	written, err := stdout.Write(output.Bytes())
 	if err == nil && written != output.Len() {
 		err = io.ErrShortWrite
@@ -148,6 +141,38 @@ func runInspectCommandWithHooks(args []string, stdout io.Writer, hooks inspectCo
 		return fmt.Errorf("write inspect %s report: %w", options.format, err)
 	}
 	return nil
+}
+
+func inspectPackageGraph(root string) (inspectReport, error) {
+	return validatePackageGraphWithHooks(root, packageGraphValidationHooks{})
+}
+
+func validatePackageGraphWithHooks(
+	root string,
+	hooks packageGraphValidationHooks,
+) (inspectReport, error) {
+	root, err := validateInspectPackageRoot(root)
+	if err != nil {
+		return inspectReport{}, err
+	}
+	fence, err := captureInspectPackageGenerationFence(root)
+	if err != nil {
+		return inspectReport{}, err
+	}
+	report, err := inspectPackageGraphContents(root)
+	if err != nil {
+		if fenceErr := verifyInspectPackageGenerationFence(fence); fenceErr != nil {
+			return inspectReport{}, fenceErr
+		}
+		return inspectReport{}, err
+	}
+	if hooks.BeforeFinalFence != nil {
+		hooks.BeforeFinalFence(root)
+	}
+	if err := verifyInspectPackageGenerationFence(fence); err != nil {
+		return inspectReport{}, err
+	}
+	return report, nil
 }
 
 func captureInspectPackageGenerationFence(packageRoot string) (inspectPackageGenerationFence, error) {
@@ -396,11 +421,7 @@ func (registry *inspectPhysicalArtifactRegistry) add(reportedPath string, info o
 	return nil
 }
 
-func inspectPackageGraph(root string) (inspectReport, error) {
-	root, err := validateInspectPackageRoot(root)
-	if err != nil {
-		return inspectReport{}, err
-	}
+func inspectPackageGraphContents(root string) (inspectReport, error) {
 	metadata, err := readCurrentPackageMetadata(filepath.Join(root, packageMetadataName))
 	if err != nil {
 		return inspectReport{}, err

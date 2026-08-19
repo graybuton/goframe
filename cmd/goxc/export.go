@@ -4,16 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 type exportOptions struct {
-	appDir    string
-	outDir    string
-	workspace string
-	force     bool
+	appDir                 string
+	outDir                 string
+	workspace              string
+	force                  bool
+	stdout                 io.Writer
+	beforeSourceFinalFence func(packageRoot string)
+	beforeStageFinalFence  func(packageRoot string)
 }
 
 func exportCommand(args []string) error {
@@ -80,8 +84,30 @@ func exportApp(options exportOptions) error {
 	} else if !info.IsDir() {
 		return fmt.Errorf("standalone package path is not a directory: %s", layout.PackageDir)
 	}
-	if ownership := inspectPackageOwnership(layout.PackageDir); ownership.State != packageOwnedCurrent {
-		return fmt.Errorf("standalone package %s is not a complete current GoFrame package: %s", layout.PackageDir, ownership.Reason)
+	if _, err := validatePackageGraphWithHooks(layout.PackageDir, packageGraphValidationHooks{
+		BeforeFinalFence: options.beforeSourceFinalFence,
+	}); err != nil {
+		return fmt.Errorf("standalone package %s failed integrity validation: %w", layout.PackageDir, err)
+	}
+	tempDir, err := os.MkdirTemp("", "goxc-export-*")
+	if err != nil {
+		return fmt.Errorf("create temporary export directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+	stageDir := filepath.Join(tempDir, "stage")
+	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+		return fmt.Errorf("create staging export directory: %w", err)
+	}
+	if err := publishPackageArtifacts(layout.PackageDir, stageDir); err != nil {
+		return fmt.Errorf("stage standalone package export: %w", err)
+	}
+	if _, err := validatePackageGraphWithHooks(stageDir, packageGraphValidationHooks{
+		BeforeFinalFence: options.beforeStageFinalFence,
+	}); err != nil {
+		return invalidatePackageCompletionMarker(
+			stageDir,
+			fmt.Errorf("staged export failed integrity validation: %w", err),
+		)
 	}
 	if err := ensureNoPhysicalOverlap(options.outDir, layout.PackageDir, "export output directory", "standalone package directory"); err != nil {
 		return err
@@ -104,13 +130,19 @@ func exportApp(options exportOptions) error {
 	if err := cleanPackageArtifacts(options.outDir, "bundle.wasm"); err != nil {
 		return err
 	}
-	if err := publishPackageArtifacts(layout.PackageDir, options.outDir); err != nil {
+	if err := publishPackageArtifacts(stageDir, options.outDir); err != nil {
 		return err
 	}
 	if err := verifyPublishedPackage(options.outDir); err != nil {
 		return err
 	}
-	fmt.Printf("exported %s -> %s\n", layout.PackageDir, options.outDir)
+	stdout := options.stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if _, err := fmt.Fprintf(stdout, "exported %s -> %s\n", layout.PackageDir, options.outDir); err != nil {
+		return fmt.Errorf("write export success output: %w", err)
+	}
 	return nil
 }
 
