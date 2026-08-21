@@ -775,7 +775,7 @@ func writeDevIntegrationApp(t *testing.T, appDir, repositoryRoot, name string) {
 	t.Helper()
 	writeTestFile(t, appDir, "go.mod", fmt.Sprintf(`module example.com/devapp
 
-go 1.22
+go 1.26.6
 
 require %s v0.0.0
 
@@ -806,7 +806,7 @@ func writeDevEmbedIntegrationApp(t *testing.T, appDir, repositoryRoot string) {
 	t.Helper()
 	writeTestFile(t, appDir, "go.mod", fmt.Sprintf(`module example.com/devembed
 
-go 1.22
+go 1.26.6
 
 require %s v0.0.0
 

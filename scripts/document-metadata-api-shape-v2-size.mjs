@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtureRelative = "scripts/fixtures/document-metadata-api-shape-v2";
 const fixtureSource = join(rootDir, fixtureRelative);
-const goToolchain = process.env.GOTOOLCHAIN ?? "go1.26.5";
+const goToolchain = process.env.GOTOOLCHAIN ?? "go1.26.6";
 const candidates = ["control", "hook", "component", "handle"];
 const compilers = ["go", "tinygo"];
 const symbols = [

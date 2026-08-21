@@ -16,10 +16,10 @@ It uses an explicit Go and host matrix:
 
 | host | Go | tier | full-only gates |
 | --- | --- | --- | --- |
-| `ubuntu-latest` | `1.25.12` | supported | artifact/module/docs/race |
-| `ubuntu-latest` | `1.26.5` | supported | artifact/module/docs/race |
-| `macos-15-intel` | `1.26.5` | host evidence | none |
-| `windows-latest` | `1.26.5` | host evidence | none |
+| `ubuntu-latest` | `1.26.6` | supported minimum | artifact/module/docs/race |
+| `ubuntu-latest` | `1.27.0` | supported stable | artifact/module/docs/race |
+| `macos-15-intel` | `1.26.6` | host evidence | none |
+| `windows-latest` | `1.26.6` | host evidence | none |
 
 Every matrix entry runs formatting, ordinary tests, vet, debug-tag tests, and
 selected GOX golden tests. The two supported Linux entries additionally run
@@ -39,9 +39,11 @@ It checks:
 - GOX golden tests, including source-oriented error diagnostics.
 - GOX fuzz seed targets through the normal `go test ./...` seed pass.
 
-A separate focused Linux matrix installs TinyGo `0.41.1` under Go `1.25.12`
-and Go `1.26.5`. It checks browser source-selection parity and feature-tagged
-TinyGo builds without duplicating the full package, browser, or size workflows.
+A separate focused Linux job installs TinyGo `0.41.1` under Go `1.26.6`. It
+checks browser source-selection parity and feature-tagged TinyGo builds without
+duplicating the full package, browser, or size workflows. TinyGo `0.41.1`
+supports Go through `1.26`, so the stable Go `1.27.0` Core row does not claim
+TinyGo parity.
 
 The `cmd/goxc` test suite includes manifest/path/package/export/workspace
 regression tests, including root-aware symlink checks for app roots, entry
@@ -104,7 +106,7 @@ pass.
 `.github/workflows/ci-wasm-size.yml` runs on pull requests, pushes to `main`,
 and manually through `workflow_dispatch`.
 
-It installs Go `1.26.5`, TinyGo `0.41.1`, brotli, and zstd. Then it packages
+It installs Go `1.26.6`, TinyGo `0.41.1`, brotli, and zstd. Then it packages
 the counter, components, todo, dashboard, context, virtualized, multipackage,
 cmdapp, router, router-dashboard, and resource examples with TinyGo. It also
 runs a release-style package pass with `--asset-hash --preload
@@ -149,7 +151,7 @@ older `main.wasm` packages.
 `.github/workflows/ci-browser-smoke.yml` runs on pull requests, pushes to
 `main`, and manually through `workflow_dispatch` on `ubuntu-latest` only.
 
-It installs Go `1.26.5`, TinyGo `0.41.1`, Node.js `24.18.1`, Chrome, and
+It installs Go `1.26.6`, TinyGo `0.41.1`, Node.js `24.18.1`, Chrome, and
 compression tools, then runs:
 
 ```bash
@@ -408,10 +410,10 @@ test run is not needed.
 
 Local checks use:
 
-- Go `1.25.12` or newer; the module declaration requires the exact
-  `1.25.12` minimum patch level;
-- Go `1.25.12` and `1.26.5` for supported full Core evidence;
-- Go `1.26.5` for the browser-smoke and WASM-size baselines;
+- Go `1.26.6` or newer; the module declaration requires the exact
+  `1.26.6` minimum patch level;
+- Go `1.26.6` and stable Go `1.27.0` for supported full Core evidence;
+- Go `1.26.6` for the browser-smoke, TinyGo parity, and WASM-size baselines;
 - TinyGo `0.41.1` for focused source-selection parity, WASM size, and browser
   smoke gates;
 - gzip;
@@ -421,9 +423,10 @@ Local checks use:
 - Chrome or Chromium for browser smoke;
 - curl for smoke server readiness checks.
 
-Go `1.25.12` currently has correctness and source-selection evidence. The
-single heavy browser and size baseline uses Go `1.26.5`; it does not imply a
-second Go `1.25.12` browser or size matrix.
+Go `1.26.6` is the minimum compatibility row and the heavy browser, TinyGo,
+and size baseline. Stable Go `1.27.0` has a full standard-Go Linux Core row.
+Older Go versions are outside the supported GoFrame preview contract, and the
+Go `1.27.0` row does not imply a second TinyGo, browser, or size matrix.
 
 Set `CHROME=/path/to/chrome` when Chrome is not available as `google-chrome`.
 There is no local non-Chrome smoke command in the current preview contract.

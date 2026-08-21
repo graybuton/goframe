@@ -1296,7 +1296,7 @@ func TestEffectivePropDestinationControlsBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	module := "module example.com/effective-props\n\ngo 1.25.12\n\n" +
+	module := "module example.com/effective-props\n\ngo 1.26.6\n\n" +
 		"require github.com/graybuton/goframe v0.0.0\n\n" +
 		"replace github.com/graybuton/goframe => " + filepath.ToSlash(repositoryRoot) + "\n"
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644); err != nil {

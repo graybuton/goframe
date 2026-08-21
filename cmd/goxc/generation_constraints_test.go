@@ -311,13 +311,18 @@ func TestBrowserFeatureToolTagsUseSelectedGoVersion(t *testing.T) {
 		},
 		{
 			name:      "Go 1.26 default",
-			goVersion: "go1.26.5",
+			goVersion: "go1.26.6",
 			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
 		},
 		{
 			name:      "Go 1.26 explicit old feature",
-			goVersion: "go1.26.5",
+			goVersion: "go1.26.6",
 			goWASM:    "satconv",
+			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
+		},
+		{
+			name:      "Go 1.27 default",
+			goVersion: "go1.27.0",
 			want:      []string{"custom.tool", "wasm.satconv", "wasm.signext"},
 		},
 		{
@@ -344,8 +349,8 @@ func TestBrowserFeatureToolTagsUseSelectedGoVersion(t *testing.T) {
 		},
 		{
 			name:      "malformed selected version",
-			goVersion: "1.26.5",
-			wantError: `unsupported version "1.26.5"`,
+			goVersion: "1.26.6",
+			wantError: `unsupported version "1.26.6"`,
 		},
 		{
 			name:      "development selected version",
@@ -402,7 +407,7 @@ func TestBrowserSelectedToolchainOverridesBuildToolchainTags(t *testing.T) {
 		{
 			name:              "selected Go 1.26 overrides Go 1.25 build context",
 			buildReleaseTags:  []string{"go1.1", "go1.25"},
-			selectedGoVersion: "go1.26.5",
+			selectedGoVersion: "go1.26.6",
 			wantFeatures:      true,
 		},
 		{
@@ -498,12 +503,23 @@ func TestBrowserSelectedReleaseTagsControlAuthoredAndGOXSelection(t *testing.T) 
 		{
 			name:              "selected Go 1.26 overrides Go 1.25 build context",
 			buildReleaseTags:  testReleaseTagsThrough(25),
-			selectedGoVersion: "go1.26.5",
+			selectedGoVersion: "go1.26.6",
 			wantReleaseMinor:  26,
 			constraints: map[string]bool{
 				"go1.25": true,
 				"go1.26": true,
 				"go1.27": false,
+			},
+		},
+		{
+			name:              "selected Go 1.27 overrides Go 1.26 build context",
+			buildReleaseTags:  testReleaseTagsThrough(26),
+			selectedGoVersion: "go1.27.0",
+			wantReleaseMinor:  27,
+			constraints: map[string]bool{
+				"go1.26": true,
+				"go1.27": true,
+				"go1.28": false,
 			},
 		},
 		{
@@ -662,7 +678,7 @@ func Child() gf.Node {
 			string,
 		) (browserToolchainObservation, error) {
 			observations++
-			return browserToolchainObservation{goVersion: "go1.26.5"}, nil
+			return browserToolchainObservation{goVersion: "go1.26.6"}, nil
 		},
 	)
 	if err != nil {
@@ -682,7 +698,7 @@ func Child() gf.Node {
 }
 
 func TestBrowserToolchainObservationIsNotGloballyCached(t *testing.T) {
-	versions := []string{"go1.25.12", "go1.26.5"}
+	versions := []string{"go1.25.12", "go1.26.6"}
 	observations := 0
 	observe := func(
 		string,

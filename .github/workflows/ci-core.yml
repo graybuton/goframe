@@ -18,19 +18,19 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            go: '1.25.12'
+            go: '1.26.6'
             tier: supported
             full: true
           - os: ubuntu-latest
-            go: '1.26.5'
+            go: '1.27.0'
             tier: supported
             full: true
           - os: macos-15-intel
-            go: '1.26.5'
+            go: '1.26.6'
             tier: host
             full: false
           - os: windows-latest
-            go: '1.26.5'
+            go: '1.26.6'
             tier: host
             full: false
 
@@ -90,8 +90,7 @@ jobs:
       fail-fast: false
       matrix:
         go:
-          - '1.25.12'
-          - '1.26.5'
+          - '1.26.6'
 
     env:
       TINYGO_VERSION: 0.41.1
