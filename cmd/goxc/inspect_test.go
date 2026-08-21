@@ -1649,6 +1649,136 @@ func TestInspectRejectsPhysicalArtifactAliases(t *testing.T) {
 	}
 }
 
+func TestPhysicalFileIdentityMatchesHardLinks(t *testing.T) {
+	if !indexedPhysicalFileIdentity {
+		t.Skip("host uses the correctness-preserving SameFile fallback")
+	}
+	root := t.TempDir()
+	original := filepath.Join(root, "original")
+	alias := filepath.Join(root, "alias")
+	distinct := filepath.Join(root, "distinct")
+	if err := os.WriteFile(original, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(original, alias); err != nil {
+		t.Skipf("hard links are unavailable: %v", err)
+	}
+	if err := os.WriteFile(distinct, []byte("distinct\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	identityFor := func(path string) physicalFileIdentity {
+		t.Helper()
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity, err := physicalFileIdentityForPath(path, info)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return identity
+	}
+	originalIdentity := identityFor(original)
+	if aliasIdentity := identityFor(alias); aliasIdentity != originalIdentity {
+		t.Fatalf("hard-link identity = %+v, want %+v", aliasIdentity, originalIdentity)
+	}
+	if distinctIdentity := identityFor(distinct); distinctIdentity == originalIdentity {
+		t.Fatalf("distinct-file identity = %+v, want value different from %+v", distinctIdentity, originalIdentity)
+	}
+}
+
+func TestPhysicalArtifactIdentityRegistryUsesOneLookup(t *testing.T) {
+	const count = 256
+	identities := make(map[string]physicalFileIdentity, count)
+	for index := range count {
+		identities[fmt.Sprintf("artifact-%03d", index)] = physicalFileIdentity{volume: 1, index: uint64(index + 1)}
+	}
+	lookups := 0
+	registry := newInspectPhysicalArtifactRegistryWithResolver(func(path string, _ os.FileInfo) (physicalFileIdentity, error) {
+		lookups++
+		return identities[path], nil
+	})
+	for path := range identities {
+		if err := registry.add(path, path, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if lookups != count {
+		t.Fatalf("physical identity lookups = %d, want exactly %d", lookups, count)
+	}
+	if len(registry.byIdentity) != count {
+		t.Fatalf("indexed identities = %d, want %d", len(registry.byIdentity), count)
+	}
+	if len(registry.artifacts) != 0 {
+		t.Fatalf("indexed registry retained %d linear artifacts", len(registry.artifacts))
+	}
+}
+
+func TestPhysicalArtifactAliasRegistry(t *testing.T) {
+	identities := map[string]physicalFileIdentity{
+		"first":    {volume: 1, index: 1},
+		"alias":    {volume: 1, index: 1},
+		"distinct": {volume: 1, index: 2},
+	}
+	registry := newInspectPhysicalArtifactRegistryWithResolver(func(path string, _ os.FileInfo) (physicalFileIdentity, error) {
+		return identities[path], nil
+	})
+	if err := registry.add("assets/first", "first", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.add("assets/first", "first", nil); err != nil {
+		t.Fatalf("consistent repeated path was rejected: %v", err)
+	}
+	if err := registry.add("assets/distinct", "distinct", nil); err != nil {
+		t.Fatalf("distinct identity was rejected: %v", err)
+	}
+	if err := registry.add("assets/alias", "alias", nil); err == nil || !strings.Contains(err.Error(), "physical alias") {
+		t.Fatalf("different reported path sharing an identity error = %v, want physical alias rejection", err)
+	}
+}
+
+func TestPhysicalArtifactIdentityFailureIsFatal(t *testing.T) {
+	want := errors.New("identity unavailable")
+	registry := newInspectPhysicalArtifactRegistryWithResolver(func(string, os.FileInfo) (physicalFileIdentity, error) {
+		return physicalFileIdentity{}, want
+	})
+	err := registry.add("assets/app.js", "app.js", nil)
+	if !errors.Is(err, want) {
+		t.Fatalf("identity error = %v, want wrapped %v", err, want)
+	}
+}
+
+func BenchmarkPhysicalArtifactRegistry(b *testing.B) {
+	for _, count := range []int{100, 1_000, 5_000} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			root := b.TempDir()
+			paths := make([]string, count)
+			infos := make([]os.FileInfo, count)
+			for index := range count {
+				paths[index] = filepath.Join(root, fmt.Sprintf("artifact-%05d", index))
+				if err := os.WriteFile(paths[index], []byte{byte(index)}, 0o644); err != nil {
+					b.Fatal(err)
+				}
+				info, err := os.Lstat(paths[index])
+				if err != nil {
+					b.Fatal(err)
+				}
+				infos[index] = info
+			}
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				registry := newInspectPhysicalArtifactRegistry()
+				for index := range count {
+					if err := registry.add(filepath.Base(paths[index]), paths[index], infos[index]); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestInspectAcceptsDistinctCaseDifferentFiles(t *testing.T) {
 	fixture := writeInspectFixture(t, filepath.Join(t.TempDir(), "package"), inspectFixtureOptions{})
 	const upperPath = "assets/App.js"
