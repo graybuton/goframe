@@ -89,11 +89,29 @@ func exportApp(options exportOptions) error {
 	}); err != nil {
 		return fmt.Errorf("standalone package %s failed integrity validation: %w", layout.PackageDir, err)
 	}
+	if err := ensureNoPhysicalOverlap(options.outDir, layout.PackageDir, "export output directory", "standalone package directory"); err != nil {
+		return err
+	}
+	if err := ensureNoPhysicalOverlap(options.outDir, layout.AppDir, "export output directory", "application directory"); err != nil {
+		return err
+	}
+	if err := validateExplicitPathRoot(options.outDir, "export output directory", true); err != nil {
+		return err
+	}
+	if err := validateExportDestination(options.outDir, options.force); err != nil {
+		return err
+	}
 	tempDir, err := os.MkdirTemp("", "goxc-export-*")
 	if err != nil {
 		return fmt.Errorf("create temporary export directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
+	if err := ensureNoPhysicalOverlap(tempDir, layout.PackageDir, "temporary export directory", "standalone package directory"); err != nil {
+		return err
+	}
+	if err := ensureNoPhysicalOverlap(tempDir, options.outDir, "temporary export directory", "export output directory"); err != nil {
+		return err
+	}
 	stageDir := filepath.Join(tempDir, "stage")
 	if err := os.MkdirAll(stageDir, 0o755); err != nil {
 		return fmt.Errorf("create staging export directory: %w", err)
@@ -108,18 +126,6 @@ func exportApp(options exportOptions) error {
 			stageDir,
 			fmt.Errorf("staged export failed integrity validation: %w", err),
 		)
-	}
-	if err := ensureNoPhysicalOverlap(options.outDir, layout.PackageDir, "export output directory", "standalone package directory"); err != nil {
-		return err
-	}
-	if err := ensureNoPhysicalOverlap(options.outDir, layout.AppDir, "export output directory", "application directory"); err != nil {
-		return err
-	}
-	if err := validateExplicitPathRoot(options.outDir, "export output directory", true); err != nil {
-		return err
-	}
-	if err := validateExportDestination(options.outDir, options.force); err != nil {
-		return err
 	}
 	if err := validateExplicitPathRoot(options.outDir, "export output directory", true); err != nil {
 		return err
