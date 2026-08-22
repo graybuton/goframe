@@ -723,7 +723,10 @@ func writeRewrittenIndex(sourcePath, destinationPath string, options htmlRewrite
 	if err != nil {
 		return fmt.Errorf("read %s: %w", sourcePath, err)
 	}
-	rewritten := rewriteIndexHTML(string(content), options)
+	rewritten, err := rewriteIndexHTML(string(content), options)
+	if err != nil {
+		return fmt.Errorf("rewrite custom index.html: %w", err)
+	}
 	if err := writeFileAtomic(destinationPath, []byte(rewritten), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", destinationPath, err)
 	}
@@ -774,33 +777,6 @@ func generateIndexHTML(options htmlRewriteOptions) string {
 	return builder.String()
 }
 
-func rewriteIndexHTML(content string, options htmlRewriteOptions) string {
-	preload := preloadHTML(options)
-	content, replaced := replaceHTMLBlock(content, preloadBlockName, preload)
-	if !replaced && preload != "" {
-		content = strings.Replace(content, "</head>", preload+"\n</head>", 1)
-	}
-
-	runtime := runtimeHTML(options)
-	content, replaced = replaceHTMLBlock(content, runtimeBlockName, runtime)
-	if !replaced {
-		content = strings.ReplaceAll(content, runtimeAssetName, options.runtimePath)
-	}
-
-	bootstrap := bootstrapHTML(options)
-	content, replaced = replaceHTMLBlock(content, bootstrapBlockName, bootstrap)
-	if !replaced {
-		content = strings.ReplaceAll(content, "main.wasm", options.wasmPath)
-		content = strings.ReplaceAll(content, "bundle.wasm", options.wasmPath)
-	}
-
-	for source, destination := range options.styleRewrites {
-		content = strings.ReplaceAll(content, `href="`+source+`"`, `href="`+destination+`"`)
-		content = strings.ReplaceAll(content, `href="./`+source+`"`, `href="`+destination+`"`)
-	}
-	return content
-}
-
 func preloadHTML(options htmlRewriteOptions) string {
 	if !options.preload {
 		return ""
@@ -825,23 +801,6 @@ func bootstrapHTML(options htmlRewriteOptions) string {
     WebAssembly.instantiateStreaming(fetch("%s"), go.importObject)
         .then((result) => go.run(result.instance));
 </script>`, options.wasmPath)
-}
-
-func replaceHTMLBlock(content, name, replacement string) (string, bool) {
-	startMarker := "<!-- goframe:" + name + " -->"
-	endMarker := "<!-- /goframe:" + name + " -->"
-	start := strings.Index(content, startMarker)
-	if start < 0 {
-		return content, false
-	}
-	end := strings.Index(content[start:], endMarker)
-	if end < 0 {
-		return content, false
-	}
-	end += start
-	blockEnd := end + len(endMarker)
-	block := startMarker + "\n" + replacement + "\n" + endMarker
-	return content[:start] + block + content[blockEnd:], true
 }
 
 func writePackageAsset(sourcePath, assetsDir, logicalName string, options packageOptions) (packageAsset, error) {
