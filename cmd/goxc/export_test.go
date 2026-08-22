@@ -221,6 +221,125 @@ func TestExportRejectsOverlappingTemporaryRoot(t *testing.T) {
 	}
 }
 
+func TestExportRejectsModeledBindMountOverlaps(t *testing.T) {
+	tests := []struct {
+		name             string
+		protectedRoot    func(appDir, packageRoot string) string
+		useAliasForTemp  bool
+		tempDescendant   bool
+		errorDescription string
+	}{
+		{
+			name: "temporary root aliases source package",
+			protectedRoot: func(_, packageRoot string) string {
+				return packageRoot
+			},
+			useAliasForTemp:  true,
+			errorDescription: "temporary export directory",
+		},
+		{
+			name: "temporary root descends from source alias",
+			protectedRoot: func(_, packageRoot string) string {
+				return packageRoot
+			},
+			useAliasForTemp:  true,
+			tempDescendant:   true,
+			errorDescription: "temporary export directory",
+		},
+		{
+			name: "destination descends from source alias",
+			protectedRoot: func(_, packageRoot string) string {
+				return packageRoot
+			},
+			errorDescription: "export output directory",
+		},
+		{
+			name: "destination descends from application alias",
+			protectedRoot: func(appDir, _ string) string {
+				return appDir
+			},
+			errorDescription: "export output directory",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := createPackagedTestApp(t)
+			layout, err := newBuildLayout(layoutOptions{appDir: appDir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			aliasRoot := filepath.Join(t.TempDir(), "bind-alias")
+			if err := os.MkdirAll(aliasRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			protectedRoot := test.protectedRoot(appDir, layout.PackageDir)
+			operations := modeledPhysicalPathOperations(t, map[string]string{
+				protectedRoot: "protected-root",
+				aliasRoot:     "protected-root",
+			})
+
+			tempRoot := filepath.Join(t.TempDir(), "temporary")
+			if err := os.MkdirAll(tempRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(aliasRoot, "export")
+			if test.useAliasForTemp {
+				tempRoot = aliasRoot
+				if test.tempDescendant {
+					tempRoot = filepath.Join(aliasRoot, "temporary")
+					if err := os.MkdirAll(tempRoot, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				destination = filepath.Join(t.TempDir(), "export")
+			}
+			if err := os.MkdirAll(destination, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeInspectRaw(t, destination, "sentinel.txt", []byte("keep\n"))
+			setExportTemporaryRoot(t, tempRoot)
+
+			applicationSnapshot := snapshotInspectTree(t, appDir)
+			destinationSnapshot := snapshotInspectTree(t, destination)
+			temporarySnapshot := snapshotInspectTree(t, tempRoot)
+			var output bytes.Buffer
+			err = exportApp(exportOptions{
+				appDir:                 appDir,
+				outDir:                 destination,
+				force:                  true,
+				stdout:                 &output,
+				physicalPathOperations: &operations,
+			})
+
+			if err == nil {
+				t.Fatal("exportApp() accepted modeled bind-mount overlap")
+			}
+			if !strings.Contains(err.Error(), test.errorDescription) || !strings.Contains(err.Error(), "must not overlap") {
+				t.Fatalf("exportApp() error = %v, want %s overlap rejection", err, test.errorDescription)
+			}
+			if output.Len() != 0 {
+				t.Fatalf("rejected export emitted success output: %q", output.String())
+			}
+			if got := snapshotInspectTree(t, appDir); !reflect.DeepEqual(got, applicationSnapshot) {
+				t.Fatalf("rejected export changed application tree\nbefore: %#v\nafter:  %#v", applicationSnapshot, got)
+			}
+			if got := snapshotInspectTree(t, destination); !reflect.DeepEqual(got, destinationSnapshot) {
+				t.Fatalf("rejected export changed destination tree\nbefore: %#v\nafter:  %#v", destinationSnapshot, got)
+			}
+			if got := snapshotInspectTree(t, tempRoot); !reflect.DeepEqual(got, temporarySnapshot) {
+				t.Fatalf("rejected export changed temporary-root tree\nbefore: %#v\nafter:  %#v", temporarySnapshot, got)
+			}
+			if _, statErr := os.Lstat(filepath.Join(destination, packageMetadataName)); !os.IsNotExist(statErr) {
+				t.Fatalf("rejected export published a completion marker: %v", statErr)
+			}
+			if paths := exportTemporaryPaths(t, tempRoot); len(paths) != 0 {
+				t.Fatalf("rejected export retained temporary paths: %#v", paths)
+			}
+		})
+	}
+}
+
 func TestExportRejectsDestinationOverlapBeforeStaging(t *testing.T) {
 	appDir := createPackagedTestApp(t)
 	layout, err := newBuildLayout(layoutOptions{appDir: appDir})

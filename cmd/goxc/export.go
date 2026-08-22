@@ -18,6 +18,7 @@ type exportOptions struct {
 	stdout                 io.Writer
 	beforeSourceFinalFence func(packageRoot string)
 	beforeStageFinalFence  func(packageRoot string)
+	physicalPathOperations *physicalPathOperations
 }
 
 func exportCommand(args []string) error {
@@ -66,6 +67,19 @@ func parseExportOptions(args []string) (exportOptions, error) {
 }
 
 func exportApp(options exportOptions) error {
+	pathOperations := defaultPhysicalPathOperations()
+	if options.physicalPathOperations != nil {
+		pathOperations = *options.physicalPathOperations
+	}
+	ensureNoOverlap := func(first, second, firstDescription, secondDescription string) error {
+		return ensureNoPhysicalOverlapWithOperations(
+			first,
+			second,
+			firstDescription,
+			secondDescription,
+			pathOperations,
+		)
+	}
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return err
 	}
@@ -89,10 +103,10 @@ func exportApp(options exportOptions) error {
 	}); err != nil {
 		return fmt.Errorf("standalone package %s failed integrity validation: %w", layout.PackageDir, err)
 	}
-	if err := ensureNoPhysicalOverlap(options.outDir, layout.PackageDir, "export output directory", "standalone package directory"); err != nil {
+	if err := ensureNoOverlap(options.outDir, layout.PackageDir, "export output directory", "standalone package directory"); err != nil {
 		return err
 	}
-	if err := ensureNoPhysicalOverlap(options.outDir, layout.AppDir, "export output directory", "application directory"); err != nil {
+	if err := ensureNoOverlap(options.outDir, layout.AppDir, "export output directory", "application directory"); err != nil {
 		return err
 	}
 	if err := validateExplicitPathRoot(options.outDir, "export output directory", true); err != nil {
@@ -101,15 +115,34 @@ func exportApp(options exportOptions) error {
 	if err := validateExportDestination(options.outDir, options.force); err != nil {
 		return err
 	}
-	tempDir, err := os.MkdirTemp("", "goxc-export-*")
+	temporaryRoot := os.TempDir()
+	if err := ensurePhysicalPathNotInsideWithOperations(
+		temporaryRoot,
+		layout.PackageDir,
+		"temporary export directory",
+		"standalone package directory",
+		pathOperations,
+	); err != nil {
+		return err
+	}
+	if err := ensurePhysicalPathNotInsideWithOperations(
+		temporaryRoot,
+		options.outDir,
+		"temporary export directory",
+		"export output directory",
+		pathOperations,
+	); err != nil {
+		return err
+	}
+	tempDir, err := os.MkdirTemp(temporaryRoot, "goxc-export-*")
 	if err != nil {
 		return fmt.Errorf("create temporary export directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
-	if err := ensureNoPhysicalOverlap(tempDir, layout.PackageDir, "temporary export directory", "standalone package directory"); err != nil {
+	if err := ensureNoOverlap(tempDir, layout.PackageDir, "temporary export directory", "standalone package directory"); err != nil {
 		return err
 	}
-	if err := ensureNoPhysicalOverlap(tempDir, options.outDir, "temporary export directory", "export output directory"); err != nil {
+	if err := ensureNoOverlap(tempDir, options.outDir, "temporary export directory", "export output directory"); err != nil {
 		return err
 	}
 	stageDir := filepath.Join(tempDir, "stage")

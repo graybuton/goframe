@@ -276,8 +276,36 @@ func pathsOverlap(first, second string) bool {
 	return relation != "separate"
 }
 
+type physicalPathOperations struct {
+	stat     func(string) (os.FileInfo, error)
+	sameFile func(os.FileInfo, os.FileInfo) bool
+}
+
+func defaultPhysicalPathOperations() physicalPathOperations {
+	return physicalPathOperations{
+		stat:     os.Stat,
+		sameFile: os.SameFile,
+	}
+}
+
 func ensureNoPhysicalOverlap(first, second, firstDescription, secondDescription string) error {
-	overlap, err := physicalPathsOverlap(first, second)
+	return ensureNoPhysicalOverlapWithOperations(
+		first,
+		second,
+		firstDescription,
+		secondDescription,
+		defaultPhysicalPathOperations(),
+	)
+}
+
+func ensureNoPhysicalOverlapWithOperations(
+	first,
+	second,
+	firstDescription,
+	secondDescription string,
+	operations physicalPathOperations,
+) error {
+	overlap, err := physicalPathsOverlapWithOperations(first, second, operations)
 	if err != nil {
 		return fmt.Errorf("compare %s %s with %s %s: %w", firstDescription, first, secondDescription, second, err)
 	}
@@ -287,8 +315,29 @@ func ensureNoPhysicalOverlap(first, second, firstDescription, secondDescription 
 	return nil
 }
 
+func ensurePhysicalPathNotInsideWithOperations(
+	candidate,
+	protected,
+	candidateDescription,
+	protectedDescription string,
+	operations physicalPathOperations,
+) error {
+	relation, err := physicalPathRelationWithOperations(candidate, protected, operations)
+	if err != nil {
+		return fmt.Errorf("compare %s %s with %s %s: %w", candidateDescription, candidate, protectedDescription, protected, err)
+	}
+	if relation == "same" || relation == "inside" {
+		return fmt.Errorf("%s %s must not overlap %s %s", candidateDescription, candidate, protectedDescription, protected)
+	}
+	return nil
+}
+
 func physicalPathsOverlap(first, second string) (bool, error) {
-	relation, err := physicalPathRelation(first, second)
+	return physicalPathsOverlapWithOperations(first, second, defaultPhysicalPathOperations())
+}
+
+func physicalPathsOverlapWithOperations(first, second string, operations physicalPathOperations) (bool, error) {
+	relation, err := physicalPathRelationWithOperations(first, second, operations)
 	if err != nil {
 		return false, err
 	}
@@ -296,6 +345,13 @@ func physicalPathsOverlap(first, second string) (bool, error) {
 }
 
 func physicalPathRelation(first, second string) (string, error) {
+	return physicalPathRelationWithOperations(first, second, defaultPhysicalPathOperations())
+}
+
+func physicalPathRelationWithOperations(first, second string, operations physicalPathOperations) (string, error) {
+	if operations.stat == nil || operations.sameFile == nil {
+		return "", errors.New("physical path operations are incomplete")
+	}
 	firstPath, err := canonicalPathForComparison(first)
 	if err != nil {
 		return "", err
@@ -304,7 +360,105 @@ func physicalPathRelation(first, second string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return pathRelation(firstPath, secondPath)
+	relation, err := pathRelation(firstPath, secondPath)
+	if err != nil || relation != "separate" {
+		return relation, err
+	}
+
+	same, err := samePhysicalPathEndpoint(firstPath, secondPath, operations)
+	if err != nil {
+		return "", err
+	}
+	if same {
+		return "same", nil
+	}
+	contains, err := physicalDirectoryContains(firstPath, secondPath, operations)
+	if err != nil {
+		return "", err
+	}
+	if contains {
+		return "contains", nil
+	}
+	inside, err := physicalDirectoryContains(secondPath, firstPath, operations)
+	if err != nil {
+		return "", err
+	}
+	if inside {
+		return "inside", nil
+	}
+	return "separate", nil
+}
+
+func samePhysicalPathEndpoint(first, second string, operations physicalPathOperations) (bool, error) {
+	firstInfo, firstExists, err := statPhysicalPath(first, operations)
+	if err != nil {
+		return false, err
+	}
+	secondInfo, secondExists, err := statPhysicalPath(second, operations)
+	if err != nil {
+		return false, err
+	}
+	return firstExists && secondExists && operations.sameFile(firstInfo, secondInfo), nil
+}
+
+func physicalDirectoryContains(root, candidate string, operations physicalPathOperations) (bool, error) {
+	rootInfo, exists, err := statPhysicalPath(root, operations)
+	if err != nil {
+		return false, err
+	}
+	if !exists || !rootInfo.IsDir() {
+		return false, nil
+	}
+
+	current, currentInfo, err := nearestExistingPhysicalAncestor(candidate, operations)
+	if err != nil {
+		return false, err
+	}
+	// Keep the root endpoint fixed so a merely shared filesystem root does not
+	// make unrelated directory trees overlap.
+	for {
+		if operations.sameFile(rootInfo, currentInfo) {
+			return true, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false, nil
+		}
+		current = parent
+		currentInfo, err = operations.stat(current)
+		if err != nil {
+			return false, fmt.Errorf("inspect physical ancestor %s: %w", current, err)
+		}
+	}
+}
+
+func statPhysicalPath(path string, operations physicalPathOperations) (os.FileInfo, bool, error) {
+	info, err := operations.stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("inspect physical path %s: %w", path, err)
+	}
+	return info, true, nil
+}
+
+func nearestExistingPhysicalAncestor(path string, operations physicalPathOperations) (string, os.FileInfo, error) {
+	current := filepath.Clean(path)
+	for {
+		info, exists, err := statPhysicalPath(current, operations)
+		if err != nil {
+			return "", nil, err
+		}
+		if exists {
+			return current, info, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", nil, fmt.Errorf("no existing physical ancestor found for %s", path)
+		}
+		current = parent
+	}
 }
 
 func canonicalPathForComparison(path string) (string, error) {
