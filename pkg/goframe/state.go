@@ -108,6 +108,15 @@ func (state stateHandle[T]) get() T {
 	return value
 }
 
+func stageStateValueForRender[T any](state stateHandle[T], value T) T {
+	participant := requireStateRenderParticipant(currentComponent)
+	if state.slot.owner != participant.instance {
+		panicRuntimeInvariant("goframe: render state normalization requires the current component state")
+	}
+	participant.stageValue(state.slot, value)
+	return value
+}
+
 func (state stateHandle[T]) set(value T) {
 	owner := state.slot.owner
 	if owner == nil || !owner.active {

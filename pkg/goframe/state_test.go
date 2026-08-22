@@ -528,9 +528,9 @@ func assertStateRenderParticipantCleared(t *testing.T, state *stateRenderPartici
 	if state == nil {
 		t.Fatal("state participant is nil")
 	}
-	if state.attempt != nil || state.instance != nil || len(state.slots) != 0 || len(state.reducers) != 0 || state.dirty {
-		t.Fatalf("state participant retained attempt=%p instance=%p slots=%d reducers=%d dirty=%v",
-			state.attempt, state.instance, len(state.slots), len(state.reducers), state.dirty)
+	if state.attempt != nil || state.instance != nil || len(state.slots) != 0 || len(state.values) != 0 || len(state.reducers) != 0 || state.dirty {
+		t.Fatalf("state participant retained attempt=%p instance=%p slots=%d values=%d reducers=%d dirty=%v",
+			state.attempt, state.instance, len(state.slots), len(state.values), len(state.reducers), state.dirty)
 	}
 }
 
@@ -549,6 +549,16 @@ func assertStateReducerBackingCleared(t *testing.T, reducers []stateReducerRende
 		if update.slot != nil || update.reducer != nil {
 			t.Fatalf("state participant reducer backing %d retained slot=%p reducer=%T",
 				index, update.slot, update.reducer)
+		}
+	}
+}
+
+func assertStateValueBackingCleared(t *testing.T, values []stateValueRenderUpdate) {
+	t.Helper()
+	for index, update := range values {
+		if update.slot != nil || update.value != nil {
+			t.Fatalf("state participant value backing %d retained slot=%p value=%T",
+				index, update.slot, update.value)
 		}
 	}
 }
@@ -598,6 +608,79 @@ func TestFailedInitialStateRenderLeavesNoGhostSlot(t *testing.T) {
 		t.Errorf("committed retry state slots = %#v, want one slot with 99", instance.stateSlots)
 	}
 	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalState", "component render", "state render failed")
+}
+
+func TestStateRenderValueNormalizationCommitsWithoutScheduling(t *testing.T) {
+	schedules := 0
+	normalized := 7
+	var observed int
+	var valueBacking []stateValueRenderUpdate
+	instance := testComponentInstance("NormalizedState", func() Node {
+		state := useStateSlot(10, "UseState")
+		observed = stageStateValueForRender(state, normalized)
+		participant := currentComponent.lifecycleAttempt.state
+		valueBacking = participant.values[:len(participant.values)]
+		return Empty()
+	}, func(*componentInstance) {
+		schedules++
+	})
+
+	renderComponentInstance(instance)
+	if observed != 7 || len(instance.stateSlots) != 1 || instance.stateSlots[0].value != 7 {
+		t.Fatalf("initial normalized state observed=%d slots=%#v, want committed 7", observed, instance.stateSlots)
+	}
+	if schedules != 0 || instance.dirty {
+		t.Fatalf("initial normalization schedules=%d dirty=%v, want 0/false", schedules, instance.dirty)
+	}
+
+	normalized = 3
+	renderComponentInstance(instance)
+	if observed != 3 || instance.stateSlots[0].value != 3 {
+		t.Fatalf("existing normalized state observed=%d committed=%v, want 3/3", observed, instance.stateSlots[0].value)
+	}
+	if schedules != 0 || instance.dirty {
+		t.Fatalf("existing normalization schedules=%d dirty=%v, want 0/false", schedules, instance.dirty)
+	}
+	assertStateValueBackingCleared(t, valueBacking)
+}
+
+func TestStateRenderValueNormalizationRollsBackAndRetryCommits(t *testing.T) {
+	errorsSeen := captureRuntimeErrors(t)
+	normalize := false
+	fail := false
+	var rendered int
+	instance := testComponentInstance("TransactionalNormalization", func() Node {
+		state := useStateSlot(10, "UseState")
+		rendered = state.get()
+		if normalize {
+			rendered = stageStateValueForRender(state, 4)
+			stageStateValueForRender(state, 2)
+			rendered = 2
+		}
+		if fail {
+			panic("normalized render failed")
+		}
+		return Empty()
+	}, nil)
+
+	renderComponentInstance(instance)
+	if instance.stateSlots[0].value != 10 {
+		t.Fatalf("initial committed state = %v, want 10", instance.stateSlots[0].value)
+	}
+
+	normalize = true
+	fail = true
+	renderComponentInstance(instance)
+	if rendered != 2 || instance.stateSlots[0].value != 10 {
+		t.Fatalf("failed normalization rendered=%d committed=%v, want 2/10", rendered, instance.stateSlots[0].value)
+	}
+
+	fail = false
+	renderComponentInstance(instance)
+	if rendered != 2 || instance.stateSlots[0].value != 2 {
+		t.Fatalf("retry normalization rendered=%d committed=%v, want 2/2", rendered, instance.stateSlots[0].value)
+	}
+	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalNormalization", "component render", "normalized render failed")
 }
 
 func TestStateRenderTransactionDiscardsMultipleSlotsAndCommitsRetryInOrder(t *testing.T) {

@@ -80,8 +80,12 @@ func renderVirtualList[T any](props VirtualListProps[T]) Node {
 	if props.RenderItem == nil {
 		panicRuntimeInvariant("goframe: VirtualList requires RenderItem")
 	}
-	rangeStart, setRangeStart := UseState(0)
-	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.ItemHeight, props.Overscan, rangeStart)
+	rangeInfo, rangeStart, setRangeStart := useVirtualRange(
+		len(props.Items),
+		props.Height,
+		props.ItemHeight,
+		props.Overscan,
+	)
 
 	children := make([]Node, 0, rangeInfo.End-rangeInfo.Start)
 	for index := rangeInfo.Start; index < rangeInfo.End; index++ {
@@ -127,8 +131,12 @@ func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 	if props.RenderRow == nil {
 		panicRuntimeInvariant("goframe: VirtualTable requires RenderRow")
 	}
-	rangeStart, setRangeStart := UseState(0)
-	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.RowHeight, props.Overscan, rangeStart)
+	rangeInfo, rangeStart, setRangeStart := useVirtualRange(
+		len(props.Items),
+		props.Height,
+		props.RowHeight,
+		props.Overscan,
+	)
 
 	bodyChildren := make([]Node, 0, rangeInfo.End-rangeInfo.Start+2)
 	if len(props.Items) == 0 {
@@ -283,6 +291,13 @@ func calculateVirtualRangeFromStart(length int, height int, itemHeight int, over
 		BottomSpacer: (length - end) * itemHeight,
 		TotalHeight:  length * itemHeight,
 	}
+}
+
+func useVirtualRange(length int, height int, itemHeight int, overscan int) (VirtualRange, int, func(int)) {
+	rangeState := useStateSlot(0, "UseState")
+	rangeInfo := calculateVirtualRangeFromStart(length, height, itemHeight, overscan, rangeState.get())
+	rangeStart := stageStateValueForRender(rangeState, rangeInfo.Start)
+	return rangeInfo, rangeStart, rangeState.set
 }
 
 func virtualVisibleCount(height int, itemHeight int) int {
