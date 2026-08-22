@@ -404,6 +404,18 @@ run_with_server ./examples/virtualized "$VIRTUALIZED_PORT" "$VIRTUALIZED_URL" \
 	node --experimental-websocket scripts/virtualized-browser-smoke.mjs
 
 echo
+echo "== Virtual range restoration browser smoke (standard Go) =="
+GOFRAME_VIRTUAL_RANGE_COMPILER=go \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/virtual-range-restoration-browser-smoke.mjs
+
+echo
+echo "== Virtual range restoration browser smoke (TinyGo) =="
+GOFRAME_VIRTUAL_RANGE_COMPILER=tinygo \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/virtual-range-restoration-browser-smoke.mjs
+
+echo
 echo "== Multipackage debug browser smoke =="
 "$GOXC" package ./examples/multipackage --compiler=tinygo
 (
