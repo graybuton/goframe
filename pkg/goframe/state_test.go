@@ -683,6 +683,36 @@ func TestStateRenderValueNormalizationRollsBackAndRetryCommits(t *testing.T) {
 	requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "TransactionalNormalization", "component render", "normalized render failed")
 }
 
+func TestPrivateStateRecordOutsideRenderDoesNotSchedule(t *testing.T) {
+	schedules := 0
+	var state stateHandle[int]
+	instance := testComponentInstance("PrivateStateRecord", func() Node {
+		state = useStateSlot(1, "UseState")
+		return Empty()
+	}, func(*componentInstance) {
+		schedules++
+	})
+
+	renderComponentInstance(instance)
+	if !recordStateValueWithoutRender(state, 7) {
+		t.Fatal("active committed state record was rejected")
+	}
+	if got := state.get(); got != 7 {
+		t.Fatalf("recorded state = %d, want 7", got)
+	}
+	if instance.dirty || schedules != 0 {
+		t.Fatalf("private record dirty=%v schedules=%d, want false/0", instance.dirty, schedules)
+	}
+
+	deactivateComponent(instance)
+	if recordStateValueWithoutRender(state, 9) {
+		t.Fatal("inactive state record succeeded")
+	}
+	if got := state.get(); got != 7 {
+		t.Fatalf("inactive record changed state to %d, want 7", got)
+	}
+}
+
 func TestStateRenderTransactionDiscardsMultipleSlotsAndCommitsRetryInOrder(t *testing.T) {
 	errorsSeen := captureRuntimeErrors(t)
 	countInitial := 1
