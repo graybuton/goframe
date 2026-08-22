@@ -1,0 +1,8 @@
+[data-testid="custom-index-app"] {
+    color: rgb(13, 71, 161);
+    font-family: sans-serif;
+}
+
+[data-testid="custom-index-increment"] {
+    background-color: rgb(255, 235, 59);
+}

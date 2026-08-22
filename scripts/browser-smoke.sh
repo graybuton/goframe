@@ -416,6 +416,20 @@ GOFRAME_VIRTUAL_RANGE_COMPILER=tinygo \
 	node --experimental-websocket scripts/virtual-range-restoration-browser-smoke.mjs
 
 echo
+echo "== Custom index rewrite browser smoke (standard Go) =="
+GOFRAME_CUSTOM_INDEX_COMPILER=go \
+	GOXC="$GOXC" \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/custom-index-rewrite-browser-smoke.mjs
+
+echo
+echo "== Custom index rewrite browser smoke (TinyGo) =="
+GOFRAME_CUSTOM_INDEX_COMPILER=tinygo \
+	GOXC="$GOXC" \
+	CHROME="$CHROME_BIN" \
+	node --experimental-websocket scripts/custom-index-rewrite-browser-smoke.mjs
+
+echo
 echo "== Multipackage debug browser smoke =="
 "$GOXC" package ./examples/multipackage --compiler=tinygo
 (
