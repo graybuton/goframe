@@ -22,10 +22,13 @@ const debugPort = Number(
 );
 const origin = `http://127.0.0.1:${appPort}`;
 
-const normal = { length: 200, height: 120, itemHeight: 20, overscan: 2 };
+const normal = { length: 200, height: 192, itemHeight: 48, overscan: 2 };
 const short = { ...normal, length: 2 };
 const empty = { ...normal, length: 0 };
-const expanded = { length: 200, height: 4000, itemHeight: 10, overscan: 0 };
+const expandedHeight = { ...normal, height: 384 };
+const expandedOverscan = { ...normal, overscan: 20 };
+const changedItemHeight = { ...normal, itemHeight: 40 };
+const geometryTolerance = 0.75;
 
 let tempRoot = null;
 let profile = null;
@@ -65,7 +68,24 @@ try {
     const scenarios = {
         short: await runCollectionScenario("short", "control-short", short),
         empty: await runCollectionScenario("empty", "control-empty", empty),
-        window: await runWindowScenario(),
+        height: await runWindowScenario(
+            "height",
+            "control-height-expand",
+            "control-height-reset",
+            expandedHeight,
+        ),
+        overscan: await runWindowScenario(
+            "overscan",
+            "control-overscan-expand",
+            "control-overscan-reset",
+            expandedOverscan,
+        ),
+        itemHeight: await runWindowScenario(
+            "item-height",
+            "control-item-height-change",
+            "control-item-height-reset",
+            changedItemHeight,
+        ),
     };
     const behaviorJSON = JSON.stringify(scenarios);
     const report = {
@@ -96,87 +116,86 @@ try {
 
 async function runCollectionScenario(label, shrinkControl, shrinkContract) {
     let state = await navigateScenario(label);
-    assertRangeState(state, normal, 0, `${label} initial`);
+    assertViewportState(state, normal, `${label} initial`);
     const initialRootToken = state.rootToken;
 
     await scrollDistant();
-    state = await pageState();
-    const distantStart = maxRangeStart(normal);
-    assertRangeState(state, normal, distantStart, `${label} distant scroll`);
-    const distant = {
-        listIDs: state.listIDs,
-        tableIDs: state.tableIDs,
-        listScrollTop: state.listScrollTop,
-        tableScrollTop: state.tableScrollTop,
-    };
+    state = await settledPageState(`${label} distant scroll`);
+    assertViewportState(state, normal, `${label} distant scroll`);
+    const distant = summarizeViewportState(state);
+    const distantListStart = state.listIDs[0];
+    const distantTableStart = state.tableIDs[0];
 
-    await click(shrinkControl);
-    state = await pageState();
-    assertRangeState(state, shrinkContract, 0, `${label} shrink`);
+    await clickControl(shrinkControl);
+    state = await settledPageState(`${label} shrink`);
+    assertViewportState(state, shrinkContract, `${label} shrink`);
     if (state.listScrollTop !== 0 || state.tableScrollTop !== 0) {
         throw new Error(`APP FAILURE: ${label} shrink retained scroll offsets: ${JSON.stringify(state)}`);
     }
-    assertCleanupCount(state, "list", distantStart, 1, `${label} list distant cleanup`);
-    assertCleanupCount(state, "table", distantStart, 1, `${label} table distant cleanup`);
+    assertCleanupCount(state, "list", distantListStart, 1, `${label} list distant cleanup`);
+    assertCleanupCount(state, "table", distantTableStart, 1, `${label} table distant cleanup`);
 
-    await click("control-large");
-    state = await pageState();
-    assertRangeState(state, normal, 0, `${label} restore`);
-    assert(!state.listIDs.includes(distantStart), `${label} restored stale list range ${distantStart}`);
-    assert(!state.tableIDs.includes(distantStart), `${label} restored stale table range ${distantStart}`);
+    await clickControl("control-large");
+    state = await settledPageState(`${label} restore`);
+    assertViewportState(state, normal, `${label} restore`);
+    assert(!state.listIDs.includes(distantListStart), `${label} restored stale list range ${distantListStart}`);
+    assert(!state.tableIDs.includes(distantTableStart), `${label} restored stale table range ${distantTableStart}`);
     assert(state.rootToken === initialRootToken, `${label} replaced the application root`);
     const cleanupsBeforeInteraction = {
-        list: mapCount(state.cleanups, `list:${distantStart}`),
-        table: mapCount(state.cleanups, `table:${distantStart}`),
+        list: mapCount(state.cleanups, `list:${distantListStart}`),
+        table: mapCount(state.cleanups, `table:${distantTableStart}`),
     };
 
-    state = await exerciseRestoredInteractions();
-    assertRangeState(state, normal, 0, `${label} interaction`);
+    const interaction = await exerciseVisibleInteractions(state, label);
+    state = interaction.state;
+    assertViewportState(state, normal, `${label} interaction`);
     assert(
-        mapCount(state.cleanups, `list:${distantStart}`) === cleanupsBeforeInteraction.list,
-        `${label} replayed list cleanup for ${distantStart}`,
+        mapCount(state.cleanups, `list:${distantListStart}`) === cleanupsBeforeInteraction.list,
+        `${label} replayed list cleanup for ${distantListStart}`,
     );
     assert(
-        mapCount(state.cleanups, `table:${distantStart}`) === cleanupsBeforeInteraction.table,
-        `${label} replayed table cleanup for ${distantStart}`,
+        mapCount(state.cleanups, `table:${distantTableStart}`) === cleanupsBeforeInteraction.table,
+        `${label} replayed table cleanup for ${distantTableStart}`,
     );
     assertFinalAudit(state, `${label} final`);
-    return summarizeScenario(distant, state);
+    return summarizeScenario(distant, state, interaction.targets);
 }
 
-async function runWindowScenario() {
-    let state = await navigateScenario("window");
-    assertRangeState(state, normal, 0, "window initial");
+async function runWindowScenario(label, changeControl, resetControl, changedContract) {
+    let state = await navigateScenario(label);
+    assertViewportState(state, normal, `${label} initial`);
     const initialRootToken = state.rootToken;
 
     await scrollDistant();
-    state = await pageState();
-    const distantStart = maxRangeStart(normal);
-    assertRangeState(state, normal, distantStart, "window distant scroll");
-    const distant = {
-        listIDs: state.listIDs,
-        tableIDs: state.tableIDs,
-        listScrollTop: state.listScrollTop,
-        tableScrollTop: state.tableScrollTop,
-    };
+    state = await settledPageState(`${label} distant scroll`);
+    assertViewportState(state, normal, `${label} distant scroll`);
+    const distant = summarizeViewportState(state);
 
-    await click("control-window-expand");
-    state = await pageState();
-    assertRangeState(state, expanded, 0, "window expanded");
+    await clickControl(changeControl);
+    state = await settledPageState(`${label} changed`);
+    assertViewportState(state, changedContract, `${label} changed`);
+    const expectedChangedScrollTop = Math.min(distant.listScrollTop, maxScrollTop(changedContract));
+    assert(
+        state.listScrollTop === expectedChangedScrollTop && state.tableScrollTop === expectedChangedScrollTop,
+        `${label} changed scrollTop ${state.listScrollTop}/${state.tableScrollTop}, want ${expectedChangedScrollTop}`,
+    );
+    const changed = summarizeViewportState(state);
 
-    await click("control-window-reset");
-    state = await pageState();
-    assertRangeState(state, normal, 0, "window restored");
-    assert(!state.listIDs.includes(distantStart), `window restored stale list range ${distantStart}`);
-    assert(!state.tableIDs.includes(distantStart), `window restored stale table range ${distantStart}`);
-    assertCleanupCount(state, "list", distantStart, 1, "window list distant cleanup");
-    assertCleanupCount(state, "table", distantStart, 1, "window table distant cleanup");
-    assert(state.rootToken === initialRootToken, "window transition replaced the application root");
+    await clickControl(resetControl);
+    state = await settledPageState(`${label} restored`);
+    assertViewportState(state, normal, `${label} restored`);
+    const expectedRestoredScrollTop = Math.min(expectedChangedScrollTop, maxScrollTop(normal));
+    assert(
+        state.listScrollTop === expectedRestoredScrollTop && state.tableScrollTop === expectedRestoredScrollTop,
+        `${label} restored scrollTop ${state.listScrollTop}/${state.tableScrollTop}, want ${expectedRestoredScrollTop}`,
+    );
+    assert(state.rootToken === initialRootToken, `${label} transition replaced the application root`);
 
-    state = await exerciseRestoredInteractions();
-    assertRangeState(state, normal, 0, "window interaction");
-    assertFinalAudit(state, "window final");
-    return summarizeScenario(distant, state);
+    const interaction = await exerciseVisibleInteractions(state, label);
+    state = interaction.state;
+    assertViewportState(state, normal, `${label} interaction`);
+    assertFinalAudit(state, `${label} final`);
+    return summarizeScenario(distant, state, interaction.targets, changed);
 }
 
 async function navigateScenario(label) {
@@ -202,7 +221,7 @@ async function navigateScenario(label) {
                 audit.rootToken = ${JSON.stringify(label)} + ":" + Date.now();
                 audit.appRoot.setAttribute("data-root-token", audit.rootToken);
             })()`);
-            return await pageState();
+            return await settledPageState(`${label} initial`);
         }
         await wait(100);
     }
@@ -220,25 +239,42 @@ async function scrollDistant() {
     await settle();
 }
 
-async function exerciseRestoredInteractions() {
-    await click("fixture-list-select-0");
-    await click("fixture-list-toggle-1");
-    await click("fixture-table-select-0");
-    await click("fixture-table-toggle-1");
-    const state = await pageState();
-    assert(state.listSelection === "list-selected:0", `list selection targeted wrong item: ${JSON.stringify(state)}`);
-    assert(state.listToggle === "list-toggled:1", `list toggle targeted wrong item: ${JSON.stringify(state)}`);
-    assert(state.tableSelection === "table-selected:0", `table selection targeted wrong item: ${JSON.stringify(state)}`);
-    assert(state.tableToggle === "table-toggled:1", `table toggle targeted wrong item: ${JSON.stringify(state)}`);
+async function exerciseVisibleInteractions(state, label) {
+    const listSelect = visibleInteractionID(state.geometry.list.visibleIDs, 0, `${label} list select`);
+    const listToggle = visibleInteractionID(state.geometry.list.visibleIDs, 1, `${label} list toggle`);
+    const tableSelect = visibleInteractionID(state.geometry.table.visibleIDs, 0, `${label} table select`);
+    const tableToggle = visibleInteractionID(state.geometry.table.visibleIDs, 1, `${label} table toggle`);
+    const targets = [];
+    targets.push(await pointerClickVisible(`fixture-list-select-${listSelect}`, "fixture-virtual-list"));
+    targets.push(await pointerClickVisible(`fixture-list-toggle-${listToggle}`, "fixture-virtual-list"));
+    targets.push(await pointerClickVisible(`fixture-table-select-${tableSelect}`, "fixture-virtual-table"));
+    targets.push(await pointerClickVisible(`fixture-table-toggle-${tableToggle}`, "fixture-virtual-table"));
+    state = await settledPageState(`${label} interactions`);
+    assert(state.listSelection === `list-selected:${listSelect}`, `list selection targeted wrong item: ${JSON.stringify(state)}`);
+    assert(state.listToggle === `list-toggled:${listToggle}`, `list toggle targeted wrong item: ${JSON.stringify(state)}`);
+    assert(state.tableSelection === `table-selected:${tableSelect}`, `table selection targeted wrong item: ${JSON.stringify(state)}`);
+    assert(state.tableToggle === `table-toggled:${tableToggle}`, `table toggle targeted wrong item: ${JSON.stringify(state)}`);
     assertDeepEqual(
         state.interactions.slice(-4),
-        ["list:select:0", "list:toggle:1", "table:select:0", "table:toggle:1"],
+        [
+            `list:select:${listSelect}`,
+            `list:toggle:${listToggle}`,
+            `table:select:${tableSelect}`,
+            `table:toggle:${tableToggle}`,
+        ],
         "restored interaction targets",
     );
-    return state;
+    return { state, targets };
 }
 
-async function click(testID) {
+function visibleInteractionID(visibleIDs, offset, label) {
+    if (visibleIDs.length <= offset) {
+        throw new Error(`APP FAILURE: ${label} has no visible target: ${JSON.stringify(visibleIDs)}`);
+    }
+    return visibleIDs[offset];
+}
+
+async function clickControl(testID) {
     await client.evaluate(`(() => {
         const target = document.querySelector(${JSON.stringify(`[data-testid='${testID}']`)});
         if (!target) throw new Error(${JSON.stringify(`missing ${testID}`)});
@@ -247,9 +283,91 @@ async function click(testID) {
     await settle();
 }
 
+async function pointerClickVisible(testID, viewportTestID) {
+    const target = await client.evaluate(`(() => {
+        const element = document.querySelector(${JSON.stringify(`[data-testid='${testID}']`)});
+        const viewport = document.querySelector(${JSON.stringify(`[data-testid='${viewportTestID}']`)});
+        if (!element || !viewport) throw new Error(${JSON.stringify(`missing visible target ${testID}`)});
+        let rect = element.getBoundingClientRect();
+        let viewportRect = viewport.getBoundingClientRect();
+        let top = Math.max(rect.top, viewportRect.top);
+        let bottom = Math.min(rect.bottom, viewportRect.bottom);
+        const initialY = (top + bottom) / 2;
+        if (initialY < 0 || initialY > window.innerHeight) {
+            window.scrollBy(0, initialY - window.innerHeight / 2);
+            rect = element.getBoundingClientRect();
+            viewportRect = viewport.getBoundingClientRect();
+            top = Math.max(rect.top, viewportRect.top);
+            bottom = Math.min(rect.bottom, viewportRect.bottom);
+        }
+        const left = Math.max(rect.left, viewportRect.left);
+        const right = Math.min(rect.right, viewportRect.right);
+        if (rect.width <= 0 || rect.height <= 0 || right <= left || bottom <= top) {
+            throw new Error(${JSON.stringify(`${testID} does not intersect ${viewportTestID}`)});
+        }
+        const x = (left + right) / 2;
+        const y = (top + bottom) / 2;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || (hit !== element && !element.contains(hit))) {
+            throw new Error(${JSON.stringify(`${testID} is not hit-testable at its visible center`)} +
+                ": target=" + element.tagName +
+                " rect=" + JSON.stringify({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }) +
+                " point=" + JSON.stringify({ x, y }) +
+                " hit=" + (hit?.tagName ?? "none") +
+                " hitTestID=" + (hit?.getAttribute?.("data-testid") ?? ""));
+        }
+        return {
+            testID: ${JSON.stringify(testID)},
+            viewportTestID: ${JSON.stringify(viewportTestID)},
+            x,
+            y,
+            width: rect.width,
+            height: rect.height,
+        };
+    })()`);
+    await client.call("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: target.x,
+        y: target.y,
+        button: "left",
+        clickCount: 1,
+    });
+    await client.call("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: target.x,
+        y: target.y,
+        button: "left",
+        clickCount: 1,
+    });
+    await settle();
+    return {
+        testID: target.testID,
+        viewportTestID: target.viewportTestID,
+        width: round(target.width),
+        height: round(target.height),
+    };
+}
+
 async function settle() {
     await client.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
     await wait(30);
+}
+
+async function settledPageState(label) {
+    let previous = "";
+    for (let attempt = 0; attempt < 20; attempt++) {
+        await settle();
+        const state = await pageState();
+        const signature = JSON.stringify({
+            contract: [state.length, state.height, state.itemHeight, state.overscan],
+            list: [state.listScrollTop, state.listIDs, state.geometry.list],
+            table: [state.tableScrollTop, state.tableIDs, state.geometry.table],
+            interactions: state.interactions,
+        });
+        if (signature === previous) return state;
+        previous = signature;
+    }
+    throw new Error(`HARNESS FAILURE: ${label} did not reach stable viewport geometry`);
 }
 
 async function pageState() {
@@ -264,8 +382,35 @@ async function pageState() {
         const duplicateTestIDs = testIDs.filter((value, index) => testIDs.indexOf(value) !== index);
         const app = document.querySelector("[data-testid='virtual-range-fixture']");
         const listFirst = listNodes[0]?.closest(".gf-virtual-item");
+        const listLast = listNodes.at(-1)?.closest(".gf-virtual-item");
         const topRow = document.querySelector(".gf-virtual-table-spacer-top");
         const bottomRow = document.querySelector(".gf-virtual-table-spacer-bottom");
+        const table = tableViewport?.querySelector("table");
+        const roundedRect = (node) => {
+            if (!node) return null;
+            const rect = node.getBoundingClientRect();
+            return {
+                top: Math.round(rect.top * 1000) / 1000,
+                bottom: Math.round(rect.bottom * 1000) / 1000,
+                height: Math.round(rect.height * 1000) / 1000,
+            };
+        };
+        const listRecords = listNodes.map((node) => {
+            const item = node.closest(".gf-virtual-item");
+            return {
+                id: Number(node.getAttribute("data-testid").replace("fixture-list-item-", "")),
+                ...roundedRect(item),
+            };
+        });
+        const tableRecords = tableNodes.map((node) => ({
+            id: Number(node.getAttribute("data-testid").replace("fixture-table-row-", "")),
+            ...roundedRect(node),
+        }));
+        const listViewportRect = roundedRect(listViewport);
+        const tableViewportRect = roundedRect(tableViewport);
+        const visibleIDs = (records, viewportRect) => records
+            .filter((record) => record.bottom > viewportRect.top && record.top < viewportRect.bottom)
+            .map((record) => record.id);
         return {
             length: Number(app?.getAttribute("data-length") ?? -1),
             height: Number(app?.getAttribute("data-height") ?? -1),
@@ -279,6 +424,30 @@ async function pageState() {
             listTotalHeight: Number.parseInt(document.querySelector(".gf-virtual-list-spacer")?.style.height || "0", 10),
             tableTop: Number.parseInt(topRow?.style.height || "0", 10),
             tableBottom: Number.parseInt(bottomRow?.style.height || "0", 10),
+            geometry: {
+                list: {
+                    viewport: listViewportRect,
+                    clientHeight: listViewport?.clientHeight ?? -1,
+                    scrollHeight: listViewport?.scrollHeight ?? -1,
+                    first: roundedRect(listFirst),
+                    last: roundedRect(listLast),
+                    spacer: roundedRect(document.querySelector(".gf-virtual-list-spacer")),
+                    itemHeights: listRecords.map((record) => record.height),
+                    visibleIDs: visibleIDs(listRecords, listViewportRect),
+                },
+                table: {
+                    viewport: tableViewportRect,
+                    clientHeight: tableViewport?.clientHeight ?? -1,
+                    scrollHeight: tableViewport?.scrollHeight ?? -1,
+                    table: roundedRect(table),
+                    first: roundedRect(tableNodes[0]),
+                    last: roundedRect(tableNodes.at(-1)),
+                    rowHeights: tableRecords.map((record) => record.height),
+                    visibleIDs: visibleIDs(tableRecords, tableViewportRect),
+                    topSpacer: roundedRect(topRow),
+                    bottomSpacer: roundedRect(bottomRow),
+                },
+            },
             listSelection: document.querySelector("[data-testid='list-selection']")?.textContent ?? "",
             listToggle: document.querySelector("[data-testid='list-toggle']")?.textContent ?? "",
             tableSelection: document.querySelector("[data-testid='table-selection']")?.textContent ?? "",
@@ -301,7 +470,7 @@ async function pageState() {
     return state;
 }
 
-function assertRangeState(state, contract, start, label) {
+function assertViewportState(state, contract, label) {
     assertDeepEqual(
         {
             length: state.length,
@@ -312,10 +481,11 @@ function assertRangeState(state, contract, start, label) {
         contract,
         `${label} contract`,
     );
-    const end = start + windowSize(contract);
-    const expectedIDs = range(start, end);
-    assertDeepEqual(state.listIDs, expectedIDs, `${label} list IDs`);
-    assertDeepEqual(state.tableIDs, expectedIDs, `${label} table IDs`);
+    assertContiguousIDs(state.listIDs, `${label} list IDs`);
+    assertContiguousIDs(state.tableIDs, `${label} table IDs`);
+    assertDeepEqual(state.listIDs, state.tableIDs, `${label} list/table parity`);
+    const start = state.listIDs[0] ?? 0;
+    const end = (state.listIDs.at(-1) ?? -1) + 1;
     assert(state.listTop === start * contract.itemHeight, `${label} list top ${state.listTop}`);
     assert(state.listTotalHeight === contract.length * contract.itemHeight, `${label} list total ${state.listTotalHeight}`);
     assert(state.tableTop === start * contract.itemHeight, `${label} table top ${state.tableTop}`);
@@ -323,8 +493,9 @@ function assertRangeState(state, contract, start, label) {
         state.tableBottom === (contract.length - end) * contract.itemHeight,
         `${label} table bottom ${state.tableBottom}`,
     );
-    assert(state.listIDs.length <= windowSize(contract), `${label} list mount bound`);
-    assert(state.tableIDs.length <= windowSize(contract), `${label} table mount bound`);
+    assert(state.listIDs.length <= maximumWindowSize(contract), `${label} list mount bound`);
+    assert(state.tableIDs.length <= maximumWindowSize(contract), `${label} table mount bound`);
+    assertGeometry(state, contract, start, end, label);
     assert(state.duplicateTestIDs.length === 0, `${label} duplicate test IDs ${JSON.stringify(state.duplicateTestIDs)}`);
     assert(state.duplicateKeyWarnings.length === 0, `${label} duplicate key warnings ${JSON.stringify(state.duplicateKeyWarnings)}`);
     assert(state.runtimeErrors.length === 0, `${label} runtime errors ${JSON.stringify(state.runtimeErrors)}`);
@@ -332,6 +503,68 @@ function assertRangeState(state, contract, start, label) {
     assert(state.cdpRuntimeErrors.length === 0, `${label} CDP runtime errors ${JSON.stringify(state.cdpRuntimeErrors)}`);
     assert(state.appMounts === 1 && state.appCleanups === 0, `${label} app lifetime ${state.appMounts}/${state.appCleanups}`);
     assert(state.rootStable, `${label} application root identity changed`);
+}
+
+function assertGeometry(state, contract, renderedStart, renderedEnd, label) {
+    const expectedScrollHeight = Math.max(contract.height, contract.length * contract.itemHeight);
+    for (const [kind, geometry] of Object.entries(state.geometry)) {
+        assertApprox(geometry.clientHeight, contract.height, `${label} ${kind} clientHeight`);
+        if (contract.length === 0) {
+            assert((kind === "list" ? state.listScrollTop : state.tableScrollTop) === 0, `${label} ${kind} empty scrollTop`);
+            assert((kind === "list" ? state.listIDs : state.tableIDs).length === 0, `${label} ${kind} empty rendered IDs`);
+            continue;
+        }
+        assertApprox(geometry.scrollHeight, expectedScrollHeight, `${label} ${kind} scrollHeight`);
+        const heights = kind === "list" ? geometry.itemHeights : geometry.rowHeights;
+        for (const height of heights) {
+            assertApprox(height, contract.itemHeight, `${label} ${kind} rendered height`);
+        }
+        const scrollTop = kind === "list" ? state.listScrollTop : state.tableScrollTop;
+        const visibleStart = Math.min(contract.length, Math.floor(scrollTop / contract.itemHeight));
+        const visibleEnd = Math.min(
+            contract.length,
+            Math.ceil((scrollTop + geometry.clientHeight) / contract.itemHeight),
+        );
+        assert(
+            renderedStart <= visibleStart && renderedEnd >= visibleEnd,
+            `${label} ${kind} rendered [${renderedStart},${renderedEnd}) does not cover viewport [${visibleStart},${visibleEnd}) at scrollTop ${scrollTop}`,
+        );
+        assert(geometry.visibleIDs.length > 0, `${label} ${kind} viewport contains no rendered item`);
+        const contentBottom = Math.min(
+            geometry.viewport.bottom,
+            geometry.viewport.top + Math.max(0, contract.length * contract.itemHeight - scrollTop),
+        );
+        assert(
+            geometry.first.top <= geometry.viewport.top + geometryTolerance,
+            `${label} ${kind} first rendered top ${geometry.first.top} leaves blank viewport at ${geometry.viewport.top}`,
+        );
+        assert(
+            geometry.last.bottom >= contentBottom - geometryTolerance,
+            `${label} ${kind} last rendered bottom ${geometry.last.bottom} leaves blank viewport before ${contentBottom}`,
+        );
+    }
+    if (contract.length === 0) return;
+    assertApprox(state.geometry.list.spacer.height, contract.length * contract.itemHeight, `${label} list spacer height`);
+    assertApprox(state.geometry.table.table.height, contract.length * contract.itemHeight, `${label} table logical height`);
+    assertApprox(state.geometry.table.topSpacer.height, renderedStart * contract.itemHeight, `${label} table top spacer height`);
+    assertApprox(
+        state.geometry.table.bottomSpacer.height,
+        (contract.length - renderedEnd) * contract.itemHeight,
+        `${label} table bottom spacer height`,
+    );
+}
+
+function assertContiguousIDs(ids, label) {
+    for (let index = 1; index < ids.length; index++) {
+        assert(ids[index] === ids[index - 1] + 1, `${label} are not contiguous: ${JSON.stringify(ids)}`);
+    }
+}
+
+function assertApprox(actual, expected, label) {
+    assert(
+        Math.abs(actual - expected) <= geometryTolerance,
+        `${label} ${actual}, want ${expected} within ${geometryTolerance}px`,
+    );
 }
 
 function assertFinalAudit(state, label) {
@@ -347,42 +580,55 @@ function assertCleanupCount(state, kind, id, expected, label) {
     assert(mapCount(state.cleanups, key) === expected, `${label} cleanups ${mapCount(state.cleanups, key)}, want ${expected}`);
 }
 
-function summarizeScenario(distant, finalState) {
+function summarizeScenario(distant, finalState, interactionTargets, changed = null) {
     return {
         distant,
-        final: {
-            listIDs: finalState.listIDs,
-            tableIDs: finalState.tableIDs,
-            listScrollTop: finalState.listScrollTop,
-            tableScrollTop: finalState.tableScrollTop,
-            interactions: finalState.interactions,
-            listenerDelta: finalState.listenerDelta,
-            appMounts: finalState.appMounts,
-            appCleanups: finalState.appCleanups,
-            runtimeErrors: finalState.runtimeErrors.length + finalState.browserErrors.length + finalState.cdpRuntimeErrors.length,
-        },
+        ...(changed ? { changed } : {}),
+        final: summarizeViewportState(finalState),
+        interactionTargets,
     };
 }
 
-function windowSize(contract) {
+function summarizeViewportState(state) {
+    return {
+        listIDs: state.listIDs,
+        tableIDs: state.tableIDs,
+        listScrollTop: state.listScrollTop,
+        tableScrollTop: state.tableScrollTop,
+        listVisibleIDs: state.geometry.list.visibleIDs,
+        tableVisibleIDs: state.geometry.table.visibleIDs,
+        listClientHeight: state.geometry.list.clientHeight,
+        tableClientHeight: state.geometry.table.clientHeight,
+        listScrollHeight: state.geometry.list.scrollHeight,
+        tableScrollHeight: state.geometry.table.scrollHeight,
+        listItemHeights: [...new Set(state.geometry.list.itemHeights)],
+        tableRowHeights: [...new Set(state.geometry.table.rowHeights)],
+        tableTopSpacer: state.geometry.table.topSpacer?.height ?? 0,
+        tableBottomSpacer: state.geometry.table.bottomSpacer?.height ?? 0,
+        interactions: state.interactions,
+        listenerDelta: state.listenerDelta,
+        appMounts: state.appMounts,
+        appCleanups: state.appCleanups,
+        runtimeErrors: state.runtimeErrors.length + state.browserErrors.length + state.cdpRuntimeErrors.length,
+    };
+}
+
+function maximumWindowSize(contract) {
     if (contract.length <= 0) return 0;
-    const overscan = Math.max(0, contract.overscan);
-    return Math.min(
-        contract.length,
-        Math.ceil(contract.height / contract.itemHeight) + 2 * overscan,
-    );
+    const visible = Math.ceil((contract.height + contract.itemHeight - 1) / contract.itemHeight);
+    return Math.min(contract.length, visible + 2 * Math.max(0, contract.overscan));
 }
 
-function maxRangeStart(contract) {
-    return contract.length - windowSize(contract);
-}
-
-function range(start, end) {
-    return Array.from({ length: Math.max(0, end - start) }, (_, index) => start + index);
+function maxScrollTop(contract) {
+    return Math.max(0, contract.length * contract.itemHeight - contract.height);
 }
 
 function mapCount(map, key) {
     return Number(map[key] ?? 0);
+}
+
+function round(value) {
+    return Math.round(value * 1000) / 1000;
 }
 
 async function buildFixture() {
@@ -698,9 +944,18 @@ function fixtureHTML() {
     body { font-family: sans-serif; margin: 0; }
     main { padding: 12px; }
     #root { min-height: 100vh; }
-    .gf-virtual-list, .gf-virtual-table-viewport { border: 1px solid #888; margin: 8px 0; }
-    .fixture-list-item, .fixture-table-row { box-sizing: border-box; height: 100%; }
-    table { border-collapse: collapse; width: 100%; }
+    button { box-sizing: border-box; height: 24px; line-height: 20px; padding: 1px 6px; }
+    .gf-virtual-list, .gf-virtual-table-viewport { margin: 8px 0; outline: 1px solid #888; }
+    .fixture-list-item {
+      align-items: center;
+      box-sizing: border-box;
+      display: flex;
+      gap: 4px;
+      height: 100%;
+    }
+    .gf-virtual-table { border-collapse: collapse; border-spacing: 0; table-layout: fixed; width: 100%; }
+    .fixture-table-row { box-sizing: border-box; }
+    .fixture-table-row > td { border: 0; box-sizing: border-box; line-height: 1; padding: 0; }
   </style>
 </head>
 <body>

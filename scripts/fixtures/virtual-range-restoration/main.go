@@ -9,13 +9,15 @@ import (
 )
 
 const (
-	fixtureLargeLength  = 200
-	fixtureShortLength  = 2
-	fixtureHeight       = 120
-	fixtureItemHeight   = 20
-	fixtureOverscan     = 2
-	fixtureWindowHeight = 4000
-	fixtureWindowItem   = 10
+	fixtureLargeLength = 200
+	fixtureShortLength = 2
+	fixtureHeight      = 192
+	fixtureItemHeight  = 48
+	fixtureOverscan    = 2
+
+	fixtureExpandedHeight    = 384
+	fixtureExpandedOverscan  = 20
+	fixtureChangedItemHeight = 40
 )
 
 type fixtureItem struct {
@@ -41,7 +43,9 @@ func main() {
 
 func App() gf.Node {
 	length, setLength := gf.UseState(fixtureLargeLength)
-	windowExpanded, setWindowExpanded := gf.UseState(false)
+	height, setHeight := gf.UseState(fixtureHeight)
+	itemHeight, setItemHeight := gf.UseState(fixtureItemHeight)
+	overscan, setOverscan := gf.UseState(fixtureOverscan)
 	listSelected, setListSelected := gf.UseState(-1)
 	listToggled, setListToggled := gf.UseState(-1)
 	tableSelected, setTableSelected := gf.UseState(-1)
@@ -55,14 +59,6 @@ func App() gf.Node {
 		}
 	})
 
-	height := fixtureHeight
-	itemHeight := fixtureItemHeight
-	overscan := fixtureOverscan
-	if windowExpanded {
-		height = fixtureWindowHeight
-		itemHeight = fixtureWindowItem
-		overscan = 0
-	}
 	items := fixtureItems(length)
 
 	selectList := func(id int) {
@@ -94,11 +90,17 @@ func App() gf.Node {
 			fixtureButton("control-large", "Large", func() { setLength(fixtureLargeLength) }),
 			fixtureButton("control-short", "Short", func() { setLength(fixtureShortLength) }),
 			fixtureButton("control-empty", "Empty", func() { setLength(0) }),
-			fixtureButton("control-window-expand", "Expand window", func() { setWindowExpanded(true) }),
-			fixtureButton("control-window-reset", "Reset window", func() { setWindowExpanded(false) }),
+			fixtureButton("control-height-expand", "Expand height", func() { setHeight(fixtureExpandedHeight) }),
+			fixtureButton("control-height-reset", "Reset height", func() { setHeight(fixtureHeight) }),
+			fixtureButton("control-overscan-expand", "Expand overscan", func() { setOverscan(fixtureExpandedOverscan) }),
+			fixtureButton("control-overscan-reset", "Reset overscan", func() { setOverscan(fixtureOverscan) }),
+			fixtureButton("control-item-height-change", "Change item height", func() { setItemHeight(fixtureChangedItemHeight) }),
+			fixtureButton("control-item-height-reset", "Reset item height", func() { setItemHeight(fixtureItemHeight) }),
 			fixtureButton("control-reset", "Reset", func() {
 				setLength(fixtureLargeLength)
-				setWindowExpanded(false)
+				setHeight(fixtureHeight)
+				setItemHeight(fixtureItemHeight)
+				setOverscan(fixtureOverscan)
 				setListSelected(-1)
 				setListToggled(-1)
 				setTableSelected(-1)
