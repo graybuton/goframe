@@ -19,10 +19,11 @@
   graph, including ordinary assets, styles, compressed sidecars, content
   hashes, physical identity, and the completion-marker generation. Damaged
   tool-owned output remains recognizable for safe cleanup.
-- `VirtualList` and `VirtualTable` now commit range clamps with successful
-  render transactions. Collection shrink, empty transitions, and effective-
-  window expansion no longer let later growth restore an obsolete distant
-  range; failed renders retain the previously committed range.
+- `VirtualList` and `VirtualTable` now track the pixel viewport separately from
+  the rendered overscan window. Collection shrink and empty transitions clamp
+  the persisted viewport, while height, item or row height, and overscan
+  changes rebuild the buffer around the latest valid viewport. The normalized
+  state commits with a successful render and rolls back after a failed render.
 
 ## v0.3.0-preview.1
 

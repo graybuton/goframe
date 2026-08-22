@@ -270,20 +270,24 @@ an already accepted replacement does not restore the previous application.
 collection primitives. They keep the mounted DOM bounded to the visible window
 plus overscan while preserving a much larger logical item count.
 
-The virtual range stores the rendered window start rather than raw scroll
-pixels. Scroll events that remain inside the buffered rendered range do not
-schedule another state update. When the visible viewport leaves that buffer,
-the virtualized component updates its range and keyed reconciliation mounts,
-unmounts, or moves only the window that should be present.
+The private virtual state keeps the latest pixel scroll anchor separate from
+the rendered window start. Scroll events inside the buffered range record the
+anchor without marking the component dirty or scheduling a render. When the
+visible viewport leaves that buffer, the virtualized component schedules one
+range update and keyed reconciliation mounts, unmounts, or moves only the
+window that should be present.
 
-A successful render transaction also normalizes the committed range when the
-collection shrinks or the effective window grows because `Height`, item or row
-height, or `Overscan` changed. The current render uses the normalized range
-immediately, and the private state update commits without scheduling a second
-render. An empty collection commits start `0`. If the render fails, the staged
-normalization is discarded with the rest of that render attempt. Later growth
-therefore continues from the last successfully normalized range rather than
-restoring an obsolete distant window.
+Each render clamps the stored scroll anchor to the current fixed-height scroll
+extent and ensures that the rendered range covers that viewport. Collection
+shrink and empty transitions therefore commit the clamped anchor, so later
+growth cannot restore the obsolete pre-shrink viewport. Height and item or row
+height changes use the latest still-valid pixel anchor, clamping it only when
+the new geometry requires it. A pure `Overscan` change rebuilds the rendered
+buffer without moving a still-valid viewport.
+
+The complete normalized viewport and range state is staged in the private
+render transaction. A successful render commits it without scheduling a
+follow-up render; a failed render discards it with the rest of the attempt.
 
 Virtualization and memoization solve different costs. Memoization skips render
 and patch work for clean mounted components; virtualization avoids mounting

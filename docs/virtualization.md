@@ -89,8 +89,10 @@ not switch a surrounding `gf.ErrorBoundary` to fallback UI.
 The current range model is intentionally fixed-height:
 
 ```text
-visibleStart = scrollTop / itemHeight
-visibleCount = ceil(height / itemHeight)
+scrollTop = clamp(scrollTop, 0, max(0, len(items) * itemHeight - height))
+visibleStart = clamp(floor(scrollTop / itemHeight), 0, len(items) - 1)
+visibleEnd = clamp(ceil((scrollTop + height) / itemHeight), visibleStart + 1, len(items))
+visibleCount = visibleEnd - visibleStart
 windowSize = min(len(items), visibleCount + 2 * overscan)
 rangeStart = clamp(visibleStart - overscan, 0, len(items) - windowSize)
 start = rangeStart
@@ -102,26 +104,30 @@ bottomSpacer = (len(items) - end) * itemHeight
 Negative overscan is treated as zero. Invalid `Height` or `ItemHeight` values
 panic with a focused runtime message.
 
-Scroll handling stores the rendered range start, not every raw pixel offset or
-every first visible row. At the top and bottom edges, the range keeps a full
+Scroll handling stores the latest pixel viewport anchor separately from the
+rendered range start. At the top and bottom edges, the range keeps a full
 `visible + 2*overscan` window whenever enough items exist, so missing overscan
 on one side is compensated on the other side.
 
 During scroll, GoFrame first checks whether the current visible rows are still
-inside the already-rendered range. If so, it leaves component state alone and
-the DOM window stays mounted. A new range is scheduled only after the visible
-viewport leaves that buffer. Virtualized viewports and spacer rows disable
-browser scroll anchoring with `overflow-anchor:none` so spacer height changes do
-not fight the user's scroll position.
+inside the already-rendered range. If so, it records the new private scroll
+anchor without marking the component dirty, scheduling a render, or changing
+the mounted DOM window. A new rendered range is scheduled only after the
+visible viewport leaves that buffer. Virtualized viewports and spacer rows
+disable browser scroll anchoring with `overflow-anchor:none` so spacer height
+changes do not fight the user's scroll position.
 
-Collection and effective-window changes use the same valid-start boundary. A
-successful render that clamps the range also commits that normalized start as
-part of the private render transaction. Empty collections normalize it to
-`0`; failed renders retain the previously committed start. Shrinking and later
-growing a collection, or expanding and later reducing its effective window,
-therefore cannot restore a distant range that an earlier successful render
-invalidated. This normalization adds no follow-up render and does not change
-the public state-hook contract.
+Collection shrink and empty transitions clamp the stored viewport anchor to
+the current fixed-height scroll extent; later collection growth therefore does
+not restore the obsolete pre-shrink viewport. Height and item or row height
+changes rebuild the range around the latest valid pixel viewport, clamping the
+anchor when the new geometry requires it. A pure `Overscan` change changes the
+rendered buffer without moving a still-valid scroll position.
+
+The normalized viewport and range state is part of the private render
+transaction. Successful renders commit it immediately without a follow-up
+render. Failed renders retain the previously committed state. This does not
+change the public state-hook contract.
 
 ## Keys
 
