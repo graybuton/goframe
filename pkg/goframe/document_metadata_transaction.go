@@ -266,7 +266,7 @@ func newDocumentMetadataCoordinator(
 	observe documentMetadataObserver,
 ) *documentMetadataCoordinator {
 	if publish == nil {
-		panic("goframe: document metadata coordinator requires a publication callback")
+		panicRuntimeInvariant("goframe: document metadata coordinator requires a publication callback")
 	}
 	return &documentMetadataCoordinator{
 		baseline: baseline,
@@ -278,7 +278,7 @@ func newDocumentMetadataCoordinator(
 
 func (coordinator *documentMetadataCoordinator) newOwner() *documentMetadataOwner {
 	if coordinator == nil {
-		panic("goframe: document metadata coordinator is nil")
+		panicRuntimeInvariant("goframe: document metadata coordinator is nil")
 	}
 	owner := &documentMetadataOwner{coordinator: coordinator}
 	coordinator.statistics.tokenCreations++
@@ -288,10 +288,10 @@ func (coordinator *documentMetadataCoordinator) newOwner() *documentMetadataOwne
 
 func (coordinator *documentMetadataCoordinator) beginUpdate() {
 	if coordinator == nil {
-		panic("goframe: document metadata coordinator is nil")
+		panicRuntimeInvariant("goframe: document metadata coordinator is nil")
 	}
 	if coordinator.batch.active {
-		panic("goframe: document metadata update is already active")
+		panicRuntimeInvariant("goframe: document metadata update is already active")
 	}
 	coordinator.batch.active = true
 	coordinator.batch.id++
@@ -315,7 +315,7 @@ func (coordinator *documentMetadataCoordinator) stagePublishForBoundary(
 	coordinator.validateOwner(owner)
 	coordinator.requireActiveUpdate()
 	if owner.state == documentMetadataOwnerReleased {
-		panic("goframe: document metadata owner is already released")
+		panicRuntimeInvariant("goframe: document metadata owner is already released")
 	}
 	coordinator.batch.operations = append(
 		coordinator.batch.operations,
@@ -355,7 +355,7 @@ func (coordinator *documentMetadataCoordinator) stageBoundaryOutcome(
 ) {
 	coordinator.requireActiveUpdate()
 	if state == nil || final == nil {
-		panic("goframe: document metadata boundary is nil")
+		panicRuntimeInvariant("goframe: document metadata boundary is nil")
 	}
 	kind := documentMetadataBoundaryFailed
 	switch outcome {
@@ -368,7 +368,7 @@ func (coordinator *documentMetadataCoordinator) stageBoundaryOutcome(
 	case protectedSubtreeLifecycleDelegated:
 		kind = documentMetadataDelegateBoundary
 	default:
-		panic("goframe: invalid protected subtree lifecycle outcome")
+		panicRuntimeInvariant("goframe: invalid protected subtree lifecycle outcome")
 	}
 	coordinator.batch.operations = append(
 		coordinator.batch.operations,
@@ -385,7 +385,7 @@ func (coordinator *documentMetadataCoordinator) stageBoundaryAbandon(
 ) {
 	coordinator.requireActiveUpdate()
 	if boundary == nil {
-		panic("goframe: document metadata boundary is nil")
+		panicRuntimeInvariant("goframe: document metadata boundary is nil")
 	}
 	coordinator.batch.operations = append(
 		coordinator.batch.operations,
@@ -400,7 +400,7 @@ func (coordinator *documentMetadataCoordinator) stageRelease(owner *documentMeta
 	coordinator.validateOwner(owner)
 	coordinator.requireActiveUpdate()
 	if owner.state == documentMetadataOwnerReleased {
-		panic("goframe: document metadata owner is already released")
+		panicRuntimeInvariant("goframe: document metadata owner is already released")
 	}
 	staged := false
 	for _, operation := range coordinator.batch.operations {
@@ -410,7 +410,7 @@ func (coordinator *documentMetadataCoordinator) stageRelease(owner *documentMeta
 		}
 	}
 	if coordinator.retainedDetachSet[owner] && !staged {
-		panic("goframe: document metadata owner was released more than once")
+		panicRuntimeInvariant("goframe: document metadata owner was released more than once")
 	}
 	_, pendingSuccessor := coordinator.pendingHandoffs[owner]
 	if !pendingSuccessor && !coordinator.retainedDetachSet[owner] {
@@ -668,7 +668,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 		switch operation.kind {
 		case documentMetadataPublish:
 			if released[operation.owner] {
-				panic("goframe: document metadata owner cannot publish after release")
+				panicRuntimeInvariant("goframe: document metadata owner cannot publish after release")
 			}
 			if operation.owner.id == 0 {
 				boundaries[operation.owner] = operation
@@ -690,11 +690,11 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 				if consumedRetained[operation.owner] {
 					continue
 				}
-				panic("goframe: document metadata owner was released more than once")
+				panicRuntimeInvariant("goframe: document metadata owner was released more than once")
 			}
 			index, ok := indices[operation.owner]
 			if !ok {
-				panic("goframe: document metadata owner is not active")
+				panicRuntimeInvariant("goframe: document metadata owner is not active")
 			}
 			boundary := operation.owner.boundary
 			if boundary != nil &&
@@ -716,7 +716,7 @@ func (coordinator *documentMetadataCoordinator) commitUpdate() {
 			documentMetadataDelegateBoundary,
 			documentMetadataAbandonBoundary:
 		default:
-			panic("goframe: invalid document metadata operation")
+			panicRuntimeInvariant("goframe: invalid document metadata operation")
 		}
 	}
 
@@ -944,7 +944,7 @@ func (coordinator *documentMetadataCoordinator) retainFailedHandoff(
 			return
 		}
 		if handoff != nil && handoff != candidate {
-			panic("goframe: overlapping document metadata ownership plans")
+			panicRuntimeInvariant("goframe: overlapping document metadata ownership plans")
 		}
 		handoff = candidate
 	}
@@ -1123,7 +1123,7 @@ func (coordinator *documentMetadataCoordinator) retainHandoffFinalization(
 	}
 	if kind != documentMetadataBoundaryRecovered &&
 		kind != documentMetadataAbandonBoundary {
-		panic("goframe: invalid document metadata handoff finalization")
+		panicRuntimeInvariant("goframe: invalid document metadata handoff finalization")
 	}
 	if handoff.finalizationSet == nil {
 		handoff.finalizationSet = make(
@@ -1218,7 +1218,7 @@ func (coordinator *documentMetadataCoordinator) retainBoundaryFinalization(
 	}
 	if kind != documentMetadataBoundaryRecovered &&
 		kind != documentMetadataAbandonBoundary {
-		panic("goframe: invalid document metadata boundary finalization")
+		panicRuntimeInvariant("goframe: invalid document metadata boundary finalization")
 	}
 	if coordinator.pendingFinalizations == nil {
 		coordinator.pendingFinalizations = make(
@@ -1444,19 +1444,19 @@ func (coordinator *documentMetadataCoordinator) selectedOwner() *documentMetadat
 
 func (coordinator *documentMetadataCoordinator) validateOwner(owner *documentMetadataOwner) {
 	if coordinator == nil {
-		panic("goframe: document metadata coordinator is nil")
+		panicRuntimeInvariant("goframe: document metadata coordinator is nil")
 	}
 	if owner == nil {
-		panic("goframe: document metadata owner is nil")
+		panicRuntimeInvariant("goframe: document metadata owner is nil")
 	}
 	if owner.coordinator != coordinator {
-		panic("goframe: document metadata owner belongs to another coordinator")
+		panicRuntimeInvariant("goframe: document metadata owner belongs to another coordinator")
 	}
 }
 
 func (coordinator *documentMetadataCoordinator) requireActiveUpdate() {
 	if coordinator == nil || !coordinator.batch.active {
-		panic("goframe: document metadata operation requires an active update")
+		panicRuntimeInvariant("goframe: document metadata operation requires an active update")
 	}
 }
 
@@ -1505,13 +1505,13 @@ func (owner *documentMetadataOwner) prepareRender(
 	metadata documentMetadataValue,
 ) {
 	if owner == nil || owner.coordinator == nil {
-		panic("goframe: document metadata owner is nil")
+		panicRuntimeInvariant("goframe: document metadata owner is nil")
 	}
 	if owner.state == documentMetadataOwnerReleased {
-		panic("goframe: document metadata owner is already released")
+		panicRuntimeInvariant("goframe: document metadata owner is already released")
 	}
 	if owner.pending.attempt != nil {
-		panic("goframe: document metadata owner already participated in this render attempt")
+		panicRuntimeInvariant("goframe: document metadata owner already participated in this render attempt")
 	}
 	boundary := currentDocumentMetadataBoundary()
 	owner.pending = documentMetadataRenderState{
@@ -1556,17 +1556,18 @@ func currentDocumentMetadataBoundary() *errorBoundaryState {
 			return boundary
 		}
 	}
-	panic("goframe: document metadata boundary owner is unavailable")
+	panicRuntimeInvariant("goframe: document metadata boundary owner is unavailable")
+	return nil
 }
 
 var activeDocumentMetadataCoordinator *documentMetadataCoordinator
 
 func installDocumentMetadataCoordinator(coordinator *documentMetadataCoordinator) {
 	if coordinator == nil {
-		panic("goframe: document metadata coordinator is nil")
+		panicRuntimeInvariant("goframe: document metadata coordinator is nil")
 	}
 	if activeDocumentMetadataCoordinator != nil {
-		panic("goframe: document metadata coordinator is already installed")
+		panicRuntimeInvariant("goframe: document metadata coordinator is already installed")
 	}
 	activeDocumentMetadataCoordinator = coordinator
 	reportProtectedSubtreeLifecycleOutcome = func(
@@ -1581,7 +1582,7 @@ func installDocumentMetadataCoordinator(coordinator *documentMetadataCoordinator
 
 func uninstallDocumentMetadataCoordinator() {
 	if activeDocumentMetadataCoordinator != nil && activeDocumentMetadataCoordinator.batch.active {
-		panic("goframe: cannot uninstall document metadata coordinator during an update")
+		panicRuntimeInvariant("goframe: cannot uninstall document metadata coordinator during an update")
 	}
 	reportProtectedSubtreeLifecycleOutcome = nil
 	reportProtectedSubtreeLifecycleAbandon = nil
@@ -1591,7 +1592,7 @@ func uninstallDocumentMetadataCoordinator() {
 func useDocumentMetadata(metadata documentMetadataValue) {
 	coordinator := activeDocumentMetadataCoordinator
 	if coordinator == nil {
-		panic("goframe: document metadata coordinator is not installed")
+		panicRuntimeInvariant("goframe: document metadata coordinator is not installed")
 	}
 	state := useStateSlot[*documentMetadataOwner](nil, "document metadata")
 	owner := state.get()
@@ -1600,7 +1601,7 @@ func useDocumentMetadata(metadata documentMetadataValue) {
 		state.slot.value = owner
 	}
 	if owner.coordinator != coordinator {
-		panic("goframe: document metadata owner belongs to another coordinator")
+		panicRuntimeInvariant("goframe: document metadata owner belongs to another coordinator")
 	}
 	owner.prepareRender(requireLifecycleRenderAttempt(currentComponent), metadata)
 	UseUnmount(func() {

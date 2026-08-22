@@ -93,7 +93,7 @@ func TestDevGenerationVerificationFailurePreservesActiveGeneration(t *testing.T)
 	if _, err := manager.activatePackage(packageDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(packageDir, "assets", "bundle.12345678.wasm")); err != nil {
+	if err := os.Remove(filepath.Join(packageDir, "assets", "bundle.wasm")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,7 +402,7 @@ func waitForObservedDone(t *testing.T, ctx *observedDoneContext) {
 
 func writeDevGenerationPackage(t *testing.T, directory, index string) {
 	t.Helper()
-	writeCompleteCurrentPackage(t, directory)
+	writeInspectFixture(t, directory, inspectFixtureOptions{})
 	if err := os.WriteFile(filepath.Join(directory, indexHTMLAssetName), []byte(index), 0o644); err != nil {
 		t.Fatal(err)
 	}

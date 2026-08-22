@@ -44,7 +44,7 @@ type contextSubscription struct {
 // component. It must be called during component render.
 func ProvideContext[T any](ctx *Context[T], value T) {
 	if ctx == nil {
-		panic("goframe: ProvideContext requires a context")
+		panicRuntimeInvariant("goframe: ProvideContext requires a context")
 	}
 	instance := requireCurrentComponent("ProvideContext")
 	provider, created := ensureContextProvider(instance, ctx.id, value)
@@ -62,7 +62,7 @@ func ProvideContext[T any](ctx *Context[T], value T) {
 // should prefer UseContextSelector.
 func UseContext[T any](ctx *Context[T]) T {
 	if ctx == nil {
-		panic("goframe: UseContext requires a context")
+		panicRuntimeInvariant("goframe: UseContext requires a context")
 	}
 	instance := requireCurrentComponent("UseContext")
 	provider := findContextProvider(instance.parent, ctx.id)
@@ -81,10 +81,10 @@ func UseContext[T any](ctx *Context[T]) T {
 // the runtime can dirty this consumer only when the selected value changes.
 func UseContextSelector[T any, S comparable](ctx *Context[T], selector func(T) S) S {
 	if ctx == nil {
-		panic("goframe: UseContextSelector requires a context")
+		panicRuntimeInvariant("goframe: UseContextSelector requires a context")
 	}
 	if selector == nil {
-		panic("goframe: UseContextSelector requires a selector")
+		panicRuntimeInvariant("goframe: UseContextSelector requires a selector")
 	}
 	instance := requireCurrentComponent("UseContextSelector")
 	provider := findContextProvider(instance.parent, ctx.id)
@@ -221,10 +221,10 @@ func subscribeContext(
 
 	slot := instance.contextSlots[index]
 	if slot.kind != kind {
-		panic("goframe: context hook at slot " + ToString(index) + " changed from " + slot.kind + " to " + kind)
+		panicRuntimeInvariant("goframe: context hook at slot " + ToString(index) + " changed from " + slot.kind + " to " + kind)
 	}
 	if slot.contextID != contextID {
-		panic("goframe: context hook at slot " + ToString(index) + " changed context")
+		panicRuntimeInvariant("goframe: context hook at slot " + ToString(index) + " changed context")
 	}
 	slot.selected = selected
 	slot.defaultValue = defaultValue

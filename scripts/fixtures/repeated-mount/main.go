@@ -44,6 +44,13 @@ var (
 	runtimeErrorCount      int
 )
 
+func fixturePanicText(value any) string {
+	if err, ok := value.(error); ok {
+		return err.Error()
+	}
+	return gf.ToString(value)
+}
+
 func main() {
 	global := js.Global()
 	global.Set("goframeRepeatedMountErrors", global.Get("Array").New())
@@ -53,7 +60,7 @@ func main() {
 		report.Set("phase", info.Phase.String())
 		report.Set("component", info.Component)
 		report.Set("operation", info.Operation)
-		report.Set("panic", gf.ToString(info.Panic))
+		report.Set("panic", fixturePanicText(info.Panic))
 		global.Get("goframeRepeatedMountErrors").Call("push", report)
 	})
 
@@ -140,7 +147,7 @@ func attemptMount(rootID string, panicCount *int, panicText *string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			*panicCount++
-			*panicText = gf.ToString(recovered)
+			*panicText = fixturePanicText(recovered)
 		}
 	}()
 	mountAppB(rootID)

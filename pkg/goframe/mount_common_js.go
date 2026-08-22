@@ -25,15 +25,15 @@ var mountedApp struct {
 func Mount(rootID string, app func() Node) {
 	document := js.Global().Get("document")
 	if document.IsUndefined() || document.IsNull() {
-		panic("goframe: document is not available")
+		panicRuntimeInvariant("goframe: document is not available")
 	}
 
 	root := document.Call("getElementById", rootID)
 	if root.IsUndefined() || root.IsNull() {
-		panic("goframe: root element not found: " + rootID)
+		panicRuntimeInvariant("goframe: root element not found: " + rootID)
 	}
 	if mountTargetInsideCurrentRoot(root) {
-		panic("goframe: cannot mount inside current root")
+		panicRuntimeInvariant("goframe: cannot mount inside current root")
 	}
 	mountApplicationUpdate(root, app, document)
 }

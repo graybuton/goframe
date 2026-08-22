@@ -138,7 +138,8 @@ func dependencyValue(value any) Dep {
 	case float64:
 		return Dep{kind: depFloat64, float: value}
 	default:
-		panic("goframe: unsupported effect dependency type; reduce complex values to string, id, version, or counter")
+		panicRuntimeInvariant("goframe: unsupported effect dependency type; reduce complex values to string, id, version, or counter")
+		return Dep{}
 	}
 }
 
@@ -233,7 +234,7 @@ func UseUnmount(cleanup Cleanup) {
 	instance.unmountIndex++
 	attempt := requireLifecycleRenderAttempt(instance)
 	if index != len(attempt.unmounts) {
-		panic("goframe: invalid unmount hook index")
+		panicRuntimeInvariant("goframe: invalid unmount hook index")
 	}
 	commitLifecycleHook = commitLifecycleHooks
 	attempt.hooks = true
@@ -251,21 +252,21 @@ func effectDepsArg(deps []EffectDeps) EffectDeps {
 		return Once()
 	}
 	if len(deps) > 1 {
-		panic("goframe: UseEffect accepts at most one dependency set")
+		panicRuntimeInvariant("goframe: UseEffect accepts at most one dependency set")
 	}
 	return deps[0]
 }
 
 func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 	if effect == nil {
-		panic("goframe: UseEffect requires an effect function")
+		panicRuntimeInvariant("goframe: UseEffect requires an effect function")
 	}
 	instance := requireCurrentComponent("UseEffect")
 	index := instance.effectIndex
 	instance.effectIndex++
 	attempt := requireLifecycleRenderAttempt(instance)
 	if index != len(attempt.effects) {
-		panic("goframe: invalid effect hook index")
+		panicRuntimeInvariant("goframe: invalid effect hook index")
 	}
 	commitLifecycleHook = commitLifecycleHooks
 	attempt.hooks = true
@@ -280,7 +281,7 @@ func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 	} else {
 		slot := instance.effectSlots[index]
 		if slot.kind != kind {
-			panic("goframe: lifecycle hook type changed between component renders")
+			panicRuntimeInvariant("goframe: lifecycle hook type changed between component renders")
 		}
 		update.slot = slot
 		if shouldRunEffect(slot, deps) {
@@ -294,25 +295,25 @@ func useEffect(kind effectKind, effect func() Cleanup, deps EffectDeps) {
 func requireCurrentComponent(hook string) *componentInstance {
 	instance := currentComponent
 	if instance == nil {
-		panic("goframe: " + hook + " must be called during component render")
+		panicRuntimeInvariant("goframe: " + hook + " must be called during component render")
 	}
 	return instance
 }
 
 func beginLifecycleRenderAttempt(instance *componentInstance) {
 	if instance == nil {
-		panic("goframe: lifecycle render attempt requires a component")
+		panicRuntimeInvariant("goframe: lifecycle render attempt requires a component")
 	}
 	attempt := &instance.lifecycleAttempt
 	if attempt.active {
-		panic("goframe: component lifecycle render attempt is already active")
+		panicRuntimeInvariant("goframe: component lifecycle render attempt is already active")
 	}
 	attempt.active = true
 }
 
 func requireLifecycleRenderAttempt(instance *componentInstance) *renderLifecycleAttempt {
 	if instance == nil || !instance.lifecycleAttempt.active {
-		panic("goframe: lifecycle hook requires an active render attempt")
+		panicRuntimeInvariant("goframe: lifecycle hook requires an active render attempt")
 	}
 	return &instance.lifecycleAttempt
 }

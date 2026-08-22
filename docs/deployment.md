@@ -36,6 +36,11 @@ goxc export ./examples/todo --out ./dist
 
 Only the export step creates `./dist`.
 
+Package and export success require a complete validated declared graph. Package
+staging is validated before publication. Export validates the current source
+before touching its destination, validates a private staged copy, and verifies
+the published result before printing success.
+
 If you intentionally pass `goxc package --out <dir>`, that directory is also
 treated as package output owned by goxc. It must be empty or already contain a
 complete current GoFrame package marker; otherwise package fails before
@@ -224,13 +229,16 @@ version recorded in Go build information, such as `vX.Y.Z-preview.N`.
 
 `goframe-package.json` is the authoritative current package completion marker.
 `goxc` publishes it last and removes it first during destructive package
-cleanup. A directory is considered a complete current GoFrame package only
-when this marker, the companion asset manifest, and the referenced
-HTML/WASM/runtime files are all regular files inside the package root.
-Package and export commands verify this ownership state after publication and
-before printing success. If verification fails, goxc removes
-`goframe-package.json` so the directory is not marked as a completed current
-package.
+cleanup. The ownership predicate requires this marker, the companion asset
+manifest, and the referenced HTML/WASM/runtime files to be regular files inside
+the package root. It intentionally remains usable for cleanup when another
+declared asset or sidecar has subsequently been damaged.
+
+Publication integrity is stricter than cleanup ownership. Package and export
+validate every declared entrypoint, ordinary asset, compressed sidecar, path,
+hash, collision, physical identity, and the completion-marker generation.
+They remove a failed published marker and print success only after the complete
+graph passes.
 
 ## Package Graph Inspection
 

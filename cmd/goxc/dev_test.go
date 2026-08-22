@@ -1154,7 +1154,7 @@ func TestDevRunTreatsListenerFailureAsFatal(t *testing.T) {
 		if err := os.MkdirAll(layout.PackageDir, 0o755); err != nil {
 			return err
 		}
-		writeCompleteCurrentPackage(t, layout.PackageDir)
+		writeDevGenerationPackage(t, layout.PackageDir, "<html></html>")
 		return nil
 	}
 	dependencies.listen = func(string, string) (net.Listener, error) {

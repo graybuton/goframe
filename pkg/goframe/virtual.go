@@ -78,7 +78,7 @@ const (
 func renderVirtualList[T any](props VirtualListProps[T]) Node {
 	validateVirtualListDimensions(props.Height, props.ItemHeight)
 	if props.RenderItem == nil {
-		panic("goframe: VirtualList requires RenderItem")
+		panicRuntimeInvariant("goframe: VirtualList requires RenderItem")
 	}
 	rangeStart, setRangeStart := UseState(0)
 	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.ItemHeight, props.Overscan, rangeStart)
@@ -125,7 +125,7 @@ func renderVirtualList[T any](props VirtualListProps[T]) Node {
 func renderVirtualTable[T any](props VirtualTableProps[T]) Node {
 	validateVirtualTableDimensions(props.Height, props.RowHeight)
 	if props.RenderRow == nil {
-		panic("goframe: VirtualTable requires RenderRow")
+		panicRuntimeInvariant("goframe: VirtualTable requires RenderRow")
 	}
 	rangeStart, setRangeStart := UseState(0)
 	rangeInfo := calculateVirtualRangeFromStart(len(props.Items), props.Height, props.RowHeight, props.Overscan, rangeStart)
@@ -242,19 +242,19 @@ func renderVirtualTableEmpty(render func() Node) (node Node) {
 
 func validateVirtualListDimensions(height int, itemHeight int) {
 	if height <= 0 || itemHeight <= 0 {
-		panic("goframe: VirtualList requires positive Height and ItemHeight")
+		panicRuntimeInvariant("goframe: VirtualList requires positive Height and ItemHeight")
 	}
 }
 
 func validateVirtualTableDimensions(height int, rowHeight int) {
 	if height <= 0 || rowHeight <= 0 {
-		panic("goframe: VirtualTable requires positive Height and RowHeight")
+		panicRuntimeInvariant("goframe: VirtualTable requires positive Height and RowHeight")
 	}
 }
 
 func validateVirtualRangeDimensions(height int, itemHeight int) {
 	if height <= 0 || itemHeight <= 0 {
-		panic("goframe: virtual range requires positive Height and ItemHeight")
+		panicRuntimeInvariant("goframe: virtual range requires positive Height and ItemHeight")
 	}
 }
 

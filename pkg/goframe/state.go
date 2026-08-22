@@ -54,7 +54,7 @@ type Reducer[S any, A any] func(state S, action A) S
 // current state.
 func UseReducer[S any, A any](initial S, reducer Reducer[S, A]) (S, func(A)) {
 	if reducer == nil {
-		panic("goframe: UseReducer reducer must not be nil")
+		panicRuntimeInvariant("goframe: UseReducer reducer must not be nil")
 	}
 	state := useStateSlot(initial, "UseReducer")
 	setReducer(state.slot, reducer)
@@ -66,7 +66,7 @@ func UseReducer[S any, A any](initial S, reducer Reducer[S, A]) (S, func(A)) {
 func useStateSlot[T any](initial T, hookName string) stateHandle[T] {
 	instance := currentComponent
 	if instance == nil {
-		panic("goframe: " + hookName + " must be called during component render")
+		panicRuntimeInvariant("goframe: " + hookName + " must be called during component render")
 	}
 
 	index := instance.stateIndex
@@ -83,19 +83,19 @@ func useStateSlot[T any](initial T, hookName string) stateHandle[T] {
 		}
 		slot := state.slots[pendingIndex]
 		if slot.kind != hookName {
-			panic("goframe: hook at state slot " + ToString(index) + " changed from " + slot.kind + " to " + hookName)
+			panicRuntimeInvariant("goframe: hook at state slot " + ToString(index) + " changed from " + slot.kind + " to " + hookName)
 		}
 		if _, ok := slotValue[T](slot); !ok {
-			panic("goframe: " + hookName + " state type changed between component renders")
+			panicRuntimeInvariant("goframe: " + hookName + " state type changed between component renders")
 		}
 		return stateHandle[T]{slot: slot}
 	}
 	slot := instance.stateSlots[index]
 	if slot.kind != hookName {
-		panic("goframe: hook at state slot " + ToString(index) + " changed from " + slot.kind + " to " + hookName)
+		panicRuntimeInvariant("goframe: hook at state slot " + ToString(index) + " changed from " + slot.kind + " to " + hookName)
 	}
 	if _, ok := slotValue[T](slot); !ok {
-		panic("goframe: " + hookName + " state type changed between component renders")
+		panicRuntimeInvariant("goframe: " + hookName + " state type changed between component renders")
 	}
 	return stateHandle[T]{slot: slot}
 }
@@ -103,7 +103,7 @@ func useStateSlot[T any](initial T, hookName string) stateHandle[T] {
 func (state stateHandle[T]) get() T {
 	value, ok := slotValue[T](state.slot)
 	if !ok {
-		panic("goframe: state contains an unexpected value type")
+		panicRuntimeInvariant("goframe: state contains an unexpected value type")
 	}
 	return value
 }
@@ -136,7 +136,7 @@ func setReducer[S any, A any](slot *stateSlot, reducer Reducer[S, A]) {
 	}
 	if currentReducer != nil {
 		if _, ok := currentReducer.(Reducer[S, A]); !ok {
-			panic("goframe: UseReducer reducer type changed between component renders")
+			panicRuntimeInvariant("goframe: UseReducer reducer type changed between component renders")
 		}
 	}
 	state.stageReducer(slot, reducer)
@@ -159,7 +159,7 @@ func dispatchReducer[S any, A any](slot *stateSlot, action A) {
 	}
 	reducer, ok := reducerValue.(Reducer[S, A])
 	if !ok {
-		panic("goframe: UseReducer reducer type changed between component renders")
+		panicRuntimeInvariant("goframe: UseReducer reducer type changed between component renders")
 	}
 	state.set(reducer(state.get(), action))
 }

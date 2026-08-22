@@ -93,6 +93,10 @@ type inspectCommandHooks struct {
 	BeforeFinalFence func(packageRoot string)
 }
 
+type packageGraphValidationHooks struct {
+	BeforeFinalFence func(packageRoot string)
+}
+
 type inspectPackageGenerationFence struct {
 	path   string
 	info   os.FileInfo
@@ -109,15 +113,10 @@ func runInspectCommandWithHooks(args []string, stdout io.Writer, hooks inspectCo
 	if err != nil {
 		return err
 	}
-	fence, err := captureInspectPackageGenerationFence(packageRoot)
+	report, err := validatePackageGraphWithHooks(packageRoot, packageGraphValidationHooks{
+		BeforeFinalFence: hooks.BeforeFinalFence,
+	})
 	if err != nil {
-		return err
-	}
-	report, err := inspectPackageGraph(packageRoot)
-	if err != nil {
-		if fenceErr := verifyInspectPackageGenerationFence(fence); fenceErr != nil {
-			return fenceErr
-		}
 		return err
 	}
 
@@ -134,12 +133,6 @@ func runInspectCommandWithHooks(args []string, stdout io.Writer, hooks inspectCo
 	default:
 		return fmt.Errorf("unsupported inspect format %q", options.format)
 	}
-	if hooks.BeforeFinalFence != nil {
-		hooks.BeforeFinalFence(packageRoot)
-	}
-	if err := verifyInspectPackageGenerationFence(fence); err != nil {
-		return err
-	}
 	written, err := stdout.Write(output.Bytes())
 	if err == nil && written != output.Len() {
 		err = io.ErrShortWrite
@@ -148,6 +141,38 @@ func runInspectCommandWithHooks(args []string, stdout io.Writer, hooks inspectCo
 		return fmt.Errorf("write inspect %s report: %w", options.format, err)
 	}
 	return nil
+}
+
+func inspectPackageGraph(root string) (inspectReport, error) {
+	return validatePackageGraphWithHooks(root, packageGraphValidationHooks{})
+}
+
+func validatePackageGraphWithHooks(
+	root string,
+	hooks packageGraphValidationHooks,
+) (inspectReport, error) {
+	root, err := validateInspectPackageRoot(root)
+	if err != nil {
+		return inspectReport{}, err
+	}
+	fence, err := captureInspectPackageGenerationFence(root)
+	if err != nil {
+		return inspectReport{}, err
+	}
+	report, err := inspectPackageGraphContents(root)
+	if err != nil {
+		if fenceErr := verifyInspectPackageGenerationFence(fence); fenceErr != nil {
+			return inspectReport{}, fenceErr
+		}
+		return inspectReport{}, err
+	}
+	if hooks.BeforeFinalFence != nil {
+		hooks.BeforeFinalFence(root)
+	}
+	if err := verifyInspectPackageGenerationFence(fence); err != nil {
+		return inspectReport{}, err
+	}
+	return report, nil
 }
 
 func captureInspectPackageGenerationFence(packageRoot string) (inspectPackageGenerationFence, error) {
@@ -384,23 +409,60 @@ type inspectPhysicalArtifact struct {
 	info os.FileInfo
 }
 
-type inspectPhysicalArtifactRegistry []inspectPhysicalArtifact
+type inspectPhysicalArtifactRegistry struct {
+	byIdentity  map[physicalFileIdentity]inspectPhysicalArtifact
+	artifacts   []inspectPhysicalArtifact
+	identityFor physicalFileIdentityResolver
+	initialized bool
+}
 
-func (registry *inspectPhysicalArtifactRegistry) add(reportedPath string, info os.FileInfo) error {
-	for _, existing := range *registry {
+func newInspectPhysicalArtifactRegistry() inspectPhysicalArtifactRegistry {
+	registry := inspectPhysicalArtifactRegistry{initialized: true}
+	if indexedPhysicalFileIdentity {
+		registry.byIdentity = make(map[physicalFileIdentity]inspectPhysicalArtifact)
+		registry.identityFor = physicalFileIdentityForPath
+	}
+	return registry
+}
+
+func newInspectPhysicalArtifactRegistryWithResolver(resolver physicalFileIdentityResolver) inspectPhysicalArtifactRegistry {
+	return inspectPhysicalArtifactRegistry{
+		byIdentity:  make(map[physicalFileIdentity]inspectPhysicalArtifact),
+		identityFor: resolver,
+		initialized: true,
+	}
+}
+
+func (registry *inspectPhysicalArtifactRegistry) add(reportedPath, actualPath string, info os.FileInfo) error {
+	if !registry.initialized {
+		*registry = newInspectPhysicalArtifactRegistry()
+	}
+	if registry.identityFor != nil {
+		identity, err := registry.identityFor(actualPath, info)
+		if err != nil {
+			return fmt.Errorf("identify physical artifact %q: %w", reportedPath, err)
+		}
+		if existing, exists := registry.byIdentity[identity]; exists {
+			if existing.path != reportedPath {
+				return fmt.Errorf("artifact path %q is a physical alias of %q", reportedPath, existing.path)
+			}
+			return nil
+		}
+		registry.byIdentity[identity] = inspectPhysicalArtifact{path: reportedPath}
+		return nil
+	}
+
+	// Unsupported hosts retain the correctness-preserving linear SameFile check.
+	for _, existing := range registry.artifacts {
 		if existing.path != reportedPath && os.SameFile(existing.info, info) {
 			return fmt.Errorf("artifact path %q is a physical alias of %q", reportedPath, existing.path)
 		}
 	}
-	*registry = append(*registry, inspectPhysicalArtifact{path: reportedPath, info: info})
+	registry.artifacts = append(registry.artifacts, inspectPhysicalArtifact{path: reportedPath, info: info})
 	return nil
 }
 
-func inspectPackageGraph(root string) (inspectReport, error) {
-	root, err := validateInspectPackageRoot(root)
-	if err != nil {
-		return inspectReport{}, err
-	}
+func inspectPackageGraphContents(root string) (inspectReport, error) {
 	metadata, err := readCurrentPackageMetadata(filepath.Join(root, packageMetadataName))
 	if err != nil {
 		return inspectReport{}, err
@@ -546,7 +608,7 @@ func inspectPackageGraph(root string) (inspectReport, error) {
 		Artifacts: make([]inspectArtifact, 0, len(occupied)),
 		Edges:     make([]inspectEdge, 0, 2+len(stylePaths)+len(sidecars)),
 	}
-	physicalArtifacts := inspectPhysicalArtifactRegistry{}
+	physicalArtifacts := newInspectPhysicalArtifactRegistry()
 
 	for _, fixed := range []struct {
 		path      string
@@ -649,7 +711,7 @@ func inspectArtifactAt(root, relative, logicalName, mediaType, declaredHash, enc
 	if err != nil {
 		return inspectArtifact{}, err
 	}
-	if err := physicalArtifacts.add(relative, info); err != nil {
+	if err := physicalArtifacts.add(relative, fullPath, info); err != nil {
 		return inspectArtifact{}, err
 	}
 	content, err := os.ReadFile(fullPath)

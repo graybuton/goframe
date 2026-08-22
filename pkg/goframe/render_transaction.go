@@ -19,7 +19,7 @@ var (
 
 func beginProtectedSubtreeLifecycle(state *errorBoundaryState) *errorBoundaryState {
 	if state.phase != errorBoundaryProtected || state.attempts != nil {
-		panic("goframe: invalid protected subtree transaction")
+		panicRuntimeInvariant("goframe: invalid protected subtree transaction")
 	}
 	previous := currentProtectedLifecycleBoundary
 	state.attempts = make([]*componentInstance, 0)
@@ -35,7 +35,7 @@ func finishProtectedSubtreeLifecycle(
 	recovered := recover()
 	if state.attempts == nil ||
 		currentProtectedLifecycleBoundary != state {
-		panic("goframe: invalid protected subtree transaction")
+		panicRuntimeInvariant("goframe: invalid protected subtree transaction")
 	}
 
 	currentProtectedLifecycleBoundary = previous

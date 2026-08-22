@@ -792,7 +792,7 @@ func TestPendingStateClosuresAreInvalidatedByLifecycleRelease(t *testing.T) {
 func TestUseStateOutsideComponentPanics(t *testing.T) {
 	currentComponent = nil
 	defer func() {
-		if recovered := recover(); recovered != "goframe: UseState must be called during component render" {
+		if recovered := comparablePanicValue(recover()); recovered != "goframe: UseState must be called during component render" {
 			t.Fatalf("panic = %v", recovered)
 		}
 	}()
@@ -1353,7 +1353,7 @@ func testComponentInstance(name string, render func() Node, schedule func(*compo
 func assertPanic(t *testing.T, want any, fn func()) {
 	t.Helper()
 	defer func() {
-		if recovered := recover(); recovered != want {
+		if recovered := comparablePanicValue(recover()); recovered != want {
 			t.Fatalf("panic = %v, want %v", recovered, want)
 		}
 	}()

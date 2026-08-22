@@ -220,3 +220,10 @@ func requireRuntimeError(t *testing.T, errors []ErrorInfo, phase ErrorPhase, com
 	t.Fatalf("missing runtime error phase=%s component=%q operation=%q panic=%v in %#v",
 		phase.String(), component, operation, panicValue, errors)
 }
+
+func comparablePanicValue(value any) any {
+	if invariant, ok := value.(runtimeInvariantPanic); ok {
+		return invariant.message
+	}
+	return value
+}

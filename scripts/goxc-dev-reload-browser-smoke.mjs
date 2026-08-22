@@ -656,7 +656,7 @@ function recordSuccessfulReload() {
 
 async function writeApplication(gox, go, index) {
     await mkdir(join(appDir, "assets"), { recursive: true });
-    await writeFile(join(appDir, "go.mod"), `module example.com/goframe-dev-reload\n\ngo 1.22\n\nrequire github.com/graybuton/goframe v0.0.0\n\nreplace github.com/graybuton/goframe => ${repositoryRoot}\n`);
+    await writeFile(join(appDir, "go.mod"), `module example.com/goframe-dev-reload\n\ngo 1.26.6\n\nrequire github.com/graybuton/goframe v0.0.0\n\nreplace github.com/graybuton/goframe => ${repositoryRoot}\n`);
     await writeFile(join(appDir, "goframe.json"), `{"name":"dev-reload-smoke","entry":".","compiler":"go","assets":"assets"}\n`);
     await writeFile(join(appDir, "main.go"), `//go:build js && wasm\n\npackage main\n\nimport (\n    "syscall/js"\n\n    gf "github.com/graybuton/goframe/pkg/goframe"\n)\n\nfunc main() {\n    done := make(chan struct{})\n    app := App\n    body := js.Global().Get("document").Get("body")\n    if !body.IsUndefined() && !body.IsNull() && body.Get("id").String() == "root" {\n        app = BodyRootApp\n    }\n    gf.Mount("root", app)\n    <-done\n}\n`);
     await writeGoMessage(go);

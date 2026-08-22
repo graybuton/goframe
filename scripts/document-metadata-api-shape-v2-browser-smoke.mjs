@@ -23,7 +23,7 @@ const sourceFixtureDir = join(
 const fixturePackage = "./scripts/fixtures/document-metadata-api-shape-v2/cmd/app";
 const compiler = process.env.GOFRAME_DOCUMENT_API_SHAPE_COMPILER ?? "go";
 const chrome = process.env.CHROME ?? "google-chrome";
-const goToolchain = process.env.GOTOOLCHAIN ?? "go1.26.5";
+const goToolchain = process.env.GOTOOLCHAIN ?? "go1.26.6";
 const appPort = Number(
     process.env.GOFRAME_DOCUMENT_API_SHAPE_PORT ?? await pickFreePort(),
 );

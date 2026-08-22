@@ -16,7 +16,7 @@ const fixtureDir = join(rootDir, "scripts", "fixtures", "document-state-api-desi
 const fixturePackage = "./scripts/fixtures/document-state-api-design/cmd/handoff";
 const compiler = process.env.GOFRAME_DOCUMENT_HANDOFF_COMPILER ?? "go";
 const chrome = process.env.CHROME ?? "google-chrome";
-const goToolchain = process.env.GOTOOLCHAIN ?? "go1.26.5";
+const goToolchain = process.env.GOTOOLCHAIN ?? "go1.26.6";
 const appPort = Number(
     process.env.GOFRAME_DOCUMENT_HANDOFF_PORT ?? await pickFreePort(),
 );

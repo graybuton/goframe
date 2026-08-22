@@ -662,7 +662,7 @@ func newPackageIdentifierFixture(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repository root: %v", err)
 	}
-	writeTestFile(t, root, "go.mod", "module example.com/collision\n\ngo 1.22\n\n"+
+	writeTestFile(t, root, "go.mod", "module example.com/collision\n\ngo 1.26.6\n\n"+
 		"require github.com/graybuton/goframe v0.0.0\n\n"+
 		"replace github.com/graybuton/goframe => "+strconv.Quote(filepath.ToSlash(repositoryRoot))+"\n")
 	writeTestFile(t, root, "components.go", `package app
@@ -980,13 +980,13 @@ func App() gf.Node {
 				t.Fatal(err)
 			}
 			observedGoMod = string(content)
-			if !strings.Contains(observedGoMod, "\ngo 1.22\n") {
+			if !strings.Contains(observedGoMod, "\ngo "+minimumSupportedGoVersion+"\n") {
 				t.Fatalf("generated go.mod has unexpected language version:\n%s", content)
 			}
 			if strings.Contains(observedGoMod, "toolchain go1.25.12") {
 				t.Fatalf("generated go.mod inherited caller toolchain:\n%s", content)
 			}
-			return browserToolchainObservation{goVersion: "go1.26.5"}, nil
+			return browserToolchainObservation{goVersion: "go1.26.6"}, nil
 		},
 	)
 	if err != nil {
@@ -1066,7 +1066,7 @@ func App() gf.Node {
 			if _, err := os.Stat(filepath.Join(layout.WorkDir, "go.mod")); err != nil {
 				t.Fatalf("workspace go.mod missing before observation: %v", err)
 			}
-			return browserToolchainObservation{goVersion: "go1.26.5"}, nil
+			return browserToolchainObservation{goVersion: "go1.26.6"}, nil
 		},
 	)
 	if err != nil {
@@ -1242,7 +1242,7 @@ func writeTestFile(t *testing.T, root, relative, content string) {
 func writeExternalCardModule(t *testing.T, root, directory, modulePath, packageName string) {
 	t.Helper()
 	moduleDir := filepath.Join(root, directory)
-	writeTestFile(t, moduleDir, "go.mod", "module "+modulePath+"\n\ngo 1.22\n")
+	writeTestFile(t, moduleDir, "go.mod", "module "+modulePath+"\n\ngo 1.26.6\n")
 	writeTestFile(t, moduleDir, "card.go", `package `+packageName+`
 
 import gf "github.com/graybuton/goframe/pkg/goframe"

@@ -61,8 +61,8 @@ In GOX, use ordinary package-qualified component tags:
 There is no special GOX lowering for boundaries. The tag compiles through the
 same `ComponentT` path as other `gf.*` package-qualified components.
 
-`Fallback` is required. A nil fallback is a runtime invariant panic with a
-`goframe:` prefix, so it is not swallowed by the boundary mechanism.
+`Fallback` is required. A nil fallback raises a private typed runtime invariant,
+so it is not swallowed by the boundary mechanism.
 
 ## Render-Only Scope
 
@@ -75,7 +75,11 @@ They do not catch:
 - `UseUnmount` cleanup panics;
 - memo comparator panics;
 - context selector update panics;
-- runtime invariant panics with a `goframe:` prefix.
+- private typed runtime invariant panics.
+
+The discriminator is the private panic type, not message text. An application
+panic string, error, or stringer remains an ordinary render failure even when
+its text starts with `goframe:`.
 
 Those phases keep the MVP 23 semantics and continue to report through
 `SetErrorHandler` without switching the boundary to fallback UI.

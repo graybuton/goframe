@@ -1266,7 +1266,7 @@ func TestEmbedMaterializationRejectsWorkspaceOnlyInputs(t *testing.T) {
 			t.Fatal("repository root not found")
 		}
 		appDir := t.TempDir()
-		writeTestFile(t, appDir, "go.mod", "module example.com/generatedembed\n\ngo 1.22\n\nrequire "+canonicalModulePath+" v0.0.0\n\nreplace "+canonicalModulePath+" => "+filepath.ToSlash(repositoryRoot)+"\n")
+		writeTestFile(t, appDir, "go.mod", "module example.com/generatedembed\n\ngo 1.26.6\n\nrequire "+canonicalModulePath+" v0.0.0\n\nreplace "+canonicalModulePath+" => "+filepath.ToSlash(repositoryRoot)+"\n")
 		writeTestFile(t, appDir, "cmd/app/main.go", embedFSSource("*"))
 		writeTestFile(t, appDir, "cmd/app/app.gox", `package main
 
