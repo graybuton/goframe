@@ -270,11 +270,20 @@ an already accepted replacement does not restore the previous application.
 collection primitives. They keep the mounted DOM bounded to the visible window
 plus overscan while preserving a much larger logical item count.
 
-The virtual range stores the first visible row rather than raw scroll pixels.
-Scroll events that remain inside the same row boundary do not schedule another
-state update. When the row boundary changes, the virtualized component updates
-its range and keyed reconciliation mounts, unmounts, or moves only the window
-that should be present.
+The virtual range stores the rendered window start rather than raw scroll
+pixels. Scroll events that remain inside the buffered rendered range do not
+schedule another state update. When the visible viewport leaves that buffer,
+the virtualized component updates its range and keyed reconciliation mounts,
+unmounts, or moves only the window that should be present.
+
+A successful render transaction also normalizes the committed range when the
+collection shrinks or the effective window grows because `Height`, item or row
+height, or `Overscan` changed. The current render uses the normalized range
+immediately, and the private state update commits without scheduling a second
+render. An empty collection commits start `0`. If the render fails, the staged
+normalization is discarded with the rest of that render attempt. Later growth
+therefore continues from the last successfully normalized range rather than
+restoring an obsolete distant window.
 
 Virtualization and memoization solve different costs. Memoization skips render
 and patch work for clean mounted components; virtualization avoids mounting

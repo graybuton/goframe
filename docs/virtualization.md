@@ -114,6 +114,15 @@ viewport leaves that buffer. Virtualized viewports and spacer rows disable
 browser scroll anchoring with `overflow-anchor:none` so spacer height changes do
 not fight the user's scroll position.
 
+Collection and effective-window changes use the same valid-start boundary. A
+successful render that clamps the range also commits that normalized start as
+part of the private render transaction. Empty collections normalize it to
+`0`; failed renders retain the previously committed start. Shrinking and later
+growing a collection, or expanding and later reducing its effective window,
+therefore cannot restore a distant range that an earlier successful render
+invalidated. This normalization adds no follow-up render and does not change
+the public state-hook contract.
+
 ## Keys
 
 Always prefer stable item IDs:

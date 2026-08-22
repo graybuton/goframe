@@ -19,6 +19,10 @@
   graph, including ordinary assets, styles, compressed sidecars, content
   hashes, physical identity, and the completion-marker generation. Damaged
   tool-owned output remains recognizable for safe cleanup.
+- `VirtualList` and `VirtualTable` now commit range clamps with successful
+  render transactions. Collection shrink, empty transitions, and effective-
+  window expansion no longer let later growth restore an obsolete distant
+  range; failed renders retain the previously committed range.
 
 ## v0.3.0-preview.1
 
