@@ -16,7 +16,12 @@ func TestCustomIndexDevelopmentInjectionUsesCanonicalPackageHTML(t *testing.T) {
 	source := `<!doctype html><html><head></head><body data-example="bundle.wasm">
 <p>authored bundle.wasm</p>
 <script src="wasm_exec.js"></script>
-<script>fetch("bundle.wasm"); const documentation = "bundle.wasm";</script>
+<script>
+const go = new Go();
+WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+    .then((result) => go.run(result.instance));
+</script>
+<script>const documentation = "bundle.wasm";</script>
 </body></html>`
 	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)

@@ -558,10 +558,16 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		if !executableScriptType(plan.content, typeAttribute) {
 			continue
 		}
-		replacements := scanLegacyFetchReplacements(plan.content, tag.rawStart, tag.rawEnd, wasmPath)
-		for _, replacement := range replacements {
-			plan.add(replacement)
+		match, ok := recognizeLegacyGoFrameBootstrap(plan.content, tag.rawStart, tag.rawEnd)
+		if !ok {
+			continue
 		}
+		plan.add(htmlReplacement{
+			start:       match.urlStart,
+			end:         match.urlEnd,
+			value:       wasmPath + match.suffix,
+			description: "legacy GoFrame bootstrap WASM URL",
+		})
 	}
 	return nil
 }
@@ -674,300 +680,180 @@ func splitLegacyURL(value string) (string, string) {
 	return value, ""
 }
 
-func scanLegacyFetchReplacements(content string, start, end int, wasmPath string) []htmlReplacement {
-	if !strings.Contains(content[start:end], "fetch") {
-		return nil
-	}
-
-	// This is a conservative recognizer, not a JavaScript validator. If lexical
-	// context becomes uncertain, retain the remaining authored bytes unchanged.
-	var replacements []htmlReplacement
-	canStartRegex := true
-	previousPunctuation := byte(0)
-	var controlParentheses []bool
-	pendingControlParenthesis := false
-	for offset := start; offset < end; {
-		current := content[offset]
-		if isJavaScriptSpace(current) {
-			offset++
-			continue
-		}
-		if current == '\'' || current == '"' {
-			next, _, ok := scanJavaScriptString(content, offset, end)
-			if !ok {
-				return replacements
-			}
-			offset = next
-			canStartRegex = false
-			previousPunctuation = 0
-			continue
-		}
-		if current == '`' {
-			next, ok := scanJavaScriptTemplate(content, offset, end)
-			if !ok {
-				return replacements
-			}
-			offset = next
-			canStartRegex = false
-			previousPunctuation = 0
-			continue
-		}
-		if current == '/' {
-			if offset+1 < end && content[offset+1] == '/' {
-				offset = scanJavaScriptLineComment(content, offset+2, end)
-				continue
-			}
-			if offset+1 < end && content[offset+1] == '*' {
-				next, ok := scanJavaScriptBlockComment(content, offset+2, end)
-				if !ok {
-					return replacements
-				}
-				offset = next
-				continue
-			}
-			if canStartRegex {
-				next, ok := scanJavaScriptRegex(content, offset+1, end)
-				if !ok {
-					return replacements
-				}
-				offset = next
-				canStartRegex = false
-				previousPunctuation = 0
-				continue
-			}
-			offset++
-			canStartRegex = true
-			previousPunctuation = '/'
-			continue
-		}
-		if isJavaScriptIdentifierStart(current) {
-			identifierStart := offset
-			offset++
-			for offset < end && isJavaScriptIdentifierPart(content[offset]) {
-				offset++
-			}
-			identifier := content[identifierStart:offset]
-			if identifier == "fetch" && previousPunctuation != '.' && previousPunctuation != '#' {
-				replacement, ok := legacyFetchReplacementAt(content, offset, end, wasmPath)
-				if ok {
-					replacements = append(replacements, replacement)
-				}
-			}
-			canStartRegex = javascriptKeywordAllowsRegex(identifier)
-			pendingControlParenthesis = javascriptControlKeyword(identifier)
-			previousPunctuation = 0
-			continue
-		}
-		if current >= '0' && current <= '9' {
-			offset++
-			for offset < end && (isJavaScriptIdentifierPart(content[offset]) || content[offset] == '.') {
-				offset++
-			}
-			canStartRegex = false
-			previousPunctuation = 0
-			continue
-		}
-		if (current == '+' || current == '-') && offset+1 < end && content[offset+1] == current {
-			postfix := !canStartRegex
-			offset += 2
-			canStartRegex = !postfix
-			pendingControlParenthesis = false
-			previousPunctuation = current
-			continue
-		}
-		offset++
-		previousPunctuation = current
-		switch current {
-		case '(':
-			controlParentheses = append(controlParentheses, pendingControlParenthesis)
-			pendingControlParenthesis = false
-			canStartRegex = true
-		case ')':
-			control := false
-			if count := len(controlParentheses); count != 0 {
-				control = controlParentheses[count-1]
-				controlParentheses = controlParentheses[:count-1]
-			}
-			canStartRegex = control
-		case ']', '}':
-			canStartRegex = false
-		case '.':
-			canStartRegex = false
-		default:
-			pendingControlParenthesis = false
-			canStartRegex = true
-		}
-	}
-	return replacements
+type legacyBootstrapMatch struct {
+	urlStart int
+	urlEnd   int
+	suffix   string
 }
 
-func javascriptControlKeyword(identifier string) bool {
-	switch identifier {
-	case "if", "while", "for", "with", "switch", "catch":
-		return true
-	default:
-		return false
-	}
+type legacyBootstrapParser struct {
+	content string
+	offset  int
+	end     int
 }
 
-func legacyFetchReplacementAt(content string, afterIdentifier, end int, wasmPath string) (htmlReplacement, bool) {
-	offset, ok := skipJavaScriptTrivia(content, afterIdentifier, end)
-	if !ok || offset >= end || content[offset] != '(' {
-		return htmlReplacement{}, false
-	}
-	offset, ok = skipJavaScriptTrivia(content, offset+1, end)
-	if !ok || offset >= end || (content[offset] != '\'' && content[offset] != '"') {
-		return htmlReplacement{}, false
-	}
-	quoteStart := offset
-	next, escaped, ok := scanJavaScriptString(content, quoteStart, end)
-	if !ok {
-		return htmlReplacement{}, false
-	}
-	if escaped {
-		return htmlReplacement{}, false
-	}
-	valueStart := quoteStart + 1
-	valueEnd := next - 1
-	afterValue, ok := skipJavaScriptTrivia(content, next, end)
-	if !ok || afterValue >= end || (content[afterValue] != ',' && content[afterValue] != ')') {
-		return htmlReplacement{}, false
-	}
-	value := content[valueStart:valueEnd]
-	var suffix string
-	matched := false
-	for _, legacy := range []string{"bundle.wasm", "main.wasm"} {
-		if currentSuffix, ok := legacyURLSuffix(value, legacy); ok {
-			suffix = currentSuffix
-			matched = true
-			break
+func recognizeLegacyGoFrameBootstrap(content string, start, end int) (legacyBootstrapMatch, bool) {
+	// Each branch is a complete historical GoFrame bootstrap shape. Extra
+	// authored tokens make the script non-owned and therefore unchanged.
+	for _, shape := range []func(*legacyBootstrapParser) (legacyBootstrapMatch, bool){
+		parseGeneratedArrowBootstrap,
+		parseLegacyFunctionBootstrap,
+		parseLegacyLoadWrappedBootstrap,
+	} {
+		parser := &legacyBootstrapParser{content: content, offset: start, end: end}
+		match, ok := shape(parser)
+		if ok && parser.complete() {
+			return match, true
 		}
 	}
-	if !matched {
-		return htmlReplacement{}, false
-	}
-	return htmlReplacement{
-		start:       valueStart,
-		end:         valueEnd,
-		value:       wasmPath + suffix,
-		description: "legacy WASM fetch URL",
-	}, true
+	return legacyBootstrapMatch{}, false
 }
 
-func skipJavaScriptTrivia(content string, start, end int) (int, bool) {
-	offset := start
-	for offset < end {
-		if isJavaScriptSpace(content[offset]) {
-			offset++
-			continue
-		}
-		if offset+1 < end && content[offset] == '/' && content[offset+1] == '/' {
-			offset = scanJavaScriptLineComment(content, offset+2, end)
-			continue
-		}
-		if offset+1 < end && content[offset] == '/' && content[offset+1] == '*' {
-			next, ok := scanJavaScriptBlockComment(content, offset+2, end)
-			if !ok {
-				return end, false
-			}
-			offset = next
-			continue
-		}
-		break
+func parseGeneratedArrowBootstrap(parser *legacyBootstrapParser) (legacyBootstrapMatch, bool) {
+	if !parser.word("const") || !parser.word("go") || !parser.token("=") ||
+		!parser.word("new") || !parser.word("Go") || !parser.token("(") ||
+		!parser.token(")") || !parser.token(";") {
+		return legacyBootstrapMatch{}, false
 	}
-	return offset, true
+	match, ok := parser.streamingCall()
+	if !ok || !parser.token(".") || !parser.word("then") || !parser.token("(") ||
+		!parser.token("(") || !parser.word("result") || !parser.token(")") ||
+		!parser.token("=>") || !parser.word("go") || !parser.token(".") ||
+		!parser.word("run") || !parser.token("(") || !parser.word("result") ||
+		!parser.token(".") || !parser.word("instance") || !parser.token(")") ||
+		!parser.token(")") || !parser.token(";") {
+		return legacyBootstrapMatch{}, false
+	}
+	return match, true
 }
 
-func scanJavaScriptString(content string, start, end int) (int, bool, bool) {
-	quote := content[start]
-	escaped := false
-	for offset := start + 1; offset < end; offset++ {
-		switch content[offset] {
-		case '\\':
-			escaped = true
-			offset++
+func parseLegacyFunctionBootstrap(parser *legacyBootstrapParser) (legacyBootstrapMatch, bool) {
+	if !parser.word("var") || !parser.word("go") || !parser.token("=") ||
+		!parser.word("new") || !parser.word("Go") || !parser.token("(") ||
+		!parser.token(")") || !parser.token(";") {
+		return legacyBootstrapMatch{}, false
+	}
+	match, ok := parser.streamingCall()
+	if !ok || !parser.token(".") || !parser.word("then") || !parser.token("(") ||
+		!parser.word("function") || !parser.token("(") || !parser.word("result") ||
+		!parser.token(")") || !parser.token("{") || !parser.word("go") ||
+		!parser.token(".") || !parser.word("run") || !parser.token("(") ||
+		!parser.word("result") || !parser.token(".") || !parser.word("instance") ||
+		!parser.token(")") || !parser.token(";") || !parser.token("}") ||
+		!parser.token(")") || !parser.token(";") {
+		return legacyBootstrapMatch{}, false
+	}
+	return match, true
+}
+
+func parseLegacyLoadWrappedBootstrap(parser *legacyBootstrapParser) (legacyBootstrapMatch, bool) {
+	if !parser.word("window") || !parser.token(".") || !parser.word("addEventListener") ||
+		!parser.token("(") || !parser.token(`"load"`) || !parser.token(",") ||
+		!parser.word("function") || !parser.token("(") || !parser.token(")") ||
+		!parser.token("{") {
+		return legacyBootstrapMatch{}, false
+	}
+	match, ok := parseLegacyFunctionBootstrap(parser)
+	if !ok || !parser.token("}") || !parser.token(",") || !parser.token("{") ||
+		!parser.word("once") || !parser.token(":") || !parser.word("true") ||
+		!parser.token("}") || !parser.token(")") || !parser.token(";") {
+		return legacyBootstrapMatch{}, false
+	}
+	return match, true
+}
+
+func (parser *legacyBootstrapParser) streamingCall() (legacyBootstrapMatch, bool) {
+	if !parser.word("WebAssembly") || !parser.token(".") ||
+		!parser.word("instantiateStreaming") || !parser.token("(") ||
+		!parser.word("fetch") || !parser.token("(") {
+		return legacyBootstrapMatch{}, false
+	}
+	match, ok := parser.legacyWASMURL()
+	if !ok || !parser.token(")") || !parser.token(",") || !parser.word("go") ||
+		!parser.token(".") || !parser.word("importObject") {
+		return legacyBootstrapMatch{}, false
+	}
+	parser.optionalToken(",")
+	if !parser.token(")") {
+		return legacyBootstrapMatch{}, false
+	}
+	return match, true
+}
+
+func (parser *legacyBootstrapParser) legacyWASMURL() (legacyBootstrapMatch, bool) {
+	parser.skipSpace()
+	if parser.offset >= parser.end || parser.content[parser.offset] != '\'' && parser.content[parser.offset] != '"' {
+		return legacyBootstrapMatch{}, false
+	}
+	quote := parser.content[parser.offset]
+	valueStart := parser.offset + 1
+	for offset := valueStart; offset < parser.end; offset++ {
+		switch parser.content[offset] {
+		case '\\', '\n', '\r':
+			return legacyBootstrapMatch{}, false
 		case quote:
-			return offset + 1, escaped, true
-		case '\n', '\r':
-			return offset, escaped, false
-		}
-	}
-	return end, escaped, false
-}
-
-func scanJavaScriptTemplate(content string, start, end int) (int, bool) {
-	for offset := start + 1; offset < end; offset++ {
-		switch content[offset] {
-		case '\\':
-			offset++
-		case '`':
-			return offset + 1, true
-		}
-	}
-	return end, false
-}
-
-func scanJavaScriptLineComment(content string, start, end int) int {
-	for offset := start; offset < end; offset++ {
-		if content[offset] == '\n' || content[offset] == '\r' {
-			return offset + 1
-		}
-	}
-	return end
-}
-
-func scanJavaScriptBlockComment(content string, start, end int) (int, bool) {
-	for offset := start; offset+1 < end; offset++ {
-		if content[offset] == '*' && content[offset+1] == '/' {
-			return offset + 2, true
-		}
-	}
-	return end, false
-}
-
-func scanJavaScriptRegex(content string, start, end int) (int, bool) {
-	inClass := false
-	for offset := start; offset < end; offset++ {
-		switch content[offset] {
-		case '\\':
-			offset++
-		case '[':
-			inClass = true
-		case ']':
-			inClass = false
-		case '/':
-			if inClass {
-				continue
+			value := parser.content[valueStart:offset]
+			for _, legacy := range []string{"bundle.wasm", "main.wasm"} {
+				suffix, ok := legacyURLSuffix(value, legacy)
+				if !ok {
+					continue
+				}
+				parser.offset = offset + 1
+				return legacyBootstrapMatch{
+					urlStart: valueStart,
+					urlEnd:   offset,
+					suffix:   suffix,
+				}, true
 			}
-			offset++
-			for offset < end && isJavaScriptIdentifierPart(content[offset]) {
-				offset++
-			}
-			return offset, true
-		case '\n', '\r':
-			return offset, false
+			return legacyBootstrapMatch{}, false
 		}
 	}
-	return end, false
+	return legacyBootstrapMatch{}, false
 }
 
-func isJavaScriptSpace(value byte) bool {
-	return isHTMLSpace(value)
-}
-
-func isJavaScriptIdentifierStart(value byte) bool {
-	return value == '_' || value == '$' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
-}
-
-func isJavaScriptIdentifierPart(value byte) bool {
-	return isJavaScriptIdentifierStart(value) || value >= '0' && value <= '9'
-}
-
-func javascriptKeywordAllowsRegex(identifier string) bool {
-	switch identifier {
-	case "return", "throw", "case", "delete", "void", "typeof", "new", "in", "instanceof", "yield", "await", "else", "do":
-		return true
-	default:
+func (parser *legacyBootstrapParser) word(value string) bool {
+	parser.skipSpace()
+	end := parser.offset + len(value)
+	if end > parser.end || parser.content[parser.offset:end] != value {
 		return false
 	}
+	if end < parser.end && isLegacyBootstrapIdentifierPart(parser.content[end]) {
+		return false
+	}
+	parser.offset = end
+	return true
+}
+
+func (parser *legacyBootstrapParser) token(value string) bool {
+	parser.skipSpace()
+	end := parser.offset + len(value)
+	if end > parser.end || parser.content[parser.offset:end] != value {
+		return false
+	}
+	parser.offset = end
+	return true
+}
+
+func (parser *legacyBootstrapParser) optionalToken(value string) {
+	parser.skipSpace()
+	end := parser.offset + len(value)
+	if end <= parser.end && parser.content[parser.offset:end] == value {
+		parser.offset = end
+	}
+}
+
+func (parser *legacyBootstrapParser) complete() bool {
+	parser.skipSpace()
+	return parser.offset == parser.end
+}
+
+func (parser *legacyBootstrapParser) skipSpace() {
+	for parser.offset < parser.end && isHTMLSpace(parser.content[parser.offset]) {
+		parser.offset++
+	}
+}
+
+func isLegacyBootstrapIdentifierPart(value byte) bool {
+	return value == '_' || value == '$' || value >= 'A' && value <= 'Z' ||
+		value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }

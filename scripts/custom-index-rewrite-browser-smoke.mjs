@@ -41,6 +41,9 @@ const legacyJavaScriptSentinels = [
     "let counter = 0;",
     "const postfixed = counter++ / 2;",
     'const legacyFetchPattern = /fetch\\("bundle\\.wasm"\\)/;',
+    'const nestedTemplate = `outer ${`fetch("bundle.wasm")`}`;',
+    'if (true) {}\n        /fetch("bundle.wasm")/.test("value");',
+    'class AuthoredSyntax {\n            #value = "fetch(\\"bundle.wasm\\")";\n        }',
 ];
 
 let tempRoot = null;

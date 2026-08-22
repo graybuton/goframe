@@ -236,7 +236,7 @@ func TestCustomIndexLegacyRuntimeReferenceMatrix(t *testing.T) {
 	}
 }
 
-func TestCustomIndexLegacyWASMFetchMatrix(t *testing.T) {
+func TestCustomIndexMarkerlessNonBootstrapReferencesRemainAuthored(t *testing.T) {
 	source := `<script>
 fetch("bundle.wasm");
 fetch ( './main.wasm?v=1#app' );
@@ -257,35 +257,8 @@ fetch("bundle.wasm.map");
 <script type="text/plain">fetch("bundle.wasm")</script>
 <template><script>fetch("bundle.wasm")</script></template>`
 	got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: "assets/bundle.12345678.wasm"})
-
-	for _, want := range []string{
-		`fetch("assets/bundle.12345678.wasm")`,
-		`fetch ( 'assets/bundle.12345678.wasm?v=1#app' )`,
-		`fetch /* compatibility */ ( "assets/bundle.12345678.wasm#second", options )`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("WASM rewrite missing %q:\n%s", want, got)
-		}
-	}
-	for _, preserved := range []string{
-		`// fetch("bundle.wasm")`,
-		`/* fetch('main.wasm') */`,
-		`const docs = "bundle.wasm";`,
-		"const template = `fetch(\"bundle.wasm\")`;",
-		`/fetch\("bundle\.wasm"\)/`,
-		`if (dynamicURL) /fetch\("bundle.wasm"\)/.test(dynamicURL);`,
-		`obj.fetch("bundle.wasm")`,
-		`fetch(dynamicURL)`,
-		`fetch("bundle.wasm.map")`,
-		`<script type="application/json">{"asset":"bundle.wasm"`,
-		`<script type="importmap">{"imports":{"app":"bundle.wasm"}}</script>`,
-		`<script type="speculationrules">{"prefetch":[{"source":"bundle.wasm"}]}</script>`,
-		`<script type="text/plain">fetch("bundle.wasm")</script>`,
-		`<template><script>fetch("bundle.wasm")</script></template>`,
-	} {
-		if !strings.Contains(got, preserved) {
-			t.Errorf("WASM authored context %q changed:\n%s", preserved, got)
-		}
+	if got != source {
+		t.Fatalf("non-bootstrap references changed\ngot:  %q\nwant: %q", got, source)
 	}
 }
 
@@ -363,67 +336,92 @@ const result = x-- / y;`,
 	}
 }
 
-func TestCustomIndexLegacyWASMRewritesOnlyProvenFetchArguments(t *testing.T) {
-	source := `<script>
-fetch('./main.wasm?position=before');
-let x = 10;
-const y = 2;
-const before = x++ / y;
-fetch("bundle.wasm");
-const values = [10];
-let index = 0;
-const divisor = 2;
-const after = values[index]-- / divisor;
-const pattern = /bundle\.wasm/;
-const quotient = x / y;
-fetch('./main.wasm?v=1#app');
-if (x) /fetch\("bundle.wasm"\)/.test(String(x));
-function fetch(value) { return value; }
-fetch("bundle.wasm#shadowed");
-obj.fetch("bundle.wasm");
-fetch(dynamicURL);
-fetch("bundle.wasm.map");
-fetch?.("bundle.wasm");
-</script>`
-	want := `<script>
-fetch('assets/bundle.12345678.wasm?position=before');
-let x = 10;
-const y = 2;
-const before = x++ / y;
-fetch("assets/bundle.12345678.wasm");
-const values = [10];
-let index = 0;
-const divisor = 2;
-const after = values[index]-- / divisor;
-const pattern = /bundle\.wasm/;
-const quotient = x / y;
-fetch('assets/bundle.12345678.wasm?v=1#app');
-if (x) /fetch\("bundle.wasm"\)/.test(String(x));
-function fetch(value) { return value; }
-fetch("assets/bundle.12345678.wasm#shadowed");
-obj.fetch("bundle.wasm");
-fetch(dynamicURL);
-fetch("bundle.wasm.map");
-fetch?.("bundle.wasm");
-</script>`
+func TestCustomIndexHistoricalBootstrapCorpus(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		legacyURL string
+	}{
+		{
+			name: "v0.1.0-mvp10 markerless main bootstrap",
+			body: `
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject)
+            .then((result) => go.run(result.instance));
+    `,
+			legacyURL: "main.wasm",
+		},
+		{
+			name: "current generated bundle bootstrap",
+			body: `
+    const go = new Go();
+    WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+        .then((result) => go.run(result.instance));
+`,
+			legacyURL: "bundle.wasm",
+		},
+		{
+			name: "committed single quote trailing comma fixture",
+			body: `
+        const go = new Go();
+        WebAssembly.instantiateStreaming(
+            fetch ( './bundle.wasm?fixture=legacy#wasm' ),
+            go.importObject,
+        ).then((result) => go.run(result.instance));
+    `,
+			legacyURL: "./bundle.wasm?fixture=legacy#wasm",
+		},
+		{
+			name:      "v0.3.0-preview.1 dev callback bootstrap",
+			body:      `var go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then(function (result) { go.run(result.instance); });`,
+			legacyURL: "bundle.wasm",
+		},
+		{
+			name:      "v0.3.0-preview.1 load wrapped dev bootstrap",
+			body:      `window.addEventListener("load", function () { var go = new Go(); WebAssembly.instantiateStreaming(fetch("./main.wasm#load"), go.importObject).then(function (result) { go.run(result.instance); }); }, { once: true });`,
+			legacyURL: "./main.wasm#load",
+		},
+	}
+
 	options := htmlRewriteOptions{wasmPath: "assets/bundle.12345678.wasm"}
-	got, err := rewriteIndexHTML(source, options)
-	if err != nil {
-		t.Fatalf("rewriteIndexHTML() error: %v", err)
-	}
-	if got != want {
-		t.Fatalf("candidate-scoped rewrite mismatch\ngot:\n%s\nwant:\n%s", got, want)
-	}
-	second, err := rewriteIndexHTML(got, options)
-	if err != nil {
-		t.Fatalf("second rewriteIndexHTML() error: %v", err)
-	}
-	if second != got {
-		t.Fatalf("candidate-scoped rewrite is not idempotent\nfirst:\n%s\nsecond:\n%s", got, second)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if count := strings.Count(test.body, test.legacyURL); count != 1 {
+				t.Fatalf("historical body legacy URL count = %d, want 1", count)
+			}
+			_, suffix := splitLegacyURL(test.legacyURL)
+			source := "<script>" + test.body + "</script>"
+			want := strings.Replace(
+				source,
+				test.legacyURL,
+				options.wasmPath+suffix,
+				1,
+			)
+			got := rewriteIndexForTest(t, source, options)
+			if got != want {
+				t.Fatalf("historical bootstrap rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+			if second := rewriteIndexForTest(t, got, options); second != got {
+				t.Fatalf("historical bootstrap rewrite is not idempotent\nfirst:  %q\nsecond: %q", got, second)
+			}
+		})
 	}
 }
 
-func TestCustomIndexLegacyWASMLexicalUncertaintyIsPreserved(t *testing.T) {
+func TestCustomIndexHistoricalBootstrapMultipleScripts(t *testing.T) {
+	source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => go.run(result.instance));</script>
+<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch('./bundle.wasm?v=1#app'), go.importObject,).then((result) => go.run(result.instance));</script>`
+	want := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("assets/bundle.12345678.wasm"), go.importObject).then((result) => go.run(result.instance));</script>
+<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch('assets/bundle.12345678.wasm?v=1#app'), go.importObject,).then((result) => go.run(result.instance));</script>`
+	got := rewriteIndexForTest(t, source, htmlRewriteOptions{
+		wasmPath: "assets/bundle.12345678.wasm",
+	})
+	if got != want {
+		t.Fatalf("multiple bootstrap rewrite mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestCustomIndexMarkerlessIncompleteJavaScriptIsPreserved(t *testing.T) {
 	tests := []struct {
 		name   string
 		script string
@@ -443,9 +441,150 @@ func TestCustomIndexLegacyWASMLexicalUncertaintyIsPreserved(t *testing.T) {
 				t.Fatalf("rewriteIndexHTML() treated authored JavaScript as a package error: %v", err)
 			}
 			if got != source {
-				t.Fatalf("lexically uncertain JavaScript changed\ngot:  %q\nwant: %q", got, source)
+				t.Fatalf("incomplete authored JavaScript changed\ngot:  %q\nwant: %q", got, source)
 			}
 		})
+	}
+}
+
+func TestCustomIndexLegacyWASMArbitraryJavaScriptIsPreserved(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{
+			name:   "nested template",
+			script: "const value = `outer ${`fetch(\"bundle.wasm\")`}`;",
+		},
+		{
+			name:   "conditional nested template",
+			script: "const value = `outer ${condition ? `fetch(\"bundle.wasm\")` : \"x\"}`;",
+		},
+		{
+			name: "deep nested template",
+			script: "const value = `outer ${\n" +
+				"    (() => `nested ${`fetch(\"main.wasm\")`}`)()\n" +
+				"}`;",
+		},
+		{
+			name:   "regex after statement block",
+			script: "if (ready) {}\n/fetch(\"bundle.wasm\")/.test(value);",
+		},
+		{
+			name:   "regex after catch block",
+			script: "try {} catch {}\n/fetch(\"main.wasm\")/.test(value);",
+		},
+		{
+			name:   "regex after arrow block",
+			script: "const fn = () => {};\n/fetch(\"bundle.wasm\")/.test(value);",
+		},
+		{
+			name:   "regex after labeled block",
+			script: "label: {}\n/fetch(\"bundle.wasm\")/.test(value);",
+		},
+		{
+			name: "class private field and static block",
+			script: `class Example {
+    #value = "fetch(\"bundle.wasm\")";
+    static {
+        const pattern = /fetch\("bundle\.wasm"\)/;
+    }
+}`,
+		},
+		{
+			name:   "optional calls",
+			script: `const result = object?.method?.("bundle.wasm");`,
+		},
+		{
+			name:   "nullish assignment",
+			script: `const result = value ??= "fetch(\"bundle.wasm\")";`,
+		},
+		{
+			name:   "dynamic import",
+			script: `await import("./bundle.wasm");`,
+		},
+		{
+			name:   "arbitrary direct fetch",
+			script: `fetch("bundle.wasm");`,
+		},
+		{
+			name: "unsupported let bootstrap",
+			script: `let go = new Go();
+WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+    .then((result) => go.run(result.instance));`,
+		},
+		{
+			name: "absolute bootstrap URL",
+			script: `const go = new Go();
+WebAssembly.instantiateStreaming(fetch("https://example.test/bundle.wasm"), go.importObject)
+    .then((result) => go.run(result.instance));`,
+		},
+		{
+			name: "authored async runtime loader",
+			script: `const runtimeScript = document.createElement("script");
+runtimeScript.src = "wasm_exec.js";
+runtimeScript.onload = async () => {
+    const go = new Go();
+    const result = await WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject);
+    go.run(result.instance);
+};
+document.head.appendChild(runtimeScript);`,
+		},
+		{
+			name: "extra authored statement around bootstrap",
+			script: `const docs = "custom";
+const go = new Go();
+WebAssembly.instantiateStreaming(
+    fetch("bundle.wasm"),
+    go.importObject,
+).then((result) => go.run(result.instance));`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "<script>\n" + test.script + "\n</script>"
+			got, err := rewriteIndexHTML(source, htmlRewriteOptions{
+				wasmPath: "assets/bundle.12345678.wasm",
+			})
+			if err != nil {
+				t.Fatalf("rewriteIndexHTML() treated authored JavaScript as a package error: %v", err)
+			}
+			if got != source {
+				t.Fatalf("authored JavaScript changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
+func TestCustomIndexLegacyWASMMixedPageRewritesOnlyCompleteBootstrap(t *testing.T) {
+	source := `<script>const value = ` + "`outer ${`fetch(\"bundle.wasm\")`}`" + `;</script>
+<script>if (ready) {}
+/fetch("bundle.wasm")/.test(value);</script>
+<script>fetch("bundle.wasm");</script>
+<script>
+    const go = new Go();
+    WebAssembly.instantiateStreaming(fetch("bundle.wasm?v=1#app"), go.importObject)
+        .then((result) => go.run(result.instance));
+</script>`
+	want := `<script>const value = ` + "`outer ${`fetch(\"bundle.wasm\")`}`" + `;</script>
+<script>if (ready) {}
+/fetch("bundle.wasm")/.test(value);</script>
+<script>fetch("bundle.wasm");</script>
+<script>
+    const go = new Go();
+    WebAssembly.instantiateStreaming(fetch("assets/bundle.12345678.wasm?v=1#app"), go.importObject)
+        .then((result) => go.run(result.instance));
+</script>`
+
+	got, err := rewriteIndexHTML(source, htmlRewriteOptions{
+		wasmPath: "assets/bundle.12345678.wasm",
+	})
+	if err != nil {
+		t.Fatalf("rewriteIndexHTML() error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("mixed-page rewrite mismatch\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
 
@@ -569,11 +708,13 @@ func TestCustomIndexBytePreservation(t *testing.T) {
 	source := "<!DoCtYpE html>\r\n<HTML lang='界'>\r\n<HEAD data-doc=\"bundle.wasm\">\r\n" +
 		"<link href='styles.css?v=1#x' data-order=first rel='stylesheet'>\r\n</HEAD>\r\n" +
 		"<BODY>\r\n<script data-x=1 src='./wasm_exec.js?v=2'></script>\r\n" +
-		"<script> fetch (\"bundle.wasm#boot\") </script>\r\n<p> authored bundle.wasm 界 </p>\r\n</BODY>\r\n</HTML>"
+		"<script> const go = new Go(); WebAssembly.instantiateStreaming(fetch(\"bundle.wasm#boot\"), go.importObject).then((result) => go.run(result.instance)); </script>\r\n" +
+		"<p> authored bundle.wasm 界 </p>\r\n</BODY>\r\n</HTML>"
 	want := "<!DoCtYpE html>\r\n<HTML lang='界'>\r\n<HEAD data-doc=\"bundle.wasm\">\r\n" +
 		"<link href='assets/styles.33333333.css?v=1#x' data-order=first rel='stylesheet'>\r\n</HEAD>\r\n" +
 		"<BODY>\r\n<script data-x=1 src='assets/wasm_exec.22222222.js?v=2'></script>\r\n" +
-		"<script> fetch (\"assets/bundle.11111111.wasm#boot\") </script>\r\n<p> authored bundle.wasm 界 </p>\r\n</BODY>\r\n</HTML>"
+		"<script> const go = new Go(); WebAssembly.instantiateStreaming(fetch(\"assets/bundle.11111111.wasm#boot\"), go.importObject).then((result) => go.run(result.instance)); </script>\r\n" +
+		"<p> authored bundle.wasm 界 </p>\r\n</BODY>\r\n</HTML>"
 	got := rewriteIndexForTest(t, source, htmlRewriteOptions{
 		wasmPath:    "assets/bundle.11111111.wasm",
 		runtimePath: "assets/wasm_exec.22222222.js",
