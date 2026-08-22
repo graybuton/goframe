@@ -36,6 +36,13 @@ const authoredSentinels = [
     'const similarNames = "my-bundle.wasm bundle.wasm.backup bundle.wasm.map wasm_exec.js.map custom-wasm_exec.js";',
 ];
 
+const legacyJavaScriptSentinels = [
+    "const quotient = 10 / 2;",
+    "let counter = 0;",
+    "const postfixed = counter++ / 2;",
+    'const legacyFetchPattern = /fetch\\("bundle\\.wasm"\\)/;',
+];
+
 let tempRoot = null;
 let profile = null;
 let browser = null;
@@ -181,6 +188,10 @@ function assertAuthoredSentinels(source, packaged, mode) {
     if (mode === "legacy") {
         const falseHead = '<script>const falseHeadExample = "</head>";</script>';
         assert(source.includes(falseHead) && packaged.includes(falseHead), "legacy false head sentinel changed");
+        for (const sentinel of legacyJavaScriptSentinels) {
+            assert(source.includes(sentinel), `legacy source is missing JavaScript sentinel ${JSON.stringify(sentinel)}`);
+            assert(packaged.includes(sentinel), `legacy package changed JavaScript sentinel ${JSON.stringify(sentinel)}`);
+        }
     }
 }
 

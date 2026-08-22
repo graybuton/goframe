@@ -558,10 +558,7 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		if !executableScriptType(plan.content, typeAttribute) {
 			continue
 		}
-		replacements, err := scanLegacyFetchReplacements(plan.content, tag.rawStart, tag.rawEnd, wasmPath)
-		if err != nil {
-			return err
-		}
+		replacements := scanLegacyFetchReplacements(plan.content, tag.rawStart, tag.rawEnd, wasmPath)
 		for _, replacement := range replacements {
 			plan.add(replacement)
 		}
@@ -677,7 +674,13 @@ func splitLegacyURL(value string) (string, string) {
 	return value, ""
 }
 
-func scanLegacyFetchReplacements(content string, start, end int, wasmPath string) ([]htmlReplacement, error) {
+func scanLegacyFetchReplacements(content string, start, end int, wasmPath string) []htmlReplacement {
+	if !strings.Contains(content[start:end], "fetch") {
+		return nil
+	}
+
+	// This is a conservative recognizer, not a JavaScript validator. If lexical
+	// context becomes uncertain, retain the remaining authored bytes unchanged.
 	var replacements []htmlReplacement
 	canStartRegex := true
 	previousPunctuation := byte(0)
@@ -690,9 +693,9 @@ func scanLegacyFetchReplacements(content string, start, end int, wasmPath string
 			continue
 		}
 		if current == '\'' || current == '"' {
-			next, _, err := scanJavaScriptString(content, offset, end)
-			if err != nil {
-				return nil, err
+			next, _, ok := scanJavaScriptString(content, offset, end)
+			if !ok {
+				return replacements
 			}
 			offset = next
 			canStartRegex = false
@@ -700,9 +703,9 @@ func scanLegacyFetchReplacements(content string, start, end int, wasmPath string
 			continue
 		}
 		if current == '`' {
-			next, err := scanJavaScriptTemplate(content, offset, end)
-			if err != nil {
-				return nil, err
+			next, ok := scanJavaScriptTemplate(content, offset, end)
+			if !ok {
+				return replacements
 			}
 			offset = next
 			canStartRegex = false
@@ -715,17 +718,17 @@ func scanLegacyFetchReplacements(content string, start, end int, wasmPath string
 				continue
 			}
 			if offset+1 < end && content[offset+1] == '*' {
-				next, err := scanJavaScriptBlockComment(content, offset+2, end)
-				if err != nil {
-					return nil, err
+				next, ok := scanJavaScriptBlockComment(content, offset+2, end)
+				if !ok {
+					return replacements
 				}
 				offset = next
 				continue
 			}
 			if canStartRegex {
-				next, err := scanJavaScriptRegex(content, offset+1, end)
-				if err != nil {
-					return nil, err
+				next, ok := scanJavaScriptRegex(content, offset+1, end)
+				if !ok {
+					return replacements
 				}
 				offset = next
 				canStartRegex = false
@@ -744,11 +747,8 @@ func scanLegacyFetchReplacements(content string, start, end int, wasmPath string
 				offset++
 			}
 			identifier := content[identifierStart:offset]
-			if identifier == "fetch" && previousPunctuation != '.' {
-				replacement, ok, err := legacyFetchReplacementAt(content, offset, end, wasmPath)
-				if err != nil {
-					return nil, err
-				}
+			if identifier == "fetch" && previousPunctuation != '.' && previousPunctuation != '#' {
+				replacement, ok := legacyFetchReplacementAt(content, offset, end, wasmPath)
 				if ok {
 					replacements = append(replacements, replacement)
 				}
@@ -765,6 +765,14 @@ func scanLegacyFetchReplacements(content string, start, end int, wasmPath string
 			}
 			canStartRegex = false
 			previousPunctuation = 0
+			continue
+		}
+		if (current == '+' || current == '-') && offset+1 < end && content[offset+1] == current {
+			postfix := !canStartRegex
+			offset += 2
+			canStartRegex = !postfix
+			pendingControlParenthesis = false
+			previousPunctuation = current
 			continue
 		}
 		offset++
@@ -790,7 +798,7 @@ func scanLegacyFetchReplacements(content string, start, end int, wasmPath string
 			canStartRegex = true
 		}
 	}
-	return replacements, nil
+	return replacements
 }
 
 func javascriptControlKeyword(identifier string) bool {
@@ -802,28 +810,28 @@ func javascriptControlKeyword(identifier string) bool {
 	}
 }
 
-func legacyFetchReplacementAt(content string, afterIdentifier, end int, wasmPath string) (htmlReplacement, bool, error) {
-	offset, err := skipJavaScriptTrivia(content, afterIdentifier, end)
-	if err != nil || offset >= end || content[offset] != '(' {
-		return htmlReplacement{}, false, err
+func legacyFetchReplacementAt(content string, afterIdentifier, end int, wasmPath string) (htmlReplacement, bool) {
+	offset, ok := skipJavaScriptTrivia(content, afterIdentifier, end)
+	if !ok || offset >= end || content[offset] != '(' {
+		return htmlReplacement{}, false
 	}
-	offset, err = skipJavaScriptTrivia(content, offset+1, end)
-	if err != nil || offset >= end || (content[offset] != '\'' && content[offset] != '"') {
-		return htmlReplacement{}, false, err
+	offset, ok = skipJavaScriptTrivia(content, offset+1, end)
+	if !ok || offset >= end || (content[offset] != '\'' && content[offset] != '"') {
+		return htmlReplacement{}, false
 	}
 	quoteStart := offset
-	next, escaped, err := scanJavaScriptString(content, quoteStart, end)
-	if err != nil {
-		return htmlReplacement{}, false, err
+	next, escaped, ok := scanJavaScriptString(content, quoteStart, end)
+	if !ok {
+		return htmlReplacement{}, false
 	}
 	if escaped {
-		return htmlReplacement{}, false, nil
+		return htmlReplacement{}, false
 	}
 	valueStart := quoteStart + 1
 	valueEnd := next - 1
-	afterValue, err := skipJavaScriptTrivia(content, next, end)
-	if err != nil || afterValue >= end || (content[afterValue] != ',' && content[afterValue] != ')') {
-		return htmlReplacement{}, false, err
+	afterValue, ok := skipJavaScriptTrivia(content, next, end)
+	if !ok || afterValue >= end || (content[afterValue] != ',' && content[afterValue] != ')') {
+		return htmlReplacement{}, false
 	}
 	value := content[valueStart:valueEnd]
 	var suffix string
@@ -836,17 +844,17 @@ func legacyFetchReplacementAt(content string, afterIdentifier, end int, wasmPath
 		}
 	}
 	if !matched {
-		return htmlReplacement{}, false, nil
+		return htmlReplacement{}, false
 	}
 	return htmlReplacement{
 		start:       valueStart,
 		end:         valueEnd,
 		value:       wasmPath + suffix,
 		description: "legacy WASM fetch URL",
-	}, true, nil
+	}, true
 }
 
-func skipJavaScriptTrivia(content string, start, end int) (int, error) {
+func skipJavaScriptTrivia(content string, start, end int) (int, bool) {
 	offset := start
 	for offset < end {
 		if isJavaScriptSpace(content[offset]) {
@@ -858,19 +866,19 @@ func skipJavaScriptTrivia(content string, start, end int) (int, error) {
 			continue
 		}
 		if offset+1 < end && content[offset] == '/' && content[offset+1] == '*' {
-			next, err := scanJavaScriptBlockComment(content, offset+2, end)
-			if err != nil {
-				return 0, err
+			next, ok := scanJavaScriptBlockComment(content, offset+2, end)
+			if !ok {
+				return end, false
 			}
 			offset = next
 			continue
 		}
 		break
 	}
-	return offset, nil
+	return offset, true
 }
 
-func scanJavaScriptString(content string, start, end int) (int, bool, error) {
+func scanJavaScriptString(content string, start, end int) (int, bool, bool) {
 	quote := content[start]
 	escaped := false
 	for offset := start + 1; offset < end; offset++ {
@@ -879,24 +887,24 @@ func scanJavaScriptString(content string, start, end int) (int, bool, error) {
 			escaped = true
 			offset++
 		case quote:
-			return offset + 1, escaped, nil
+			return offset + 1, escaped, true
 		case '\n', '\r':
-			return 0, escaped, fmt.Errorf("custom index executable script has an unterminated quoted string")
+			return offset, escaped, false
 		}
 	}
-	return 0, escaped, fmt.Errorf("custom index executable script has an unterminated quoted string")
+	return end, escaped, false
 }
 
-func scanJavaScriptTemplate(content string, start, end int) (int, error) {
+func scanJavaScriptTemplate(content string, start, end int) (int, bool) {
 	for offset := start + 1; offset < end; offset++ {
 		switch content[offset] {
 		case '\\':
 			offset++
 		case '`':
-			return offset + 1, nil
+			return offset + 1, true
 		}
 	}
-	return 0, fmt.Errorf("custom index executable script has an unterminated template literal")
+	return end, false
 }
 
 func scanJavaScriptLineComment(content string, start, end int) int {
@@ -908,16 +916,16 @@ func scanJavaScriptLineComment(content string, start, end int) int {
 	return end
 }
 
-func scanJavaScriptBlockComment(content string, start, end int) (int, error) {
+func scanJavaScriptBlockComment(content string, start, end int) (int, bool) {
 	for offset := start; offset+1 < end; offset++ {
 		if content[offset] == '*' && content[offset+1] == '/' {
-			return offset + 2, nil
+			return offset + 2, true
 		}
 	}
-	return 0, fmt.Errorf("custom index executable script has an unterminated block comment")
+	return end, false
 }
 
-func scanJavaScriptRegex(content string, start, end int) (int, error) {
+func scanJavaScriptRegex(content string, start, end int) (int, bool) {
 	inClass := false
 	for offset := start; offset < end; offset++ {
 		switch content[offset] {
@@ -935,12 +943,12 @@ func scanJavaScriptRegex(content string, start, end int) (int, error) {
 			for offset < end && isJavaScriptIdentifierPart(content[offset]) {
 				offset++
 			}
-			return offset, nil
+			return offset, true
 		case '\n', '\r':
-			return 0, fmt.Errorf("custom index executable script has an unterminated regular expression")
+			return offset, false
 		}
 	}
-	return 0, fmt.Errorf("custom index executable script has an unterminated regular expression")
+	return end, false
 }
 
 func isJavaScriptSpace(value byte) bool {

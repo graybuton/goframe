@@ -17,6 +17,10 @@
         const documentation = "bundle.wasm";
         const runtimeExample = "wasm_exec.js";
         const similarNames = "my-bundle.wasm bundle.wasm.backup bundle.wasm.map wasm_exec.js.map custom-wasm_exec.js";
+        const quotient = 10 / 2;
+        let counter = 0;
+        const postfixed = counter++ / 2;
+        const legacyFetchPattern = /fetch\("bundle\.wasm"\)/;
     </script>
     <script data-authored="legacy-runtime" SRC='./wasm_exec.js?fixture=legacy#runtime'></script>
     <script data-authored="legacy-bootstrap">

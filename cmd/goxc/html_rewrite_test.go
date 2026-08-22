@@ -289,6 +289,166 @@ fetch("bundle.wasm.map");
 	}
 }
 
+func TestCustomIndexLegacyWASMUnrelatedJavaScriptMatrix(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{
+			name:   "postfix increment division",
+			script: "let x = 10;\nlet y = 2;\nconst result = x++ / y;",
+		},
+		{
+			name:   "postfix decrement division",
+			script: "let x = 10;\nlet y = 2;\nconst result = x-- / y;",
+		},
+		{
+			name:   "parenthesized postfix division",
+			script: "let x = 10;\nlet y = 2;\nconst result = (x++) / y;",
+		},
+		{
+			name:   "indexed postfix division",
+			script: "const values = [10];\nlet index = 0;\nconst divisor = 2;\nconst result = values[index]++ / divisor;",
+		},
+		{
+			name:   "member postfix division",
+			script: "const object = { value: 10 };\nconst divisor = 2;\nconst result = object.value-- / divisor;",
+		},
+		{
+			name:   "chained division",
+			script: "const a = 24;\nconst b = 3;\nconst c = 2;\nconst result = a / b / c;",
+		},
+		{
+			name:   "division assignment",
+			script: "let a = 10;\nconst b = 2;\na /= b;",
+		},
+		{
+			name:   "unary plus division",
+			script: "const a = 1;\nconst b = 4;\nconst c = 2;\nconst result = a + +b / c;",
+		},
+		{
+			name: "authored legacy-looking strings",
+			script: `const docs = "bundle.wasm";
+const runtimeDocs = "wasm_exec.js";
+let x = 10;
+const y = 2;
+const result = x++ / y;`,
+		},
+		{
+			name: "authored legacy-looking regex",
+			script: `const pattern = /fetch\("bundle\.wasm"\)/;
+let x = 10;
+const y = 2;
+const result = x-- / y;`,
+		},
+		{
+			name:   "authored legacy-looking template",
+			script: "const template = `fetch(\"bundle.wasm\")`;\nconst values = [10];\nlet index = 0;\nconst divisor = 2;\nconst result = values[index]++ / divisor;",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "<script>\n" + test.script + "\n</script>"
+			got, err := rewriteIndexHTML(source, htmlRewriteOptions{
+				wasmPath: "assets/bundle.12345678.wasm",
+			})
+			if err != nil {
+				t.Fatalf("rewriteIndexHTML() rejected unrelated valid JavaScript: %v", err)
+			}
+			if got != source {
+				t.Fatalf("unrelated JavaScript changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
+func TestCustomIndexLegacyWASMRewritesOnlyProvenFetchArguments(t *testing.T) {
+	source := `<script>
+fetch('./main.wasm?position=before');
+let x = 10;
+const y = 2;
+const before = x++ / y;
+fetch("bundle.wasm");
+const values = [10];
+let index = 0;
+const divisor = 2;
+const after = values[index]-- / divisor;
+const pattern = /bundle\.wasm/;
+const quotient = x / y;
+fetch('./main.wasm?v=1#app');
+if (x) /fetch\("bundle.wasm"\)/.test(String(x));
+function fetch(value) { return value; }
+fetch("bundle.wasm#shadowed");
+obj.fetch("bundle.wasm");
+fetch(dynamicURL);
+fetch("bundle.wasm.map");
+fetch?.("bundle.wasm");
+</script>`
+	want := `<script>
+fetch('assets/bundle.12345678.wasm?position=before');
+let x = 10;
+const y = 2;
+const before = x++ / y;
+fetch("assets/bundle.12345678.wasm");
+const values = [10];
+let index = 0;
+const divisor = 2;
+const after = values[index]-- / divisor;
+const pattern = /bundle\.wasm/;
+const quotient = x / y;
+fetch('assets/bundle.12345678.wasm?v=1#app');
+if (x) /fetch\("bundle.wasm"\)/.test(String(x));
+function fetch(value) { return value; }
+fetch("assets/bundle.12345678.wasm#shadowed");
+obj.fetch("bundle.wasm");
+fetch(dynamicURL);
+fetch("bundle.wasm.map");
+fetch?.("bundle.wasm");
+</script>`
+	options := htmlRewriteOptions{wasmPath: "assets/bundle.12345678.wasm"}
+	got, err := rewriteIndexHTML(source, options)
+	if err != nil {
+		t.Fatalf("rewriteIndexHTML() error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("candidate-scoped rewrite mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	second, err := rewriteIndexHTML(got, options)
+	if err != nil {
+		t.Fatalf("second rewriteIndexHTML() error: %v", err)
+	}
+	if second != got {
+		t.Fatalf("candidate-scoped rewrite is not idempotent\nfirst:\n%s\nsecond:\n%s", got, second)
+	}
+}
+
+func TestCustomIndexLegacyWASMLexicalUncertaintyIsPreserved(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{name: "quoted string", script: `const example = "fetch('bundle.wasm')`},
+		{name: "template literal", script: "const example = `fetch(\"bundle.wasm\")"},
+		{name: "regular expression", script: `const example = /fetch\("bundle\.wasm"\)`},
+		{name: "block comment", script: `/* fetch("bundle.wasm")`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "<script>" + test.script + "</script>"
+			got, err := rewriteIndexHTML(source, htmlRewriteOptions{
+				wasmPath: "assets/bundle.12345678.wasm",
+			})
+			if err != nil {
+				t.Fatalf("rewriteIndexHTML() treated authored JavaScript as a package error: %v", err)
+			}
+			if got != source {
+				t.Fatalf("lexically uncertain JavaScript changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
 func TestCustomIndexLegacyStylesheetReferenceMatrix(t *testing.T) {
 	source := `<link rel="stylesheet" href="styles.css">
 <LINK HREF='./styles/theme.css?v=1#dark' REL='alternate STYLESHEET'>
