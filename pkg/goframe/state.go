@@ -108,6 +108,27 @@ func (state stateHandle[T]) get() T {
 	return value
 }
 
+func stageStateValueForRender[T any](state stateHandle[T], value T) T {
+	participant := requireStateRenderParticipant(currentComponent)
+	if state.slot.owner != participant.instance {
+		panicRuntimeInvariant("goframe: render state normalization requires the current component state")
+	}
+	participant.stageValue(state.slot, value)
+	return value
+}
+
+func recordStateValueWithoutRender[T any](state stateHandle[T], value T) bool {
+	owner := state.slot.owner
+	if owner == nil || !owner.active {
+		return false
+	}
+	if currentComponent != nil || state.slot.pending != nil {
+		panicRuntimeInvariant("goframe: private state recording requires committed state outside render")
+	}
+	state.slot.value = value
+	return true
+}
+
 func (state stateHandle[T]) set(value T) {
 	owner := state.slot.owner
 	if owner == nil || !owner.active {

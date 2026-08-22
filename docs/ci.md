@@ -183,6 +183,18 @@ identity. It also covers route Error Boundary fallback and safe navigation
 recovery in the reference app. It also covers the resource example for explicit
 loading/ready/failed state, reload, stale completion guards, and
 cleanup-after-unmount behavior.
+
+The private virtual-range-restoration fixture runs under standard Go/WASM and
+TinyGo/WASM. It scrolls both `VirtualList` and `VirtualTable` to a distant
+viewport, then separately exercises large-to-short-to-large,
+large-to-empty-to-large, viewport-height, overscan, and item or row height
+transitions. The fixture requires configured and actual fixed-height geometry
+to agree, the rendered range to cover the `scrollTop`-derived viewport, and a
+pure overscan change to retain its valid scroll position. It also uses
+hit-tested pointer input on visible rows and checks bounded mounted counts,
+stable keys and application identity, correct selection/toggle targets,
+one-time cleanup, balanced listeners, and zero browser runtime errors.
+
 The private controlled-select fixture verifies parent-driven option
 reconciliation and independently dirty stateful option descendants. It covers
 an unchanged parent render count during child-only updates, a changed current

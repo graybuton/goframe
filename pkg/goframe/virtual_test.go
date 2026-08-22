@@ -134,6 +134,306 @@ func TestVirtualRangeStartAfterScrollBeyondBufferUpdatesRangeStart(t *testing.T)
 	}
 }
 
+func TestVirtualRangeCoversFractionalViewport(t *testing.T) {
+	rangeInfo := calculateVirtualRange(100, 100, 20, 0, 1)
+	visibleEnd := ceilDiv(1+100, 20)
+	if rangeInfo.Start > 0 || rangeInfo.End < visibleEnd {
+		t.Fatalf("range %#v does not cover fractional viewport [0,%d)", rangeInfo, visibleEnd)
+	}
+}
+
+func TestVirtualComponentsOverscanChangesCoverRetainedViewport(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		t.Run(primitive, func(t *testing.T) {
+			harness := newVirtualRangeHarness(primitive, 200)
+			harness.height = 100
+			harness.itemHeight = 20
+			harness.overscan = 2
+			initial := harness.render()
+			const scrollTop = 3900
+			harness.scroll(initial, scrollTop)
+
+			harness.overscan = 20
+			harness.render()
+			harness.overscan = 2
+			harness.render()
+
+			visibleStart := virtualVisibleStart(harness.length, harness.itemHeight, scrollTop)
+			visibleEnd := ceilDiv(scrollTop+harness.height, harness.itemHeight)
+			if gotStart, gotEnd := harness.rendered[0], harness.rendered[len(harness.rendered)-1]+1; gotStart > visibleStart || gotEnd < visibleEnd {
+				t.Fatalf("rendered range [%d,%d) does not cover retained viewport [%d,%d)",
+					gotStart, gotEnd, visibleStart, visibleEnd)
+			}
+		})
+	}
+}
+
+func TestVirtualRangeTransitionCarriesNormalizedStart(t *testing.T) {
+	for _, transition := range []struct {
+		name   string
+		large  int
+		shrink int
+	}{
+		{name: "100 to 2 to 100", large: 100, shrink: 2},
+		{name: "100 to 0 to 100", large: 100, shrink: 0},
+		{name: "1000 to 10 to 1000", large: 1000, shrink: 10},
+	} {
+		t.Run(transition.name, func(t *testing.T) {
+			const height = 100
+			const itemHeight = 20
+			const overscan = 2
+			distant := calculateVirtualRange(transition.large, height, itemHeight, overscan, transition.large*itemHeight)
+			shrunk := calculateVirtualRangeFromStart(transition.shrink, height, itemHeight, overscan, distant.Start)
+			restored := calculateVirtualRangeFromStart(transition.large, height, itemHeight, overscan, shrunk.Start)
+			if restored.Start != shrunk.Start {
+				t.Fatalf("restored start = %d, want committed shrink start %d", restored.Start, shrunk.Start)
+			}
+		})
+	}
+}
+
+func TestVirtualComponentsCommitNormalizedRangeAcrossCollectionShrinkGrow(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		for _, transition := range []struct {
+			name   string
+			large  int
+			shrink int
+		}{
+			{name: "100 to 2 to 100", large: 100, shrink: 2},
+			{name: "100 to 0 to 100", large: 100, shrink: 0},
+			{name: "1000 to 10 to 1000", large: 1000, shrink: 10},
+		} {
+			t.Run(primitive+"/"+transition.name, func(t *testing.T) {
+				harness := newVirtualRangeHarness(primitive, transition.large)
+				initial := harness.render()
+				harness.scroll(initial, transition.large*harness.itemHeight)
+				distant := harness.committedViewport(t)
+				if distant.RangeStart == 0 || distant.ScrollTop == 0 {
+					t.Fatal("distant scroll did not commit a non-zero range")
+				}
+
+				harness.length = transition.shrink
+				harness.render()
+				shrunk := harness.committedViewport(t)
+				wantScrollTop := virtualScrollTop(
+					transition.shrink,
+					harness.height,
+					harness.itemHeight,
+					distant.ScrollTop,
+				)
+				want := calculateVirtualRange(
+					transition.shrink,
+					harness.height,
+					harness.itemHeight,
+					harness.overscan,
+					shrunk.ScrollTop,
+				).Start
+				if shrunk.ScrollTop != wantScrollTop {
+					t.Fatalf("shrink scroll top = %d, want %d", shrunk.ScrollTop, wantScrollTop)
+				}
+				if transition.shrink > 0 && harness.firstRendered(t) != want {
+					t.Fatalf("shrink rendered start = %d, want %d", harness.firstRendered(t), want)
+				}
+				if transition.shrink == 0 && len(harness.rendered) != 0 {
+					t.Fatalf("empty shrink rendered indices %v, want none", harness.rendered)
+				}
+
+				harness.length = transition.large
+				harness.render()
+				if got := harness.firstRendered(t); got != want {
+					t.Fatalf("grow restored start = %d, want committed shrink start %d", got, want)
+				}
+				if got := harness.committedStart(t); got != want {
+					t.Fatalf("committed start after grow = %d, want %d", got, want)
+				}
+				if got := harness.committedViewport(t).ScrollTop; got != wantScrollTop {
+					t.Fatalf("committed scroll top after grow = %d, want %d", got, wantScrollTop)
+				}
+			})
+		}
+	}
+}
+
+func TestVirtualComponentsKeepRangesAlignedAcrossWindowChanges(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		for _, change := range []struct {
+			name       string
+			height     int
+			itemHeight int
+			overscan   int
+		}{
+			{name: "height", height: 1000, itemHeight: 20, overscan: 0},
+			{name: "item height", height: 100, itemHeight: 5, overscan: 0},
+			{name: "overscan", height: 100, itemHeight: 20, overscan: 20},
+		} {
+			t.Run(primitive+"/"+change.name, func(t *testing.T) {
+				harness := newVirtualRangeHarness(primitive, 100)
+				harness.overscan = 0
+				initial := harness.render()
+				harness.scroll(initial, 100*harness.itemHeight)
+				distant := harness.committedViewport(t)
+
+				originalHeight := harness.height
+				originalItemHeight := harness.itemHeight
+				originalOverscan := harness.overscan
+				harness.height = change.height
+				harness.itemHeight = change.itemHeight
+				harness.overscan = change.overscan
+				harness.render()
+				changed := harness.committedViewport(t)
+				wantChangedScrollTop := virtualScrollTop(
+					harness.length,
+					harness.height,
+					harness.itemHeight,
+					distant.ScrollTop,
+				)
+				if changed.ScrollTop != wantChangedScrollTop {
+					t.Fatalf("changed scroll top = %d, want %d", changed.ScrollTop, wantChangedScrollTop)
+				}
+				assertVirtualHarnessCoversViewport(t, harness, changed.ScrollTop)
+
+				harness.height = originalHeight
+				harness.itemHeight = originalItemHeight
+				harness.overscan = originalOverscan
+				harness.render()
+				restored := harness.committedViewport(t)
+				wantRestoredScrollTop := virtualScrollTop(
+					harness.length,
+					harness.height,
+					harness.itemHeight,
+					changed.ScrollTop,
+				)
+				if restored.ScrollTop != wantRestoredScrollTop {
+					t.Fatalf("restored scroll top = %d, want latest valid viewport %d", restored.ScrollTop, wantRestoredScrollTop)
+				}
+				assertVirtualHarnessCoversViewport(t, harness, restored.ScrollTop)
+			})
+		}
+	}
+}
+
+func TestVirtualComponentsTreatNegativeOverscanAsZero(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		t.Run(primitive, func(t *testing.T) {
+			harness := newVirtualRangeHarness(primitive, 100)
+			harness.overscan = 0
+			initial := harness.render()
+			harness.scroll(initial, 40*harness.itemHeight)
+			wantStart := harness.committedStart(t)
+			wantRendered := append([]int(nil), harness.rendered...)
+
+			harness.overscan = -7
+			harness.render()
+			if got := harness.committedStart(t); got != wantStart {
+				t.Fatalf("negative overscan committed start = %d, want zero-equivalent %d", got, wantStart)
+			}
+			if len(harness.rendered) != len(wantRendered) {
+				t.Fatalf("negative overscan rendered %d entries, want %d", len(harness.rendered), len(wantRendered))
+			}
+			for index := range wantRendered {
+				if harness.rendered[index] != wantRendered[index] {
+					t.Fatalf("negative overscan rendered indices = %v, want %v", harness.rendered, wantRendered)
+				}
+			}
+		})
+	}
+}
+
+func TestVirtualComponentsCoveredScrollRetainsNormalizedStart(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		t.Run(primitive, func(t *testing.T) {
+			harness := newVirtualRangeHarness(primitive, 100)
+			initial := harness.render()
+			harness.scroll(initial, 100*harness.itemHeight)
+			harness.length = 2
+			shrunk := harness.render()
+			beforeSchedules := harness.schedules
+
+			harness.scrollWithoutRender(shrunk, 0)
+			if harness.instance.dirty || harness.schedules != beforeSchedules {
+				t.Fatalf("covered scroll dirty=%v schedules=%d, want clean/%d",
+					harness.instance.dirty, harness.schedules, beforeSchedules)
+			}
+			if got := harness.committedStart(t); got != 0 {
+				t.Fatalf("covered scroll committed start = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestVirtualComponentsRecordCoveredViewportWithoutScheduling(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		t.Run(primitive, func(t *testing.T) {
+			harness := newVirtualRangeHarness(primitive, 100)
+			initial := harness.render()
+			beforeSchedules := harness.schedules
+
+			harness.scrollWithoutRender(initial, 40)
+			viewport := harness.committedViewport(t)
+			if viewport != (virtualViewportState{RangeStart: 0, ScrollTop: 40}) {
+				t.Fatalf("covered viewport = %#v, want start 0 scrollTop 40", viewport)
+			}
+			if harness.instance.dirty || harness.schedules != beforeSchedules {
+				t.Fatalf("covered scroll dirty=%v schedules=%d, want clean/%d",
+					harness.instance.dirty, harness.schedules, beforeSchedules)
+			}
+		})
+	}
+}
+
+func TestVirtualComponentsScheduleOnceAfterViewportLeavesBuffer(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		t.Run(primitive, func(t *testing.T) {
+			harness := newVirtualRangeHarness(primitive, 100)
+			initial := harness.render()
+
+			harness.scrollWithoutRender(initial, 100)
+			if !harness.instance.dirty || harness.schedules != 1 {
+				t.Fatalf("uncovered scroll dirty=%v schedules=%d, want true/1",
+					harness.instance.dirty, harness.schedules)
+			}
+			viewport := harness.committedViewport(t)
+			if viewport.ScrollTop != 100 {
+				t.Fatalf("scheduled scroll top = %d, want 100", viewport.ScrollTop)
+			}
+
+			harness.render()
+			assertVirtualHarnessCoversViewport(t, harness, viewport.ScrollTop)
+		})
+	}
+}
+
+func TestVirtualComponentsRollbackRangeNormalizationAfterFailedRender(t *testing.T) {
+	for _, primitive := range []string{"list", "table"} {
+		t.Run(primitive, func(t *testing.T) {
+			errorsSeen := captureRuntimeErrors(t)
+			harness := newVirtualRangeHarness(primitive, 100)
+			initial := harness.render()
+			harness.scroll(initial, 100*harness.itemHeight)
+			distant := harness.committedViewport(t)
+
+			harness.length = 2
+			harness.failKey = true
+			if rendered := harness.render(); rendered != (EmptyNode{}) {
+				t.Fatalf("failed render result = %#v, want EmptyNode", rendered)
+			}
+			if got := harness.committedViewport(t); got != distant {
+				t.Fatalf("failed render committed viewport = %#v, want previous %#v", got, distant)
+			}
+
+			harness.failKey = false
+			harness.render()
+			if got := harness.committedStart(t); got != 0 {
+				t.Fatalf("successful retry committed start = %d, want 0", got)
+			}
+			if got := harness.committedViewport(t).ScrollTop; got != 0 {
+				t.Fatalf("successful retry committed scroll top = %d, want 0", got)
+			}
+			requireRuntimeError(t, errorsSeen(), ErrorPhaseRender, "Virtual"+titleCaseVirtualPrimitive(primitive), "component render", "virtual range render failure")
+		})
+	}
+}
+
 func TestVirtualItemKey(t *testing.T) {
 	if got := virtualItemKey[int](nil, 42, 7); got != "index-7" {
 		t.Fatalf("fallback key = %q, want index-7", got)
@@ -324,6 +624,143 @@ func renderVirtualTableBodyChildrenForTest[T any](props VirtualTableProps[T]) []
 	table := outer.Children[0].(VNode)
 	tbody := table.Children[len(table.Children)-1].(VNode)
 	return tbody.Children
+}
+
+type virtualRangeHarness struct {
+	primitive  string
+	length     int
+	height     int
+	itemHeight int
+	overscan   int
+	failKey    bool
+	rendered   []int
+	schedules  int
+	instance   *componentInstance
+}
+
+func newVirtualRangeHarness(primitive string, length int) *virtualRangeHarness {
+	return &virtualRangeHarness{
+		primitive:  primitive,
+		length:     length,
+		height:     100,
+		itemHeight: 20,
+		overscan:   2,
+	}
+}
+
+func (harness *virtualRangeHarness) render() Node {
+	harness.rendered = harness.rendered[:0]
+	node := harness.componentNode()
+	if harness.instance == nil {
+		harness.instance = newComponentInstance(node, "", nil, func(*componentInstance) {
+			harness.schedules++
+		})
+	} else {
+		harness.instance.node = node
+	}
+	return renderComponentInstance(harness.instance)
+}
+
+func (harness *virtualRangeHarness) componentNode() ComponentNode {
+	items := make([]int, harness.length)
+	for index := range items {
+		items[index] = index
+	}
+	key := func(item int, _ int) string {
+		if harness.failKey {
+			panic("virtual range render failure")
+		}
+		return ToString(item)
+	}
+	if harness.primitive == "list" {
+		return VirtualList(VirtualListProps[int]{
+			Items:      items,
+			Height:     harness.height,
+			ItemHeight: harness.itemHeight,
+			Overscan:   harness.overscan,
+			Key:        key,
+			RenderItem: func(item VirtualItem[int]) Node {
+				harness.rendered = append(harness.rendered, item.Index)
+				return Text(ToString(item.Item))
+			},
+		}).(ComponentNode)
+	}
+	return VirtualTable(VirtualTableProps[int]{
+		Items:       items,
+		Height:      harness.height,
+		RowHeight:   harness.itemHeight,
+		Overscan:    harness.overscan,
+		ColumnCount: 1,
+		Key:         key,
+		RenderRow: func(row VirtualRow[int]) Node {
+			harness.rendered = append(harness.rendered, row.Index)
+			return El("tr", Props{"style": row.RowStyle}, El("td", Props{}, Text(ToString(row.Item))))
+		},
+	}).(ComponentNode)
+}
+
+func (harness *virtualRangeHarness) scroll(rendered Node, scrollTop int) Node {
+	harness.scrollWithoutRender(rendered, scrollTop)
+	return harness.render()
+}
+
+func (harness *virtualRangeHarness) scrollWithoutRender(rendered Node, scrollTop int) {
+	outer := rendered.(VNode)
+	handler := outer.Props["OnScroll"].(func(ScrollEvent))
+	handler(ScrollEvent{scrollTop: func() int { return scrollTop }})
+}
+
+func (harness *virtualRangeHarness) committedStart(t *testing.T) int {
+	return harness.committedViewport(t).RangeStart
+}
+
+func (harness *virtualRangeHarness) committedViewport(t *testing.T) virtualViewportState {
+	t.Helper()
+	if harness.instance == nil || len(harness.instance.stateSlots) != 1 {
+		t.Fatalf("state slots = %#v, want one committed viewport slot", harness.instance)
+	}
+	viewport, ok := harness.instance.stateSlots[0].value.(virtualViewportState)
+	if !ok {
+		t.Fatalf("viewport slot value = %#v, want virtualViewportState", harness.instance.stateSlots[0].value)
+	}
+	return viewport
+}
+
+func (harness *virtualRangeHarness) firstRendered(t *testing.T) int {
+	t.Helper()
+	if len(harness.rendered) == 0 {
+		t.Fatal("virtual component rendered no items")
+	}
+	return harness.rendered[0]
+}
+
+func assertVirtualHarnessCoversViewport(t *testing.T, harness *virtualRangeHarness, scrollTop int) {
+	t.Helper()
+	if harness.length == 0 {
+		if len(harness.rendered) != 0 {
+			t.Fatalf("empty virtual component rendered indices %v", harness.rendered)
+		}
+		return
+	}
+	visibleStart, visibleEnd := virtualVisibleRange(
+		harness.length,
+		harness.height,
+		harness.itemHeight,
+		scrollTop,
+	)
+	renderedStart := harness.rendered[0]
+	renderedEnd := harness.rendered[len(harness.rendered)-1] + 1
+	if renderedStart > visibleStart || renderedEnd < visibleEnd {
+		t.Fatalf("rendered range [%d,%d) does not cover viewport [%d,%d) at scrollTop %d",
+			renderedStart, renderedEnd, visibleStart, visibleEnd, scrollTop)
+	}
+}
+
+func titleCaseVirtualPrimitive(primitive string) string {
+	if primitive == "list" {
+		return "List"
+	}
+	return "Table"
 }
 
 func requireKeyedNode(t *testing.T, node Node) KeyedNode {

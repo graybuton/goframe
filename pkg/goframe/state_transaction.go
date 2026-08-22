@@ -5,10 +5,16 @@ type stateReducerRenderUpdate struct {
 	reducer any
 }
 
+type stateValueRenderUpdate struct {
+	slot  *stateSlot
+	value any
+}
+
 type stateRenderParticipant struct {
 	attempt  *renderLifecycleAttempt
 	instance *componentInstance
 	slots    []*stateSlot
+	values   []stateValueRenderUpdate
 	reducers []stateReducerRenderUpdate
 	dirty    bool
 }
@@ -30,6 +36,26 @@ func requireStateRenderParticipant(instance *componentInstance) *stateRenderPart
 func (state *stateRenderParticipant) addSlot(slot *stateSlot) {
 	slot.pending = state
 	state.slots = append(state.slots, slot)
+}
+
+func (state *stateRenderParticipant) stageValue(slot *stateSlot, value any) {
+	if slot.pending == state {
+		slot.value = value
+		return
+	}
+	for index := range state.values {
+		if state.values[index].slot == slot {
+			state.values[index].value = value
+			return
+		}
+	}
+	if stateValuesEqual(slot.value, value) {
+		return
+	}
+	state.values = append(state.values, stateValueRenderUpdate{
+		slot:  slot,
+		value: value,
+	})
 }
 
 func (state *stateRenderParticipant) stageReducer(slot *stateSlot, reducer any) {
@@ -69,6 +95,9 @@ func (state *stateRenderParticipant) finishStateRender(attempt *renderLifecycleA
 			slot.pending = nil
 			instance.stateSlots = append(instance.stateSlots, slot)
 		}
+		for _, update := range state.values {
+			update.slot.value = update.value
+		}
 		for _, update := range state.reducers {
 			update.slot.reducer = update.reducer
 		}
@@ -83,10 +112,12 @@ func (state *stateRenderParticipant) finishStateRender(attempt *renderLifecycleA
 	}
 
 	clear(state.slots)
+	clear(state.values)
 	clear(state.reducers)
 	state.attempt = nil
 	state.instance = nil
 	state.slots = state.slots[:0]
+	state.values = state.values[:0]
 	state.reducers = state.reducers[:0]
 	state.dirty = false
 
