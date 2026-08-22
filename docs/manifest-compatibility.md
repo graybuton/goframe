@@ -62,6 +62,15 @@ Current input behavior:
   paths;
 - custom `index.html` templates must exist before compilation and must be
   regular non-symlink files;
+- custom templates may give GoFrame explicit ownership of preload, runtime,
+  and bootstrap sections through complete, exact managed comment pairs. The
+  delimiters remain in package and development HTML; malformed, duplicate,
+  nested, or interleaved pairs fail before package publication;
+- without a managed section, compatibility rewriting is limited to structural
+  runtime script URLs, static quoted direct `fetch(...)` WASM URLs, declared
+  stylesheet links, and structural preload insertion. Arbitrary authored text
+  is not a package reference, and dynamic loaders use the managed bootstrap
+  block;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 

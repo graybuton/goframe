@@ -151,9 +151,35 @@ Custom `index.html` files may use explicit package blocks:
 <!-- /goframe:bootstrap -->
 ```
 
-Packaging rewrites those blocks to the final asset paths. If a legacy HTML file
-does not have the markers, packaging falls back to simple `wasm_exec.js` and
-`main.wasm`/`bundle.wasm` string rewrites.
+These exact, case-sensitive comments are build-time ownership delimiters.
+Packaging validates all three block types before changing the document, then
+replaces only the complete managed blocks with final package references. The
+comments remain in packaged and development HTML and do not participate in
+application rendering. Duplicate, orphaned, reversed, nested, or interleaved
+managed markers fail packaging before publication. With `--preload` disabled,
+a valid preload block retains its delimiters with an empty interior.
+
+Markerless compatibility is structural rather than textual. It rewrites only:
+
+- the URL value of an executable `<script src>` that names `wasm_exec.js` or
+  `./wasm_exec.js`;
+- a static single- or double-quoted `bundle.wasm` or `main.wasm` URL used as
+  the first argument of a direct `fetch(...)` call in executable inline
+  JavaScript;
+- the URL value of a stylesheet or style-preload `<link>` that names a
+  declared packaged stylesheet.
+
+Those forms retain a query string or fragment. Absolute, protocol-relative,
+root-relative, data, blob, dynamic-loader, and similar-name references are not
+rewritten. Comments, text, data attributes, inline JSON, import maps,
+speculation rules, templates, style text, JavaScript comments, unrelated
+strings, template literals, and regular expressions remain authored bytes. A
+custom dynamic loader should use the explicit `goframe:bootstrap` block.
+
+The rewriter scans the original source and changes only validated byte ranges;
+it does not parse and serialize the whole document. Whitespace, line endings,
+doctype spelling, attribute casing and order, quotes, and formatting outside
+managed or recognized reference spans are preserved.
 
 ## Preload Hints
 
@@ -167,7 +193,11 @@ assets:
 ```
 
 CSS preload is included only when CSS assets are packaged through the manifest
-asset directory or explicit asset list.
+asset directory or explicit asset list. For markerless custom HTML, preload
+markup is inserted immediately before the structural closing `</head>` tag.
+Text resembling `</head>` inside comments, scripts, styles, attributes, or
+examples is ignored. If no unambiguous closing head exists, packaging fails and
+recommends an explicit `goframe:preload` block.
 
 ## Asset Manifest
 

@@ -61,6 +61,18 @@ before replacing a prior complete package, export validates its source before
 destination mutation and validates a private stage before publication, and a
 damaged tool-owned package remains eligible for safe cleanup.
 
+Custom-index tests validate all managed-marker shapes before replacement and
+exercise source-preserving runtime, WASM, stylesheet, and preload rewrites
+across quote styles, ASCII tag casing, query/fragment suffixes, raw text,
+templates, malformed syntax, and similar authored names. Rewrite failures emit
+no partial HTML and preserve an earlier complete package. A private browser
+fixture packages explicit-marker and markerless documents with asset hashing,
+preload, gzip, and Brotli under standard Go and TinyGo; it requires inspect and
+export parity, final asset delivery, applied CSS, interactive state updates,
+unchanged authored sentinels, and zero browser runtime errors. A focused dev
+control serves the canonical rewritten package through the generation manager
+and verifies that reload-client injection changes only the response.
+
 Focused `goxc inspect` tests cover CLI resolution, deterministic text and
 schema-v1 JSON, copy-root byte identity, read-only filesystem behavior, writer
 failures, and an invalid-graph matrix for metadata, entrypoints, hashes,
