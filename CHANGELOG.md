@@ -23,8 +23,8 @@
   and limits markerless compatibility rewrites to structural runtime, WASM,
   stylesheet, and preload references. Authored comments, text, data, and
   unrelated JavaScript remain byte-preserved outside recognized spans. Legacy
-  direct-fetch recognition is syntactic and conservative: ambiguous authored
-  JavaScript remains unchanged rather than becoming a packaging error.
+  WASM compatibility recognizes complete historical GoFrame bootstrap scripts;
+  arbitrary direct fetch calls and unsupported custom loaders remain unchanged.
 - `VirtualList` and `VirtualTable` now track the pixel viewport separately from
   the rendered overscan window. Collection shrink and empty transitions clamp
   the persisted viewport, while height, item or row height, and overscan

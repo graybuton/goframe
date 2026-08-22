@@ -163,9 +163,9 @@ Markerless compatibility is structural rather than textual. It rewrites only:
 
 - the URL value of an executable `<script src>` that names `wasm_exec.js` or
   `./wasm_exec.js`;
-- a static single- or double-quoted `bundle.wasm` or `main.wasm` URL used as
-  the first argument of a direct `fetch(...)` call in executable inline
-  JavaScript;
+- the static single- or double-quoted `bundle.wasm` or `main.wasm` URL inside
+  an executable inline script whose complete body matches a historical
+  GoFrame bootstrap;
 - the URL value of a stylesheet or style-preload `<link>` that names a
   declared packaged stylesheet.
 
@@ -175,11 +175,12 @@ rewritten. Comments, text, data attributes, inline JSON, import maps,
 speculation rules, templates, style text, JavaScript comments, unrelated
 strings, template literals, and regular expressions remain authored bytes.
 
-Direct `fetch(...)` matching is syntactic rather than binding-aware. A call to
-another authored function named `fetch` still has the legacy compatibility
-shape. The conservative recognizer does not validate arbitrary JavaScript; an
-unsupported or lexically ambiguous loader remains unchanged. Use an explicit
-`goframe:bootstrap` block when that code needs a deterministic package rewrite.
+Markerless bootstrap recognition is structural and applies to the complete
+script body. Arbitrary direct `fetch(...)` calls are not rewritten, and
+additional authored statements make a script non-owned. The recognizer does
+not validate arbitrary JavaScript; unsupported custom loaders remain unchanged.
+Use an explicit `goframe:bootstrap` block when that code needs a deterministic
+package rewrite.
 
 The rewriter scans the original source and changes only validated byte ranges;
 it does not parse and serialize the whole document. Whitespace, line endings,
