@@ -173,8 +173,13 @@ Those forms retain a query string or fragment. Absolute, protocol-relative,
 root-relative, data, blob, dynamic-loader, and similar-name references are not
 rewritten. Comments, text, data attributes, inline JSON, import maps,
 speculation rules, templates, style text, JavaScript comments, unrelated
-strings, template literals, and regular expressions remain authored bytes. A
-custom dynamic loader should use the explicit `goframe:bootstrap` block.
+strings, template literals, and regular expressions remain authored bytes.
+
+Direct `fetch(...)` matching is syntactic rather than binding-aware. A call to
+another authored function named `fetch` still has the legacy compatibility
+shape. The conservative recognizer does not validate arbitrary JavaScript; an
+unsupported or lexically ambiguous loader remains unchanged. Use an explicit
+`goframe:bootstrap` block when that code needs a deterministic package rewrite.
 
 The rewriter scans the original source and changes only validated byte ranges;
 it does not parse and serialize the whole document. Whitespace, line endings,

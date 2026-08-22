@@ -68,9 +68,10 @@ Current input behavior:
   nested, or interleaved pairs fail before package publication;
 - without a managed section, compatibility rewriting is limited to structural
   runtime script URLs, static quoted direct `fetch(...)` WASM URLs, declared
-  stylesheet links, and structural preload insertion. Arbitrary authored text
-  is not a package reference, and dynamic loaders use the managed bootstrap
-  block;
+  stylesheet links, and structural preload insertion. Direct fetch matching is
+  syntactic rather than binding-aware. The recognizer does not validate
+  arbitrary JavaScript; unsupported or lexically ambiguous loaders remain
+  unchanged and use the managed bootstrap block when rewriting is required;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 
