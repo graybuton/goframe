@@ -194,7 +194,7 @@ func TestCustomIndexForeignIntegrationPointTransitions(t *testing.T) {
 		},
 		{
 			name: "MathML annotation HTML encoding",
-			source: "<math><annotation-xml encoding=\"\tTEXT/HTML\r\"><![CDATA[x > <script src=\"wasm_exec.js?cdata\"></script>]]>\n" +
+			source: "<math><annotation-xml encoding=\"TEXT/HTML\"><![CDATA[x > <script src=\"wasm_exec.js?cdata\"></script>]]>\n" +
 				"<script src=\"wasm_exec.js?child\"></script></annotation-xml></math>",
 			want: `src="assets/wasm_exec.22222222.js?child"`,
 		},
@@ -216,6 +216,117 @@ func TestCustomIndexForeignIntegrationPointTransitions(t *testing.T) {
 				t.Fatalf("HTML child below integration point was not rewritten:\n%s", got)
 			}
 		})
+	}
+}
+
+func TestCustomIndexAnnotationXMLIntegrationPointExactEncoding(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name        string
+		encoding    string
+		integration bool
+	}{
+		{name: "HTML", encoding: "text/html", integration: true},
+		{name: "HTML ASCII case", encoding: "TEXT/HTML", integration: true},
+		{name: "HTML named reference", encoding: "text&sol;html", integration: true},
+		{name: "XHTML", encoding: "application/xhtml+xml", integration: true},
+		{name: "XHTML ASCII case", encoding: "APPLICATION/XHTML+XML", integration: true},
+		{name: "leading space", encoding: " text/html"},
+		{name: "trailing space", encoding: "text/html "},
+		{name: "leading newline", encoding: "\ntext/html"},
+		{name: "numeric trailing space", encoding: "text/html&#x20;"},
+		{name: "leading NBSP", encoding: " text/html"},
+		{name: "MIME parameter", encoding: "text/html;charset=utf-8"},
+		{name: "empty", encoding: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			attribute := ""
+			if test.name != "empty" {
+				attribute = ` encoding="` + test.encoding + `"`
+			}
+			source := `<math><annotation-xml` + attribute + `><script src="wasm_exec.js?annotation"></script></annotation-xml></math>`
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+			rewritten := strings.Contains(got, `src="`+runtimePath+`?annotation"`)
+			if rewritten != test.integration {
+				t.Fatalf("annotation integration rewrite = %v, want %v\ngot:  %q\nsource: %q", rewritten, test.integration, got, source)
+			}
+			if !test.integration && got != source {
+				t.Fatalf("foreign annotation bytes changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+
+	source := `<math><annotation-xml encoding="text/html"><svg><title><script src="wasm_exec.js?nested"></script></title></svg></annotation-xml></math>`
+	got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+	if !strings.Contains(got, `src="`+runtimePath+`?nested"`) {
+		t.Fatalf("nested SVG integration point did not expose its HTML child: %q", got)
+	}
+}
+
+func TestCustomIndexCompleteTagNameState(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, name := range []string{
+		"title_extra",
+		"title.extra",
+		"title=extra",
+		`title"extra`,
+		"title'extra",
+		"title@extra",
+		"titleé",
+		"title:extra",
+		"title-extra",
+		"title\x00extra",
+	} {
+		t.Run("false integration "+name, func(t *testing.T) {
+			source := `<svg><` + name + `><script src="wasm_exec.js?foreign"></script></` + name + `></svg>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != source {
+				t.Fatalf("tag name %q became an SVG integration point\ngot:  %q\nwant: %q", name, got, source)
+			}
+		})
+	}
+
+	for _, element := range []struct {
+		name       string
+		attributes string
+	}{
+		{name: "p_extra"},
+		{name: "div.extra"},
+		{name: "span=extra"},
+		{name: "font_extra", attributes: ` color="red"`},
+		{name: "body@extra"},
+	} {
+		t.Run("false breakout "+element.name, func(t *testing.T) {
+			source := `<svg><` + element.name + element.attributes + `><script src="wasm_exec.js?foreign"></script></` + element.name + `></svg>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != source {
+				t.Fatalf("tag name %q caused a foreign-content breakout\ngot:  %q\nwant: %q", element.name, got, source)
+			}
+		})
+	}
+
+	for _, element := range []struct {
+		name       string
+		attributes string
+	}{
+		{name: "title"},
+		{name: "foreignObject"},
+		{name: "desc"},
+		{name: "p"},
+		{name: "div"},
+		{name: "font", attributes: ` color="red"`},
+	} {
+		t.Run("genuine control "+element.name, func(t *testing.T) {
+			source := `<svg><` + element.name + element.attributes + `><script src="wasm_exec.js?html"></script></` + element.name + `></svg>`
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+			if !strings.Contains(got, `src="`+runtimePath+`?html"`) {
+				t.Fatalf("genuine %q control did not expose HTML content: %q", element.name, got)
+			}
+		})
+	}
+
+	source := `<div id="value"><input disabled/><script src="wasm_exec.js?attributes"></script></div>`
+	want := `<div id="value"><input disabled/><script src="` + runtimePath + `?attributes"></script></div>`
+	if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+		t.Fatalf("ordinary attribute boundaries changed\ngot:  %q\nwant: %q", got, want)
 	}
 }
 
@@ -1637,6 +1748,80 @@ func TestCustomIndexManagedPreloadDoesNotOwnExternalStyleSheet(t *testing.T) {
 	}
 }
 
+func TestCustomIndexHTMLCommentTokenizerStates(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name    string
+		comment string
+	}{
+		{name: "normal", comment: "<!--x-->"},
+		{name: "end bang", comment: "<!--x--!>"},
+		{name: "abrupt empty", comment: "<!-->"},
+		{name: "abrupt dash", comment: "<!--->"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := test.comment + `<script src="wasm_exec.js?real"></script>`
+			want := test.comment + `<script src="` + runtimePath + `?real"></script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+				t.Fatalf("comment close did not expose following runtime tag\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		`<!-- marker-like <!-- goframe:runtime --> text --><script src="wasm_exec.js?real"></script>`,
+		`<!-- <script src="wasm_exec.js?opaque"></script><link rel="stylesheet" href="styles.css"></head> --><script src="wasm_exec.js?real"></script>`,
+	} {
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+		if strings.Contains(got, runtimePath+`?opaque`) {
+			t.Fatalf("comment data became structural: %q", got)
+		}
+		if !strings.Contains(got, runtimePath+`?real`) {
+			t.Fatalf("real runtime tag after comment was not rewritten: %q", got)
+		}
+	}
+
+	markerLike := `<!-- goframe:runtime --!><script src="wasm_exec.js?real"></script>`
+	if got := rewriteIndexForTest(t, markerLike, htmlRewriteOptions{runtimePath: runtimePath}); !strings.Contains(got, runtimePath+`?real`) {
+		t.Fatalf("incorrectly closed marker-like comment became managed: %q", got)
+	}
+
+	eofComment := `<!-- <script src="wasm_exec.js?opaque"></script></head>`
+	if got := rewriteIndexForTest(t, eofComment, htmlRewriteOptions{runtimePath: runtimePath}); got != eofComment {
+		t.Fatalf("EOF comment changed\ngot:  %q\nwant: %q", got, eofComment)
+	}
+	document, err := scanCustomIndexHTML(eofComment)
+	if err != nil {
+		t.Fatalf("scanCustomIndexHTML(EOF comment) error: %v", err)
+	}
+	if len(document.comments) != 1 || !document.comments[0].eof || document.comments[0].end != len(eofComment) {
+		t.Fatalf("EOF comment span = %#v, want one EOF-terminated full-source span", document.comments)
+	}
+
+	realHead := `<html><head></head><body><!-- </head>`
+	got := rewriteIndexForTest(t, realHead, htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.11111111.wasm",
+		runtimePath: runtimePath,
+	})
+	if !strings.Contains(got, `<link rel="preload" href="assets/bundle.11111111.wasm"`) {
+		t.Fatalf("real head close before EOF comment did not receive preload: %q", got)
+	}
+
+	fakeHead := `<html><head><!-- </head>`
+	result, err := rewriteIndexHTML(fakeHead, htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.11111111.wasm",
+		runtimePath: runtimePath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "closing </head>") {
+		t.Fatalf("rewriteIndexHTML() = %q, %v, want structural head guidance", result, err)
+	}
+	if result != "" {
+		t.Fatalf("EOF comment preload failure returned partial output %q", result)
+	}
+}
+
 func TestCustomIndexPreloadInsertionMatrix(t *testing.T) {
 	options := htmlRewriteOptions{
 		preload:     true,
@@ -1736,7 +1921,6 @@ func TestCustomIndexMalformedSyntaxFailsClosed(t *testing.T) {
 		source string
 		want   string
 	}{
-		{name: "comment", source: `<!-- open`, want: "unterminated HTML comment"},
 		{name: "tag", source: `<script src="wasm_exec.js"`, want: "unterminated"},
 		{name: "script", source: `<script>fetch("bundle.wasm")`, want: "no closing </script>"},
 		{name: "template", source: `<template><p>x</p>`, want: "opening <template>"},

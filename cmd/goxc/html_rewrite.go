@@ -66,6 +66,7 @@ type scannedHTML struct {
 type htmlComment struct {
 	start         int
 	end           int
+	eof           bool
 	templateDepth int
 }
 
@@ -133,14 +134,11 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			continue
 		}
 		if strings.HasPrefix(content[offset:], "<!--") {
-			end := strings.Index(content[offset+4:], "-->")
-			if end < 0 {
-				return scannedHTML{}, fmt.Errorf("custom index has an unterminated HTML comment; close it with -->")
-			}
-			end += offset + 7
+			end, eof := scanHTMLComment(content, offset)
 			document.comments = append(document.comments, htmlComment{
 				start:         offset,
 				end:           end,
+				eof:           eof,
 				templateDepth: templateDepth,
 			})
 			offset = end
@@ -232,6 +230,118 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		return scannedHTML{}, fmt.Errorf("custom index has an opening <template> without a matching closing tag")
 	}
 	return document, nil
+}
+
+type htmlCommentState uint8
+
+const (
+	htmlCommentStart htmlCommentState = iota
+	htmlCommentStartDash
+	htmlCommentData
+	htmlCommentLessThan
+	htmlCommentLessThanBang
+	htmlCommentLessThanBangDash
+	htmlCommentLessThanBangDashDash
+	htmlCommentEndDash
+	htmlCommentEnd
+	htmlCommentEndBang
+)
+
+// scanHTMLComment follows the bounded comment tokenizer states. The scanner
+// only needs the raw source span; comment data remains authored and opaque.
+func scanHTMLComment(content string, start int) (end int, eof bool) {
+	state := htmlCommentStart
+	for offset := start + len("<!--"); ; {
+		if offset >= len(content) {
+			return len(content), true
+		}
+		current := content[offset]
+		switch state {
+		case htmlCommentStart:
+			switch current {
+			case '-':
+				state = htmlCommentStartDash
+				offset++
+			case '>':
+				return offset + 1, false
+			default:
+				state = htmlCommentData
+			}
+		case htmlCommentStartDash:
+			switch current {
+			case '-':
+				state = htmlCommentEnd
+				offset++
+			case '>':
+				return offset + 1, false
+			default:
+				state = htmlCommentData
+			}
+		case htmlCommentData:
+			switch current {
+			case '<':
+				state = htmlCommentLessThan
+			case '-':
+				state = htmlCommentEndDash
+			}
+			offset++
+		case htmlCommentLessThan:
+			switch current {
+			case '!':
+				state = htmlCommentLessThanBang
+				offset++
+			case '<':
+				offset++
+			default:
+				state = htmlCommentData
+			}
+		case htmlCommentLessThanBang:
+			if current == '-' {
+				state = htmlCommentLessThanBangDash
+				offset++
+			} else {
+				state = htmlCommentData
+			}
+		case htmlCommentLessThanBangDash:
+			if current == '-' {
+				state = htmlCommentLessThanBangDashDash
+				offset++
+			} else {
+				state = htmlCommentEndDash
+			}
+		case htmlCommentLessThanBangDashDash:
+			state = htmlCommentEnd
+		case htmlCommentEndDash:
+			if current == '-' {
+				state = htmlCommentEnd
+				offset++
+			} else {
+				state = htmlCommentData
+			}
+		case htmlCommentEnd:
+			switch current {
+			case '>':
+				return offset + 1, false
+			case '!':
+				state = htmlCommentEndBang
+				offset++
+			case '-':
+				offset++
+			default:
+				state = htmlCommentData
+			}
+		case htmlCommentEndBang:
+			switch current {
+			case '-':
+				state = htmlCommentEndDash
+				offset++
+			case '>':
+				return offset + 1, false
+			default:
+				state = htmlCommentData
+			}
+		}
+	}
 }
 
 func scanForeignCDATAEnd(content string, start int, namespace htmlNamespace) (int, error) {
@@ -352,7 +462,6 @@ func (context *htmlScannerContext) push(content string, tag htmlTag) {
 			element.mathMLTextIntegrationPt = true
 		case "annotation-xml":
 			if encoding, ok := firstHTMLAttributeValue(content, tag, "encoding"); ok {
-				encoding = trimHTMLSpace(encoding)
 				element.htmlIntegrationPoint = asciiFoldEqual(encoding, "text/html") ||
 					asciiFoldEqual(encoding, "application/xhtml+xml")
 			}
@@ -544,10 +653,10 @@ func scanHTMLTag(content string, start int) (htmlTag, bool, error) {
 		return htmlTag{}, false, nil
 	}
 	nameStart := offset
-	for offset < len(content) && isHTMLNameByte(content[offset]) {
+	for offset < len(content) && !isHTMLSpace(content[offset]) && content[offset] != '/' && content[offset] != '>' {
 		offset++
 	}
-	name := asciiLower(content[nameStart:offset])
+	name := semanticHTMLTagName(content[nameStart:offset])
 	tagEnd, err := scanHTMLConstructEnd(content, offset)
 	if err != nil {
 		return htmlTag{}, false, fmt.Errorf("custom index <%s> tag is unterminated: %w", name, err)
@@ -564,6 +673,22 @@ func scanHTMLTag(content string, start int) (htmlTag, bool, error) {
 		selfClosing: selfClosing,
 		attributes:  attributes,
 	}, true, nil
+}
+
+func semanticHTMLTagName(value string) string {
+	var name strings.Builder
+	name.Grow(len(value))
+	for offset := 0; offset < len(value); offset++ {
+		switch current := value[offset]; {
+		case current == 0:
+			name.WriteRune('\uFFFD')
+		case current >= 'A' && current <= 'Z':
+			name.WriteByte(current + 'a' - 'A')
+		default:
+			name.WriteByte(current)
+		}
+	}
+	return name.String()
 }
 
 func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlAttribute, bool, error) {
@@ -891,10 +1016,6 @@ func scanRawElementClose(content string, start int, name string) (htmlTag, error
 
 func isHTMLNameStart(value byte) bool {
 	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
-}
-
-func isHTMLNameByte(value byte) bool {
-	return isHTMLNameStart(value) || value >= '0' && value <= '9' || value == '-' || value == ':'
 }
 
 func isHTMLSpace(value byte) bool {
