@@ -47,15 +47,26 @@
             #value = "fetch(\"bundle.wasm\")";
         }
     </script>
+    <math id="fixture-spaced-annotation" style="display:none">
+        <annotation-xml encoding=" text/html ">
+            <script id="fixture-spaced-annotation-script" type="application/json" src="wasm_exec.js?fixture=annotation-decoy"></script>
+        </annotation-xml>
+    </math>
+    <svg id="fixture-punctuation-svg" style="display:none">
+        <title_extra id="fixture-punctuation-tag">
+            <script id="fixture-punctuation-script" type="application/json" src="wasm_exec.js?fixture=punctuation-decoy"></script>
+        </title_extra>
+    </svg>
     <svg id="fixture-breakout" style="display:none">
     <p id="fixture-breakout-html"></p>
     <input id="fixture-compact-input" disabled/>
-    <link data-authored="legacy-style" href=' ./styles&period;css?fixture=legacy#theme ' rel='STYLESHEET'>
-    <script id="fixture-breakout-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' ./wasm&lowbar;exec.js?fixture=legacy#runtime '></script>
+    <link data-authored="legacy-style" href=' assets/../styles&period;css?fixture=legacy#theme ' rel='STYLESHEET'>
+    <!-- authored scanner close --!>
+    <script id="fixture-breakout-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' ././wasm&lowbar;exec.js?fixture=legacy#runtime '></script>
     <script data-authored="legacy-bootstrap">
         const go = new Go();
         WebAssembly.instantiateStreaming(
-            fetch ( ' ./bundle.wasm?fixture=legacy#wasm ' ),
+            fetch ( ' assets/%2e%2e/bundle.wasm?fixture=legacy#wasm ' ),
             go.importObject,
         ).then((result) => go.run(result.instance));
     </script>

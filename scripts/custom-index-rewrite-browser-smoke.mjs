@@ -67,6 +67,17 @@ const legacyHTMLSentinels = [
     '<script id="fixture-nbsp-script" type=" application/javascript" src="wasm_exec.js"></script>',
     '<link id="fixture-nbsp-rel" rel="alternate stylesheet" href="styles.css">',
     '<link id="fixture-nbsp-as" rel="preload" as=" style" href="styles.css">',
+    `<math id="fixture-spaced-annotation" style="display:none">
+        <annotation-xml encoding=" text/html ">
+            <script id="fixture-spaced-annotation-script" type="application/json" src="wasm_exec.js?fixture=annotation-decoy"></script>
+        </annotation-xml>
+    </math>`,
+    `<svg id="fixture-punctuation-svg" style="display:none">
+        <title_extra id="fixture-punctuation-tag">
+            <script id="fixture-punctuation-script" type="application/json" src="wasm_exec.js?fixture=punctuation-decoy"></script>
+        </title_extra>
+    </svg>`,
+    '<!-- authored scanner close --!>',
     '<svg id="fixture-breakout" style="display:none">',
     '<p id="fixture-breakout-html"></p>',
     '<input id="fixture-compact-input" disabled/>',
@@ -233,10 +244,12 @@ function assertAuthoredSentinels(source, packaged, mode) {
         assert(packaged.includes(sentinel), `${mode} package changed sentinel ${JSON.stringify(sentinel)}`);
     }
     if (mode === "legacy") {
-        assert(source.includes("./wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy source is missing the named runtime reference");
-        assert(source.includes("./styles&period;css?fixture=legacy#theme"), "legacy source is missing the named stylesheet reference");
+        assert(source.includes("././wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy source is missing the dot-segment runtime reference");
+        assert(source.includes("assets/../styles&period;css?fixture=legacy#theme"), "legacy source is missing the dot-segment stylesheet reference");
+        assert(source.includes("assets/%2e%2e/bundle.wasm?fixture=legacy#wasm"), "legacy source is missing the percent-dot bootstrap reference");
         assert(!packaged.includes("wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy package retained the named runtime reference");
         assert(!packaged.includes("styles&period;css?fixture=legacy#theme"), "legacy package retained the named stylesheet reference");
+        assert(!packaged.includes("%2e%2e/bundle.wasm?fixture=legacy#wasm"), "legacy package retained the percent-dot bootstrap reference");
         const falseHead = '<script>const falseHeadExample = "</head>";</script>';
         assert(source.includes(falseHead) && packaged.includes(falseHead), "legacy false head sentinel changed");
         for (const sentinel of legacyJavaScriptSentinels) {
@@ -344,6 +357,10 @@ async function runBrowserScenario(scenario) {
         assert(before.breakoutHTMLNamespace === "http://www.w3.org/1999/xhtml", "foreign breakout did not create an HTML element");
         assert(before.breakoutRuntimeNamespace === "http://www.w3.org/1999/xhtml", "runtime script did not enter the HTML namespace");
         assert(before.compactInputNamespace === "http://www.w3.org/1999/xhtml", "compact input did not enter the HTML namespace");
+        assert(before.spacedAnnotationNamespace === "http://www.w3.org/1998/Math/MathML", "spaced annotation child left the MathML namespace");
+        assert(before.punctuationTagName === "title_extra", `punctuation tag name = ${JSON.stringify(before.punctuationTagName)}`);
+        assert(before.punctuationScriptNamespace === "http://www.w3.org/2000/svg", "punctuation tag child left the SVG namespace");
+        assert(before.scannerCommentPresent === true, "incorrectly closed authored comment was not exposed as a browser comment");
         assert(before.compactInputDisabled === true, "compact boolean attribute was not accepted");
         assert(before.breakoutInsideSVG === false, "foreign breakout element remained under the SVG node");
         assert(before.runtimeInsideSVG === false, "runtime script remained under the SVG node");
@@ -387,6 +404,10 @@ async function runBrowserScenario(scenario) {
         requestedAssets,
         breakoutNamespace: after.breakoutHTMLNamespace,
         runtimeNamespace: after.breakoutRuntimeNamespace,
+        spacedAnnotationNamespace: after.spacedAnnotationNamespace,
+        punctuationTagName: after.punctuationTagName,
+        punctuationScriptNamespace: after.punctuationScriptNamespace,
+        scannerCommentPresent: after.scannerCommentPresent,
         compactInputDisabled: after.compactInputDisabled,
         runtimeErrorCount: cdpRuntimeErrors.length + after.runtimeErrors.length,
         unexpectedHTTPFailureCount: cdpUnexpectedHTTPFailures.length,
@@ -418,6 +439,14 @@ async function pageState() {
         const breakout = document.querySelector("#fixture-breakout-html");
         const runtime = document.querySelector("#fixture-breakout-runtime");
         const compactInput = document.querySelector("#fixture-compact-input");
+        const spacedAnnotationScript = document.querySelector("#fixture-spaced-annotation-script");
+        const punctuationTag = document.querySelector("#fixture-punctuation-tag");
+        const punctuationScript = document.querySelector("#fixture-punctuation-script");
+        const commentWalker = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+        let scannerCommentPresent = false;
+        for (let comment = commentWalker.nextNode(); comment; comment = commentWalker.nextNode()) {
+            if (comment.data === " authored scanner close ") scannerCommentPresent = true;
+        }
         return {
             count: document.querySelector("[data-testid='custom-index-count']")?.textContent ?? null,
             appColor: app ? getComputedStyle(app).color : null,
@@ -439,6 +468,10 @@ async function pageState() {
             breakoutHTMLNamespace: breakout?.namespaceURI ?? null,
             breakoutRuntimeNamespace: runtime?.namespaceURI ?? null,
             compactInputNamespace: compactInput?.namespaceURI ?? null,
+            spacedAnnotationNamespace: spacedAnnotationScript?.namespaceURI ?? null,
+            punctuationTagName: punctuationTag?.localName ?? null,
+            punctuationScriptNamespace: punctuationScript?.namespaceURI ?? null,
+            scannerCommentPresent,
             compactInputDisabled: compactInput?.disabled ?? null,
             breakoutInsideSVG: Boolean(breakout?.closest("svg")),
             runtimeInsideSVG: Boolean(runtime?.closest("svg")),
