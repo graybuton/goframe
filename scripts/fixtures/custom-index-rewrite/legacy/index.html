@@ -7,7 +7,6 @@
     <script>const falseHeadExample = "</head>";</script>
     <script type="application/json" id="fixture-json">{"asset":"bundle.wasm","runtime":"wasm_exec.js"}</script>
     <style id="fixture-style">.sentinel::after { content: "bundle.wasm"; }</style>
-    <link data-authored="legacy-style" href='./styles.css?fixture=legacy#theme' rel='STYLESHEET'>
     <svg id="fixture-svg-cdata" style="display:none">
 <![CDATA[
 <script src="wasm_exec.js"></script>
@@ -47,13 +46,18 @@
             #value = "fetch(\"bundle.wasm\")";
         }
     </script>
-    <script data-authored="legacy-runtime" SRC='./wasm_exec.js?fixture=legacy#runtime'></script>
+    <svg id="fixture-breakout" style="display:none">
+    <p id="fixture-breakout-html"></p>
+    <input id="fixture-compact-input" disabled/>
+    <link data-authored="legacy-style" href=' ./styles.css?fixture=legacy#theme ' rel='STYLESHEET'>
+    <script id="fixture-breakout-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' ./wasm_exec.js?fixture=legacy#runtime '></script>
     <script data-authored="legacy-bootstrap">
         const go = new Go();
         WebAssembly.instantiateStreaming(
-            fetch ( './bundle.wasm?fixture=legacy#wasm' ),
+            fetch ( ' ./bundle.wasm?fixture=legacy#wasm ' ),
             go.importObject,
         ).then((result) => go.run(result.instance));
     </script>
+    </svg>
 </body>
 </html>

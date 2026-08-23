@@ -66,6 +66,10 @@ const legacyHTMLSentinels = [
     '<script id="fixture-nbsp-script" type=" application/javascript" src="wasm_exec.js"></script>',
     '<link id="fixture-nbsp-rel" rel="alternate stylesheet" href="styles.css">',
     '<link id="fixture-nbsp-as" rel="preload" as=" style" href="styles.css">',
+    '<svg id="fixture-breakout" style="display:none">',
+    '<p id="fixture-breakout-html"></p>',
+    '<input id="fixture-compact-input" disabled/>',
+    'type="text/javascript1.5"',
 ];
 
 let tempRoot = null;
@@ -78,6 +82,7 @@ let serverError = "";
 const cdpRuntimeErrors = [];
 const cdpUnexpectedHTTPFailures = [];
 const cdpDecoyRequests = [];
+const cdpPackageAssetRequests = [];
 
 try {
     tempRoot = await mkdtemp(join(tmpdir(), `goframe-custom-index-${compiler}-`));
@@ -105,6 +110,9 @@ try {
         const pathname = new URL(response.url).pathname;
         if (pathname === "/wasm_exec.js" || pathname === "/styles.css") {
             cdpDecoyRequests.push({ url: response.url, status: response.status });
+        }
+        if (pathname.startsWith("/assets/")) {
+            cdpPackageAssetRequests.push({ pathname, status: response.status });
         }
         if (response.status >= 400 && pathname !== "/favicon.ico") {
             cdpUnexpectedHTTPFailures.push({ url: response.url, status: response.status });
@@ -264,9 +272,11 @@ function assertPackageContract(mode, html, manifest, metadata) {
         assert(html.includes(`href="${style}?fixture=marker#theme"`), "marker stylesheet target is stale");
         assert(!html.includes("authored preload interior"), "marker preload interior was not replaced");
     } else {
-        assert(html.includes(`SRC='${runtime}?fixture=legacy#runtime'`), "legacy runtime target is stale");
-        assert(html.includes(`fetch ( '${wasm}?fixture=legacy#wasm' )`), "legacy WASM target is stale");
-        assert(html.includes(`href='${style}?fixture=legacy#theme'`), "legacy stylesheet target is stale");
+        assert(html.includes(`SRC=' ${runtime}?fixture=legacy#runtime '`), "legacy runtime target is stale");
+        assert(html.includes(`fetch ( ' ${wasm}?fixture=legacy#wasm ' )`), "legacy WASM target is stale");
+        assert(html.includes(`href=' ${style}?fixture=legacy#theme '`), "legacy stylesheet target is stale");
+        assert(html.includes('type="text/javascript1.5"'), "legacy runtime MIME type changed");
+        assert(html.includes('<input id="fixture-compact-input" disabled/>'), "compact boolean tag changed");
         const preload = html.indexOf(`<link rel="preload" href="${wasm}"`);
         const structuralHead = html.lastIndexOf("</head>");
         const falseHead = html.indexOf('const falseHeadExample = "</head>";');
@@ -298,6 +308,7 @@ async function runBrowserScenario(scenario) {
     cdpRuntimeErrors.length = 0;
     cdpUnexpectedHTTPFailures.length = 0;
     cdpDecoyRequests.length = 0;
+    cdpPackageAssetRequests.length = 0;
     const url = `http://127.0.0.1:${port}/?mode=${scenario.mode}&compiler=${compiler}&run=${Date.now()}`;
     await client.call("Page.navigate", { url });
     await waitForFixture(url);
@@ -323,6 +334,20 @@ async function runBrowserScenario(scenario) {
         assert(before.nbspRelHref === "styles.css", "legacy NBSP rel href changed");
         assert(before.nbspAs === " style", "legacy NBSP as changed");
         assert(before.nbspAsHref === "styles.css", "legacy NBSP as href changed");
+        assert(before.breakoutSVGNamespace === "http://www.w3.org/2000/svg", "legacy SVG namespace changed");
+        assert(before.breakoutHTMLNamespace === "http://www.w3.org/1999/xhtml", "foreign breakout did not create an HTML element");
+        assert(before.breakoutRuntimeNamespace === "http://www.w3.org/1999/xhtml", "runtime script did not enter the HTML namespace");
+        assert(before.compactInputNamespace === "http://www.w3.org/1999/xhtml", "compact input did not enter the HTML namespace");
+        assert(before.compactInputDisabled === true, "compact boolean attribute was not accepted");
+        assert(before.breakoutInsideSVG === false, "foreign breakout element remained under the SVG node");
+        assert(before.runtimeInsideSVG === false, "runtime script remained under the SVG node");
+    }
+
+    const requestedAssets = [...new Set(cdpPackageAssetRequests
+        .filter((request) => request.status === 200)
+        .map((request) => request.pathname))].sort();
+    for (const path of Object.values(scenario.paths)) {
+        assert(requestedAssets.includes(`/${path}`), `${scenario.mode} browser did not request ${path}`);
     }
 
     const assetStatuses = await client.evaluate(`Promise.all(${JSON.stringify(Object.values(scenario.paths))}.map(async (path) => {
@@ -353,6 +378,10 @@ async function runBrowserScenario(scenario) {
         appColor: after.appColor,
         buttonBackground: after.buttonBackground,
         assetStatuses,
+        requestedAssets,
+        breakoutNamespace: after.breakoutHTMLNamespace,
+        runtimeNamespace: after.breakoutRuntimeNamespace,
+        compactInputDisabled: after.compactInputDisabled,
         runtimeErrorCount: cdpRuntimeErrors.length + after.runtimeErrors.length,
         unexpectedHTTPFailureCount: cdpUnexpectedHTTPFailures.length,
     };
@@ -380,6 +409,9 @@ async function pageState() {
     return await client.evaluate(`(() => {
         const app = document.querySelector("[data-testid='custom-index-app']");
         const button = document.querySelector("[data-testid='custom-index-increment']");
+        const breakout = document.querySelector("#fixture-breakout-html");
+        const runtime = document.querySelector("#fixture-breakout-runtime");
+        const compactInput = document.querySelector("#fixture-compact-input");
         return {
             count: document.querySelector("[data-testid='custom-index-count']")?.textContent ?? null,
             appColor: app ? getComputedStyle(app).color : null,
@@ -396,6 +428,13 @@ async function pageState() {
             nbspRelHref: document.querySelector("#fixture-nbsp-rel")?.getAttribute("href") ?? null,
             nbspAs: document.querySelector("#fixture-nbsp-as")?.getAttribute("as") ?? null,
             nbspAsHref: document.querySelector("#fixture-nbsp-as")?.getAttribute("href") ?? null,
+            breakoutSVGNamespace: document.querySelector("#fixture-breakout")?.namespaceURI ?? null,
+            breakoutHTMLNamespace: breakout?.namespaceURI ?? null,
+            breakoutRuntimeNamespace: runtime?.namespaceURI ?? null,
+            compactInputNamespace: compactInput?.namespaceURI ?? null,
+            compactInputDisabled: compactInput?.disabled ?? null,
+            breakoutInsideSVG: Boolean(breakout?.closest("svg")),
+            runtimeInsideSVG: Boolean(runtime?.closest("svg")),
             runtimeErrors: Array.from(window.__customIndexRuntimeErrors ?? []),
         };
     })()`);
@@ -630,6 +669,7 @@ async function diagnostics() {
         cdpRuntimeErrors,
         cdpUnexpectedHTTPFailures,
         cdpDecoyRequests,
+        cdpPackageAssetRequests,
         page,
     };
 }
