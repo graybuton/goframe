@@ -1375,7 +1375,10 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 		if !ok {
 			continue
 		}
-		base := strings.TrimPrefix(reference.base, "./")
+		base, ok := normalizeLegacyPackageURLPath(reference.base)
+		if !ok {
+			continue
+		}
 		destination, ok := rewrites[base]
 		if !ok {
 			continue
@@ -1461,10 +1464,75 @@ type legacyURLReference struct {
 
 func matchLegacyURL(value string, units []sourceByte, expected string) (legacyURLReference, bool) {
 	reference, ok := preprocessLegacyURL(value, units)
-	if !ok || strings.TrimPrefix(reference.base, "./") != expected {
+	if !ok {
+		return legacyURLReference{}, false
+	}
+	normalized, ok := normalizeLegacyPackageURLPath(reference.base)
+	if !ok || normalized != expected {
 		return legacyURLReference{}, false
 	}
 	return reference, true
+}
+
+func normalizeLegacyPackageURLPath(value string) (string, bool) {
+	if value == "" || value[0] == '/' || value[0] == '\\' || hasLegacyURLScheme(value) {
+		return "", false
+	}
+
+	segments := make([]string, 0, strings.Count(value, "/")+strings.Count(value, "\\")+1)
+	start := 0
+	for offset := 0; offset <= len(value); offset++ {
+		if offset < len(value) && value[offset] != '/' && value[offset] != '\\' {
+			continue
+		}
+		segment := value[start:offset]
+		switch {
+		case singleDotURLPathSegment(segment):
+			if offset == len(value) {
+				segments = append(segments, "")
+			}
+		case doubleDotURLPathSegment(segment):
+			if len(segments) == 0 {
+				return "", false
+			}
+			segments = segments[:len(segments)-1]
+			if offset == len(value) {
+				segments = append(segments, "")
+			}
+		default:
+			segments = append(segments, segment)
+		}
+		start = offset + 1
+	}
+	return strings.Join(segments, "/"), true
+}
+
+func singleDotURLPathSegment(value string) bool {
+	return value == "." || asciiFoldEqual(value, "%2e")
+}
+
+func doubleDotURLPathSegment(value string) bool {
+	return value == ".." || asciiFoldEqual(value, ".%2e") ||
+		asciiFoldEqual(value, "%2e.") || asciiFoldEqual(value, "%2e%2e")
+}
+
+func hasLegacyURLScheme(value string) bool {
+	if !isHTMLNameStart(value[0]) {
+		return false
+	}
+	for offset := 1; offset < len(value); offset++ {
+		switch current := value[offset]; {
+		case current == ':':
+			return true
+		case current == '/' || current == '\\':
+			return false
+		case isASCIIAlphaNumeric(current) || current == '+' || current == '-' || current == '.':
+			continue
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func preprocessLegacyURL(value string, units []sourceByte) (legacyURLReference, bool) {

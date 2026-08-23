@@ -792,6 +792,102 @@ func TestCustomIndexURLPreprocessingBrowserSemantics(t *testing.T) {
 	}
 }
 
+func TestCustomIndexLegacyURLPathNormalization(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, value := range []string{
+		"wasm_exec.js",
+		"./wasm_exec.js",
+		"././wasm_exec.js",
+		"assets/../wasm_exec.js",
+		"%2e/wasm_exec.js",
+		"assets/%2e%2e/wasm_exec.js",
+		"assets/.%2e/wasm_exec.js",
+		`.\wasm_exec.js`,
+		`assets\..\wasm_exec.js`,
+	} {
+		t.Run("runtime positive "+value, func(t *testing.T) {
+			source := `<script src="` + value + `?v=1#app"></script>`
+			want := `<script src="` + runtimePath + `?v=1#app"></script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+				t.Fatalf("runtime path normalization mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, value := range []string{
+		"../wasm_exec.js",
+		"foo/../../wasm_exec.js",
+		"/wasm_exec.js",
+		"//host/wasm_exec.js",
+		"https://host/wasm_exec.js",
+		"data:wasm_exec.js",
+		"blob:wasm_exec.js",
+		"C:/wasm_exec.js",
+		`C:\wasm_exec.js`,
+		"wasm_exec.js.map",
+		"my-wasm_exec.js",
+		"assets/%2f../wasm_exec.js",
+		"assets/%5c../wasm_exec.js",
+		"assets/%2e%2eX/wasm_exec.js",
+		"wasm_exec.js/.",
+		"wasm_exec.js/..",
+	} {
+		t.Run("runtime negative "+value, func(t *testing.T) {
+			source := `<script src="` + value + `"></script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != source {
+				t.Fatalf("unowned runtime path changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+
+	t.Run("semantic path and raw suffix spans", func(t *testing.T) {
+		source := `<script src=" assets/..&sol;wasm&lowbar;exec.js?v=1&amp;x#app "></script>`
+		want := `<script src=" ` + runtimePath + `?v=1&amp;x#app "></script>`
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+			t.Fatalf("semantic path source-span mismatch\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	const stylePath = "assets/styles.33333333.css"
+	for _, value := range []string{
+		"styles.css",
+		"././styles.css",
+		"assets/../styles.css",
+		"assets/%2E%2E/styles.css",
+	} {
+		t.Run("style positive "+value, func(t *testing.T) {
+			for _, link := range []string{
+				`<link rel="stylesheet" href="` + value + `?v=1#theme">`,
+				`<link rel="preload" as="style" href="` + value + `?v=1#theme">`,
+			} {
+				want := strings.Replace(link, value, stylePath, 1)
+				got := rewriteIndexForTest(t, link, htmlRewriteOptions{styleRewrites: map[string]string{"styles.css": stylePath}})
+				if got != want {
+					t.Fatalf("style path normalization mismatch\ngot:  %q\nwant: %q", got, want)
+				}
+			}
+		})
+	}
+
+	for _, value := range []string{
+		"././bundle.wasm",
+		"assets/../bundle.wasm",
+		"assets/%2e%2e/main.wasm",
+	} {
+		t.Run("bootstrap positive "+value, func(t *testing.T) {
+			source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("` + value + `?v=1#app"), go.importObject).then((result) => go.run(result.instance));</script>`
+			want := strings.Replace(source, value, "assets/bundle.11111111.wasm", 1)
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"})
+			if got != want {
+				t.Fatalf("bootstrap path normalization mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+			if second := rewriteIndexForTest(t, got, htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"}); second != got {
+				t.Fatalf("bootstrap rewrite is not idempotent\nfirst:  %q\nsecond: %q", got, second)
+			}
+		})
+	}
+}
+
 func TestCustomIndexNumericAttributeReferencesUseBrowserValues(t *testing.T) {
 	const runtimePath = "assets/wasm_exec.22222222.js"
 	for _, test := range []struct {
