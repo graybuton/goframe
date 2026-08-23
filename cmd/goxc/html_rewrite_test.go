@@ -933,6 +933,53 @@ func TestCustomIndexNamedCharacterReferenceConsumption(t *testing.T) {
 	}
 }
 
+func TestCustomIndexRawElementAllocationStability(t *testing.T) {
+	type scanner struct {
+		name    string
+		closing string
+		scan    func(string) error
+	}
+	for _, scanner := range []scanner{
+		{
+			name:    "generic raw element",
+			closing: "</style>",
+			scan: func(content string) error {
+				_, err := scanRawElementClose(content, 0, "style")
+				return err
+			},
+		},
+		{
+			name:    "script data",
+			closing: "</script>",
+			scan: func(content string) error {
+				_, err := scanScriptElementClose(content, 0)
+				return err
+			},
+		},
+	} {
+		t.Run(scanner.name, func(t *testing.T) {
+			allocations := func(size int) float64 {
+				t.Helper()
+				content := strings.Repeat("x", size) + scanner.closing
+				return testing.AllocsPerRun(1, func() {
+					if err := scanner.scan(content); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+
+			small := allocations(64 << 10)
+			large := allocations(8 << 20)
+			if large > small+8 {
+				t.Fatalf("allocations grow with body length: 64 KiB %.0f, 8 MiB %.0f", small, large)
+			}
+			if large > 8 {
+				t.Fatalf("8 MiB scan uses %.0f allocations, want at most 8", large)
+			}
+		})
+	}
+}
+
 func TestCustomIndexHTMLSemanticsCombinedDocument(t *testing.T) {
 	const nbsp = "\u00a0"
 	options := htmlRewriteOptions{

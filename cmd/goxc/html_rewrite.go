@@ -869,12 +869,12 @@ func updateScriptTemporaryBuffer(value byte, length int, matches bool) bool {
 }
 
 func scanRawElementClose(content string, start int, name string) (htmlTag, error) {
-	needle := "</" + name
-	for offset := start; offset+len(needle) <= len(content); offset++ {
-		if !asciiFoldEqual(content[offset:offset+len(needle)], needle) {
+	needleLength := len(name) + 2
+	for offset := start; offset+needleLength <= len(content); offset++ {
+		if content[offset] != '<' || content[offset+1] != '/' || !asciiFoldPrefixAt(content, offset+2, name) {
 			continue
 		}
-		afterName := offset + len(needle)
+		afterName := offset + needleLength
 		if afterName < len(content) && !isHTMLSpace(content[afterName]) && content[afterName] != '>' && content[afterName] != '/' {
 			continue
 		}
@@ -939,7 +939,7 @@ func asciiFoldPrefixAt(content string, offset int, expected string) bool {
 }
 
 func asciiFoldEqual(first, second string) bool {
-	return len(first) == len(second) && asciiLower(first) == asciiLower(second)
+	return len(first) == len(second) && asciiFoldPrefixAt(first, 0, second)
 }
 
 type managedHTMLBlock struct {
