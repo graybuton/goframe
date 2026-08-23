@@ -295,7 +295,7 @@ func TestCustomIndexHTMLWhitespaceClassification(t *testing.T) {
 			{name: "line feed", value: "\napplication/javascript\n", rewrite: true},
 			{name: "form feed", value: "\fapplication/javascript\f", rewrite: true},
 			{name: "carriage return", value: "\rapplication/javascript\r", rewrite: true},
-			{name: "MIME parameters", value: "application/javascript; charset=utf-8", rewrite: true},
+			{name: "MIME parameters", value: "application/javascript; charset=utf-8"},
 			{name: "NBSP prefix", value: "\u00a0application/javascript"},
 			{name: "NBSP suffix", value: "application/javascript\u00a0"},
 			{name: "EM SPACE", value: "\u2003text/javascript"},
@@ -374,6 +374,363 @@ func TestCustomIndexHTMLWhitespaceClassification(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestCustomIndexForeignBreakoutBrowserSemantics(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	options := htmlRewriteOptions{runtimePath: runtimePath}
+	breakoutNames := []string{
+		"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div", "dl", "dt",
+		"em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head", "hr", "i", "img",
+		"li", "listing", "menu", "meta", "nobr", "ol", "p", "pre", "ruby", "s", "small",
+		"span", "strong", "strike", "sub", "sup", "table", "tt", "u", "ul", "var",
+	}
+	for _, name := range breakoutNames {
+		t.Run("SVG start "+name, func(t *testing.T) {
+			source := `<svg><` + name + `><script src="wasm_exec.js?` + name + `"></script>`
+			got := rewriteIndexForTest(t, source, options)
+			want := `src="` + runtimePath + `?` + name + `"`
+			if !strings.Contains(got, want) {
+				t.Fatalf("foreign breakout <%s> did not reprocess the runtime script as HTML\ngot: %s", name, got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name    string
+		source  string
+		rewrite bool
+	}{
+		{name: "MathML start", source: `<math><div><script src="wasm_exec.js?math"></script>`, rewrite: true},
+		{name: "font color", source: `<svg><font color="red"><script src="wasm_exec.js?color"></script>`, rewrite: true},
+		{name: "font face", source: `<svg><font face="sans"><script src="wasm_exec.js?face"></script>`, rewrite: true},
+		{name: "font size", source: `<svg><font size="2"><script src="wasm_exec.js?size"></script>`, rewrite: true},
+		{name: "font without trigger", source: `<svg><font><script src="wasm_exec.js?plain"></script>`},
+		{name: "closing p", source: `<svg></p><script src="wasm_exec.js?end-p"></script>`, rewrite: true},
+		{name: "closing br", source: `<math></br><script src="wasm_exec.js?end-br"></script>`, rewrite: true},
+		{name: "ordinary SVG child", source: `<svg><g><script src="wasm_exec.js?g"></script></g></svg>`},
+		{name: "HTML integration point", source: `<svg><foreignObject><p><script src="wasm_exec.js?integration"></script>`, rewrite: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, options)
+			rewritten := strings.Contains(got, runtimePath)
+			if rewritten != test.rewrite {
+				t.Fatalf("foreign-content classification rewrite = %v, want %v\ngot: %s", rewritten, test.rewrite, got)
+			}
+		})
+	}
+
+	t.Run("combined owned references", func(t *testing.T) {
+		source := `<svg><p><link rel="stylesheet" href="styles.css"><script src="wasm_exec.js"></script><script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then((result) => go.run(result.instance));</script>`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{
+			wasmPath:    "assets/bundle.11111111.wasm",
+			runtimePath: runtimePath,
+			styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			},
+		})
+		for _, want := range []string{runtimePath, "assets/styles.33333333.css", "assets/bundle.11111111.wasm"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("breakout rewrite missing %q:\n%s", want, got)
+			}
+		}
+	})
+}
+
+func TestCustomIndexScriptClassificationBrowserSemantics(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	javaScriptMIMETypes := []string{
+		"application/ecmascript", "application/javascript", "application/x-ecmascript", "application/x-javascript",
+		"text/ecmascript", "text/javascript", "text/javascript1.0", "text/javascript1.1",
+		"text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5",
+		"text/jscript", "text/livescript", "text/x-ecmascript", "text/x-javascript",
+	}
+	for _, value := range javaScriptMIMETypes {
+		for _, variant := range []string{value, strings.ToUpper(value)} {
+			t.Run(variant, func(t *testing.T) {
+				source := `<script type="` + variant + `" src="wasm_exec.js"></script>`
+				got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+				if !strings.Contains(got, runtimePath) {
+					t.Fatalf("JavaScript MIME type %q was not executable: %s", variant, got)
+				}
+			})
+		}
+	}
+
+	for _, test := range []struct {
+		name    string
+		attrs   string
+		rewrite bool
+	}{
+		{name: "attributes absent", rewrite: true},
+		{name: "empty type", attrs: ` type=""`, rewrite: true},
+		{name: "boolean type", attrs: ` type`, rewrite: true},
+		{name: "space-only type", attrs: ` type=" "`},
+		{name: "module", attrs: ` type=" module "`, rewrite: true},
+		{name: "module parameters", attrs: ` type="module;foo"`},
+		{name: "JavaScript parameters", attrs: ` type="text/javascript; charset=utf-8"`},
+		{name: "unknown JavaScript version", attrs: ` type="text/javascript1.6"`},
+		{name: "empty language", attrs: ` language=""`, rewrite: true},
+		{name: "boolean language", attrs: ` language`, rewrite: true},
+		{name: "language JavaScript", attrs: ` language="javascript"`, rewrite: true},
+		{name: "language JavaScript 1.5", attrs: ` language="JavaScript1.5"`, rewrite: true},
+		{name: "language is not trimmed", attrs: ` language=" javascript"`},
+		{name: "language VBScript", attrs: ` language="vbscript"`},
+		{name: "type overrides language", attrs: ` type="application/json" language="javascript"`},
+		{name: "import map", attrs: ` type="importmap"`},
+		{name: "speculation rules", attrs: ` type="speculationrules"`},
+		{name: "data block", attrs: ` type="application/json"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := `<script` + test.attrs + ` src="wasm_exec.js"></script>`
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+			rewritten := strings.Contains(got, runtimePath)
+			if rewritten != test.rewrite {
+				t.Fatalf("script classification rewrite = %v, want %v\ngot: %s", rewritten, test.rewrite, got)
+			}
+		})
+	}
+}
+
+func TestCustomIndexPlaintextBrowserSemantics(t *testing.T) {
+	t.Run("opaque through EOF", func(t *testing.T) {
+		source := `<html><head></head><body><plaintext>
+<script src="wasm_exec.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<!-- goframe:runtime -->`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{
+			runtimePath: "assets/wasm_exec.22222222.js",
+			styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			},
+		})
+		if got != source {
+			t.Fatalf("plaintext content changed\ngot:  %q\nwant: %q", got, source)
+		}
+	})
+
+	t.Run("real head close before plaintext", func(t *testing.T) {
+		options := htmlRewriteOptions{preload: true, wasmPath: "assets/bundle.wasm", runtimePath: "assets/wasm_exec.js"}
+		source := `<html><head></head><body><plaintext></head><script src="wasm_exec.js"></script>`
+		got := rewriteIndexForTest(t, source, options)
+		insertion := strings.Index(got, preloadHTML(options))
+		realClose := strings.Index(got, "</head>")
+		if insertion < 0 || realClose < 0 || insertion > realClose {
+			t.Fatalf("preload was not inserted before the real head close: %s", got)
+		}
+		if strings.Count(got, preloadHTML(options)) != 1 || !strings.HasSuffix(got, `<plaintext></head><script src="wasm_exec.js"></script>`) {
+			t.Fatalf("plaintext bytes after the real head close changed: %s", got)
+		}
+	})
+
+	t.Run("fake head close after plaintext", func(t *testing.T) {
+		source := `<html><head><plaintext></head>`
+		got, err := rewriteIndexHTML(source, htmlRewriteOptions{preload: true, wasmPath: "assets/bundle.wasm"})
+		if err == nil || !strings.Contains(err.Error(), "closing </head>") {
+			t.Fatalf("rewriteIndexHTML() = %q, %v, want missing structural head failure", got, err)
+		}
+		if got != "" {
+			t.Fatalf("plaintext preload failure returned partial output %q", got)
+		}
+	})
+
+	t.Run("foreign plaintext remains foreign", func(t *testing.T) {
+		source := `<svg><plaintext><script src="wasm_exec.js"></script></plaintext></svg>`
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.js"}); got != source {
+			t.Fatalf("foreign plaintext changed document\ngot:  %q\nwant: %q", got, source)
+		}
+	})
+
+	t.Run("EOF immediately after start tag", func(t *testing.T) {
+		source := `<plaintext>`
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{}); got != source {
+			t.Fatalf("plaintext EOF changed: %q", got)
+		}
+	})
+}
+
+func TestCustomIndexSelfClosingSolidusBrowserSemantics(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		source      string
+		selfClosing bool
+		value       string
+	}{
+		{name: "compact boolean", source: `<input disabled/>`, selfClosing: true},
+		{name: "spaced boolean", source: `<input disabled />`, selfClosing: true},
+		{name: "quoted value", source: `<input value="x"/>`, selfClosing: true, value: "x"},
+		{name: "unquoted slash", source: `<input value=x/>`, value: "x/"},
+		{name: "foreign compact boolean", source: `<path disabled/>`, selfClosing: true},
+		{name: "foreign unquoted slash", source: `<path value=x/>`, value: "x/"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tag, ok, err := scanHTMLTag(test.source, 0)
+			if err != nil {
+				t.Fatalf("scanHTMLTag() error: %v", err)
+			}
+			if !ok || tag.selfClosing != test.selfClosing {
+				t.Fatalf("scanHTMLTag() = %+v, %v, want selfClosing %v", tag, ok, test.selfClosing)
+			}
+			if test.value != "" {
+				attribute, err := tag.attribute("value")
+				if err != nil || attribute == nil {
+					t.Fatalf("value attribute = %+v, %v", attribute, err)
+				}
+				if got := test.source[attribute.valueStart:attribute.valueEnd]; got != test.value {
+					t.Fatalf("value = %q, want %q", got, test.value)
+				}
+			}
+		})
+	}
+
+	t.Run("HTML non-void flag does not close context", func(t *testing.T) {
+		source := `<svg><foreignObject><div/><![CDATA[x > <script src="wasm_exec.js?html"></script>]]></foreignObject></svg>`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
+		if !strings.Contains(got, `src="assets/wasm_exec.22222222.js?html"`) {
+			t.Fatalf("self-closing HTML div incorrectly closed its HTML context: %s", got)
+		}
+	})
+
+	t.Run("foreign self-closing flag closes context", func(t *testing.T) {
+		source := `<svg><path disabled/><![CDATA[x > <script src="wasm_exec.js?foreign"></script>]]></svg>`
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"}); got != source {
+			t.Fatalf("foreign self-closing tag exposed inert CDATA\ngot:  %q\nwant: %q", got, source)
+		}
+	})
+}
+
+func TestCustomIndexURLPreprocessingBrowserSemantics(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "runtime spaces", source: `<script src=" wasm_exec.js "></script>`, want: `<script src=" ` + runtimePath + ` "></script>`},
+		{name: "runtime tab and newline", source: "<script src=\"\twasm_exec.js\n\"></script>", want: "<script src=\"\t" + runtimePath + "\n\"></script>"},
+		{name: "runtime internal newline", source: "<script src=\"wasm_\nexec.js\"></script>", want: `<script src="` + runtimePath + `"></script>`},
+		{name: "runtime NBSP", source: `<script src=" wasm_exec.js "></script>`, want: `<script src=" wasm_exec.js "></script>`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{runtimePath: runtimePath})
+			if got != test.want {
+				t.Fatalf("runtime URL rewrite mismatch\ngot:  %q\nwant: %q", got, test.want)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name    string
+		href    string
+		rewrite bool
+	}{
+		{name: "spaces", href: " styles.css ", rewrite: true},
+		{name: "linefeed and tab", href: "\nstyles.css\t", rewrite: true},
+		{name: "internal tab", href: "styles.\tcss", rewrite: true},
+		{name: "NBSP", href: " styles.css "},
+	} {
+		t.Run("style "+test.name, func(t *testing.T) {
+			source := `<link rel="stylesheet" href="` + test.href + `">`
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}})
+			rewritten := strings.Contains(got, "assets/styles.33333333.css")
+			if rewritten != test.rewrite {
+				t.Fatalf("style URL rewrite = %v, want %v: %q", rewritten, test.rewrite, got)
+			}
+		})
+	}
+
+	t.Run("style source span", func(t *testing.T) {
+		source := `<link rel="stylesheet" href=" styles.css?v=1#theme ">`
+		want := `<link rel="stylesheet" href=" assets/styles.33333333.css?v=1#theme ">`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{styleRewrites: map[string]string{
+			"styles.css": "assets/styles.33333333.css",
+		}})
+		if got != want {
+			t.Fatalf("style source span mismatch\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	t.Run("historical bootstrap source span", func(t *testing.T) {
+		source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch(" bundle.wasm?v=1#app "), go.importObject).then((result) => go.run(result.instance));</script>`
+		want := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch(" assets/bundle.11111111.wasm?v=1#app "), go.importObject).then((result) => go.run(result.instance));</script>`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"})
+		if got != want {
+			t.Fatalf("bootstrap URL rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	t.Run("historical bootstrap escaped whitespace", func(t *testing.T) {
+		source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("\tbundle.wasm\n"), go.importObject).then((result) => go.run(result.instance));</script>`
+		want := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("\tassets/bundle.11111111.wasm\n"), go.importObject).then((result) => go.run(result.instance));</script>`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"})
+		if got != want {
+			t.Fatalf("escaped bootstrap URL rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	for _, value := range []string{"/bundle.wasm", "https://example.test/bundle.wasm", "bundle.wasm.map", "my-bundle.wasm", " bundle.wasm "} {
+		t.Run("bootstrap non-match "+value, func(t *testing.T) {
+			source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("` + value + `"), go.importObject).then((result) => go.run(result.instance));</script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"}); got != source {
+				t.Fatalf("non-matching bootstrap URL changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
+func TestCustomIndexNumericAttributeReferencesUseBrowserValues(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+		want    string
+	}{
+		{
+			name:    "type and src",
+			source:  `<script type="text&#x2f;javascript" src="&#x20;wasm_exec.js&#x20;"></script>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<script type="text&#x2f;javascript" src="&#x20;` + runtimePath + `&#x20;"></script>`,
+		},
+		{
+			name:    "language",
+			source:  `<script language="java&#x73;cript" src="wasm_exec.js"></script>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<script language="java&#x73;cript" src="` + runtimePath + `"></script>`,
+		},
+		{
+			name:   "rel and href",
+			source: `<link rel="style&#x73;heet" href="&#x20;styles.css&#x20;">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			want: `<link rel="style&#x73;heet" href="&#x20;assets/styles.33333333.css&#x20;">`,
+		},
+		{
+			name:   "style preload as",
+			source: `<link rel="preload" as="st&#x79;le" href="styles.css">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			want: `<link rel="preload" as="st&#x79;le" href="assets/styles.33333333.css">`,
+		},
+		{
+			name:    "annotation XML encoding",
+			source:  `<math><annotation-xml encoding="text&#x2f;html"><script src="wasm_exec.js"></script>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<math><annotation-xml encoding="text&#x2f;html"><script src="` + runtimePath + `"></script>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, test.options)
+			if got != test.want {
+				t.Fatalf("numeric attribute references did not use browser values\ngot:  %q\nwant: %q", got, test.want)
+			}
+		})
+	}
 }
 
 func TestCustomIndexHTMLSemanticsCombinedDocument(t *testing.T) {
@@ -678,9 +1035,10 @@ const result = x-- / y;`,
 
 func TestCustomIndexHistoricalBootstrapCorpus(t *testing.T) {
 	tests := []struct {
-		name      string
-		body      string
-		legacyURL string
+		name       string
+		body       string
+		legacyURL  string
+		wantSuffix string
 	}{
 		{
 			name: "v0.1.0-mvp10 markerless main bootstrap",
@@ -709,7 +1067,8 @@ func TestCustomIndexHistoricalBootstrapCorpus(t *testing.T) {
             go.importObject,
         ).then((result) => go.run(result.instance));
     `,
-			legacyURL: "./bundle.wasm?fixture=legacy#wasm",
+			legacyURL:  "./bundle.wasm?fixture=legacy#wasm",
+			wantSuffix: "?fixture=legacy#wasm",
 		},
 		{
 			name:      "v0.3.0-preview.1 dev callback bootstrap",
@@ -717,9 +1076,10 @@ func TestCustomIndexHistoricalBootstrapCorpus(t *testing.T) {
 			legacyURL: "bundle.wasm",
 		},
 		{
-			name:      "v0.3.0-preview.1 load wrapped dev bootstrap",
-			body:      `window.addEventListener("load", function () { var go = new Go(); WebAssembly.instantiateStreaming(fetch("./main.wasm#load"), go.importObject).then(function (result) { go.run(result.instance); }); }, { once: true });`,
-			legacyURL: "./main.wasm#load",
+			name:       "v0.3.0-preview.1 load wrapped dev bootstrap",
+			body:       `window.addEventListener("load", function () { var go = new Go(); WebAssembly.instantiateStreaming(fetch("./main.wasm#load"), go.importObject).then(function (result) { go.run(result.instance); }); }, { once: true });`,
+			legacyURL:  "./main.wasm#load",
+			wantSuffix: "#load",
 		},
 	}
 
@@ -729,12 +1089,11 @@ func TestCustomIndexHistoricalBootstrapCorpus(t *testing.T) {
 			if count := strings.Count(test.body, test.legacyURL); count != 1 {
 				t.Fatalf("historical body legacy URL count = %d, want 1", count)
 			}
-			_, suffix := splitLegacyURL(test.legacyURL)
 			source := "<script>" + test.body + "</script>"
 			want := strings.Replace(
 				source,
 				test.legacyURL,
-				options.wasmPath+suffix,
+				options.wasmPath+test.wantSuffix,
 				1,
 			)
 			got := rewriteIndexForTest(t, source, options)
@@ -1204,6 +1563,80 @@ func TestPackageCustomIndexUnterminatedForeignCDATAFailureIsAtomic(t *testing.T)
 		if strings.HasPrefix(entry.Name(), "goxc-package-") {
 			t.Fatalf("CDATA rewrite failure retained temporary staging %s", entry.Name())
 		}
+	}
+}
+
+func TestPackageCustomIndexBrowserSemanticsFailuresAreAtomic(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		source  string
+		preload bool
+		want    string
+	}{
+		{
+			name:    "plaintext hides closing head",
+			source:  `<html><head><plaintext></head>`,
+			preload: true,
+			want:    "closing </head>",
+		},
+		{
+			name:   "malformed solidus",
+			source: `<html><head></head><body><input disabled//></body></html>`,
+			want:   "malformed solidus",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := t.TempDir()
+			writeMinimalPackageApp(t, appDir)
+			writeTestFile(t, appDir, indexHTMLAssetName, test.source)
+
+			temporaryRoot := t.TempDir()
+			t.Setenv("TMPDIR", temporaryRoot)
+			outDir := filepath.Join(t.TempDir(), "package")
+			writeCompleteCurrentPackage(t, outDir)
+			before := snapshotInspectTree(t, outDir)
+			markerBefore, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var packageErr error
+			output := captureStdout(t, func() {
+				packageErr = packageApp(packageOptions{
+					appDir:   appDir,
+					compiler: "go",
+					outDir:   outDir,
+					preload:  test.preload,
+					compress: map[string]bool{},
+				})
+			})
+			if packageErr == nil || !strings.Contains(packageErr.Error(), test.want) {
+				t.Fatalf("packageApp() error = %v, want %q", packageErr, test.want)
+			}
+			if strings.Contains(output, "packaged ") {
+				t.Fatalf("failed package emitted success output: %q", output)
+			}
+			if got := snapshotInspectTree(t, outDir); !reflect.DeepEqual(got, before) {
+				t.Fatalf("rewrite failure changed previous package\nbefore: %#v\nafter:  %#v", before, got)
+			}
+			assertFileContent(t, filepath.Join(appDir, indexHTMLAssetName), test.source)
+			markerAfter, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(markerAfter, markerBefore) {
+				t.Fatalf("rewrite failure changed the previous completion marker\nbefore: %q\nafter:  %q", markerBefore, markerAfter)
+			}
+			entries, err := os.ReadDir(temporaryRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), "goxc-package-") {
+					t.Fatalf("rewrite failure retained temporary staging %s", entry.Name())
+				}
+			}
+		})
 	}
 }
 

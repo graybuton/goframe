@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	stdhtml "html"
 	"sort"
 	"strings"
 )
@@ -168,7 +169,13 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			offset++
 			continue
 		}
-		if tag.closing {
+		if context.applyForeignBreakout(tag) {
+			if tag.closing {
+				tag.namespace = htmlNamespaceHTML
+			} else {
+				tag.namespace = namespaceForHTMLStartTag(tag.name)
+			}
+		} else if tag.closing {
 			tag.namespace = context.closingNamespace(tag.name)
 		} else {
 			tag.namespace = context.startTagNamespace(tag.name)
@@ -180,6 +187,10 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			templateDepth--
 		}
 		tag.templateDepth = templateDepth
+		if !tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "plaintext" {
+			document.tags = append(document.tags, tag)
+			return document, nil
+		}
 		if !tag.closing && tag.namespace == htmlNamespaceHTML && opaqueHTMLTextElement(tag.name) {
 			closing, err := scanRawElementClose(content, tag.end, tag.name)
 			if err != nil {
@@ -197,7 +208,11 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		document.tags = append(document.tags, tag)
 		if tag.closing {
 			context.close(tag.name)
-		} else if !tag.selfClosing && !(tag.namespace == htmlNamespaceHTML && voidHTMLElement(tag.name)) {
+		} else if tag.namespace == htmlNamespaceHTML {
+			if !voidHTMLElement(tag.name) {
+				context.push(content, tag)
+			}
+		} else if !tag.selfClosing {
 			context.push(content, tag)
 		}
 		if !tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "template" {
@@ -239,11 +254,69 @@ func (context htmlScannerContext) startTagNamespace(name string) htmlNamespace {
 		return namespaceForHTMLStartTag(name)
 	}
 	current := context.elements[len(context.elements)-1]
+	if current.namespace == htmlNamespaceMathML && current.name == "annotation-xml" && name == "svg" {
+		return htmlNamespaceSVG
+	}
 	if current.namespace == htmlNamespaceHTML || current.htmlIntegrationPoint ||
 		current.mathMLTextIntegrationPt && name != "mglyph" && name != "malignmark" {
 		return namespaceForHTMLStartTag(name)
 	}
 	return current.namespace
+}
+
+func (context *htmlScannerContext) applyForeignBreakout(tag htmlTag) bool {
+	if !context.usesForeignContentRules(tag) || !foreignContentBreakoutTag(tag) {
+		return false
+	}
+	for len(context.elements) > 0 {
+		current := context.elements[len(context.elements)-1]
+		if current.namespace == htmlNamespaceHTML || current.htmlIntegrationPoint || current.mathMLTextIntegrationPt {
+			break
+		}
+		context.elements = context.elements[:len(context.elements)-1]
+	}
+	return true
+}
+
+func (context htmlScannerContext) usesForeignContentRules(tag htmlTag) bool {
+	if len(context.elements) == 0 {
+		return false
+	}
+	current := context.elements[len(context.elements)-1]
+	if current.namespace == htmlNamespaceHTML {
+		return false
+	}
+	if tag.closing {
+		return true
+	}
+	if current.mathMLTextIntegrationPt && tag.name != "mglyph" && tag.name != "malignmark" {
+		return false
+	}
+	if current.namespace == htmlNamespaceMathML && current.name == "annotation-xml" && tag.name == "svg" {
+		return false
+	}
+	return !current.htmlIntegrationPoint
+}
+
+func foreignContentBreakoutTag(tag htmlTag) bool {
+	if tag.closing {
+		return tag.name == "br" || tag.name == "p"
+	}
+	switch tag.name {
+	case "b", "big", "blockquote", "body", "br", "center", "code", "dd", "div", "dl", "dt",
+		"em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head", "hr", "i", "img",
+		"li", "listing", "menu", "meta", "nobr", "ol", "p", "pre", "ruby", "s", "small",
+		"span", "strong", "strike", "sub", "sup", "table", "tt", "u", "ul", "var":
+		return true
+	case "font":
+		for _, attribute := range tag.attributes {
+			switch attribute.name {
+			case "color", "face", "size":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func namespaceForHTMLStartTag(name string) htmlNamespace {
@@ -301,10 +374,82 @@ func (context *htmlScannerContext) close(name string) {
 func firstHTMLAttributeValue(content string, tag htmlTag, name string) (string, bool) {
 	for _, attribute := range tag.attributes {
 		if attribute.name == name && attribute.hasValue {
-			return content[attribute.valueStart:attribute.valueEnd], true
+			return semanticHTMLAttributeValue(content, &attribute), true
 		}
 	}
 	return "", false
+}
+
+type sourceByte struct {
+	value byte
+	start int
+	end   int
+}
+
+func semanticHTMLAttributeValue(content string, attribute *htmlAttribute) string {
+	if attribute == nil || !attribute.hasValue {
+		return ""
+	}
+	units := htmlAttributeSourceBytes(content, attribute)
+	var result strings.Builder
+	result.Grow(len(units))
+	for _, unit := range units {
+		result.WriteByte(unit.value)
+	}
+	return result.String()
+}
+
+func htmlAttributeSourceBytes(content string, attribute *htmlAttribute) []sourceByte {
+	value := content[attribute.valueStart:attribute.valueEnd]
+	units := make([]sourceByte, 0, len(value))
+	for offset := 0; offset < len(value); {
+		decoded, end, ok := decodeNumericHTMLCharacterReference(value, offset)
+		if !ok {
+			units = append(units, sourceByte{value: value[offset], start: offset, end: offset + 1})
+			offset++
+			continue
+		}
+		for index := range len(decoded) {
+			units = append(units, sourceByte{value: decoded[index], start: offset, end: end})
+		}
+		offset = end
+	}
+	return units
+}
+
+func decodeNumericHTMLCharacterReference(value string, start int) (string, int, bool) {
+	if start+2 >= len(value) || value[start] != '&' || value[start+1] != '#' {
+		return "", 0, false
+	}
+	offset := start + 2
+	base := byte(10)
+	if offset < len(value) && (value[offset] == 'x' || value[offset] == 'X') {
+		base = 16
+		offset++
+	}
+	digits := offset
+	for offset < len(value) && isHTMLCharacterReferenceDigit(value[offset], base) {
+		offset++
+	}
+	if offset == digits {
+		return "", 0, false
+	}
+	if offset < len(value) && value[offset] == ';' {
+		offset++
+	}
+	raw := value[start:offset]
+	decoded := stdhtml.UnescapeString(raw)
+	if decoded == raw {
+		return "", 0, false
+	}
+	return decoded, offset, true
+}
+
+func isHTMLCharacterReferenceDigit(value byte, base byte) bool {
+	if value >= '0' && value <= '9' {
+		return true
+	}
+	return base == 16 && (value >= 'a' && value <= 'f' || value >= 'A' && value <= 'F')
 }
 
 func voidHTMLElement(name string) bool {
@@ -365,17 +510,7 @@ func scanHTMLTag(content string, start int) (htmlTag, bool, error) {
 	if err != nil {
 		return htmlTag{}, false, fmt.Errorf("custom index <%s> tag is unterminated: %w", name, err)
 	}
-	limit := tagEnd - 1
-	last := limit - 1
-	for last >= offset && isHTMLSpace(content[last]) {
-		last--
-	}
-	selfClosing := last >= offset && content[last] == '/' &&
-		(last == offset || isHTMLSpace(content[last-1]) || content[last-1] == '\'' || content[last-1] == '"')
-	if selfClosing {
-		limit = last
-	}
-	attributes, err := scanHTMLAttributes(content, offset, limit, name)
+	attributes, selfClosing, err := scanHTMLAttributes(content, offset, tagEnd-1, name)
 	if err != nil {
 		return htmlTag{}, false, err
 	}
@@ -389,7 +524,7 @@ func scanHTMLTag(content string, start int) (htmlTag, bool, error) {
 	}, true, nil
 }
 
-func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlAttribute, error) {
+func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlAttribute, bool, error) {
 	var attributes []htmlAttribute
 	for offset := start; offset < end; {
 		for offset < end && isHTMLSpace(content[offset]) {
@@ -398,12 +533,18 @@ func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlA
 		if offset >= end {
 			break
 		}
+		if content[offset] == '/' {
+			if offset+1 == end {
+				return attributes, true, nil
+			}
+			return nil, false, fmt.Errorf("custom index <%s> has a malformed solidus near byte %d", tagName, offset)
+		}
 		nameStart := offset
 		for offset < end && !isHTMLSpace(content[offset]) && content[offset] != '=' && content[offset] != '/' && content[offset] != '>' {
 			offset++
 		}
 		if nameStart == offset {
-			return nil, fmt.Errorf("custom index <%s> has a malformed attribute near byte %d", tagName, offset)
+			return nil, false, fmt.Errorf("custom index <%s> has a malformed attribute near byte %d", tagName, offset)
 		}
 		attribute := htmlAttribute{name: asciiLower(content[nameStart:offset])}
 		for offset < end && isHTMLSpace(content[offset]) {
@@ -416,7 +557,7 @@ func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlA
 				offset++
 			}
 			if offset >= end {
-				return nil, fmt.Errorf("custom index <%s> attribute %s has no value", tagName, attribute.name)
+				return nil, false, fmt.Errorf("custom index <%s> attribute %s has no value", tagName, attribute.name)
 			}
 			if content[offset] == '\'' || content[offset] == '"' {
 				quote := content[offset]
@@ -426,7 +567,7 @@ func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlA
 					offset++
 				}
 				if offset >= end {
-					return nil, fmt.Errorf("custom index <%s> attribute %s has an unterminated quoted value", tagName, attribute.name)
+					return nil, false, fmt.Errorf("custom index <%s> attribute %s has an unterminated quoted value", tagName, attribute.name)
 				}
 				attribute.valueEnd = offset
 				offset++
@@ -437,13 +578,13 @@ func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlA
 				}
 				attribute.valueEnd = offset
 				if attribute.valueStart == attribute.valueEnd {
-					return nil, fmt.Errorf("custom index <%s> attribute %s has an empty unquoted value", tagName, attribute.name)
+					return nil, false, fmt.Errorf("custom index <%s> attribute %s has an empty unquoted value", tagName, attribute.name)
 				}
 			}
 		}
 		attributes = append(attributes, attribute)
 	}
-	return attributes, nil
+	return attributes, false, nil
 }
 
 func scanRawElementClose(content string, start int, name string) (htmlTag, error) {
@@ -662,22 +803,22 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 		if source == nil || !source.hasValue {
 			continue
 		}
-		typeAttribute, err := tag.attribute("type")
+		kind, err := classifyScriptTag(plan.content, tag)
 		if err != nil {
 			return err
 		}
-		if !executableScriptType(plan.content, typeAttribute) {
+		if kind != scriptKindClassic && kind != scriptKindModule {
 			continue
 		}
 		value := plan.content[source.valueStart:source.valueEnd]
-		suffix, ok := legacyURLSuffix(value, runtimeAssetName)
+		match, ok := matchLegacyURL(value, htmlAttributeSourceBytes(plan.content, source), runtimeAssetName)
 		if !ok {
 			continue
 		}
 		plan.add(htmlReplacement{
-			start:       source.valueStart,
-			end:         source.valueEnd,
-			value:       runtimePath + suffix,
+			start:       source.valueStart + match.start,
+			end:         source.valueStart + match.end,
+			value:       runtimePath + match.suffix,
 			description: "legacy runtime script source",
 		})
 	}
@@ -696,11 +837,11 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		if source != nil {
 			continue
 		}
-		typeAttribute, err := tag.attribute("type")
+		kind, err := classifyScriptTag(plan.content, tag)
 		if err != nil {
 			return err
 		}
-		if !executableScriptType(plan.content, typeAttribute) {
+		if kind != scriptKindClassic && kind != scriptKindModule {
 			continue
 		}
 		match, ok := recognizeLegacyGoFrameBootstrap(plan.content, tag.rawStart, tag.rawEnd)
@@ -717,16 +858,61 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 	return nil
 }
 
-func executableScriptType(content string, typeAttribute *htmlAttribute) bool {
-	if typeAttribute == nil || !typeAttribute.hasValue {
-		return true
+type scriptKind uint8
+
+const (
+	scriptKindData scriptKind = iota
+	scriptKindClassic
+	scriptKindModule
+	scriptKindImportMap
+	scriptKindSpeculationRules
+)
+
+func classifyScriptTag(content string, tag htmlTag) (scriptKind, error) {
+	typeAttribute, err := tag.attribute("type")
+	if err != nil {
+		return scriptKindData, err
 	}
-	value := asciiLower(trimHTMLSpace(content[typeAttribute.valueStart:typeAttribute.valueEnd]))
-	if separator := strings.IndexByte(value, ';'); separator >= 0 {
-		value = trimHTMLSpace(value[:separator])
+	languageAttribute, err := tag.attribute("language")
+	if err != nil {
+		return scriptKindData, err
 	}
-	switch value {
-	case "", "module", "text/javascript", "application/javascript", "text/ecmascript", "application/ecmascript", "text/jscript":
+	typeValue := semanticHTMLAttributeValue(content, typeAttribute)
+	languageValue := semanticHTMLAttributeValue(content, languageAttribute)
+	var typeString string
+	switch {
+	case typeAttribute != nil && typeValue == "":
+		typeString = "text/javascript"
+	case typeAttribute == nil && languageAttribute != nil && languageValue == "":
+		typeString = "text/javascript"
+	case typeAttribute == nil && languageAttribute == nil:
+		typeString = "text/javascript"
+	case typeAttribute != nil:
+		typeString = trimHTMLSpace(typeValue)
+	default:
+		typeString = "text/" + languageValue
+	}
+	if javaScriptMIMETypeEssenceMatch(typeString) {
+		return scriptKindClassic, nil
+	}
+	switch {
+	case asciiFoldEqual(typeString, "module"):
+		return scriptKindModule, nil
+	case asciiFoldEqual(typeString, "importmap"):
+		return scriptKindImportMap, nil
+	case asciiFoldEqual(typeString, "speculationrules"):
+		return scriptKindSpeculationRules, nil
+	default:
+		return scriptKindData, nil
+	}
+}
+
+func javaScriptMIMETypeEssenceMatch(value string) bool {
+	switch asciiLower(value) {
+	case "application/ecmascript", "application/javascript", "application/x-ecmascript", "application/x-javascript",
+		"text/ecmascript", "text/javascript", "text/javascript1.0", "text/javascript1.1",
+		"text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5",
+		"text/jscript", "text/livescript", "text/x-ecmascript", "text/x-javascript":
 		return true
 	default:
 		return false
@@ -757,23 +943,26 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 		if href == nil || !href.hasValue || rel == nil || !rel.hasValue {
 			continue
 		}
-		relTokens := htmlSpaceTokenSet(plan.content[rel.valueStart:rel.valueEnd])
+		relTokens := htmlSpaceTokenSet(semanticHTMLAttributeValue(plan.content, rel))
 		stylesheet := relTokens["stylesheet"]
-		stylePreload := relTokens["preload"] && as != nil && as.hasValue && asciiFoldEqual(trimHTMLSpace(plan.content[as.valueStart:as.valueEnd]), "style")
+		stylePreload := relTokens["preload"] && as != nil && as.hasValue && asciiFoldEqual(trimHTMLSpace(semanticHTMLAttributeValue(plan.content, as)), "style")
 		if !stylesheet && (!stylePreload || preloadManaged) {
 			continue
 		}
 		value := plan.content[href.valueStart:href.valueEnd]
-		base, suffix := splitLegacyURL(value)
-		base = strings.TrimPrefix(base, "./")
+		reference, ok := preprocessLegacyURL(value, htmlAttributeSourceBytes(plan.content, href))
+		if !ok {
+			continue
+		}
+		base := strings.TrimPrefix(reference.base, "./")
 		destination, ok := rewrites[base]
 		if !ok {
 			continue
 		}
 		plan.add(htmlReplacement{
-			start:       href.valueStart,
-			end:         href.valueEnd,
-			value:       destination + suffix,
+			start:       href.valueStart + reference.start,
+			end:         href.valueStart + reference.end,
+			value:       destination + reference.suffix,
 			description: "legacy stylesheet reference",
 		})
 	}
@@ -842,19 +1031,68 @@ func planPreloadInsertion(plan *htmlRewritePlan, document scannedHTML, blocks ma
 	return nil
 }
 
-func legacyURLSuffix(value, expected string) (string, bool) {
-	base, suffix := splitLegacyURL(value)
-	if strings.TrimPrefix(base, "./") != expected {
-		return "", false
-	}
-	return suffix, true
+type legacyURLReference struct {
+	base   string
+	suffix string
+	start  int
+	end    int
 }
 
-func splitLegacyURL(value string) (string, string) {
-	if index := strings.IndexAny(value, "?#"); index >= 0 {
-		return value[:index], value[index:]
+func matchLegacyURL(value string, units []sourceByte, expected string) (legacyURLReference, bool) {
+	reference, ok := preprocessLegacyURL(value, units)
+	if !ok || strings.TrimPrefix(reference.base, "./") != expected {
+		return legacyURLReference{}, false
 	}
-	return value, ""
+	return reference, true
+}
+
+func preprocessLegacyURL(value string, units []sourceByte) (legacyURLReference, bool) {
+	start := 0
+	for start < len(units) && units[start].value <= 0x20 {
+		start++
+	}
+	end := len(units)
+	for end > start && units[end-1].value <= 0x20 {
+		end--
+	}
+	if start == end {
+		return legacyURLReference{}, false
+	}
+
+	filtered := make([]sourceByte, 0, end-start)
+	for _, unit := range units[start:end] {
+		switch unit.value {
+		case '\t', '\n', '\r':
+			continue
+		default:
+			filtered = append(filtered, unit)
+		}
+	}
+	if len(filtered) == 0 {
+		return legacyURLReference{}, false
+	}
+
+	delimiter := len(filtered)
+	var base strings.Builder
+	for index, unit := range filtered {
+		if unit.value == '?' || unit.value == '#' {
+			delimiter = index
+			break
+		}
+		base.WriteByte(unit.value)
+	}
+	rawStart := units[start].start
+	rawEnd := units[end-1].end
+	suffix := ""
+	if delimiter < len(filtered) {
+		suffix = value[filtered[delimiter].start:rawEnd]
+	}
+	return legacyURLReference{
+		base:   base.String(),
+		suffix: suffix,
+		start:  rawStart,
+		end:    rawEnd,
+	}, true
 }
 
 type legacyBootstrapMatch struct {
@@ -964,25 +1202,54 @@ func (parser *legacyBootstrapParser) legacyWASMURL() (legacyBootstrapMatch, bool
 	}
 	quote := parser.content[parser.offset]
 	valueStart := parser.offset + 1
-	for offset := valueStart; offset < parser.end; offset++ {
+	units := make([]sourceByte, 0, 32)
+	for offset := valueStart; offset < parser.end; {
 		switch parser.content[offset] {
-		case '\\', '\n', '\r':
+		case '\n', '\r':
 			return legacyBootstrapMatch{}, false
+		case '\\':
+			if offset+1 >= parser.end {
+				return legacyBootstrapMatch{}, false
+			}
+			var decoded byte
+			switch parser.content[offset+1] {
+			case 't':
+				decoded = '\t'
+			case 'n':
+				decoded = '\n'
+			case 'r':
+				decoded = '\r'
+			default:
+				return legacyBootstrapMatch{}, false
+			}
+			units = append(units, sourceByte{
+				value: decoded,
+				start: offset - valueStart,
+				end:   offset + 2 - valueStart,
+			})
+			offset += 2
 		case quote:
 			value := parser.content[valueStart:offset]
 			for _, legacy := range []string{"bundle.wasm", "main.wasm"} {
-				suffix, ok := legacyURLSuffix(value, legacy)
+				reference, ok := matchLegacyURL(value, units, legacy)
 				if !ok {
 					continue
 				}
 				parser.offset = offset + 1
 				return legacyBootstrapMatch{
-					urlStart: valueStart,
-					urlEnd:   offset,
-					suffix:   suffix,
+					urlStart: valueStart + reference.start,
+					urlEnd:   valueStart + reference.end,
+					suffix:   reference.suffix,
 				}, true
 			}
 			return legacyBootstrapMatch{}, false
+		default:
+			units = append(units, sourceByte{
+				value: parser.content[offset],
+				start: offset - valueStart,
+				end:   offset + 1 - valueStart,
+			})
+			offset++
 		}
 	}
 	return legacyBootstrapMatch{}, false
