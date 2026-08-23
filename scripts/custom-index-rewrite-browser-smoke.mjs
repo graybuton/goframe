@@ -46,6 +46,28 @@ const legacyJavaScriptSentinels = [
     'class AuthoredSyntax {\n            #value = "fetch(\\"bundle.wasm\\")";\n        }',
 ];
 
+const legacyHTMLSentinels = [
+    `<svg id="fixture-svg-cdata" style="display:none">
+<![CDATA[
+<script src="wasm_exec.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<!-- goframe:runtime -->
+]]>
+    </svg>`,
+    `<math id="fixture-math-cdata" style="display:none">
+<![CDATA[
+<script src="wasm_exec.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<!-- goframe:runtime -->
+]]>
+    </math>`,
+    '<script id="fixture-nbsp-script" type=" application/javascript" src="wasm_exec.js"></script>',
+    '<link id="fixture-nbsp-rel" rel="alternate stylesheet" href="styles.css">',
+    '<link id="fixture-nbsp-as" rel="preload" as=" style" href="styles.css">',
+];
+
 let tempRoot = null;
 let profile = null;
 let browser = null;
@@ -54,6 +76,8 @@ let client = null;
 let server = null;
 let serverError = "";
 const cdpRuntimeErrors = [];
+const cdpUnexpectedHTTPFailures = [];
+const cdpDecoyRequests = [];
 
 try {
     tempRoot = await mkdtemp(join(tmpdir(), `goframe-custom-index-${compiler}-`));
@@ -76,8 +100,19 @@ try {
     client.on("Runtime.exceptionThrown", (params) => {
         cdpRuntimeErrors.push(params.exceptionDetails?.text ?? "runtime exception");
     });
+    client.on("Network.responseReceived", (params) => {
+        const response = params.response;
+        const pathname = new URL(response.url).pathname;
+        if (pathname === "/wasm_exec.js" || pathname === "/styles.css") {
+            cdpDecoyRequests.push({ url: response.url, status: response.status });
+        }
+        if (response.status >= 400 && pathname !== "/favicon.ico") {
+            cdpUnexpectedHTTPFailures.push({ url: response.url, status: response.status });
+        }
+    });
     await client.call("Runtime.enable");
     await client.call("Page.enable");
+    await client.call("Network.enable");
 
     for (const scenario of scenarios) {
         scenario.browser = await runBrowserScenario(scenario);
@@ -195,6 +230,10 @@ function assertAuthoredSentinels(source, packaged, mode) {
             assert(source.includes(sentinel), `legacy source is missing JavaScript sentinel ${JSON.stringify(sentinel)}`);
             assert(packaged.includes(sentinel), `legacy package changed JavaScript sentinel ${JSON.stringify(sentinel)}`);
         }
+        for (const sentinel of legacyHTMLSentinels) {
+            assert(source.includes(sentinel), `legacy source is missing HTML sentinel ${JSON.stringify(sentinel)}`);
+            assert(packaged.includes(sentinel), `legacy package changed HTML sentinel ${JSON.stringify(sentinel)}`);
+        }
     }
 }
 
@@ -257,6 +296,8 @@ async function runBrowserScenario(scenario) {
     await waitForServer(port, server);
 
     cdpRuntimeErrors.length = 0;
+    cdpUnexpectedHTTPFailures.length = 0;
+    cdpDecoyRequests.length = 0;
     const url = `http://127.0.0.1:${port}/?mode=${scenario.mode}&compiler=${compiler}&run=${Date.now()}`;
     await client.call("Page.navigate", { url });
     await waitForFixture(url);
@@ -269,6 +310,20 @@ async function runBrowserScenario(scenario) {
     assert(before.bodyExample === "bundle.wasm", `${scenario.mode} data attribute changed`);
     assert(before.inlineJSON === '{"asset":"bundle.wasm","runtime":"wasm_exec.js"}', `${scenario.mode} inline JSON changed`);
     assertDeepEqual(before.runtimeErrors, [], `${scenario.mode} GoFrame runtime errors before interaction`);
+    if (scenario.mode === "legacy") {
+        for (const [name, value] of [["SVG", before.svgCDATA], ["MathML", before.mathCDATA]]) {
+            assert(value.includes('<script src="wasm_exec.js"></script>'), `${name} CDATA runtime decoy changed`);
+            assert(value.includes('<link rel="stylesheet" href="styles.css">'), `${name} CDATA style decoy changed`);
+            assert(value.includes("</head>"), `${name} CDATA head decoy changed`);
+            assert(value.includes("<!-- goframe:runtime -->"), `${name} CDATA marker decoy changed`);
+        }
+        assert(before.nbspScriptType === " application/javascript", "legacy NBSP script type changed");
+        assert(before.nbspScriptSource === "wasm_exec.js", "legacy NBSP script source changed");
+        assert(before.nbspRel === "alternate stylesheet", "legacy NBSP rel changed");
+        assert(before.nbspRelHref === "styles.css", "legacy NBSP rel href changed");
+        assert(before.nbspAs === " style", "legacy NBSP as changed");
+        assert(before.nbspAsHref === "styles.css", "legacy NBSP as href changed");
+    }
 
     const assetStatuses = await client.evaluate(`Promise.all(${JSON.stringify(Object.values(scenario.paths))}.map(async (path) => {
         const response = await fetch("/" + path, { cache: "no-store" });
@@ -287,6 +342,8 @@ async function runBrowserScenario(scenario) {
     assert(after.count === "1", `${scenario.mode} interaction did not update the current application`);
     assertDeepEqual(after.runtimeErrors, [], `${scenario.mode} GoFrame runtime errors after interaction`);
     assert(cdpRuntimeErrors.length === 0, `${scenario.mode} CDP runtime errors: ${JSON.stringify(cdpRuntimeErrors)}`);
+    assert(cdpDecoyRequests.length === 0, `${scenario.mode} inert authored references were fetched: ${JSON.stringify(cdpDecoyRequests)}`);
+    assert(cdpUnexpectedHTTPFailures.length === 0, `${scenario.mode} unexpected HTTP failures: ${JSON.stringify(cdpUnexpectedHTTPFailures)}`);
 
     await stopProcess(server);
     server = null;
@@ -297,6 +354,7 @@ async function runBrowserScenario(scenario) {
         buttonBackground: after.buttonBackground,
         assetStatuses,
         runtimeErrorCount: cdpRuntimeErrors.length + after.runtimeErrors.length,
+        unexpectedHTTPFailureCount: cdpUnexpectedHTTPFailures.length,
     };
 }
 
@@ -330,6 +388,14 @@ async function pageState() {
             authoredHref: document.querySelector("[data-testid='authored-link']")?.getAttribute("href") ?? null,
             bodyExample: document.body?.getAttribute("data-example") ?? null,
             inlineJSON: document.querySelector("#fixture-json")?.textContent ?? null,
+            svgCDATA: document.querySelector("#fixture-svg-cdata")?.textContent ?? "",
+            mathCDATA: document.querySelector("#fixture-math-cdata")?.textContent ?? "",
+            nbspScriptType: document.querySelector("#fixture-nbsp-script")?.getAttribute("type") ?? null,
+            nbspScriptSource: document.querySelector("#fixture-nbsp-script")?.getAttribute("src") ?? null,
+            nbspRel: document.querySelector("#fixture-nbsp-rel")?.getAttribute("rel") ?? null,
+            nbspRelHref: document.querySelector("#fixture-nbsp-rel")?.getAttribute("href") ?? null,
+            nbspAs: document.querySelector("#fixture-nbsp-as")?.getAttribute("as") ?? null,
+            nbspAsHref: document.querySelector("#fixture-nbsp-as")?.getAttribute("href") ?? null,
             runtimeErrors: Array.from(window.__customIndexRuntimeErrors ?? []),
         };
     })()`);
@@ -562,6 +628,8 @@ async function diagnostics() {
         browserStderr: browserError.slice(-6000),
         serverStderr: serverError.slice(-6000),
         cdpRuntimeErrors,
+        cdpUnexpectedHTTPFailures,
+        cdpDecoyRequests,
         page,
     };
 }

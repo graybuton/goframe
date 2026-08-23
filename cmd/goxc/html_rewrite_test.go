@@ -74,6 +74,346 @@ func TestCustomIndexPreloadUsesStructuralHeadClose(t *testing.T) {
 	}
 }
 
+func TestCustomIndexForeignCDATAIsOpaque(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		foreign string
+	}{
+		{
+			name: "SVG",
+			foreign: `<svg><g><![CDATA[
+x >
+<script src="wasm_exec.js?svg"></script>
+<link rel="stylesheet" href="styles.css?svg">
+</head>
+<!-- goframe:runtime -->
+]]></g></svg>`,
+		},
+		{
+			name: "MathML",
+			foreign: `<math><mrow><![CDATA[
+x >
+<script src="wasm_exec.js?math"></script>
+<link rel="stylesheet" href="styles.css?math">
+</head>
+<!-- goframe:runtime -->
+]]></mrow></math>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			options := htmlRewriteOptions{
+				preload:     true,
+				wasmPath:    "assets/bundle.11111111.wasm",
+				runtimePath: "assets/wasm_exec.22222222.js",
+				stylePaths:  []string{"assets/styles.33333333.css"},
+				styleRewrites: map[string]string{
+					"styles.css": "assets/styles.33333333.css",
+				},
+			}
+			source := "<html><head>\n" + test.foreign + `
+<script src="wasm_exec.js?real"></script>
+<link rel="stylesheet" href="styles.css?real">
+</head><body></body></html>`
+			got, err := rewriteIndexHTML(source, options)
+			if err != nil {
+				t.Fatalf("rewriteIndexHTML() error: %v", err)
+			}
+			if !strings.Contains(got, test.foreign) {
+				t.Fatalf("foreign CDATA bytes changed:\n%s", got)
+			}
+			for _, want := range []string{
+				`src="assets/wasm_exec.22222222.js?real"`,
+				`href="assets/styles.33333333.css?real"`,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("real reference outside foreign CDATA missing %q:\n%s", want, got)
+				}
+			}
+			preload := strings.Index(got, `<link rel="preload" href="assets/bundle.11111111.wasm"`)
+			closingHead := strings.LastIndex(got, "</head>")
+			if preload < 0 || closingHead < 0 || preload > closingHead {
+				t.Fatalf("preload was not inserted before the real closing head:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestCustomIndexForeignIntegrationPointTransitions(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "SVG foreignObject",
+			source: `<svg><FoReIgNoBjEcT><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></FoReIgNoBjEcT></svg>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "SVG desc",
+			source: `<svg><desc><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></desc></svg>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "SVG title",
+			source: `<svg><title><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></title></svg>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "MathML mi text integration point",
+			source: `<math><mi><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></mi></math>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "MathML mo text integration point",
+			source: `<math><mo><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></mo></math>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "MathML mn text integration point",
+			source: `<math><mn><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></mn></math>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "MathML ms text integration point",
+			source: `<math><ms><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></ms></math>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "MathML mtext integration point",
+			source: `<math><mtext><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></mtext></math>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "MathML annotation HTML encoding",
+			source: "<math><annotation-xml encoding=\"\tTEXT/HTML\r\"><![CDATA[x > <script src=\"wasm_exec.js?cdata\"></script>]]>\n" +
+				"<script src=\"wasm_exec.js?child\"></script></annotation-xml></math>",
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+		{
+			name: "MathML annotation XHTML encoding",
+			source: `<math><annotation-xml encoding="application/xhtml+xml"><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]>
+<script src="wasm_exec.js?child"></script></annotation-xml></math>`,
+			want: `src="assets/wasm_exec.22222222.js?child"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{
+				runtimePath: "assets/wasm_exec.22222222.js",
+			})
+			if !strings.Contains(got, `src="wasm_exec.js?cdata"`) {
+				t.Fatalf("integration-point CDATA changed:\n%s", got)
+			}
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("HTML child below integration point was not rewritten:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestCustomIndexForeignNamespaceControls(t *testing.T) {
+	options := htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"}
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "HTML namespace CDATA-like markup",
+			source: `<div><![CDATA[x > <script src="wasm_exec.js?html"></script>]]></div>`,
+			want:   `src="assets/wasm_exec.22222222.js?html"`,
+		},
+		{
+			name:   "HTML child below SVG integration point",
+			source: `<svg><foreignObject><div><![CDATA[x > <script src="wasm_exec.js?html"></script>]]></div></foreignObject></svg>`,
+			want:   `src="assets/wasm_exec.22222222.js?html"`,
+		},
+		{
+			name:   "self-closing foreign child retains SVG context",
+			source: `<svg><path/><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]></svg><script src="wasm_exec.js?real"></script>`,
+			want:   `src="assets/wasm_exec.22222222.js?real"`,
+		},
+		{
+			name:   "closing integration point restores SVG context",
+			source: `<svg><foreignObject><div>HTML child</div></foreignObject><![CDATA[x > <script src="wasm_exec.js?cdata"></script>]]></svg><script src="wasm_exec.js?real"></script>`,
+			want:   `src="assets/wasm_exec.22222222.js?real"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, options)
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("namespace control missing %q:\n%s", test.want, got)
+			}
+			if strings.Contains(test.source, "?cdata") && !strings.Contains(got, `src="wasm_exec.js?cdata"`) {
+				t.Fatalf("self-closing foreign child exposed CDATA content:\n%s", got)
+			}
+		})
+	}
+
+	annotation := `<math><annotation-xml encoding=" text/html"><script src="wasm_exec.js?foreign"></script></annotation-xml></math>`
+	if got := rewriteIndexForTest(t, annotation, options); got != annotation {
+		t.Fatalf("non-HTML-space annotation encoding created an HTML integration point\ngot:  %q\nwant: %q", got, annotation)
+	}
+}
+
+func TestCustomIndexUnterminatedForeignCDATAFailsClosed(t *testing.T) {
+	for _, source := range []string{
+		`<svg><![CDATA[x >`,
+		`<math><![CDATA[x >`,
+	} {
+		got, err := rewriteIndexHTML(source, htmlRewriteOptions{})
+		if err == nil {
+			t.Fatalf("rewriteIndexHTML(%q) = %q, want unterminated CDATA error", source, got)
+		}
+		if !strings.Contains(err.Error(), "unterminated") || !strings.Contains(err.Error(), "CDATA") {
+			t.Fatalf("rewriteIndexHTML(%q) error = %v, want CDATA guidance", source, err)
+		}
+		if got != "" {
+			t.Fatalf("rewriteIndexHTML(%q) returned partial output %q", source, got)
+		}
+	}
+}
+
+func TestCustomIndexHTMLWhitespaceClassification(t *testing.T) {
+	t.Run("script type", func(t *testing.T) {
+		for _, test := range []struct {
+			name    string
+			value   string
+			rewrite bool
+		}{
+			{name: "empty", value: "", rewrite: true},
+			{name: "ASCII space", value: " application/javascript ", rewrite: true},
+			{name: "tab", value: "\ttext/javascript\t", rewrite: true},
+			{name: "line feed", value: "\napplication/javascript\n", rewrite: true},
+			{name: "form feed", value: "\fapplication/javascript\f", rewrite: true},
+			{name: "carriage return", value: "\rapplication/javascript\r", rewrite: true},
+			{name: "MIME parameters", value: "application/javascript; charset=utf-8", rewrite: true},
+			{name: "NBSP prefix", value: "\u00a0application/javascript"},
+			{name: "NBSP suffix", value: "application/javascript\u00a0"},
+			{name: "EM SPACE", value: "\u2003text/javascript"},
+			{name: "NARROW NBSP", value: "\u202fapplication/javascript"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				source := `<script type="` + test.value + `" src="wasm_exec.js"></script><p>authored</p>`
+				want := source
+				if test.rewrite {
+					want = strings.Replace(want, `src="wasm_exec.js"`, `src="assets/wasm_exec.22222222.js"`, 1)
+				}
+				got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
+				if got != want {
+					t.Fatalf("script type classification mismatch\ngot:  %q\nwant: %q", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("link rel", func(t *testing.T) {
+		for _, test := range []struct {
+			name    string
+			value   string
+			rewrite bool
+		}{
+			{name: "ASCII space", value: "alternate stylesheet", rewrite: true},
+			{name: "tab", value: "alternate\tstylesheet", rewrite: true},
+			{name: "line feed", value: "preload\nstylesheet", rewrite: true},
+			{name: "form feed", value: "alternate\fstylesheet", rewrite: true},
+			{name: "carriage return", value: "alternate\rstylesheet", rewrite: true},
+			{name: "NBSP", value: "alternate\u00a0stylesheet"},
+			{name: "EM SPACE", value: "alternate\u2003stylesheet"},
+			{name: "NARROW NBSP", value: "preload\u202fstylesheet"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				source := `<link rel="` + test.value + `" href="styles.css"><p>authored</p>`
+				want := source
+				if test.rewrite {
+					want = strings.Replace(want, `href="styles.css"`, `href="assets/styles.33333333.css"`, 1)
+				}
+				got := rewriteIndexForTest(t, source, htmlRewriteOptions{styleRewrites: map[string]string{
+					"styles.css": "assets/styles.33333333.css",
+				}})
+				if got != want {
+					t.Fatalf("link rel classification mismatch\ngot:  %q\nwant: %q", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("link as", func(t *testing.T) {
+		for _, test := range []struct {
+			name    string
+			value   string
+			rewrite bool
+		}{
+			{name: "plain", value: "style", rewrite: true},
+			{name: "ASCII space", value: " style ", rewrite: true},
+			{name: "NBSP prefix", value: "\u00a0style"},
+			{name: "NBSP suffix", value: "style\u00a0"},
+			{name: "EM SPACE", value: "\u2003style"},
+			{name: "NARROW NBSP", value: "style\u202f"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				source := `<link rel="preload" as="` + test.value + `" href="styles.css"><p>authored</p>`
+				want := source
+				if test.rewrite {
+					want = strings.Replace(want, `href="styles.css"`, `href="assets/styles.33333333.css"`, 1)
+				}
+				got := rewriteIndexForTest(t, source, htmlRewriteOptions{styleRewrites: map[string]string{
+					"styles.css": "assets/styles.33333333.css",
+				}})
+				if got != want {
+					t.Fatalf("link as classification mismatch\ngot:  %q\nwant: %q", got, want)
+				}
+			})
+		}
+	})
+}
+
+func TestCustomIndexHTMLSemanticsCombinedDocument(t *testing.T) {
+	const nbsp = "\u00a0"
+	options := htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.11111111.wasm",
+		runtimePath: "assets/wasm_exec.22222222.js",
+		stylePaths:  []string{"assets/styles.33333333.css"},
+		styleRewrites: map[string]string{
+			"styles.css": "assets/styles.33333333.css",
+		},
+	}
+	source := `<html><head>
+<svg><![CDATA[x > <script src="wasm_exec.js?svg"></script><link rel="stylesheet" href="styles.css?svg"></head>]]></svg>
+<math><![CDATA[x > <script src="wasm_exec.js?math"></script><link rel="stylesheet" href="styles.css?math"></head>]]></math>
+<script src="wasm_exec.js?real"></script>
+<script type="` + nbsp + `application/javascript" src="wasm_exec.js?nbsp"></script>
+<link rel="stylesheet" href="styles.css?real">
+<link rel="alternate` + nbsp + `stylesheet" href="styles.css?rel">
+<link rel="preload" as="style" href="styles.css?preload">
+<link rel="preload" as="` + nbsp + `style" href="styles.css?as">
+</head><body></body></html>`
+	want := strings.Replace(source, `src="wasm_exec.js?real"`, `src="assets/wasm_exec.22222222.js?real"`, 1)
+	want = strings.Replace(want, `href="styles.css?real"`, `href="assets/styles.33333333.css?real"`, 1)
+	want = strings.Replace(want, `href="styles.css?preload"`, `href="assets/styles.33333333.css?preload"`, 1)
+	closingHead := strings.LastIndex(want, "</head>")
+	if closingHead < 0 {
+		t.Fatal("combined source has no structural closing head")
+	}
+	want = want[:closingHead] + preloadHTML(options) + "\n" + want[closingHead:]
+	got := rewriteIndexForTest(t, source, options)
+	if got != want {
+		t.Fatalf("combined HTML semantics rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+	if second := rewriteIndexForTest(t, got, options); second != got {
+		t.Fatalf("combined HTML semantics rewrite is not idempotent\nfirst:  %q\nsecond: %q", got, second)
+	}
+}
+
 func TestCustomIndexSimilarNamesRemainAuthored(t *testing.T) {
 	source := `<p>my-bundle.wasm bundle.wasm.backup bundle.wasm.map main.wasm.example wasm_exec.js.map custom-wasm_exec.js</p>`
 	got, err := rewriteIndexHTML(source, htmlRewriteOptions{
@@ -815,6 +1155,55 @@ func TestPackageCustomIndexRewriteFailurePreservesPublishedPackage(t *testing.T)
 	assertFileContent(t, filepath.Join(appDir, indexHTMLAssetName), malformed)
 	if ownership := inspectPackageOwnership(outDir); ownership.State != packageOwnedCurrent {
 		t.Fatalf("previous package ownership = %+v, want current", ownership)
+	}
+}
+
+func TestPackageCustomIndexUnterminatedForeignCDATAFailureIsAtomic(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	malformed := "<!doctype html><html><body><svg><![CDATA[x >\n"
+	writeTestFile(t, appDir, indexHTMLAssetName, malformed)
+
+	temporaryRoot := t.TempDir()
+	t.Setenv("TMPDIR", temporaryRoot)
+	outDir := filepath.Join(t.TempDir(), "package")
+	writeCompleteCurrentPackage(t, outDir)
+	before := snapshotInspectTree(t, outDir)
+	markerBefore, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var packageErr error
+	output := captureStdout(t, func() {
+		packageErr = packageApp(packageOptions{
+			appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{},
+		})
+	})
+	if packageErr == nil || !strings.Contains(packageErr.Error(), "unterminated") || !strings.Contains(packageErr.Error(), "CDATA") {
+		t.Fatalf("packageApp() error = %v, want unterminated CDATA failure", packageErr)
+	}
+	if strings.Contains(output, "packaged ") {
+		t.Fatalf("failed package emitted success output: %q", output)
+	}
+	if got := snapshotInspectTree(t, outDir); !reflect.DeepEqual(got, before) {
+		t.Fatalf("CDATA rewrite failure changed previous package\nbefore: %#v\nafter:  %#v", before, got)
+	}
+	assertFileContent(t, filepath.Join(appDir, indexHTMLAssetName), malformed)
+	markerAfter, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(markerAfter, markerBefore) {
+		t.Fatalf("CDATA rewrite failure changed the previous completion marker\nbefore: %q\nafter:  %q", markerBefore, markerAfter)
+	}
+	entries, err := os.ReadDir(temporaryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "goxc-package-") {
+			t.Fatalf("CDATA rewrite failure retained temporary staging %s", entry.Name())
+		}
 	}
 }
 

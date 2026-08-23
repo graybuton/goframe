@@ -70,6 +70,7 @@ type htmlTag struct {
 	start         int
 	end           int
 	name          string
+	namespace     htmlNamespace
 	closing       bool
 	selfClosing   bool
 	attributes    []htmlAttribute
@@ -83,6 +84,25 @@ type htmlAttribute struct {
 	valueStart int
 	valueEnd   int
 	hasValue   bool
+}
+
+type htmlNamespace uint8
+
+const (
+	htmlNamespaceHTML htmlNamespace = iota
+	htmlNamespaceSVG
+	htmlNamespaceMathML
+)
+
+type htmlElementContext struct {
+	name                    string
+	namespace               htmlNamespace
+	htmlIntegrationPoint    bool
+	mathMLTextIntegrationPt bool
+}
+
+type htmlScannerContext struct {
+	elements []htmlElementContext
 }
 
 func (tag htmlTag) attribute(name string) (*htmlAttribute, error) {
@@ -102,6 +122,7 @@ func (tag htmlTag) attribute(name string) (*htmlAttribute, error) {
 
 func scanCustomIndexHTML(content string) (scannedHTML, error) {
 	var document scannedHTML
+	var context htmlScannerContext
 	templateDepth := 0
 	for offset := 0; offset < len(content); {
 		if content[offset] != '<' {
@@ -122,6 +143,14 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			offset = end
 			continue
 		}
+		if strings.HasPrefix(content[offset:], "<![CDATA[") && context.currentNamespace() != htmlNamespaceHTML {
+			end, err := scanForeignCDATAEnd(content, offset, context.currentNamespace())
+			if err != nil {
+				return scannedHTML{}, err
+			}
+			offset = end
+			continue
+		}
 		if strings.HasPrefix(content[offset:], "<!") || strings.HasPrefix(content[offset:], "<?") {
 			end, err := scanHTMLConstructEnd(content, offset+2)
 			if err != nil {
@@ -139,18 +168,24 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			offset++
 			continue
 		}
-		if tag.closing && tag.name == "template" {
+		if tag.closing {
+			tag.namespace = context.closingNamespace(tag.name)
+		} else {
+			tag.namespace = context.startTagNamespace(tag.name)
+		}
+		if tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "template" {
 			if templateDepth == 0 {
 				return scannedHTML{}, fmt.Errorf("custom index has a closing </template> without a matching opening tag")
 			}
 			templateDepth--
 		}
 		tag.templateDepth = templateDepth
-		if !tag.closing && opaqueHTMLTextElement(tag.name) {
+		if !tag.closing && tag.namespace == htmlNamespaceHTML && opaqueHTMLTextElement(tag.name) {
 			closing, err := scanRawElementClose(content, tag.end, tag.name)
 			if err != nil {
 				return scannedHTML{}, err
 			}
+			closing.namespace = tag.namespace
 			tag.rawStart = tag.end
 			tag.rawEnd = closing.start
 			document.tags = append(document.tags, tag)
@@ -160,7 +195,12 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			continue
 		}
 		document.tags = append(document.tags, tag)
-		if !tag.closing && tag.name == "template" {
+		if tag.closing {
+			context.close(tag.name)
+		} else if !tag.selfClosing && !(tag.namespace == htmlNamespaceHTML && voidHTMLElement(tag.name)) {
+			context.push(content, tag)
+		}
+		if !tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "template" {
 			templateDepth++
 		}
 		offset = tag.end
@@ -169,6 +209,111 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		return scannedHTML{}, fmt.Errorf("custom index has an opening <template> without a matching closing tag")
 	}
 	return document, nil
+}
+
+func scanForeignCDATAEnd(content string, start int, namespace htmlNamespace) (int, error) {
+	const opening = "<![CDATA["
+	end := strings.Index(content[start+len(opening):], "]]>")
+	if end < 0 {
+		name := "foreign-content"
+		switch namespace {
+		case htmlNamespaceSVG:
+			name = "SVG"
+		case htmlNamespaceMathML:
+			name = "MathML"
+		}
+		return 0, fmt.Errorf("custom index has an unterminated %s CDATA section; close it with ]]>", name)
+	}
+	return start + len(opening) + end + len("]]>"), nil
+}
+
+func (context htmlScannerContext) currentNamespace() htmlNamespace {
+	if len(context.elements) == 0 {
+		return htmlNamespaceHTML
+	}
+	return context.elements[len(context.elements)-1].namespace
+}
+
+func (context htmlScannerContext) startTagNamespace(name string) htmlNamespace {
+	if len(context.elements) == 0 {
+		return namespaceForHTMLStartTag(name)
+	}
+	current := context.elements[len(context.elements)-1]
+	if current.namespace == htmlNamespaceHTML || current.htmlIntegrationPoint ||
+		current.mathMLTextIntegrationPt && name != "mglyph" && name != "malignmark" {
+		return namespaceForHTMLStartTag(name)
+	}
+	return current.namespace
+}
+
+func namespaceForHTMLStartTag(name string) htmlNamespace {
+	switch name {
+	case "svg":
+		return htmlNamespaceSVG
+	case "math":
+		return htmlNamespaceMathML
+	default:
+		return htmlNamespaceHTML
+	}
+}
+
+func (context *htmlScannerContext) push(content string, tag htmlTag) {
+	element := htmlElementContext{name: tag.name, namespace: tag.namespace}
+	switch tag.namespace {
+	case htmlNamespaceSVG:
+		switch tag.name {
+		case "foreignobject", "desc", "title":
+			element.htmlIntegrationPoint = true
+		}
+	case htmlNamespaceMathML:
+		switch tag.name {
+		case "mi", "mo", "mn", "ms", "mtext":
+			element.mathMLTextIntegrationPt = true
+		case "annotation-xml":
+			if encoding, ok := firstHTMLAttributeValue(content, tag, "encoding"); ok {
+				encoding = trimHTMLSpace(encoding)
+				element.htmlIntegrationPoint = asciiFoldEqual(encoding, "text/html") ||
+					asciiFoldEqual(encoding, "application/xhtml+xml")
+			}
+		}
+	}
+	context.elements = append(context.elements, element)
+}
+
+func (context htmlScannerContext) closingNamespace(name string) htmlNamespace {
+	for index := len(context.elements) - 1; index >= 0; index-- {
+		if context.elements[index].name == name {
+			return context.elements[index].namespace
+		}
+	}
+	return context.currentNamespace()
+}
+
+func (context *htmlScannerContext) close(name string) {
+	for index := len(context.elements) - 1; index >= 0; index-- {
+		if context.elements[index].name == name {
+			context.elements = context.elements[:index]
+			return
+		}
+	}
+}
+
+func firstHTMLAttributeValue(content string, tag htmlTag, name string) (string, bool) {
+	for _, attribute := range tag.attributes {
+		if attribute.name == name && attribute.hasValue {
+			return content[attribute.valueStart:attribute.valueEnd], true
+		}
+	}
+	return "", false
+}
+
+func voidHTMLElement(name string) bool {
+	switch name {
+	case "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr":
+		return true
+	default:
+		return false
+	}
 }
 
 func opaqueHTMLTextElement(name string) bool {
@@ -507,7 +652,7 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 
 func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, runtimePath string) error {
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "script" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.namespace != htmlNamespaceHTML || tag.name != "script" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
@@ -541,7 +686,7 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 
 func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, wasmPath string) error {
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "script" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.namespace != htmlNamespaceHTML || tag.name != "script" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
@@ -576,9 +721,9 @@ func executableScriptType(content string, typeAttribute *htmlAttribute) bool {
 	if typeAttribute == nil || !typeAttribute.hasValue {
 		return true
 	}
-	value := asciiLower(strings.TrimSpace(content[typeAttribute.valueStart:typeAttribute.valueEnd]))
+	value := asciiLower(trimHTMLSpace(content[typeAttribute.valueStart:typeAttribute.valueEnd]))
 	if separator := strings.IndexByte(value, ';'); separator >= 0 {
-		value = strings.TrimSpace(value[:separator])
+		value = trimHTMLSpace(value[:separator])
 	}
 	switch value {
 	case "", "module", "text/javascript", "application/javascript", "text/ecmascript", "application/ecmascript", "text/jscript":
@@ -594,7 +739,7 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 	}
 	_, preloadManaged := blocks[preloadBlockName]
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "link" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.namespace != htmlNamespaceHTML || tag.name != "link" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		href, err := tag.attribute("href")
@@ -612,9 +757,9 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 		if href == nil || !href.hasValue || rel == nil || !rel.hasValue {
 			continue
 		}
-		relTokens := asciiTokenSet(plan.content[rel.valueStart:rel.valueEnd])
+		relTokens := htmlSpaceTokenSet(plan.content[rel.valueStart:rel.valueEnd])
 		stylesheet := relTokens["stylesheet"]
-		stylePreload := relTokens["preload"] && as != nil && as.hasValue && asciiFoldEqual(strings.TrimSpace(plan.content[as.valueStart:as.valueEnd]), "style")
+		stylePreload := relTokens["preload"] && as != nil && as.hasValue && asciiFoldEqual(trimHTMLSpace(plan.content[as.valueStart:as.valueEnd]), "style")
 		if !stylesheet && (!stylePreload || preloadManaged) {
 			continue
 		}
@@ -635,9 +780,38 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 	return nil
 }
 
-func asciiTokenSet(value string) map[string]bool {
+func trimHTMLSpace(value string) string {
+	start := 0
+	for start < len(value) && isHTMLSpace(value[start]) {
+		start++
+	}
+	end := len(value)
+	for end > start && isHTMLSpace(value[end-1]) {
+		end--
+	}
+	return value[start:end]
+}
+
+func splitHTMLSpaceTokens(value string) []string {
+	var tokens []string
+	for offset := 0; offset < len(value); {
+		for offset < len(value) && isHTMLSpace(value[offset]) {
+			offset++
+		}
+		start := offset
+		for offset < len(value) && !isHTMLSpace(value[offset]) {
+			offset++
+		}
+		if start < offset {
+			tokens = append(tokens, value[start:offset])
+		}
+	}
+	return tokens
+}
+
+func htmlSpaceTokenSet(value string) map[string]bool {
 	result := map[string]bool{}
-	for _, token := range strings.Fields(value) {
+	for _, token := range splitHTMLSpaceTokens(value) {
 		result[asciiLower(token)] = true
 	}
 	return result
@@ -646,7 +820,7 @@ func asciiTokenSet(value string) map[string]bool {
 func planPreloadInsertion(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, preload string) error {
 	var closingHeads []htmlTag
 	for _, tag := range document.tags {
-		if tag.closing && tag.name == "head" && tag.templateDepth == 0 && !managedBlockContains(blocks, tag.start) {
+		if tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "head" && tag.templateDepth == 0 && !managedBlockContains(blocks, tag.start) {
 			closingHeads = append(closingHeads, tag)
 		}
 	}
@@ -655,6 +829,9 @@ func planPreloadInsertion(plan *htmlRewritePlan, document scannedHTML, blocks ma
 	}
 	if len(closingHeads) > 1 {
 		return fmt.Errorf("custom index has multiple structural </head> tags; keep one closing </head> tag or add an explicit goframe:preload block")
+	}
+	if strings.HasSuffix(plan.content[:closingHeads[0].start], preload+"\n") {
+		return nil
 	}
 	plan.add(htmlReplacement{
 		start:       closingHeads[0].start,

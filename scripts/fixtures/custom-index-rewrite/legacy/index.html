@@ -8,6 +8,25 @@
     <script type="application/json" id="fixture-json">{"asset":"bundle.wasm","runtime":"wasm_exec.js"}</script>
     <style id="fixture-style">.sentinel::after { content: "bundle.wasm"; }</style>
     <link data-authored="legacy-style" href='./styles.css?fixture=legacy#theme' rel='STYLESHEET'>
+    <svg id="fixture-svg-cdata" style="display:none">
+<![CDATA[
+<script src="wasm_exec.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<!-- goframe:runtime -->
+]]>
+    </svg>
+    <math id="fixture-math-cdata" style="display:none">
+<![CDATA[
+<script src="wasm_exec.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<!-- goframe:runtime -->
+]]>
+    </math>
+    <script id="fixture-nbsp-script" type=" application/javascript" src="wasm_exec.js"></script>
+    <link id="fixture-nbsp-rel" rel="alternate stylesheet" href="styles.css">
+    <link id="fixture-nbsp-as" rel="preload" as=" style" href="styles.css">
 </head>
 <body data-example="bundle.wasm">
     <p data-testid="authored-text">bundle.wasm is documented here.</p>
