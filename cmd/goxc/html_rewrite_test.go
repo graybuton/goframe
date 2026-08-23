@@ -891,6 +891,46 @@ func TestCustomIndexNamedCharacterReferenceSourceSpans(t *testing.T) {
 	}
 }
 
+func TestCustomIndexTokenizerCombinedSourcePreservation(t *testing.T) {
+	largeBody := strings.Repeat("x", 1<<20)
+	inertScript := `<script id="inert" type="application/json"><!--<script>` + largeBody + `</script>` +
+		`<script src="wasm_exec.js?inert"></script>` +
+		`<link rel="stylesheet" href="styles.css?inert">` +
+		`</head><!-- goframe:runtime -->--></script>`
+	source := `<html><head>` + inertScript +
+		`<div data-unknown="&unknown;" data-multi="&NotEqualTilde;"></div>` +
+		`<script src="wasm&lowbar;exec.js?real"></script>` +
+		`<link rel="stylesheet" href="styles&period;css?real">` +
+		`<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm?real"), go.importObject).then((result) => go.run(result.instance));</script>` +
+		`</head><body></body></html>`
+	options := htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.11111111.wasm",
+		runtimePath: "assets/wasm_exec.22222222.js",
+		stylePaths:  []string{"assets/styles.33333333.css"},
+		styleRewrites: map[string]string{
+			"styles.css": "assets/styles.33333333.css",
+		},
+	}
+
+	want := strings.Replace(source, "wasm&lowbar;exec.js?real", options.runtimePath+"?real", 1)
+	want = strings.Replace(want, "styles&period;css?real", options.styleRewrites["styles.css"]+"?real", 1)
+	want = strings.Replace(want, "bundle.wasm?real", options.wasmPath+"?real", 1)
+	closingHead := strings.LastIndex(want, "</head>")
+	want = want[:closingHead] + preloadHTML(options) + "\n" + want[closingHead:]
+
+	got := rewriteIndexForTest(t, source, options)
+	if got != want {
+		t.Fatalf("combined tokenizer rewrite changed bytes outside recognized spans")
+	}
+	if !strings.Contains(got, inertScript) {
+		t.Fatal("combined tokenizer rewrite changed inert double-escaped script bytes")
+	}
+	if second := rewriteIndexForTest(t, got, options); second != got {
+		t.Fatal("combined tokenizer rewrite is not idempotent")
+	}
+}
+
 func TestCustomIndexNamedCharacterReferenceConsumption(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -1830,6 +1870,11 @@ func TestPackageCustomIndexBrowserSemanticsFailuresAreAtomic(t *testing.T) {
 			name:   "malformed solidus",
 			source: `<html><head></head><body><input disabled//></body></html>`,
 			want:   "malformed solidus",
+		},
+		{
+			name:   "unterminated script data",
+			source: `<html><head></head><body><script><!--<script></script>`,
+			want:   "no closing </script> tag",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

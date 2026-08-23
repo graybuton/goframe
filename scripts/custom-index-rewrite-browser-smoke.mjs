@@ -47,6 +47,7 @@ const legacyJavaScriptSentinels = [
 ];
 
 const legacyHTMLSentinels = [
+    '<script id="fixture-double-escaped" type="application/json"><!--<script></script><script src="wasm_exec.js?fixture=double-escaped"></script>--></script>',
     `<svg id="fixture-svg-cdata" style="display:none">
 <![CDATA[
 <script src="wasm_exec.js"></script>
@@ -232,6 +233,10 @@ function assertAuthoredSentinels(source, packaged, mode) {
         assert(packaged.includes(sentinel), `${mode} package changed sentinel ${JSON.stringify(sentinel)}`);
     }
     if (mode === "legacy") {
+        assert(source.includes("./wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy source is missing the named runtime reference");
+        assert(source.includes("./styles&period;css?fixture=legacy#theme"), "legacy source is missing the named stylesheet reference");
+        assert(!packaged.includes("wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy package retained the named runtime reference");
+        assert(!packaged.includes("styles&period;css?fixture=legacy#theme"), "legacy package retained the named stylesheet reference");
         const falseHead = '<script>const falseHeadExample = "</head>";</script>';
         assert(source.includes(falseHead) && packaged.includes(falseHead), "legacy false head sentinel changed");
         for (const sentinel of legacyJavaScriptSentinels) {
@@ -334,6 +339,7 @@ async function runBrowserScenario(scenario) {
         assert(before.nbspRelHref === "styles.css", "legacy NBSP rel href changed");
         assert(before.nbspAs === " style", "legacy NBSP as changed");
         assert(before.nbspAsHref === "styles.css", "legacy NBSP as href changed");
+        assert(before.doubleEscapedText.includes('<script src="wasm_exec.js?fixture=double-escaped"></script>'), "legacy double-escaped runtime decoy changed");
         assert(before.breakoutSVGNamespace === "http://www.w3.org/2000/svg", "legacy SVG namespace changed");
         assert(before.breakoutHTMLNamespace === "http://www.w3.org/1999/xhtml", "foreign breakout did not create an HTML element");
         assert(before.breakoutRuntimeNamespace === "http://www.w3.org/1999/xhtml", "runtime script did not enter the HTML namespace");
@@ -420,6 +426,7 @@ async function pageState() {
             authoredHref: document.querySelector("[data-testid='authored-link']")?.getAttribute("href") ?? null,
             bodyExample: document.body?.getAttribute("data-example") ?? null,
             inlineJSON: document.querySelector("#fixture-json")?.textContent ?? null,
+            doubleEscapedText: document.querySelector("#fixture-double-escaped")?.textContent ?? "",
             svgCDATA: document.querySelector("#fixture-svg-cdata")?.textContent ?? "",
             mathCDATA: document.querySelector("#fixture-math-cdata")?.textContent ?? "",
             nbspScriptType: document.querySelector("#fixture-nbsp-script")?.getAttribute("type") ?? null,

@@ -6,6 +6,7 @@
     <!-- authored sentinel: bundle.wasm wasm_exec.js styles.css -->
     <script>const falseHeadExample = "</head>";</script>
     <script type="application/json" id="fixture-json">{"asset":"bundle.wasm","runtime":"wasm_exec.js"}</script>
+    <script id="fixture-double-escaped" type="application/json"><!--<script></script><script src="wasm_exec.js?fixture=double-escaped"></script>--></script>
     <style id="fixture-style">.sentinel::after { content: "bundle.wasm"; }</style>
     <svg id="fixture-svg-cdata" style="display:none">
 <![CDATA[
@@ -49,8 +50,8 @@
     <svg id="fixture-breakout" style="display:none">
     <p id="fixture-breakout-html"></p>
     <input id="fixture-compact-input" disabled/>
-    <link data-authored="legacy-style" href=' ./styles.css?fixture=legacy#theme ' rel='STYLESHEET'>
-    <script id="fixture-breakout-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' ./wasm_exec.js?fixture=legacy#runtime '></script>
+    <link data-authored="legacy-style" href=' ./styles&period;css?fixture=legacy#theme ' rel='STYLESHEET'>
+    <script id="fixture-breakout-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' ./wasm&lowbar;exec.js?fixture=legacy#runtime '></script>
     <script data-authored="legacy-bootstrap">
         const go = new Go();
         WebAssembly.instantiateStreaming(
