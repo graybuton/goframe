@@ -733,6 +733,206 @@ func TestCustomIndexNumericAttributeReferencesUseBrowserValues(t *testing.T) {
 	}
 }
 
+func TestCustomIndexScriptDataDoubleEscapedClosing(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "double escaped closing",
+			source: `<script id="outer"><!--<script></script><script src="wasm_exec.js?inert"></script>--></script><script src="wasm_exec.js?real"></script>`,
+		},
+		{
+			name:   "mixed case double escape",
+			source: `<script><!--<ScRiPt></sCrIpT><script src="wasm_exec.js?inert"></script>--></script><script src="wasm_exec.js?real"></script>`,
+		},
+		{
+			name:   "double escape end then escaped close",
+			source: `<script><!--<script></script></script><script src="wasm_exec.js?real"></script>`,
+		},
+		{
+			name:   "escaped close",
+			source: `<script><!--</script><script src="wasm_exec.js?real"></script>`,
+		},
+		{
+			name:   "NUL in escaped state",
+			source: "<script><!--\x00<script></script><script src=\"wasm_exec.js?inert\"></script>--></script><script src=\"wasm_exec.js?real\"></script>",
+		},
+		{
+			name:   "non-matching end tag name",
+			source: `<script>const text = "</scriptx>";</script><script src="wasm_exec.js?real"></script>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			want := strings.Replace(test.source, `src="wasm_exec.js?real"`, `src="`+runtimePath+`?real"`, 1)
+			got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{runtimePath: runtimePath})
+			if got != want {
+				t.Fatalf("script-data closing mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+}
+
+func TestCustomIndexScriptDataMalformedEOF(t *testing.T) {
+	for _, source := range []string{
+		`<script><!--<script></script>`,
+		`<script><!--<script></script><script src="wasm_exec.js"></script>`,
+		"<script><!--\x00<script></script>",
+	} {
+		got, err := rewriteIndexHTML(source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.js"})
+		if err == nil || !strings.Contains(err.Error(), "no closing </script> tag") {
+			t.Fatalf("rewriteIndexHTML(%q) = %q, %v, want script EOF error", source, got, err)
+		}
+		if got != "" {
+			t.Fatalf("script EOF failure returned partial output %q", got)
+		}
+	}
+}
+
+func TestCustomIndexNamedCharacterReferencesUseBrowserValues(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+		want    string
+	}{
+		{
+			name:    "runtime URL",
+			source:  `<script src="wasm&lowbar;exec.js"></script>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<script src="` + runtimePath + `"></script>`,
+		},
+		{
+			name:   "stylesheet URL",
+			source: `<link rel="stylesheet" href="styles&period;css">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			want: `<link rel="stylesheet" href="assets/styles.33333333.css">`,
+		},
+		{
+			name:    "script type",
+			source:  `<script type="text&sol;javascript" src="wasm_exec.js"></script>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<script type="text&sol;javascript" src="` + runtimePath + `"></script>`,
+		},
+		{
+			name:    "script language remains non-executable",
+			source:  `<script language="java&Tab;script" src="wasm_exec.js"></script>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<script language="java&Tab;script" src="wasm_exec.js"></script>`,
+		},
+		{
+			name:   "stylesheet rel token",
+			source: `<link rel="alternate&Tab;stylesheet" href="styles.css">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			want: `<link rel="alternate&Tab;stylesheet" href="assets/styles.33333333.css">`,
+		},
+		{
+			name:   "stylesheet preload as",
+			source: `<link rel="preload" as="&NewLine;style&Tab;" href="styles.css">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			want: `<link rel="preload" as="&NewLine;style&Tab;" href="assets/styles.33333333.css">`,
+		},
+		{
+			name:   "NBSP is not an ASCII rel separator",
+			source: `<link rel="alternate&nbsp;stylesheet" href="styles.css">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			want: `<link rel="alternate&nbsp;stylesheet" href="styles.css">`,
+		},
+		{
+			name:    "annotation XML encoding",
+			source:  `<math><annotation-xml encoding="text&sol;html"><script src="wasm_exec.js"></script>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<math><annotation-xml encoding="text&sol;html"><script src="` + runtimePath + `"></script>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, test.options)
+			if got != test.want {
+				t.Fatalf("named reference semantic mismatch\ngot:  %q\nwant: %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCustomIndexNamedCharacterReferenceSourceSpans(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "named filename bytes",
+			source: `<script src="./wasm&lowbar;exec&period;js?v=1#app"></script>`,
+			want:   `<script src="` + runtimePath + `?v=1#app"></script>`,
+		},
+		{
+			name:   "named surrounding whitespace",
+			source: `<script src="&Tab;wasm&lowbar;exec.js&NewLine;"></script>`,
+			want:   `<script src="&Tab;` + runtimePath + `&NewLine;"></script>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{runtimePath: runtimePath})
+			if got != test.want {
+				t.Fatalf("named reference source span mismatch\ngot:  %q\nwant: %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCustomIndexNamedCharacterReferenceConsumption(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		raw   string
+		value string
+	}{
+		{name: "longest match", raw: "&notin;", value: "∉"},
+		{name: "short match", raw: "&not;", value: "¬"},
+		{name: "attribute alphanumeric exception", raw: "&notit;", value: "&notit;"},
+		{name: "attribute amp exception", raw: "&ampfoo", value: "&ampfoo"},
+		{name: "attribute equals exception", raw: "&copy=", value: "&copy="},
+		{name: "semicolon match", raw: "&copy;", value: "©"},
+		{name: "two code points", raw: "&NotEqualTilde;", value: "≂̸"},
+		{name: "unknown", raw: "&unknown;", value: "&unknown;"},
+		{name: "unknown legacy spelling", raw: "&lowbar", value: "&lowbar"},
+		{name: "ambiguous prefix", raw: "&lowbarx", value: "&lowbarx"},
+		{name: "ampersand", raw: "&", value: "&"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := `<div data-value="` + test.raw + `">`
+			tag, ok, err := scanHTMLTag(source, 0)
+			if err != nil || !ok {
+				t.Fatalf("scanHTMLTag() = %+v, %v, %v", tag, ok, err)
+			}
+			attribute, err := tag.attribute("data-value")
+			if err != nil || attribute == nil {
+				t.Fatalf("data-value attribute = %+v, %v", attribute, err)
+			}
+			if got := semanticHTMLAttributeValue(source, attribute); got != test.value {
+				t.Fatalf("semantic value = %q, want %q", got, test.value)
+			}
+			if test.name == "two code points" {
+				for _, unit := range htmlAttributeSourceBytes(source, attribute) {
+					if unit.start != 0 || unit.end != len(test.raw) {
+						t.Fatalf("decoded byte source span = [%d,%d), want [0,%d)", unit.start, unit.end, len(test.raw))
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestCustomIndexHTMLSemanticsCombinedDocument(t *testing.T) {
 	const nbsp = "\u00a0"
 	options := htmlRewriteOptions{

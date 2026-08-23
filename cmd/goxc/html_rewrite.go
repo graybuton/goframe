@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+//go:generate go run html_entities_generate.go
+
 type htmlReplacement struct {
 	start       int
 	end         int
@@ -192,7 +194,13 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			return document, nil
 		}
 		if !tag.closing && tag.namespace == htmlNamespaceHTML && opaqueHTMLTextElement(tag.name) {
-			closing, err := scanRawElementClose(content, tag.end, tag.name)
+			var closing htmlTag
+			var err error
+			if tag.name == "script" {
+				closing, err = scanScriptElementClose(content, tag.end)
+			} else {
+				closing, err = scanRawElementClose(content, tag.end, tag.name)
+			}
 			if err != nil {
 				return scannedHTML{}, err
 			}
@@ -403,7 +411,7 @@ func htmlAttributeSourceBytes(content string, attribute *htmlAttribute) []source
 	value := content[attribute.valueStart:attribute.valueEnd]
 	units := make([]sourceByte, 0, len(value))
 	for offset := 0; offset < len(value); {
-		decoded, end, ok := decodeNumericHTMLCharacterReference(value, offset)
+		decoded, end, ok := decodeHTMLCharacterReference(value, offset)
 		if !ok {
 			units = append(units, sourceByte{value: value[offset], start: offset, end: offset + 1})
 			offset++
@@ -415,6 +423,36 @@ func htmlAttributeSourceBytes(content string, attribute *htmlAttribute) []source
 		offset = end
 	}
 	return units
+}
+
+func decodeHTMLCharacterReference(value string, start int) (string, int, bool) {
+	if decoded, end, ok := decodeNumericHTMLCharacterReference(value, start); ok {
+		return decoded, end, true
+	}
+	return decodeNamedHTMLCharacterReference(value, start)
+}
+
+func decodeNamedHTMLCharacterReference(value string, start int) (string, int, bool) {
+	if start >= len(value) || value[start] != '&' {
+		return "", 0, false
+	}
+	remaining := len(value) - start - 1
+	if remaining > longestHTMLNamedCharacterReference {
+		remaining = longestHTMLNamedCharacterReference
+	}
+	for length := remaining; length > 0; length-- {
+		name := value[start+1 : start+1+length]
+		decoded, ok := htmlNamedCharacterReferences[name]
+		if !ok {
+			continue
+		}
+		end := start + 1 + length
+		if name[len(name)-1] != ';' && end < len(value) && (isASCIIAlphaNumeric(value[end]) || value[end] == '=') {
+			return "", 0, false
+		}
+		return decoded, end, true
+	}
+	return "", 0, false
 }
 
 func decodeNumericHTMLCharacterReference(value string, start int) (string, int, bool) {
@@ -450,6 +488,10 @@ func isHTMLCharacterReferenceDigit(value byte, base byte) bool {
 		return true
 	}
 	return base == 16 && (value >= 'a' && value <= 'f' || value >= 'A' && value <= 'F')
+}
+
+func isASCIIAlphaNumeric(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
 }
 
 func voidHTMLElement(name string) bool {
@@ -587,6 +629,245 @@ func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlA
 	return attributes, false, nil
 }
 
+type scriptDataState uint8
+
+const (
+	scriptData scriptDataState = iota
+	scriptDataLessThan
+	scriptDataEndTagOpen
+	scriptDataEndTagName
+	scriptDataEscapeStart
+	scriptDataEscapeStartDash
+	scriptDataEscaped
+	scriptDataEscapedDash
+	scriptDataEscapedDashDash
+	scriptDataEscapedLessThan
+	scriptDataEscapedEndTagOpen
+	scriptDataEscapedEndTagName
+	scriptDataDoubleEscapeStart
+	scriptDataDoubleEscaped
+	scriptDataDoubleEscapedDash
+	scriptDataDoubleEscapedDashDash
+	scriptDataDoubleEscapedLessThan
+	scriptDataDoubleEscapeEnd
+)
+
+// scanScriptElementClose follows the HTML tokenizer's script-data states. It
+// deliberately does not interpret JavaScript syntax; only HTML script closing
+// sequences affect where structural scanning resumes.
+func scanScriptElementClose(content string, start int) (htmlTag, error) {
+	state := scriptData
+	tagStart := -1
+	temporaryLength := 0
+	temporaryMatchesScript := false
+	for offset := start; offset < len(content); {
+		current := content[offset]
+		switch state {
+		case scriptData:
+			if current == '<' {
+				state = scriptDataLessThan
+			}
+			offset++
+		case scriptDataLessThan:
+			switch current {
+			case '/':
+				tagStart = offset - 1
+				state = scriptDataEndTagOpen
+				offset++
+			case '!':
+				state = scriptDataEscapeStart
+				offset++
+			default:
+				state = scriptData
+			}
+		case scriptDataEndTagOpen:
+			if isHTMLNameStart(current) {
+				state = scriptDataEndTagName
+			} else {
+				state = scriptData
+			}
+		case scriptDataEndTagName:
+			tag, found, resume, err := scanScriptEndTagCandidate(content, tagStart, offset)
+			if err != nil {
+				return htmlTag{}, err
+			}
+			if found {
+				return tag, nil
+			}
+			offset = resume
+			state = scriptData
+		case scriptDataEscapeStart:
+			if current == '-' {
+				state = scriptDataEscapeStartDash
+				offset++
+			} else {
+				state = scriptData
+			}
+		case scriptDataEscapeStartDash:
+			if current == '-' {
+				state = scriptDataEscapedDashDash
+				offset++
+			} else {
+				state = scriptData
+			}
+		case scriptDataEscaped:
+			switch current {
+			case '-':
+				state = scriptDataEscapedDash
+			case '<':
+				state = scriptDataEscapedLessThan
+			}
+			offset++
+		case scriptDataEscapedDash:
+			switch current {
+			case '-':
+				state = scriptDataEscapedDashDash
+			case '<':
+				state = scriptDataEscapedLessThan
+			default:
+				state = scriptDataEscaped
+			}
+			offset++
+		case scriptDataEscapedDashDash:
+			switch current {
+			case '<':
+				state = scriptDataEscapedLessThan
+			case '>':
+				state = scriptData
+			case '-':
+			default:
+				state = scriptDataEscaped
+			}
+			offset++
+		case scriptDataEscapedLessThan:
+			switch {
+			case current == '/':
+				tagStart = offset - 1
+				state = scriptDataEscapedEndTagOpen
+				offset++
+			case isHTMLNameStart(current):
+				temporaryLength = 0
+				temporaryMatchesScript = true
+				state = scriptDataDoubleEscapeStart
+			default:
+				state = scriptDataEscaped
+			}
+		case scriptDataEscapedEndTagOpen:
+			if isHTMLNameStart(current) {
+				state = scriptDataEscapedEndTagName
+			} else {
+				state = scriptDataEscaped
+			}
+		case scriptDataEscapedEndTagName:
+			tag, found, resume, err := scanScriptEndTagCandidate(content, tagStart, offset)
+			if err != nil {
+				return htmlTag{}, err
+			}
+			if found {
+				return tag, nil
+			}
+			offset = resume
+			state = scriptDataEscaped
+		case scriptDataDoubleEscapeStart:
+			switch {
+			case isHTMLNameStart(current):
+				temporaryMatchesScript = updateScriptTemporaryBuffer(current, temporaryLength, temporaryMatchesScript)
+				temporaryLength++
+				offset++
+			case isHTMLSpace(current) || current == '/' || current == '>':
+				if temporaryMatchesScript && temporaryLength == len("script") {
+					state = scriptDataDoubleEscaped
+				} else {
+					state = scriptDataEscaped
+				}
+				offset++
+			default:
+				state = scriptDataEscaped
+			}
+		case scriptDataDoubleEscaped:
+			switch current {
+			case '-':
+				state = scriptDataDoubleEscapedDash
+			case '<':
+				state = scriptDataDoubleEscapedLessThan
+			}
+			offset++
+		case scriptDataDoubleEscapedDash:
+			switch current {
+			case '-':
+				state = scriptDataDoubleEscapedDashDash
+			case '<':
+				state = scriptDataDoubleEscapedLessThan
+			default:
+				state = scriptDataDoubleEscaped
+			}
+			offset++
+		case scriptDataDoubleEscapedDashDash:
+			switch current {
+			case '<':
+				state = scriptDataDoubleEscapedLessThan
+			case '>':
+				state = scriptData
+			case '-':
+			default:
+				state = scriptDataDoubleEscaped
+			}
+			offset++
+		case scriptDataDoubleEscapedLessThan:
+			if current == '/' {
+				temporaryLength = 0
+				temporaryMatchesScript = true
+				state = scriptDataDoubleEscapeEnd
+				offset++
+			} else {
+				state = scriptDataDoubleEscaped
+			}
+		case scriptDataDoubleEscapeEnd:
+			switch {
+			case isHTMLNameStart(current):
+				temporaryMatchesScript = updateScriptTemporaryBuffer(current, temporaryLength, temporaryMatchesScript)
+				temporaryLength++
+				offset++
+			case isHTMLSpace(current) || current == '/' || current == '>':
+				if temporaryMatchesScript && temporaryLength == len("script") {
+					state = scriptDataEscaped
+				} else {
+					state = scriptDataDoubleEscaped
+				}
+				offset++
+			default:
+				state = scriptDataDoubleEscaped
+			}
+		}
+	}
+	return htmlTag{}, fmt.Errorf("custom index <script> element has no closing </script> tag")
+}
+
+func scanScriptEndTagCandidate(content string, tagStart, nameStart int) (htmlTag, bool, int, error) {
+	offset := nameStart
+	for offset < len(content) && isHTMLNameStart(content[offset]) {
+		offset++
+	}
+	if offset-nameStart != len("script") || !asciiFoldPrefixAt(content, nameStart, "script") {
+		return htmlTag{}, false, offset, nil
+	}
+	if offset >= len(content) || !isHTMLSpace(content[offset]) && content[offset] != '/' && content[offset] != '>' {
+		return htmlTag{}, false, offset, nil
+	}
+	tag, ok, err := scanHTMLTag(content, tagStart)
+	if err != nil {
+		return htmlTag{}, false, offset, err
+	}
+	if !ok || !tag.closing || tag.name != "script" {
+		return htmlTag{}, false, offset, nil
+	}
+	return tag, true, tag.end, nil
+}
+
+func updateScriptTemporaryBuffer(value byte, length int, matches bool) bool {
+	return matches && length < len("script") && asciiLowerByte(value) == "script"[length]
+}
+
 func scanRawElementClose(content string, start int, name string) (htmlTag, error) {
 	needle := "</" + name
 	for offset := start; offset+len(needle) <= len(content); offset++ {
@@ -636,6 +917,25 @@ func asciiLower(value string) string {
 		builder.WriteByte(current)
 	}
 	return builder.String()
+}
+
+func asciiLowerByte(value byte) byte {
+	if value >= 'A' && value <= 'Z' {
+		return value + 'a' - 'A'
+	}
+	return value
+}
+
+func asciiFoldPrefixAt(content string, offset int, expected string) bool {
+	if offset < 0 || len(content)-offset < len(expected) {
+		return false
+	}
+	for index := range len(expected) {
+		if asciiLowerByte(content[offset+index]) != asciiLowerByte(expected[index]) {
+			return false
+		}
+	}
+	return true
 }
 
 func asciiFoldEqual(first, second string) bool {
