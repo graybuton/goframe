@@ -26,7 +26,11 @@
   inferred. Authored comments, text, data, and unrelated JavaScript remain
   byte-preserved outside recognized spans. Legacy WASM compatibility recognizes
   complete historical GoFrame bootstrap scripts; arbitrary direct fetch calls
-  and unsupported custom loaders remain unchanged.
+  and unsupported custom loaders remain unchanged. Package-owned generated URLs
+  remain relative, so an active HTML `base[href]` now fails before publication
+  whenever a managed or markerless operation would emit one. A target-only
+  `base` and active-base documents with no package-owned URL output remain
+  accepted.
 - `VirtualList` and `VirtualTable` now track the pixel viewport separately from
   the rendered overscan window. Collection shrink and empty transitions clamp
   the persisted viewport, while height, item or row height, and overscan

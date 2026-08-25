@@ -161,13 +161,30 @@ tree-builder-sensitive placements fail packaging before publication. With
 `--preload` disabled, a valid preload block retains its delimiters with an
 empty interior.
 
+Managed blocks establish which source spans GoFrame owns; they do not override
+browser base-URL resolution. The current package references emitted for the
+runtime, WASM bootstrap, stylesheets, and enabled preload hints are relative.
+If a potentially active HTML `<base href>` is present, packaging therefore
+rejects any managed or markerless operation that would emit one of those URLs,
+before replacing a previous package. The diagnostic identifies the blocked
+operation and recommends removing the base or supplying deployment-safe
+authored markup outside that managed operation.
+
+`<base target="_blank">` without `href` remains valid. A document with an
+active base may also package unchanged when it has no GoFrame-owned relative
+URL operation; authored absolute references remain authored content. A
+disabled managed preload block is allowed because it emits no URL. Configurable
+deployment-base output and full active-base support are outside the current
+preview contract.
+
 Markerless rewriting is a bounded historical compatibility profile, not full
 HTML tree construction. It is available only when source structure is
 balanced and ownership does not depend on browser recovery or insertion modes.
 In particular, GoFrame does not infer markerless ownership through `select`,
-table-sensitive content, `frameset`, `noscript`, declarative Shadow DOM, an
-active `base[href]`, or ownership-affecting misnesting. Inside the supported
-simple profile, it rewrites only:
+table-sensitive content, `frameset`, `noscript`, declarative Shadow DOM, or
+ownership-affecting misnesting. The active-base restriction above applies
+independently to both managed and markerless output. Inside the supported simple
+profile, markerless compatibility rewrites only:
 
 - the URL value of an executable `<script src>` that names `wasm_exec.js` or
   `./wasm_exec.js`;

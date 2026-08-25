@@ -67,14 +67,20 @@ Current input behavior:
   the universal ownership mechanism. The delimiters remain in package and
   development HTML; malformed, duplicate, nested, interleaved, or unsafe
   tree-builder-sensitive placements fail before package publication;
+- managed ownership does not change browser URL resolution. Runtime, WASM,
+  stylesheet, and enabled-preload references emitted by the current packager
+  are package-relative, so a potentially active HTML `base[href]` rejects any
+  managed or markerless operation that would emit one. A target-only `base`, a
+  disabled preload block, and active-base documents with no package-owned
+  relative URL output remain valid. Configurable deployment-base output is not
+  part of the current schema or preview contract;
 - without a managed section, compatibility rewriting is limited to a balanced
   simple historical profile: structural runtime script URLs, complete
   historical GoFrame bootstrap scripts, declared stylesheet links, and
   structural preload insertion. GoFrame does not infer markerless ownership
   through select/table/frameset/noscript insertion modes, declarative Shadow
-  DOM, active base URLs, or ownership-affecting misnesting. A required rewrite
-  in those contexts fails before publication rather than publishing a stale
-  path;
+  DOM, or ownership-affecting misnesting. A required rewrite in those contexts
+  fails before publication rather than publishing a stale path;
 - arbitrary direct fetch calls and scripts with additional authored statements
   remain unchanged. The recognizer does not validate arbitrary JavaScript;
   unsupported custom loaders remain byte-preserved and use an explicit managed
