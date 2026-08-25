@@ -6,6 +6,6 @@
   "wasm": "bundle.wasm",
   "assets": [
     "index.html",
-    "styles.css"
+    "my &copy; style.css"
   ]
 }

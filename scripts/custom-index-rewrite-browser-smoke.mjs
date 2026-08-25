@@ -120,11 +120,12 @@ try {
     client.on("Network.responseReceived", (params) => {
         const response = params.response;
         const pathname = new URL(response.url).pathname;
-        if (pathname === "/wasm_exec.js" || pathname === "/styles.css") {
+        const decodedPathname = decodeURLPathname(pathname);
+        if (decodedPathname === "/wasm_exec.js" || decodedPathname === "/styles.css") {
             cdpDecoyRequests.push({ url: response.url, status: response.status });
         }
-        if (pathname.startsWith("/assets/")) {
-            cdpPackageAssetRequests.push({ pathname, status: response.status });
+        if (decodedPathname.startsWith("/assets/")) {
+            cdpPackageAssetRequests.push({ pathname, decodedPathname, status: response.status });
         }
         if (response.status >= 400 && pathname !== "/favicon.ico") {
             cdpUnexpectedHTTPFailures.push({ url: response.url, status: response.status });
@@ -133,6 +134,7 @@ try {
     await client.call("Runtime.enable");
     await client.call("Page.enable");
     await client.call("Network.enable");
+    const attributeOracle = await runAttributeOracle();
 
     for (const scenario of scenarios) {
         scenario.browser = await runBrowserScenario(scenario);
@@ -149,6 +151,7 @@ try {
     }));
     const report = {
         compiler,
+        attributeOracle,
         behaviorSha256: sha256(JSON.stringify(stableScenarios)),
         scenarios: stableScenarios,
     };
@@ -245,10 +248,10 @@ function assertAuthoredSentinels(source, packaged, mode) {
     }
     if (mode === "legacy") {
         assert(source.includes("././wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy source is missing the dot-segment runtime reference");
-        assert(source.includes("assets/../styles&period;css?fixture=legacy#theme"), "legacy source is missing the dot-segment stylesheet reference");
+        assert(source.includes("assets/../my&#32;&amp;copy;&#32;style.css?fixture=legacy&copy;=x#theme"), "legacy source is missing the unquoted semantic stylesheet reference");
         assert(source.includes("assets/%2e%2e/bundle.wasm?fixture=legacy#wasm"), "legacy source is missing the percent-dot bootstrap reference");
         assert(!packaged.includes("wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy package retained the named runtime reference");
-        assert(!packaged.includes("styles&period;css?fixture=legacy#theme"), "legacy package retained the named stylesheet reference");
+        assert(!packaged.includes("assets/../my&#32;&amp;copy;&#32;style.css"), "legacy package retained the original stylesheet reference");
         assert(!packaged.includes("%2e%2e/bundle.wasm?fixture=legacy#wasm"), "legacy package retained the percent-dot bootstrap reference");
         const falseHead = '<script>const falseHeadExample = "</head>";</script>';
         assert(source.includes(falseHead) && packaged.includes(falseHead), "legacy false head sentinel changed");
@@ -271,14 +274,15 @@ function assertPackageContract(mode, html, manifest, metadata) {
     const styles = manifest.entrypoints.styles;
     assert(Array.isArray(styles) && styles.length === 1, `${mode} package styles = ${JSON.stringify(styles)}`);
     const style = styles[0];
-    for (const [logicalName, path] of [["bundle.wasm", wasm], ["wasm_exec.js", runtime], ["styles.css", style]]) {
+    const styleLogicalName = mode === "legacy" ? "my &copy; style.css" : "styles.css";
+    for (const [logicalName, path] of [["bundle.wasm", wasm], ["wasm_exec.js", runtime], [styleLogicalName, style]]) {
         assert(/^assets\/.+\.[0-9a-f]{8}\.[^.]+$/.test(path), `${mode} ${logicalName} path is not hashed: ${path}`);
         const compressed = manifest.assets[logicalName]?.compressed;
         assert(compressed?.gzip === `${path}.gz`, `${mode} ${logicalName} gzip sidecar is missing`);
         assert(compressed?.br === `${path}.br`, `${mode} ${logicalName} Brotli sidecar is missing`);
     }
     for (const path of [wasm, runtime, style]) {
-        assert(html.includes(`<link rel="preload" href="${path}"`), `${mode} preload is missing ${path}`);
+        assert(html.includes(`<link rel="preload" href="${encodeDoubleQuotedAttribute(path)}"`), `${mode} preload is missing ${path}`);
     }
     if (mode === "marker") {
         for (const name of ["preload", "runtime", "bootstrap"]) {
@@ -287,12 +291,12 @@ function assertPackageContract(mode, html, manifest, metadata) {
         }
         assert(html.includes(`<script src="${runtime}"></script>`), "marker runtime target is stale");
         assert(html.includes(`fetch("${wasm}")`), "marker WASM target is stale");
-        assert(html.includes(`href="${style}?fixture=marker#theme"`), "marker stylesheet target is stale");
+        assert(html.includes(`href="${encodeDoubleQuotedAttribute(style)}?fixture=marker#theme"`), "marker stylesheet target is stale");
         assert(!html.includes("authored preload interior"), "marker preload interior was not replaced");
     } else {
         assert(html.includes(`SRC=' ${runtime}?fixture=legacy#runtime '`), "legacy runtime target is stale");
         assert(html.includes(`fetch ( ' ${wasm}?fixture=legacy#wasm ' )`), "legacy WASM target is stale");
-        assert(html.includes(`href=' ${style}?fixture=legacy#theme '`), "legacy stylesheet target is stale");
+        assert(html.includes(`href=${encodeUnquotedAttribute(style)}?fixture=legacy&copy;=x#theme`), "legacy stylesheet target is stale");
         assert(html.includes('type="text/javascript1.5"'), "legacy runtime MIME type changed");
         assert(html.includes('<input id="fixture-compact-input" disabled/>'), "compact boolean tag changed");
         const preload = html.indexOf(`<link rel="preload" href="${wasm}"`);
@@ -364,13 +368,21 @@ async function runBrowserScenario(scenario) {
         assert(before.compactInputDisabled === true, "compact boolean attribute was not accepted");
         assert(before.breakoutInsideSVG === false, "foreign breakout element remained under the SVG node");
         assert(before.runtimeInsideSVG === false, "runtime script remained under the SVG node");
+        assert(before.encodedStyleHref === `${scenario.paths.style}?fixture=legacy©=x#theme`, `legacy stylesheet semantic href = ${JSON.stringify(before.encodedStyleHref)}`);
+        assert(before.encodedStyleAttributeCount === 4, `legacy stylesheet attribute count = ${before.encodedStyleAttributeCount}`);
+        assert(before.encodedStyleNamespace === "http://www.w3.org/1999/xhtml", "legacy stylesheet left the HTML namespace");
     }
 
     const requestedAssets = [...new Set(cdpPackageAssetRequests
         .filter((request) => request.status === 200)
-        .map((request) => request.pathname))].sort();
+        .map((request) => request.decodedPathname))].sort();
     for (const path of Object.values(scenario.paths)) {
         assert(requestedAssets.includes(`/${path}`), `${scenario.mode} browser did not request ${path}`);
+    }
+    if (scenario.mode === "legacy") {
+        const entityDecodedStyle = `/${scenario.paths.style.replace("&copy;", "©")}`;
+        assert(!cdpPackageAssetRequests.some((request) => request.decodedPathname === "/assets/my"), "legacy stylesheet request was truncated at its generated space");
+        assert(!cdpPackageAssetRequests.some((request) => request.decodedPathname === entityDecodedStyle), "legacy stylesheet ampersand was decoded as an HTML named reference");
     }
 
     const assetStatuses = await client.evaluate(`Promise.all(${JSON.stringify(Object.values(scenario.paths))}.map(async (path) => {
@@ -475,9 +487,110 @@ async function pageState() {
             compactInputDisabled: compactInput?.disabled ?? null,
             breakoutInsideSVG: Boolean(breakout?.closest("svg")),
             runtimeInsideSVG: Boolean(runtime?.closest("svg")),
+            encodedStyleHref: document.querySelector("#fixture-encoded-style")?.getAttribute("href") ?? null,
+            encodedStyleAttributeCount: document.querySelector("#fixture-encoded-style")?.attributes.length ?? null,
+            encodedStyleNamespace: document.querySelector("#fixture-encoded-style")?.namespaceURI ?? null,
             runtimeErrors: Array.from(window.__customIndexRuntimeErrors ?? []),
         };
     })()`);
+}
+
+async function runAttributeOracle() {
+    const cases = [
+        {
+            name: "double quoted",
+            source: `<link href="assets/my &quot; &amp;copy; style.css?v=1&copy;=x#theme">`,
+            selector: "link",
+            attribute: "href",
+            expected: `assets/my " &copy; style.css?v=1©=x#theme`,
+        },
+        {
+            name: "single quoted",
+            source: `<link href='assets/my &#39; &amp;copy; style.css?v=1&copy;=x#theme'>`,
+            selector: "link",
+            attribute: "href",
+            expected: `assets/my ' &copy; style.css?v=1©=x#theme`,
+        },
+        {
+            name: "unquoted",
+            source: `<link href=assets/my&#32;&amp;copy;&#32;style.css?v=1&copy;=x#theme>`,
+            selector: "link",
+            attribute: "href",
+            expected: `assets/my &copy; style.css?v=1©=x#theme`,
+        },
+        {
+            name: "literal NUL",
+            source: `<script src="\0wasm_exec.js"></script>`,
+            selector: "script",
+            attribute: "src",
+            expected: `�wasm_exec.js`,
+        },
+        {
+            name: "named reference",
+            source: `<link href="styles&period;css?value=&copy;#theme">`,
+            selector: "link",
+            attribute: "href",
+            expected: `styles.css?value=©#theme`,
+        },
+        {
+            name: "numeric reference",
+            source: `<link href="styles&#46;css?value=&#169;#theme">`,
+            selector: "link",
+            attribute: "href",
+            expected: `styles.css?value=©#theme`,
+        },
+    ];
+    const results = await client.evaluate(`(() => {
+        const cases = ${JSON.stringify(cases)};
+        return cases.map((test) => {
+            const document = new DOMParser().parseFromString(test.source, "text/html");
+            const element = document.querySelector(test.selector);
+            return {
+                name: test.name,
+                value: element?.getAttribute(test.attribute) ?? null,
+                attributeCount: element?.attributes.length ?? null,
+                namespace: element?.namespaceURI ?? null,
+            };
+        });
+    })()`);
+    for (const [index, test] of cases.entries()) {
+        const result = results[index];
+        assert(result.value === test.expected, `${test.name} browser value = ${JSON.stringify(result.value)}, want ${JSON.stringify(test.expected)}`);
+        assert(result.attributeCount === 1, `${test.name} browser attribute count = ${result.attributeCount}`);
+        assert(result.namespace === "http://www.w3.org/1999/xhtml", `${test.name} browser namespace = ${result.namespace}`);
+    }
+    assert(!results.find((result) => result.name === "literal NUL").value.includes("\0"), "literal NUL remained in the browser attribute value");
+    return results;
+}
+
+function encodeDoubleQuotedAttribute(value) {
+    return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+}
+
+function encodeUnquotedAttribute(value) {
+    const replacements = new Map([
+        ["&", "&amp;"],
+        [" ", "&#32;"],
+        ["\t", "&#9;"],
+        ["\n", "&#10;"],
+        ["\r", "&#13;"],
+        ["\f", "&#12;"],
+        ['"', "&quot;"],
+        ["'", "&#39;"],
+        ["`", "&#96;"],
+        ["=", "&#61;"],
+        ["<", "&lt;"],
+        [">", "&gt;"],
+    ]);
+    return Array.from(value, (character) => replacements.get(character) ?? character).join("");
+}
+
+function decodeURLPathname(pathname) {
+    try {
+        return decodeURIComponent(pathname);
+    } catch {
+        return pathname;
+    }
 }
 
 function packagedDirectory(output) {
