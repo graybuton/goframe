@@ -84,11 +84,21 @@ type htmlTag struct {
 }
 
 type htmlAttribute struct {
-	name       string
-	valueStart int
-	valueEnd   int
-	hasValue   bool
+	name        string
+	valueStart  int
+	valueEnd    int
+	valueSyntax htmlAttributeValueSyntax
+	hasValue    bool
 }
+
+type htmlAttributeValueSyntax uint8
+
+const (
+	htmlAttributeValueNone htmlAttributeValueSyntax = iota
+	htmlAttributeValueUnquoted
+	htmlAttributeValueSingleQuoted
+	htmlAttributeValueDoubleQuoted
+)
 
 type htmlNamespace uint8
 
@@ -520,6 +530,13 @@ func htmlAttributeSourceBytes(content string, attribute *htmlAttribute) []source
 	value := content[attribute.valueStart:attribute.valueEnd]
 	units := make([]sourceByte, 0, len(value))
 	for offset := 0; offset < len(value); {
+		if value[offset] == 0 {
+			for _, current := range []byte("\uFFFD") {
+				units = append(units, sourceByte{value: current, start: offset, end: offset + 1})
+			}
+			offset++
+			continue
+		}
 		decoded, end, ok := decodeHTMLCharacterReference(value, offset)
 		if !ok {
 			units = append(units, sourceByte{value: value[offset], start: offset, end: offset + 1})
@@ -728,6 +745,11 @@ func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlA
 			}
 			if content[offset] == '\'' || content[offset] == '"' {
 				quote := content[offset]
+				if quote == '\'' {
+					attribute.valueSyntax = htmlAttributeValueSingleQuoted
+				} else {
+					attribute.valueSyntax = htmlAttributeValueDoubleQuoted
+				}
 				offset++
 				attribute.valueStart = offset
 				for offset < end && content[offset] != quote {
@@ -739,6 +761,7 @@ func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlA
 				attribute.valueEnd = offset
 				offset++
 			} else {
+				attribute.valueSyntax = htmlAttributeValueUnquoted
 				attribute.valueStart = offset
 				for offset < end && !isHTMLSpace(content[offset]) && content[offset] != '>' {
 					offset++
@@ -1172,11 +1195,23 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 		return "", err
 	}
 	plan := htmlRewritePlan{content: content}
+	preload, err := preloadHTML(options)
+	if err != nil {
+		return "", err
+	}
+	runtime, err := runtimeHTML(options)
+	if err != nil {
+		return "", err
+	}
+	bootstrap, err := bootstrapHTML(options)
+	if err != nil {
+		return "", err
+	}
 
 	managedValues := map[string]string{
-		preloadBlockName:   preloadHTML(options),
-		runtimeBlockName:   runtimeHTML(options),
-		bootstrapBlockName: bootstrapHTML(options),
+		preloadBlockName:   preload,
+		runtimeBlockName:   runtime,
+		bootstrapBlockName: bootstrap,
 	}
 	for _, name := range []string{preloadBlockName, runtimeBlockName, bootstrapBlockName} {
 		block, ok := blocks[name]
@@ -1205,7 +1240,7 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 		return "", err
 	}
 	if _, managed := blocks[preloadBlockName]; !managed && options.preload {
-		if err := planPreloadInsertion(&plan, document, blocks, preloadHTML(options)); err != nil {
+		if err := planPreloadInsertion(&plan, document, blocks, preload); err != nil {
 			return "", err
 		}
 	}
@@ -1236,10 +1271,14 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 		if !ok {
 			continue
 		}
+		replacement, err := encodeGeneratedHTMLAttributeValue(runtimePath, source.valueSyntax)
+		if err != nil {
+			return err
+		}
 		plan.add(htmlReplacement{
 			start:       source.valueStart + match.start,
 			end:         source.valueStart + match.end,
-			value:       runtimePath + match.suffix,
+			value:       replacement + match.suffix,
 			description: "legacy runtime script source",
 		})
 	}
@@ -1269,10 +1308,14 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		if !ok {
 			continue
 		}
+		replacement, err := encodeGeneratedJavaScriptStringContents(wasmPath, match.quote)
+		if err != nil {
+			return err
+		}
 		plan.add(htmlReplacement{
 			start:       match.urlStart,
 			end:         match.urlEnd,
-			value:       wasmPath + match.suffix,
+			value:       replacement + match.suffix,
 			description: "legacy GoFrame bootstrap WASM URL",
 		})
 	}
@@ -1383,14 +1426,69 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 		if !ok {
 			continue
 		}
+		replacement, err := encodeGeneratedHTMLAttributeValue(destination, href.valueSyntax)
+		if err != nil {
+			return err
+		}
 		plan.add(htmlReplacement{
 			start:       href.valueStart + reference.start,
 			end:         href.valueStart + reference.end,
-			value:       destination + reference.suffix,
+			value:       replacement + reference.suffix,
 			description: "legacy stylesheet reference",
 		})
 	}
 	return nil
+}
+
+func encodeGeneratedHTMLAttributeValue(value string, syntax htmlAttributeValueSyntax) (string, error) {
+	if strings.IndexByte(value, 0) >= 0 {
+		return "", fmt.Errorf("generated package URL contains a NUL byte")
+	}
+	var encoded strings.Builder
+	encoded.Grow(len(value))
+	for offset := 0; offset < len(value); offset++ {
+		current := value[offset]
+		switch {
+		case current == '&':
+			encoded.WriteString("&amp;")
+		case syntax == htmlAttributeValueDoubleQuoted && current == '"':
+			encoded.WriteString("&quot;")
+		case syntax == htmlAttributeValueSingleQuoted && current == '\'':
+			encoded.WriteString("&#39;")
+		case syntax == htmlAttributeValueUnquoted:
+			switch current {
+			case ' ':
+				encoded.WriteString("&#32;")
+			case '\t':
+				encoded.WriteString("&#9;")
+			case '\n':
+				encoded.WriteString("&#10;")
+			case '\r':
+				encoded.WriteString("&#13;")
+			case '\f':
+				encoded.WriteString("&#12;")
+			case '"':
+				encoded.WriteString("&quot;")
+			case '\'':
+				encoded.WriteString("&#39;")
+			case '`':
+				encoded.WriteString("&#96;")
+			case '=':
+				encoded.WriteString("&#61;")
+			case '<':
+				encoded.WriteString("&lt;")
+			case '>':
+				encoded.WriteString("&gt;")
+			default:
+				encoded.WriteByte(current)
+			}
+		case syntax == htmlAttributeValueNone:
+			return "", fmt.Errorf("generated package URL has no HTML attribute value context")
+		default:
+			encoded.WriteByte(current)
+		}
+	}
+	return encoded.String(), nil
 }
 
 func trimHTMLSpace(value string) string {
@@ -1588,6 +1686,7 @@ type legacyBootstrapMatch struct {
 	urlStart int
 	urlEnd   int
 	suffix   string
+	quote    byte
 }
 
 type legacyBootstrapParser struct {
@@ -1729,6 +1828,7 @@ func (parser *legacyBootstrapParser) legacyWASMURL() (legacyBootstrapMatch, bool
 					urlStart: valueStart + reference.start,
 					urlEnd:   valueStart + reference.end,
 					suffix:   reference.suffix,
+					quote:    quote,
 				}, true
 			}
 			return legacyBootstrapMatch{}, false

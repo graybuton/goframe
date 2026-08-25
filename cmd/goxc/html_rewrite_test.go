@@ -623,14 +623,15 @@ func TestCustomIndexPlaintextBrowserSemantics(t *testing.T) {
 
 	t.Run("real head close before plaintext", func(t *testing.T) {
 		options := htmlRewriteOptions{preload: true, wasmPath: "assets/bundle.wasm", runtimePath: "assets/wasm_exec.js"}
+		preload := preloadHTMLForTest(t, options)
 		source := `<html><head></head><body><plaintext></head><script src="wasm_exec.js"></script>`
 		got := rewriteIndexForTest(t, source, options)
-		insertion := strings.Index(got, preloadHTML(options))
+		insertion := strings.Index(got, preload)
 		realClose := strings.Index(got, "</head>")
 		if insertion < 0 || realClose < 0 || insertion > realClose {
 			t.Fatalf("preload was not inserted before the real head close: %s", got)
 		}
-		if strings.Count(got, preloadHTML(options)) != 1 || !strings.HasSuffix(got, `<plaintext></head><script src="wasm_exec.js"></script>`) {
+		if strings.Count(got, preload) != 1 || !strings.HasSuffix(got, `<plaintext></head><script src="wasm_exec.js"></script>`) {
 			t.Fatalf("plaintext bytes after the real head close changed: %s", got)
 		}
 	})
@@ -790,6 +791,364 @@ func TestCustomIndexURLPreprocessingBrowserSemantics(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
+	tests := []struct {
+		name         string
+		source       string
+		options      htmlRewriteOptions
+		wantSource   string
+		attribute    string
+		wantSemantic string
+		wantAttrs    int
+	}{
+		{
+			name:   "double quoted active quote and ampersand",
+			source: `<link rel="stylesheet" href="styles.css?v=1&copy;=x#theme">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": `assets/my " &copy; style.12345678.css`,
+			}},
+			wantSource:   `<link rel="stylesheet" href="assets/my &quot; &amp;copy; style.12345678.css?v=1&copy;=x#theme">`,
+			attribute:    "href",
+			wantSemantic: `assets/my " &copy; style.12345678.css?v=1©=x#theme`,
+			wantAttrs:    2,
+		},
+		{
+			name:   "single quoted active quote and ampersand",
+			source: `<link rel='stylesheet' href='styles.css?v=1&copy;=x#theme'>`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/my ' &copy; style.12345678.css",
+			}},
+			wantSource:   `<link rel='stylesheet' href='assets/my &#39; &amp;copy; style.12345678.css?v=1&copy;=x#theme'>`,
+			attribute:    "href",
+			wantSemantic: "assets/my ' &copy; style.12345678.css?v=1©=x#theme",
+			wantAttrs:    2,
+		},
+		{
+			name:   "unquoted whitespace punctuation and ampersand",
+			source: `<link rel=stylesheet href=my&#32;style.css?v=1&copy;=x#theme>`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"my style.css": "assets/my &copy; style\t\n\r\f\"'`=<>界.12345678.css",
+			}},
+			wantSource:   `<link rel=stylesheet href=assets/my&#32;&amp;copy;&#32;style&#9;&#10;&#13;&#12;&quot;&#39;&#96;&#61;&lt;&gt;界.12345678.css?v=1&copy;=x#theme>`,
+			attribute:    "href",
+			wantSemantic: "assets/my &copy; style\t\n\r\f\"'`=<>界.12345678.css?v=1©=x#theme",
+			wantAttrs:    2,
+		},
+		{
+			name:         "unquoted runtime uses shared encoder",
+			source:       `<script src=wasm_exec.js?runtime></script>`,
+			options:      htmlRewriteOptions{runtimePath: `assets/wasm &copy; "'` + "`" + `=<>.js`},
+			wantSource:   `<script src=assets/wasm&#32;&amp;copy;&#32;&quot;&#39;&#96;&#61;&lt;&gt;.js?runtime></script>`,
+			attribute:    "src",
+			wantSemantic: `assets/wasm &copy; "'` + "`" + `=<>.js?runtime`,
+			wantAttrs:    1,
+		},
+		{
+			name:   "unquoted style preload uses shared encoder",
+			source: `<link rel=preload as=style href=my&#32;style.css#preload>`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"my style.css": "assets/my &copy; style.12345678.css",
+			}},
+			wantSource:   `<link rel=preload as=style href=assets/my&#32;&amp;copy;&#32;style.12345678.css#preload>`,
+			attribute:    "href",
+			wantSemantic: "assets/my &copy; style.12345678.css#preload",
+			wantAttrs:    3,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, test.options)
+			if got != test.wantSource {
+				t.Fatalf("rewritten source mismatch\ngot:  %q\nwant: %q", got, test.wantSource)
+			}
+			tag, ok, err := scanHTMLTag(got, 0)
+			if err != nil || !ok {
+				t.Fatalf("scanHTMLTag(rewritten) = %+v, %v, %v", tag, ok, err)
+			}
+			if len(tag.attributes) != test.wantAttrs {
+				t.Fatalf("rewritten attribute count = %d, want %d: %q", len(tag.attributes), test.wantAttrs, got)
+			}
+			attribute, err := tag.attribute(test.attribute)
+			if err != nil || attribute == nil {
+				t.Fatalf("rewritten %s attribute = %+v, %v", test.attribute, attribute, err)
+			}
+			if value := semanticHTMLAttributeValue(got, attribute); value != test.wantSemantic {
+				t.Fatalf("rewritten semantic value = %q, want %q", value, test.wantSemantic)
+			}
+		})
+	}
+}
+
+func TestCustomIndexAttributeValueSyntax(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   htmlAttributeValueSyntax
+	}{
+		{name: "no value", source: `<input disabled>`, want: htmlAttributeValueNone},
+		{name: "unquoted", source: `<input value=plain>`, want: htmlAttributeValueUnquoted},
+		{name: "single quoted", source: `<input value='plain'>`, want: htmlAttributeValueSingleQuoted},
+		{name: "double quoted", source: `<input value="plain">`, want: htmlAttributeValueDoubleQuoted},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tag, ok, err := scanHTMLTag(test.source, 0)
+			if err != nil || !ok {
+				t.Fatalf("scanHTMLTag() = %+v, %v, %v", tag, ok, err)
+			}
+			attribute := tag.attributes[0]
+			if attribute.valueSyntax != test.want {
+				t.Fatalf("value syntax = %v, want %v", attribute.valueSyntax, test.want)
+			}
+		})
+	}
+}
+
+func TestCustomIndexAttributeValueEncoderMatrix(t *testing.T) {
+	const destination = "assets/my space & &copy; \" ' ` =<>界.css"
+	for _, test := range []struct {
+		name   string
+		syntax htmlAttributeValueSyntax
+		open   string
+		close  string
+	}{
+		{name: "double quoted", syntax: htmlAttributeValueDoubleQuoted, open: `<link href="`, close: `">`},
+		{name: "single quoted", syntax: htmlAttributeValueSingleQuoted, open: `<link href='`, close: `'>`},
+		{name: "unquoted", syntax: htmlAttributeValueUnquoted, open: `<link href=`, close: `>`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := encodeGeneratedHTMLAttributeValue(destination, test.syntax)
+			if err != nil {
+				t.Fatalf("encodeGeneratedHTMLAttributeValue() error: %v", err)
+			}
+			source := test.open + encoded + test.close
+			tag, ok, err := scanHTMLTag(source, 0)
+			if err != nil || !ok {
+				t.Fatalf("scanHTMLTag(encoded) = %+v, %v, %v", tag, ok, err)
+			}
+			if len(tag.attributes) != 1 {
+				t.Fatalf("encoded attribute count = %d, want 1: %q", len(tag.attributes), source)
+			}
+			if got := semanticHTMLAttributeValue(source, &tag.attributes[0]); got != destination {
+				t.Fatalf("semantic encoded value = %q, want %q", got, destination)
+			}
+		})
+	}
+
+	for _, syntax := range []htmlAttributeValueSyntax{
+		htmlAttributeValueUnquoted,
+		htmlAttributeValueSingleQuoted,
+		htmlAttributeValueDoubleQuoted,
+	} {
+		if encoded, err := encodeGeneratedHTMLAttributeValue("assets/bad\x00.css", syntax); err == nil || encoded != "" {
+			t.Fatalf("NUL encode with syntax %v = %q, %v, want error", syntax, encoded, err)
+		}
+	}
+}
+
+func TestCustomIndexLiteralNULAttributeSemantics(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{name: "double quoted leading", source: "<script src=\"\x00wasm_exec.js\"></script>"},
+		{name: "single quoted leading", source: "<script src='\x00wasm_exec.js'></script>"},
+		{name: "unquoted leading", source: "<script src=\x00wasm_exec.js></script>"},
+		{name: "double quoted trailing", source: "<script src=\"wasm_exec.js\x00\"></script>"},
+		{name: "single quoted trailing", source: "<script src='wasm_exec.js\x00'></script>"},
+		{name: "unquoted trailing", source: "<script src=wasm_exec.js\x00></script>"},
+		{name: "middle", source: "<script src=\"wasm\x00_exec.js\"></script>"},
+		{name: "numeric decimal", source: `<script src="&#0;wasm_exec.js"></script>`},
+		{name: "numeric hexadecimal", source: `<script src="&#x0;wasm_exec.js"></script>`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{runtimePath: runtimePath}); got != test.source {
+				t.Fatalf("NUL-containing runtime reference changed\ngot:  %q\nwant: %q", got, test.source)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+	}{
+		{
+			name:    "script type",
+			source:  "<script type=\"\x00text/javascript\" src=\"wasm_exec.js\"></script>",
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+		},
+		{
+			name:    "script language",
+			source:  "<script language=\"\x00javascript\" src=\"wasm_exec.js\"></script>",
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+		},
+		{
+			name:   "link rel",
+			source: "<link rel=\"\x00stylesheet\" href=\"styles.css\">",
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+		},
+		{
+			name:   "link as",
+			source: "<link rel=\"preload\" as=\"\x00style\" href=\"styles.css\">",
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+		},
+		{
+			name:    "annotation XML encoding",
+			source:  "<math><annotation-xml encoding=\"\x00text/html\"><script src=\"wasm_exec.js\"></script></annotation-xml></math>",
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := rewriteIndexForTest(t, test.source, test.options); got != test.source {
+				t.Fatalf("NUL-containing semantic attribute changed\ngot:  %q\nwant: %q", got, test.source)
+			}
+		})
+	}
+
+	source := "<script s\x00rc=\"wasm_exec.js\"></script>"
+	tag, ok, err := scanHTMLTag(source, 0)
+	if err != nil || !ok {
+		t.Fatalf("scanHTMLTag(NUL name) = %+v, %v, %v", tag, ok, err)
+	}
+	if attribute, err := tag.attribute("src"); err != nil || attribute != nil {
+		t.Fatalf("NUL-containing attribute name resolved as src: %+v, %v", attribute, err)
+	}
+	if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != source {
+		t.Fatalf("NUL-containing attribute name changed\ngot:  %q\nwant: %q", got, source)
+	}
+
+	mappedSource := `<script src="a` + "\x00" + `b"></script>`
+	tag, ok, err = scanHTMLTag(mappedSource, 0)
+	if err != nil || !ok {
+		t.Fatalf("scanHTMLTag(mapped NUL) = %+v, %v, %v", tag, ok, err)
+	}
+	sourceAttribute, err := tag.attribute("src")
+	if err != nil || sourceAttribute == nil {
+		t.Fatalf("mapped NUL src attribute = %+v, %v", sourceAttribute, err)
+	}
+	units := htmlAttributeSourceBytes(mappedSource, sourceAttribute)
+	wantValues := []byte("a\uFFFDb")
+	if len(units) != len(wantValues) {
+		t.Fatalf("mapped NUL unit count = %d, want %d", len(units), len(wantValues))
+	}
+	for index, want := range wantValues {
+		if units[index].value != want {
+			t.Fatalf("mapped NUL unit %d value = %#x, want %#x", index, units[index].value, want)
+		}
+		if index >= 1 && index <= 3 && (units[index].start != 1 || units[index].end != 2) {
+			t.Fatalf("mapped NUL unit %d span = [%d,%d), want [1,2)", index, units[index].start, units[index].end)
+		}
+	}
+}
+
+func TestCustomIndexGeneratedHTMLURLSUseContextEncoders(t *testing.T) {
+	options := htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    `assets/bundle &copy;.wasm`,
+		runtimePath: `assets/wasm " &copy;.js`,
+		stylePaths:  []string{`assets/my &copy; style.css`},
+	}
+	generated, err := generateIndexHTML(options)
+	if err != nil {
+		t.Fatalf("generateIndexHTML() error: %v", err)
+	}
+	for _, want := range []string{
+		`href="assets/bundle &amp;copy;.wasm"`,
+		`href="assets/wasm &quot; &amp;copy;.js"`,
+		`href="assets/my &amp;copy; style.css"`,
+		`src="assets/wasm &quot; &amp;copy;.js"`,
+		`fetch("assets/bundle &copy;.wasm")`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated index missing %q:\n%s", want, generated)
+		}
+	}
+
+	managed := rewriteIndexForTest(t, `<html><head><!-- goframe:preload --><!-- /goframe:preload --></head><body><!-- goframe:runtime --><!-- /goframe:runtime --><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></body></html>`, options)
+	for _, want := range []string{
+		`href="assets/bundle &amp;copy;.wasm"`,
+		`href="assets/my &amp;copy; style.css"`,
+		`src="assets/wasm &quot; &amp;copy;.js"`,
+		`fetch("assets/bundle &copy;.wasm")`,
+	} {
+		if !strings.Contains(managed, want) {
+			t.Fatalf("managed index missing %q:\n%s", want, managed)
+		}
+	}
+
+	ordinary, err := bootstrapHTML(htmlRewriteOptions{wasmPath: "assets/bundle.12345678.wasm"})
+	if err != nil {
+		t.Fatalf("bootstrapHTML() error: %v", err)
+	}
+	if !strings.Contains(ordinary, `fetch("assets/bundle.12345678.wasm")`) {
+		t.Fatalf("ordinary bootstrap string changed: %s", ordinary)
+	}
+
+	for _, test := range []struct {
+		name   string
+		quote  string
+		path   string
+		wanted string
+	}{
+		{
+			name:   "double quoted bootstrap",
+			quote:  `"`,
+			path:   `assets/my " <.wasm`,
+			wanted: `fetch("assets/my \" \u003c.wasm")`,
+		},
+		{
+			name:   "single quoted bootstrap",
+			quote:  `'`,
+			path:   `assets/my ' <.wasm`,
+			wanted: `fetch('assets/my \' \u003c.wasm')`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch(` + test.quote + `bundle.wasm` + test.quote + `), go.importObject).then((result) => go.run(result.instance));</script>`
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: test.path})
+			if !strings.Contains(got, test.wanted) {
+				t.Fatalf("bootstrap string context mismatch\ngot:  %q\nwant substring: %q", got, test.wanted)
+			}
+		})
+	}
+}
+
+func TestCustomIndexGeneratedURLFailurePreservesFiles(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "source.html")
+	destinationPath := filepath.Join(root, "destination.html")
+	source := `<script src="wasm_exec.js"></script>`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destinationPath, []byte("destination sentinel\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeRewrittenIndex(sourcePath, destinationPath, htmlRewriteOptions{runtimePath: "assets/bad\x00.js"})
+	if err == nil || !strings.Contains(err.Error(), "NUL") {
+		t.Fatalf("writeRewrittenIndex() error = %v, want NUL rejection", err)
+	}
+	assertFileContent(t, sourcePath, source)
+	assertFileContent(t, destinationPath, "destination sentinel\n")
+
+	err = writeGeneratedIndex(destinationPath, htmlRewriteOptions{
+		wasmPath:    "assets/bundle.wasm",
+		runtimePath: "assets/wasm_exec.js",
+		stylePaths:  []string{"assets/bad\x00.css"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "NUL") {
+		t.Fatalf("writeGeneratedIndex() error = %v, want NUL rejection", err)
+	}
+	assertFileContent(t, destinationPath, "destination sentinel\n")
 }
 
 func TestCustomIndexLegacyURLPathNormalization(t *testing.T) {
@@ -1124,7 +1483,7 @@ func TestCustomIndexTokenizerCombinedSourcePreservation(t *testing.T) {
 	want = strings.Replace(want, "styles&period;css?real", options.styleRewrites["styles.css"]+"?real", 1)
 	want = strings.Replace(want, "bundle.wasm?real", options.wasmPath+"?real", 1)
 	closingHead := strings.LastIndex(want, "</head>")
-	want = want[:closingHead] + preloadHTML(options) + "\n" + want[closingHead:]
+	want = want[:closingHead] + preloadHTMLForTest(t, options) + "\n" + want[closingHead:]
 
 	got := rewriteIndexForTest(t, source, options)
 	if got != want {
@@ -1255,7 +1614,7 @@ func TestCustomIndexHTMLSemanticsCombinedDocument(t *testing.T) {
 	if closingHead < 0 {
 		t.Fatal("combined source has no structural closing head")
 	}
-	want = want[:closingHead] + preloadHTML(options) + "\n" + want[closingHead:]
+	want = want[:closingHead] + preloadHTMLForTest(t, options) + "\n" + want[closingHead:]
 	got := rewriteIndexForTest(t, source, options)
 	if got != want {
 		t.Fatalf("combined HTML semantics rewrite mismatch\ngot:  %q\nwant: %q", got, want)
@@ -2084,6 +2443,34 @@ func TestPackageCustomIndexRewriteFailurePreservesPublishedPackage(t *testing.T)
 	}
 }
 
+func TestPackageCustomIndexLiteralNULReferencePreserved(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	source := "<!doctype html><html><body><div id=\"root\"></div>" +
+		"<script src=\"\x00wasm_exec.js\"></script>" +
+		"<script src=\"wasm_exec.js\"></script></body></html>"
+	writeTestFile(t, appDir, indexHTMLAssetName, source)
+
+	outDir := filepath.Join(t.TempDir(), "package")
+	if err := packageApp(packageOptions{
+		appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{},
+	}); err != nil {
+		t.Fatalf("packageApp() error: %v", err)
+	}
+	assertFileContent(t, filepath.Join(appDir, indexHTMLAssetName), source)
+	packaged, err := os.ReadFile(filepath.Join(outDir, indexHTMLAssetName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(source, `<script src="wasm_exec.js"></script>`, `<script src="assets/wasm_exec.js"></script>`, 1)
+	if string(packaged) != want {
+		t.Fatalf("packaged NUL source mismatch\ngot:  %q\nwant: %q", packaged, want)
+	}
+	if _, err := inspectPackageGraph(outDir); err != nil {
+		t.Fatalf("inspectPackageGraph() error: %v", err)
+	}
+}
+
 func TestPackageCustomIndexUnterminatedForeignCDATAFailureIsAtomic(t *testing.T) {
 	appDir := t.TempDir()
 	writeMinimalPackageApp(t, appDir)
@@ -2217,6 +2604,15 @@ func rewriteIndexForTest(t *testing.T, source string, options htmlRewriteOptions
 	got, err := rewriteIndexHTML(source, options)
 	if err != nil {
 		t.Fatalf("rewriteIndexHTML() error: %v", err)
+	}
+	return got
+}
+
+func preloadHTMLForTest(t *testing.T, options htmlRewriteOptions) string {
+	t.Helper()
+	got, err := preloadHTML(options)
+	if err != nil {
+		t.Fatalf("preloadHTML() error: %v", err)
 	}
 	return got
 }

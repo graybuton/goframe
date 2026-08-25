@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -734,14 +735,29 @@ func writeRewrittenIndex(sourcePath, destinationPath string, options htmlRewrite
 }
 
 func writeGeneratedIndex(destinationPath string, options htmlRewriteOptions) error {
-	content := generateIndexHTML(options)
+	content, err := generateIndexHTML(options)
+	if err != nil {
+		return fmt.Errorf("generate index.html: %w", err)
+	}
 	if err := writeFileAtomic(destinationPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", destinationPath, err)
 	}
 	return nil
 }
 
-func generateIndexHTML(options htmlRewriteOptions) string {
+func generateIndexHTML(options htmlRewriteOptions) (string, error) {
+	preload, err := preloadHTML(options)
+	if err != nil {
+		return "", err
+	}
+	runtime, err := runtimeHTML(options)
+	if err != nil {
+		return "", err
+	}
+	bootstrap, err := bootstrapHTML(options)
+	if err != nil {
+		return "", err
+	}
 	var builder strings.Builder
 	builder.WriteString("<!doctype html>\n")
 	builder.WriteString("<html lang=\"en\">\n")
@@ -749,7 +765,7 @@ func generateIndexHTML(options htmlRewriteOptions) string {
 	builder.WriteString("    <meta charset=\"utf-8\" />\n")
 	builder.WriteString("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n")
 	builder.WriteString("    <title>goframe app</title>\n")
-	if preload := preloadHTML(options); preload != "" {
+	if preload != "" {
 		for _, line := range strings.Split(preload, "\n") {
 			builder.WriteString("    ")
 			builder.WriteString(line)
@@ -757,50 +773,97 @@ func generateIndexHTML(options htmlRewriteOptions) string {
 		}
 	}
 	for _, style := range options.stylePaths {
+		encodedStyle, err := encodeGeneratedHTMLAttributeValue(style, htmlAttributeValueDoubleQuoted)
+		if err != nil {
+			return "", err
+		}
 		builder.WriteString("    <link rel=\"stylesheet\" href=\"")
-		builder.WriteString(style)
+		builder.WriteString(encodedStyle)
 		builder.WriteString("\" />\n")
 	}
 	builder.WriteString("</head>\n")
 	builder.WriteString("<body>\n")
 	builder.WriteString("    <div id=\"root\">Loading...</div>\n")
 	builder.WriteString("    ")
-	builder.WriteString(runtimeHTML(options))
+	builder.WriteString(runtime)
 	builder.WriteString("\n")
-	for _, line := range strings.Split(bootstrapHTML(options), "\n") {
+	for _, line := range strings.Split(bootstrap, "\n") {
 		builder.WriteString("    ")
 		builder.WriteString(line)
 		builder.WriteString("\n")
 	}
 	builder.WriteString("</body>\n")
 	builder.WriteString("</html>\n")
-	return builder.String()
+	return builder.String(), nil
 }
 
-func preloadHTML(options htmlRewriteOptions) string {
+func preloadHTML(options htmlRewriteOptions) (string, error) {
 	if !options.preload {
-		return ""
+		return "", nil
+	}
+	wasmPath, err := encodeGeneratedHTMLAttributeValue(options.wasmPath, htmlAttributeValueDoubleQuoted)
+	if err != nil {
+		return "", err
+	}
+	runtimePath, err := encodeGeneratedHTMLAttributeValue(options.runtimePath, htmlAttributeValueDoubleQuoted)
+	if err != nil {
+		return "", err
 	}
 	lines := []string{
-		fmt.Sprintf(`<link rel="preload" href="%s" as="fetch" type="application/wasm" crossorigin>`, options.wasmPath),
-		fmt.Sprintf(`<link rel="preload" href="%s" as="script">`, options.runtimePath),
+		fmt.Sprintf(`<link rel="preload" href="%s" as="fetch" type="application/wasm" crossorigin>`, wasmPath),
+		fmt.Sprintf(`<link rel="preload" href="%s" as="script">`, runtimePath),
 	}
 	for _, style := range options.stylePaths {
-		lines = append(lines, fmt.Sprintf(`<link rel="preload" href="%s" as="style">`, style))
+		encodedStyle, err := encodeGeneratedHTMLAttributeValue(style, htmlAttributeValueDoubleQuoted)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, fmt.Sprintf(`<link rel="preload" href="%s" as="style">`, encodedStyle))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), nil
 }
 
-func runtimeHTML(options htmlRewriteOptions) string {
-	return fmt.Sprintf(`<script src="%s"></script>`, options.runtimePath)
+func runtimeHTML(options htmlRewriteOptions) (string, error) {
+	runtimePath, err := encodeGeneratedHTMLAttributeValue(options.runtimePath, htmlAttributeValueDoubleQuoted)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`<script src="%s"></script>`, runtimePath), nil
 }
 
-func bootstrapHTML(options htmlRewriteOptions) string {
+func bootstrapHTML(options htmlRewriteOptions) (string, error) {
+	wasmPath, err := encodeGeneratedJavaScriptString(options.wasmPath)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf(`<script>
     const go = new Go();
-    WebAssembly.instantiateStreaming(fetch("%s"), go.importObject)
+    WebAssembly.instantiateStreaming(fetch(%s), go.importObject)
         .then((result) => go.run(result.instance));
-</script>`, options.wasmPath)
+</script>`, wasmPath), nil
+}
+
+func encodeGeneratedJavaScriptString(value string) (string, error) {
+	contents, err := encodeGeneratedJavaScriptStringContents(value, '"')
+	if err != nil {
+		return "", err
+	}
+	return `"` + contents + `"`, nil
+}
+
+func encodeGeneratedJavaScriptStringContents(value string, quote byte) (string, error) {
+	if strings.IndexByte(value, 0) >= 0 {
+		return "", fmt.Errorf("generated package URL contains a NUL byte")
+	}
+	if quote != '\'' && quote != '"' {
+		return "", fmt.Errorf("generated package URL has an invalid JavaScript string context")
+	}
+	quoted := strconv.Quote(value)
+	contents := quoted[1 : len(quoted)-1]
+	if quote == '\'' {
+		contents = strings.ReplaceAll(contents, "'", `\'`)
+	}
+	return strings.ReplaceAll(contents, "<", `\u003c`), nil
 }
 
 func writePackageAsset(sourcePath, assetsDir, logicalName string, options packageOptions) (packageAsset, error) {
