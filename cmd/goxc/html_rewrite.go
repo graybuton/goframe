@@ -745,22 +745,11 @@ func scanHTMLTag(content string, start int) (htmlTag, bool, error) {
 		offset++
 	}
 	name := semanticHTMLTagName(content[nameStart:offset])
-	tagEnd, err := scanHTMLConstructEnd(content, offset)
-	if err != nil {
-		return htmlTag{}, false, fmt.Errorf("custom index <%s> tag is unterminated: %w", name, err)
-	}
-	attributes, selfClosing, err := scanHTMLAttributes(content, offset, tagEnd-1, name)
-	if err != nil {
+	tag := htmlTag{start: start, name: name, closing: closing}
+	if err := scanHTMLTagAttributes(content, offset, &tag); err != nil {
 		return htmlTag{}, false, err
 	}
-	return htmlTag{
-		start:       start,
-		end:         tagEnd,
-		name:        name,
-		closing:     closing,
-		selfClosing: selfClosing,
-		attributes:  attributes,
-	}, true, nil
+	return tag, true, nil
 }
 
 func semanticHTMLTagName(value string) string {
@@ -779,73 +768,184 @@ func semanticHTMLTagName(value string) string {
 	return name.String()
 }
 
-func scanHTMLAttributes(content string, start, end int, tagName string) ([]htmlAttribute, bool, error) {
-	var attributes []htmlAttribute
-	for offset := start; offset < end; {
-		for offset < end && isHTMLSpace(content[offset]) {
-			offset++
-		}
-		if offset >= end {
-			break
-		}
-		if content[offset] == '/' {
-			if offset+1 == end {
-				return attributes, true, nil
+type htmlTagAttributeState uint8
+
+const (
+	htmlBeforeAttributeName htmlTagAttributeState = iota
+	htmlAttributeName
+	htmlAfterAttributeName
+	htmlBeforeAttributeValue
+	htmlTagAttributeValueDoubleQuoted
+	htmlTagAttributeValueSingleQuoted
+	htmlTagAttributeValueUnquoted
+	htmlAfterAttributeValueQuoted
+	htmlSelfClosingStartTag
+)
+
+// scanHTMLTagAttributes owns both normal-tag termination and attribute value
+// syntax. Quotes receive delimiter semantics only after '=' selects a quoted
+// value state; inside an unquoted value they remain literal parse-error bytes.
+func scanHTMLTagAttributes(content string, start int, tag *htmlTag) error {
+	state := htmlBeforeAttributeName
+	offset := start
+	nameStart := 0
+	attributeIndex := -1
+
+	finishAttributeName := func(end int) {
+		tag.attributes = append(tag.attributes, htmlAttribute{
+			name: semanticHTMLTagName(content[nameStart:end]),
+		})
+		attributeIndex = len(tag.attributes) - 1
+	}
+	finishTag := func(end int, selfClosing bool) {
+		tag.end = end
+		tag.selfClosing = selfClosing
+	}
+
+	for offset < len(content) {
+		current := content[offset]
+		switch state {
+		case htmlBeforeAttributeName:
+			switch {
+			case isHTMLSpace(current):
+				offset++
+			case current == '/':
+				state = htmlSelfClosingStartTag
+				offset++
+			case current == '>':
+				finishTag(offset+1, false)
+				return nil
+			case current == '=':
+				return fmt.Errorf("custom index <%s> has a malformed attribute near byte %d", tag.name, offset)
+			default:
+				nameStart = offset
+				state = htmlAttributeName
 			}
-			return nil, false, fmt.Errorf("custom index <%s> has a malformed solidus near byte %d", tagName, offset)
-		}
-		nameStart := offset
-		for offset < end && !isHTMLSpace(content[offset]) && content[offset] != '=' && content[offset] != '/' && content[offset] != '>' {
-			offset++
-		}
-		if nameStart == offset {
-			return nil, false, fmt.Errorf("custom index <%s> has a malformed attribute near byte %d", tagName, offset)
-		}
-		attribute := htmlAttribute{name: asciiLower(content[nameStart:offset])}
-		for offset < end && isHTMLSpace(content[offset]) {
-			offset++
-		}
-		if offset < end && content[offset] == '=' {
-			attribute.hasValue = true
-			offset++
-			for offset < end && isHTMLSpace(content[offset]) {
+
+		case htmlAttributeName:
+			switch {
+			case isHTMLSpace(current):
+				finishAttributeName(offset)
+				state = htmlAfterAttributeName
+				offset++
+			case current == '/':
+				finishAttributeName(offset)
+				state = htmlSelfClosingStartTag
+				offset++
+			case current == '=':
+				finishAttributeName(offset)
+				tag.attributes[attributeIndex].hasValue = true
+				state = htmlBeforeAttributeValue
+				offset++
+			case current == '>':
+				finishAttributeName(offset)
+				finishTag(offset+1, false)
+				return nil
+			default:
 				offset++
 			}
-			if offset >= end {
-				return nil, false, fmt.Errorf("custom index <%s> attribute %s has no value", tagName, attribute.name)
+
+		case htmlAfterAttributeName:
+			switch {
+			case isHTMLSpace(current):
+				offset++
+			case current == '/':
+				state = htmlSelfClosingStartTag
+				offset++
+			case current == '=':
+				tag.attributes[attributeIndex].hasValue = true
+				state = htmlBeforeAttributeValue
+				offset++
+			case current == '>':
+				finishTag(offset+1, false)
+				return nil
+			default:
+				state = htmlBeforeAttributeName
 			}
-			if content[offset] == '\'' || content[offset] == '"' {
-				quote := content[offset]
-				if quote == '\'' {
-					attribute.valueSyntax = htmlAttributeValueSingleQuoted
-				} else {
-					attribute.valueSyntax = htmlAttributeValueDoubleQuoted
-				}
+
+		case htmlBeforeAttributeValue:
+			attribute := &tag.attributes[attributeIndex]
+			switch {
+			case isHTMLSpace(current):
 				offset++
-				attribute.valueStart = offset
-				for offset < end && content[offset] != quote {
-					offset++
-				}
-				if offset >= end {
-					return nil, false, fmt.Errorf("custom index <%s> attribute %s has an unterminated quoted value", tagName, attribute.name)
-				}
-				attribute.valueEnd = offset
+			case current == '"':
+				attribute.valueSyntax = htmlAttributeValueDoubleQuoted
+				attribute.valueStart = offset + 1
+				state = htmlTagAttributeValueDoubleQuoted
 				offset++
-			} else {
+			case current == '\'':
+				attribute.valueSyntax = htmlAttributeValueSingleQuoted
+				attribute.valueStart = offset + 1
+				state = htmlTagAttributeValueSingleQuoted
+				offset++
+			case current == '>':
+				return fmt.Errorf("custom index <%s> attribute %s has no value", tag.name, attribute.name)
+			default:
 				attribute.valueSyntax = htmlAttributeValueUnquoted
 				attribute.valueStart = offset
-				for offset < end && !isHTMLSpace(content[offset]) && content[offset] != '>' {
-					offset++
-				}
-				attribute.valueEnd = offset
-				if attribute.valueStart == attribute.valueEnd {
-					return nil, false, fmt.Errorf("custom index <%s> attribute %s has an empty unquoted value", tagName, attribute.name)
-				}
+				state = htmlTagAttributeValueUnquoted
 			}
+
+		case htmlTagAttributeValueDoubleQuoted:
+			if current == '"' {
+				tag.attributes[attributeIndex].valueEnd = offset
+				state = htmlAfterAttributeValueQuoted
+			}
+			offset++
+
+		case htmlTagAttributeValueSingleQuoted:
+			if current == '\'' {
+				tag.attributes[attributeIndex].valueEnd = offset
+				state = htmlAfterAttributeValueQuoted
+			}
+			offset++
+
+		case htmlTagAttributeValueUnquoted:
+			switch {
+			case isHTMLSpace(current):
+				tag.attributes[attributeIndex].valueEnd = offset
+				state = htmlBeforeAttributeName
+				offset++
+			case current == '>':
+				tag.attributes[attributeIndex].valueEnd = offset
+				finishTag(offset+1, false)
+				return nil
+			default:
+				offset++
+			}
+
+		case htmlAfterAttributeValueQuoted:
+			switch {
+			case isHTMLSpace(current):
+				state = htmlBeforeAttributeName
+				offset++
+			case current == '/':
+				state = htmlSelfClosingStartTag
+				offset++
+			case current == '>':
+				finishTag(offset+1, false)
+				return nil
+			default:
+				state = htmlBeforeAttributeName
+			}
+
+		case htmlSelfClosingStartTag:
+			if current == '>' {
+				finishTag(offset+1, true)
+				return nil
+			}
+			return fmt.Errorf("custom index <%s> has a malformed solidus near byte %d", tag.name, offset-1)
 		}
-		attributes = append(attributes, attribute)
 	}
-	return attributes, false, nil
+
+	if state == htmlTagAttributeValueDoubleQuoted || state == htmlTagAttributeValueSingleQuoted {
+		return fmt.Errorf(
+			"custom index <%s> attribute %s has an unterminated quoted value",
+			tag.name,
+			tag.attributes[attributeIndex].name,
+		)
+	}
+	return fmt.Errorf("custom index <%s> tag is unterminated", tag.name)
 }
 
 type scriptDataState uint8

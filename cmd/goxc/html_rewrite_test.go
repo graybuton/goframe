@@ -911,6 +911,67 @@ func TestCustomIndexGeneratedJavaScriptStringUsesECMAScriptEscapes(t *testing.T)
 	}
 }
 
+func TestCustomIndexUnquotedAttributeTagState(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, test := range []struct {
+		name      string
+		source    string
+		wantValue string
+	}{
+		{name: "quotation mark", source: `<div data-x=a"><script src="wasm_exec.js"></script>">`, wantValue: `a"`},
+		{name: "apostrophe", source: `<div data-x=a'><script src="wasm_exec.js"></script>'>`, wantValue: `a'`},
+		{name: "equals", source: `<div data-x=a=b><script src="wasm_exec.js"></script>`, wantValue: `a=b`},
+		{name: "grave accent", source: "<div data-x=a`b><script src=\"wasm_exec.js\"></script>", wantValue: "a`b"},
+		{name: "less-than", source: `<div data-x=a<b><script src="wasm_exec.js"></script>`, wantValue: `a<b`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tag, ok, err := scanHTMLTag(test.source, 0)
+			if err != nil || !ok {
+				t.Fatalf("scanHTMLTag() = %+v, %v, %v", tag, ok, err)
+			}
+			wantEnd := strings.IndexByte(test.source, '>') + 1
+			if tag.end != wantEnd {
+				t.Fatalf("tag end = %d, want %d", tag.end, wantEnd)
+			}
+			attribute, err := tag.attribute("data-x")
+			if err != nil || attribute == nil {
+				t.Fatalf("data-x attribute = %+v, %v", attribute, err)
+			}
+			if got := semanticHTMLAttributeValue(test.source, attribute); got != test.wantValue {
+				t.Fatalf("data-x = %q, want %q", got, test.wantValue)
+			}
+			want := strings.Replace(test.source, "wasm_exec.js", runtimePath, 1)
+			if got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+				t.Fatalf("runtime after parse-error attribute mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name      string
+		source    string
+		wantValue string
+	}{
+		{name: "double quoted greater-than", source: `<div data-x="a>b"><script src="wasm_exec.js"></script>`, wantValue: `a>b`},
+		{name: "single quoted greater-than", source: `<div data-x='a>b'><script src="wasm_exec.js"></script>`, wantValue: `a>b`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tag, ok, err := scanHTMLTag(test.source, 0)
+			if err != nil || !ok {
+				t.Fatalf("scanHTMLTag() = %+v, %v, %v", tag, ok, err)
+			}
+			attribute, err := tag.attribute("data-x")
+			if err != nil || attribute == nil || semanticHTMLAttributeValue(test.source, attribute) != test.wantValue {
+				t.Fatalf("quoted data-x attribute = %+v, %v", attribute, err)
+			}
+			want := strings.Replace(test.source, "wasm_exec.js", runtimePath, 1)
+			if got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+				t.Fatalf("runtime after quoted greater-than mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+}
+
 func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
 	tests := []struct {
 		name         string
