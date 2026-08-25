@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { createServer as createHTTPServer } from "node:http";
 import { createServer as createPortServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
@@ -78,8 +79,8 @@ const legacyHTMLSentinels = [
         </title_extra>
     </svg>`,
     '<!-- authored scanner close --!>',
-    '<svg id="fixture-breakout" style="display:none">',
-    '<p id="fixture-breakout-html"></p>',
+    '<div id="fixture-legacy-owned" style="display:none">',
+    '<p id="fixture-legacy-html"></p>',
     '<input id="fixture-compact-input" disabled/>',
     'type="text/javascript1.5"',
 ];
@@ -135,6 +136,7 @@ try {
     await client.call("Page.enable");
     await client.call("Network.enable");
     const attributeOracle = await runAttributeOracle();
+    const semanticOracle = await runManagedFirstSemanticOracle();
 
     for (const scenario of scenarios) {
         scenario.browser = await runBrowserScenario(scenario);
@@ -152,6 +154,7 @@ try {
     const report = {
         compiler,
         attributeOracle,
+        semanticOracle,
         behaviorSha256: sha256(JSON.stringify(stableScenarios)),
         scenarios: stableScenarios,
     };
@@ -357,17 +360,14 @@ async function runBrowserScenario(scenario) {
         assert(before.nbspAs === " style", "legacy NBSP as changed");
         assert(before.nbspAsHref === "styles.css", "legacy NBSP as href changed");
         assert(before.doubleEscapedText.includes('<script src="wasm_exec.js?fixture=double-escaped"></script>'), "legacy double-escaped runtime decoy changed");
-        assert(before.breakoutSVGNamespace === "http://www.w3.org/2000/svg", "legacy SVG namespace changed");
-        assert(before.breakoutHTMLNamespace === "http://www.w3.org/1999/xhtml", "foreign breakout did not create an HTML element");
-        assert(before.breakoutRuntimeNamespace === "http://www.w3.org/1999/xhtml", "runtime script did not enter the HTML namespace");
+        assert(before.legacyHTMLNamespace === "http://www.w3.org/1999/xhtml", "legacy owned element left the HTML namespace");
+        assert(before.legacyRuntimeNamespace === "http://www.w3.org/1999/xhtml", "legacy runtime script left the HTML namespace");
         assert(before.compactInputNamespace === "http://www.w3.org/1999/xhtml", "compact input did not enter the HTML namespace");
         assert(before.spacedAnnotationNamespace === "http://www.w3.org/1998/Math/MathML", "spaced annotation child left the MathML namespace");
         assert(before.punctuationTagName === "title_extra", `punctuation tag name = ${JSON.stringify(before.punctuationTagName)}`);
         assert(before.punctuationScriptNamespace === "http://www.w3.org/2000/svg", "punctuation tag child left the SVG namespace");
         assert(before.scannerCommentPresent === true, "incorrectly closed authored comment was not exposed as a browser comment");
         assert(before.compactInputDisabled === true, "compact boolean attribute was not accepted");
-        assert(before.breakoutInsideSVG === false, "foreign breakout element remained under the SVG node");
-        assert(before.runtimeInsideSVG === false, "runtime script remained under the SVG node");
         assert(before.encodedStyleHref === `${scenario.paths.style}?fixture=legacy©=x#theme`, `legacy stylesheet semantic href = ${JSON.stringify(before.encodedStyleHref)}`);
         assert(before.encodedStyleAttributeCount === 4, `legacy stylesheet attribute count = ${before.encodedStyleAttributeCount}`);
         assert(before.encodedStyleNamespace === "http://www.w3.org/1999/xhtml", "legacy stylesheet left the HTML namespace");
@@ -414,8 +414,8 @@ async function runBrowserScenario(scenario) {
         buttonBackground: after.buttonBackground,
         assetStatuses,
         requestedAssets,
-        breakoutNamespace: after.breakoutHTMLNamespace,
-        runtimeNamespace: after.breakoutRuntimeNamespace,
+        legacyHTMLNamespace: after.legacyHTMLNamespace,
+        runtimeNamespace: after.legacyRuntimeNamespace,
         spacedAnnotationNamespace: after.spacedAnnotationNamespace,
         punctuationTagName: after.punctuationTagName,
         punctuationScriptNamespace: after.punctuationScriptNamespace,
@@ -448,8 +448,8 @@ async function pageState() {
     return await client.evaluate(`(() => {
         const app = document.querySelector("[data-testid='custom-index-app']");
         const button = document.querySelector("[data-testid='custom-index-increment']");
-        const breakout = document.querySelector("#fixture-breakout-html");
-        const runtime = document.querySelector("#fixture-breakout-runtime");
+        const legacyHTML = document.querySelector("#fixture-legacy-html");
+        const runtime = document.querySelector("#fixture-legacy-runtime");
         const compactInput = document.querySelector("#fixture-compact-input");
         const spacedAnnotationScript = document.querySelector("#fixture-spaced-annotation-script");
         const punctuationTag = document.querySelector("#fixture-punctuation-tag");
@@ -476,17 +476,14 @@ async function pageState() {
             nbspRelHref: document.querySelector("#fixture-nbsp-rel")?.getAttribute("href") ?? null,
             nbspAs: document.querySelector("#fixture-nbsp-as")?.getAttribute("as") ?? null,
             nbspAsHref: document.querySelector("#fixture-nbsp-as")?.getAttribute("href") ?? null,
-            breakoutSVGNamespace: document.querySelector("#fixture-breakout")?.namespaceURI ?? null,
-            breakoutHTMLNamespace: breakout?.namespaceURI ?? null,
-            breakoutRuntimeNamespace: runtime?.namespaceURI ?? null,
+            legacyHTMLNamespace: legacyHTML?.namespaceURI ?? null,
+            legacyRuntimeNamespace: runtime?.namespaceURI ?? null,
             compactInputNamespace: compactInput?.namespaceURI ?? null,
             spacedAnnotationNamespace: spacedAnnotationScript?.namespaceURI ?? null,
             punctuationTagName: punctuationTag?.localName ?? null,
             punctuationScriptNamespace: punctuationScript?.namespaceURI ?? null,
             scannerCommentPresent,
             compactInputDisabled: compactInput?.disabled ?? null,
-            breakoutInsideSVG: Boolean(breakout?.closest("svg")),
-            runtimeInsideSVG: Boolean(runtime?.closest("svg")),
             encodedStyleHref: document.querySelector("#fixture-encoded-style")?.getAttribute("href") ?? null,
             encodedStyleAttributeCount: document.querySelector("#fixture-encoded-style")?.attributes.length ?? null,
             encodedStyleNamespace: document.querySelector("#fixture-encoded-style")?.namespaceURI ?? null,
@@ -561,6 +558,274 @@ async function runAttributeOracle() {
     }
     assert(!results.find((result) => result.name === "literal NUL").value.includes("\0"), "literal NUL remained in the browser attribute value");
     return results;
+}
+
+async function runManagedFirstSemanticOracle() {
+    const pages = new Map();
+    const requests = [];
+    const oracleServer = createHTTPServer((request, response) => {
+        const url = new URL(request.url, "http://127.0.0.1");
+        requests.push(url.pathname);
+        response.setHeader("cache-control", "no-store");
+        response.setHeader("connection", "close");
+        if (url.pathname.startsWith("/case/")) {
+            const source = pages.get(url.pathname);
+            if (source === undefined) {
+                response.writeHead(404).end("missing oracle case");
+                return;
+            }
+            response.setHeader("content-type", "text/html; charset=utf-8");
+            response.end(source);
+            return;
+        }
+        if (url.pathname.startsWith("/runtime/")) {
+            response.setHeader("content-type", "text/javascript; charset=utf-8");
+            response.end(`window.__oracleRuntimeLoads = [...(window.__oracleRuntimeLoads ?? []), ${JSON.stringify(url.pathname)}];`);
+            return;
+        }
+        if (url.pathname.startsWith("/style/")) {
+            response.setHeader("content-type", "text/css; charset=utf-8");
+            response.end(`:host, html { --goframe-oracle-style: ${JSON.stringify(url.pathname)}; }`);
+            return;
+        }
+        response.writeHead(404).end("missing oracle resource");
+    });
+    await new Promise((resolveListen, reject) => {
+        oracleServer.once("error", reject);
+        oracleServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const address = oracleServer.address();
+    const origin = `http://127.0.0.1:${address.port}`;
+    const results = [];
+
+    try {
+        await runCase({
+            name: "select runtime",
+            classification: "unsupported markerless rewrite",
+            source: `<select><svg><script id="runtime" src="${origin}/runtime/select.js"></script></svg></select>`,
+            expression: `(() => {
+                const runtime = document.querySelector("#runtime");
+                return {
+                    present: Boolean(runtime),
+                    namespace: runtime?.namespaceURI ?? null,
+                    parent: runtime?.parentElement?.localName ?? null,
+                    executed: (window.__oracleRuntimeLoads ?? []).includes("/runtime/select.js"),
+                };
+            })()`,
+            validate(result, caseRequests) {
+                result.requested = caseRequests.includes("/runtime/select.js");
+                assert(result.present, "select runtime element was not created in Chrome");
+            },
+        });
+        await runCase({
+            name: "select in table runtime",
+            classification: "unsupported markerless rewrite",
+            source: `<table id="table"><select><svg><script id="runtime" src="${origin}/runtime/select-table.js"></script></svg></select></table>`,
+            expression: `(() => {
+                const runtime = document.querySelector("#runtime");
+                return {
+                    present: Boolean(runtime),
+                    namespace: runtime?.namespaceURI ?? null,
+                    parent: runtime?.parentElement?.localName ?? null,
+                    insideTable: Boolean(runtime?.closest("table")),
+                    tableParent: document.querySelector("#table")?.parentElement?.localName ?? null,
+                    executed: (window.__oracleRuntimeLoads ?? []).includes("/runtime/select-table.js"),
+                };
+            })()`,
+            validate(result, caseRequests) {
+                result.requested = caseRequests.includes("/runtime/select-table.js");
+                assert(result.present, "select-in-table runtime element was not created in Chrome");
+            },
+        });
+        await runCase({
+            name: "table foster parenting",
+            classification: "managed-only profile",
+            source: `<div id="container"><table id="table"><div id="foster">authored</div><tbody><tr><td>cell</td></tr></tbody></table></div>`,
+            expression: `(() => {
+                const foster = document.querySelector("#foster");
+                const table = document.querySelector("#table");
+                return {
+                    parent: foster?.parentElement?.id ?? null,
+                    beforeTable: foster?.nextElementSibling === table,
+                    insideTable: Boolean(foster?.closest("table")),
+                };
+            })()`,
+            validate(result) {
+                assert(result.parent === "container" && result.beforeTable && !result.insideTable, "table foster-parenting oracle changed");
+            },
+        });
+        await runCase({
+            name: "ordinary template",
+            classification: "simple profile",
+            source: `<template id="ordinary"><link rel="stylesheet" href="${origin}/style/ordinary.css"><script src="${origin}/runtime/ordinary.js"></script></template>`,
+            expression: `(() => {
+                const template = document.querySelector("#ordinary");
+                return {
+                    templatePresent: Boolean(template),
+                    linkInContent: Boolean(template?.content.querySelector("link")),
+                    scriptInContent: Boolean(template?.content.querySelector("script")),
+                    executed: (window.__oracleRuntimeLoads ?? []).length !== 0,
+                };
+            })()`,
+            validate(result, caseRequests) {
+                assert(result.templatePresent && result.linkInContent && result.scriptInContent, "ordinary template content was not inert template content");
+                assert(!result.executed && !caseRequests.some((path) => path.startsWith("/runtime/") || path.startsWith("/style/")), "ordinary template loaded an inert resource");
+            },
+        });
+        for (const mode of ["open", "closed"]) {
+            await runCase({
+                name: `declarative shadow ${mode}`,
+                classification: "unsupported markerless rewrite",
+                source: `<host-element id="host"><template shadowrootmode="${mode}"><link rel="stylesheet" href="${origin}/style/shadow-${mode}.css"></template></host-element>`,
+                expression: `(() => ({
+                    templatePresent: Boolean(document.querySelector("#host > template")),
+                    openShadowRoot: Boolean(document.querySelector("#host")?.shadowRoot),
+                }))()`,
+                validate(result, caseRequests) {
+                    assert(!result.templatePresent, `declarative shadow ${mode} template was not consumed`);
+                    assert(result.openShadowRoot === (mode === "open"), `declarative shadow ${mode} visibility changed`);
+                    assert(caseRequests.includes(`/style/shadow-${mode}.css`), `declarative shadow ${mode} stylesheet was not requested`);
+                },
+            });
+        }
+        await runCase({
+            name: "invalid shadowrootmode",
+            classification: "simple profile",
+            source: `<host-element id="host"><template shadowrootmode=" open "><link rel="stylesheet" href="${origin}/style/shadow-invalid.css"></template></host-element>`,
+            expression: `(() => ({
+                templatePresent: Boolean(document.querySelector("#host > template")),
+                openShadowRoot: Boolean(document.querySelector("#host")?.shadowRoot),
+            }))()`,
+            validate(result, caseRequests) {
+                assert(result.templatePresent && !result.openShadowRoot, "invalid shadowrootmode created a shadow root");
+                assert(!caseRequests.includes("/style/shadow-invalid.css"), "invalid shadowrootmode loaded inert template style");
+            },
+        });
+        await runCase({
+            name: "multiple declarative templates",
+            classification: "managed-only profile",
+            source: `<host-element id="host"><template shadowrootmode="open"><span id="first"></span></template><template shadowrootmode="open"><span id="second"></span></template></host-element>`,
+            expression: `(() => ({
+                firstInShadow: Boolean(document.querySelector("#host")?.shadowRoot?.querySelector("#first")),
+                secondTemplatePresent: Boolean(document.querySelector("#host > template")),
+                secondInShadow: Boolean(document.querySelector("#host")?.shadowRoot?.querySelector("#second")),
+            }))()`,
+            validate(result) {
+                assert(result.firstInShadow && result.secondTemplatePresent && !result.secondInShadow, "multiple declarative-template behavior changed");
+            },
+        });
+        await runCase({
+            name: "frameset",
+            classification: "managed-only profile",
+            source: `<!doctype html><html><head></head><frameset id="frames"><frame id="frame" src="about:blank"></frameset></html>`,
+            expression: `(() => ({
+                framesetPresent: Boolean(document.querySelector("#frames")),
+                frameParent: document.querySelector("#frame")?.parentElement?.localName ?? null,
+                bodyPresent: Boolean(document.body),
+            }))()`,
+            validate(result) {
+                assert(result.framesetPresent && result.frameParent === "frameset", "frameset oracle changed");
+            },
+        });
+        await runCase({
+            name: "noscript with scripting enabled",
+            classification: "managed-only profile",
+            source: `<noscript><script id="runtime" src="${origin}/runtime/noscript.js"></script></noscript><p id="after">after</p>`,
+            expression: `(() => ({
+                runtimeElementPresent: Boolean(document.querySelector("#runtime")),
+                afterPresent: Boolean(document.querySelector("#after")),
+                executed: (window.__oracleRuntimeLoads ?? []).length !== 0,
+            }))()`,
+            validate(result, caseRequests) {
+                assert(!result.runtimeElementPresent && result.afterPresent && !result.executed, "noscript oracle changed");
+                assert(!caseRequests.includes("/runtime/noscript.js"), "noscript loaded an inert runtime");
+            },
+        });
+        await runCase({
+            name: "active base href",
+            classification: "managed-only profile",
+            source: `<base href="https://example.test/nested/"><a id="asset" href="wasm_exec.js">asset</a>`,
+            expression: `(() => ({
+                raw: document.querySelector("#asset")?.getAttribute("href") ?? null,
+                resolved: document.querySelector("#asset")?.href ?? null,
+            }))()`,
+            validate(result) {
+                assert(result.raw === "wasm_exec.js" && result.resolved === "https://example.test/nested/wasm_exec.js", "active base URL resolution changed");
+            },
+        });
+        await runCase({
+            name: "bogus comments",
+            classification: "simple profile",
+            source: `<div id="pi"><?x "><span id="after-pi"></span>"></div><div id="declaration"><!unknown "><span id="after-declaration"></span>"></div><div id="cdata"><![CDATA["><span id="after-cdata"></span>"]></div>`,
+            expression: `(() => ({
+                afterPIParent: document.querySelector("#after-pi")?.parentElement?.id ?? null,
+                afterDeclarationParent: document.querySelector("#after-declaration")?.parentElement?.id ?? null,
+                afterCDATAParent: document.querySelector("#after-cdata")?.parentElement?.id ?? null,
+            }))()`,
+            validate(result) {
+                assert(result.afterPIParent === "pi" && result.afterDeclarationParent === "declaration" && result.afterCDATAParent === "cdata", "bogus-comment boundary changed");
+            },
+        });
+        await runCase({
+            name: "balanced foreign content",
+            classification: "simple profile",
+            source: `<svg id="svg"><g><script id="foreign-script"></script></g><foreignObject><p id="html-child"></p></foreignObject></svg>`,
+            expression: `(() => ({
+                scriptNamespace: document.querySelector("#foreign-script")?.namespaceURI ?? null,
+                htmlChildNamespace: document.querySelector("#html-child")?.namespaceURI ?? null,
+                htmlChildParent: document.querySelector("#html-child")?.parentElement?.localName ?? null,
+            }))()`,
+            validate(result) {
+                assert(result.scriptNamespace === "http://www.w3.org/2000/svg", "balanced foreign script namespace changed");
+                assert(result.htmlChildNamespace === "http://www.w3.org/1999/xhtml" && result.htmlChildParent === "foreignObject", "foreign integration point changed");
+            },
+        });
+        await runCase({
+            name: "misnested closing tags",
+            classification: "managed-only profile",
+            source: `<div id="outer"><span id="span"></div><p id="after"></p>`,
+            expression: `(() => ({
+                spanParent: document.querySelector("#span")?.parentElement?.id ?? null,
+                afterInsideOuter: Boolean(document.querySelector("#after")?.closest("#outer")),
+            }))()`,
+            validate(result) {
+                assert(result.spanParent === "outer" && !result.afterInsideOuter, "misnested-close recovery changed");
+            },
+        });
+    } finally {
+        await new Promise((resolveClose) => oracleServer.close(resolveClose));
+    }
+    return results;
+
+    async function runCase(test) {
+        const path = `/case/${encodeURIComponent(test.name)}`;
+        pages.set(path, `<!doctype html><meta charset="utf-8">${test.source}`);
+        const requestStart = requests.length;
+        const url = `${origin}${path}?run=${Date.now()}`;
+        await client.call("Page.navigate", { url });
+        await waitForOracleDocument(url);
+        const result = await client.evaluate(test.expression);
+        const caseRequests = [...new Set(requests.slice(requestStart))].sort();
+        test.validate(result, caseRequests);
+        results.push({
+            name: test.name,
+            classification: test.classification,
+            ...result,
+            requests: caseRequests.filter((request) => request !== path && request !== "/favicon.ico"),
+        });
+    }
+}
+
+async function waitForOracleDocument(expectedURL) {
+    for (let attempt = 0; attempt < 100; attempt++) {
+        const state = await client.evaluate(`({ href: location.href, readyState: document.readyState })`);
+        if (state.href === expectedURL && state.readyState === "complete") {
+            await wait(25);
+            return;
+        }
+        await wait(25);
+    }
+    throw new Error(`HARNESS FAILURE: semantic oracle did not load ${expectedURL}`);
 }
 
 function encodeDoubleQuotedAttribute(value) {
