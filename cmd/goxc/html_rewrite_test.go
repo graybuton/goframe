@@ -762,6 +762,155 @@ func TestCustomIndexURLPreprocessingBrowserSemantics(t *testing.T) {
 	}
 }
 
+func TestCustomIndexPercentEncodedLegacyURLMatching(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, value := range []string{
+		"%77asm_exec.js",
+		"wasm%5Fexec.js",
+		"%77%61sm_exec.js",
+	} {
+		t.Run("runtime "+value, func(t *testing.T) {
+			source := `<script src="` + value + `?v=1#runtime"></script>`
+			want := `<script src="` + runtimePath + `?v=1#runtime"></script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+				t.Fatalf("percent-encoded runtime rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	const stylePath = "assets/styles.33333333.css"
+	for _, source := range []string{
+		`<link rel="stylesheet" href="%73tyles.css?theme#main">`,
+		`<link rel="preload" as="style" href="%73tyles.css?theme#main">`,
+	} {
+		want := strings.Replace(source, "%73tyles.css", stylePath, 1)
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{styleRewrites: map[string]string{
+			"styles.css": stylePath,
+		}}); got != want {
+			t.Fatalf("percent-encoded style rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+		}
+	}
+
+	for _, value := range []string{"%62undle.wasm", "%6dain.wasm"} {
+		t.Run("bootstrap "+value, func(t *testing.T) {
+			source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("` + value + `?v=1#app"), go.importObject).then((result) => go.run(result.instance));</script>`
+			want := strings.Replace(source, value, "assets/bundle.11111111.wasm", 1)
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"}); got != want {
+				t.Fatalf("percent-encoded bootstrap rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	t.Run("segment-safe UTF-8", func(t *testing.T) {
+		source := `<link rel="stylesheet" href="%E7%95%8C.css">`
+		want := `<link rel="stylesheet" href="assets/%E7%95%8C.44444444.css">`
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{styleRewrites: map[string]string{
+			"界.css": "assets/界.44444444.css",
+		}}); got != want {
+			t.Fatalf("percent-encoded UTF-8 rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	for _, value := range []string{
+		"%2577asm_exec.js",
+		"%2Fwasm_exec.js",
+		"%5Cwasm_exec.js",
+		"%00wasm_exec.js",
+		"%GGwasm_exec.js",
+		"%",
+	} {
+		t.Run("unowned "+value, func(t *testing.T) {
+			source := `<script src="` + value + `"></script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != source {
+				t.Fatalf("unsafe or ambiguous percent reference changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
+func TestCustomIndexGeneratedPackagePathsBecomeBrowserURLs(t *testing.T) {
+	options := htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle space#query?percent%界\x07.wasm",
+		runtimePath: "assets/runtime space&quote\"apostrophe'界.js",
+		stylePaths:  []string{"assets/style space&query?#percent%界.css"},
+	}
+	generated, err := generateIndexHTML(options)
+	if err != nil {
+		t.Fatalf("generateIndexHTML() error: %v", err)
+	}
+	for _, want := range []string{
+		"assets/bundle%20space%23query%3Fpercent%25%E7%95%8C%07.wasm",
+		"assets/runtime%20space%26quote%22apostrophe%27%E7%95%8C.js",
+		"assets/style%20space%26query%3F%23percent%25%E7%95%8C.css",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated index missing browser URL %q:\n%s", want, generated)
+		}
+	}
+	for _, stale := range []string{"bundle space", "runtime space", "style space", `\\a`, `\\U`} {
+		if strings.Contains(generated, stale) {
+			t.Fatalf("generated index retained non-URL or Go-literal text %q:\n%s", stale, generated)
+		}
+	}
+
+	runtimeSource := `<script src="wasm_exec.js?v=1#runtime"></script>`
+	runtimeWant := `<script src="assets/runtime%20space%26quote%22apostrophe%27%E7%95%8C.js?v=1#runtime"></script>`
+	markerlessOptions := options
+	markerlessOptions.preload = false
+	if got := rewriteIndexForTest(t, runtimeSource, markerlessOptions); got != runtimeWant {
+		t.Fatalf("markerless runtime browser URL mismatch\ngot:  %q\nwant: %q", got, runtimeWant)
+	}
+
+	bootstrapSource := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch('bundle.wasm?v=1#app'), go.importObject).then((result) => go.run(result.instance));</script>`
+	bootstrapWant := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch('assets/bundle%20space%23query%3Fpercent%25%E7%95%8C%07.wasm?v=1#app'), go.importObject).then((result) => go.run(result.instance));</script>`
+	if got := rewriteIndexForTest(t, bootstrapSource, markerlessOptions); got != bootstrapWant {
+		t.Fatalf("markerless bootstrap browser URL mismatch\ngot:  %q\nwant: %q", got, bootstrapWant)
+	}
+
+	styleSource := `<link rel=stylesheet href=style.css?theme#main>`
+	styleWant := `<link rel=stylesheet href=assets/style%20space%26query%3F%23percent%25%E7%95%8C.css?theme#main>`
+	if got := rewriteIndexForTest(t, styleSource, htmlRewriteOptions{styleRewrites: map[string]string{
+		"style.css": options.stylePaths[0],
+	}}); got != styleWant {
+		t.Fatalf("markerless style browser URL mismatch\ngot:  %q\nwant: %q", got, styleWant)
+	}
+}
+
+func TestCustomIndexGeneratedJavaScriptStringUsesECMAScriptEscapes(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+		quote byte
+		want  string
+	}{
+		{name: "NUL", value: "\x00", quote: '"', want: `\x00`},
+		{name: "bell", value: "\x07", quote: '"', want: `\x07`},
+		{name: "vertical tab", value: "\x0b", quote: '"', want: `\v`},
+		{name: "delete", value: "\x7f", quote: '"', want: `\x7F`},
+		{name: "C1 control", value: "\u0085", quote: '"', want: `\x85`},
+		{name: "line separator", value: "\u2028", quote: '"', want: `\u2028`},
+		{name: "paragraph separator", value: "\u2029", quote: '"', want: `\u2029`},
+		{name: "non-BMP", value: "\U0001d11e", quote: '"', want: `\uD834\uDD1E`},
+		{name: "double quote and backslash", value: "\"\\", quote: '"', want: `\"\\`},
+		{name: "single quote and backslash", value: "'\\", quote: '\'', want: `\'\\`},
+		{name: "script data less-than", value: `</script>`, quote: '"', want: `\u003C/script>`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := encodeGeneratedJavaScriptStringContents(test.value, test.quote)
+			if err != nil {
+				t.Fatalf("encodeGeneratedJavaScriptStringContents() error: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("JavaScript string contents = %q, want %q", got, test.want)
+			}
+			if strings.Contains(got, `\a`) || strings.Contains(got, `\U`) {
+				t.Fatalf("JavaScript string contains a Go-only escape: %q", got)
+			}
+		})
+	}
+}
+
 func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -778,9 +927,9 @@ func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
 			options: htmlRewriteOptions{styleRewrites: map[string]string{
 				"styles.css": `assets/my " &copy; style.12345678.css`,
 			}},
-			wantSource:   `<link rel="stylesheet" href="assets/my &quot; &amp;copy; style.12345678.css?v=1&copy;=x#theme">`,
+			wantSource:   `<link rel="stylesheet" href="assets/my%20%22%20%26copy%3B%20style.12345678.css?v=1&copy;=x#theme">`,
 			attribute:    "href",
-			wantSemantic: `assets/my " &copy; style.12345678.css?v=1©=x#theme`,
+			wantSemantic: `assets/my%20%22%20%26copy%3B%20style.12345678.css?v=1©=x#theme`,
 			wantAttrs:    2,
 		},
 		{
@@ -789,9 +938,9 @@ func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
 			options: htmlRewriteOptions{styleRewrites: map[string]string{
 				"styles.css": "assets/my ' &copy; style.12345678.css",
 			}},
-			wantSource:   `<link rel='stylesheet' href='assets/my &#39; &amp;copy; style.12345678.css?v=1&copy;=x#theme'>`,
+			wantSource:   `<link rel='stylesheet' href='assets/my%20%27%20%26copy%3B%20style.12345678.css?v=1&copy;=x#theme'>`,
 			attribute:    "href",
-			wantSemantic: "assets/my ' &copy; style.12345678.css?v=1©=x#theme",
+			wantSemantic: "assets/my%20%27%20%26copy%3B%20style.12345678.css?v=1©=x#theme",
 			wantAttrs:    2,
 		},
 		{
@@ -800,18 +949,18 @@ func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
 			options: htmlRewriteOptions{styleRewrites: map[string]string{
 				"my style.css": "assets/my &copy; style\t\n\r\f\"'`=<>界.12345678.css",
 			}},
-			wantSource:   `<link rel=stylesheet href=assets/my&#32;&amp;copy;&#32;style&#9;&#10;&#13;&#12;&quot;&#39;&#96;&#61;&lt;&gt;界.12345678.css?v=1&copy;=x#theme>`,
+			wantSource:   `<link rel=stylesheet href=assets/my%20%26copy%3B%20style%09%0A%0D%0C%22%27%60%3D%3C%3E%E7%95%8C.12345678.css?v=1&copy;=x#theme>`,
 			attribute:    "href",
-			wantSemantic: "assets/my &copy; style\t\n\r\f\"'`=<>界.12345678.css?v=1©=x#theme",
+			wantSemantic: "assets/my%20%26copy%3B%20style%09%0A%0D%0C%22%27%60%3D%3C%3E%E7%95%8C.12345678.css?v=1©=x#theme",
 			wantAttrs:    2,
 		},
 		{
 			name:         "unquoted runtime uses shared encoder",
 			source:       `<script src=wasm_exec.js?runtime></script>`,
 			options:      htmlRewriteOptions{runtimePath: `assets/wasm &copy; "'` + "`" + `=<>.js`},
-			wantSource:   `<script src=assets/wasm&#32;&amp;copy;&#32;&quot;&#39;&#96;&#61;&lt;&gt;.js?runtime></script>`,
+			wantSource:   `<script src=assets/wasm%20%26copy%3B%20%22%27%60%3D%3C%3E.js?runtime></script>`,
 			attribute:    "src",
-			wantSemantic: `assets/wasm &copy; "'` + "`" + `=<>.js?runtime`,
+			wantSemantic: `assets/wasm%20%26copy%3B%20%22%27%60%3D%3C%3E.js?runtime`,
 			wantAttrs:    1,
 		},
 		{
@@ -820,9 +969,9 @@ func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
 			options: htmlRewriteOptions{styleRewrites: map[string]string{
 				"my style.css": "assets/my &copy; style.12345678.css",
 			}},
-			wantSource:   `<link rel=preload as=style href=assets/my&#32;&amp;copy;&#32;style.12345678.css#preload>`,
+			wantSource:   `<link rel=preload as=style href=assets/my%20%26copy%3B%20style.12345678.css#preload>`,
 			attribute:    "href",
-			wantSemantic: "assets/my &copy; style.12345678.css#preload",
+			wantSemantic: "assets/my%20%26copy%3B%20style.12345678.css#preload",
 			wantAttrs:    3,
 		},
 	}
@@ -1030,11 +1179,11 @@ func TestCustomIndexGeneratedHTMLURLSUseContextEncoders(t *testing.T) {
 		t.Fatalf("generateIndexHTML() error: %v", err)
 	}
 	for _, want := range []string{
-		`href="assets/bundle &amp;copy;.wasm"`,
-		`href="assets/wasm &quot; &amp;copy;.js"`,
-		`href="assets/my &amp;copy; style.css"`,
-		`src="assets/wasm &quot; &amp;copy;.js"`,
-		`fetch("assets/bundle &copy;.wasm")`,
+		`href="assets/bundle%20%26copy%3B.wasm"`,
+		`href="assets/wasm%20%22%20%26copy%3B.js"`,
+		`href="assets/my%20%26copy%3B%20style.css"`,
+		`src="assets/wasm%20%22%20%26copy%3B.js"`,
+		`fetch("assets/bundle%20%26copy%3B.wasm")`,
 	} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("generated index missing %q:\n%s", want, generated)
@@ -1043,10 +1192,10 @@ func TestCustomIndexGeneratedHTMLURLSUseContextEncoders(t *testing.T) {
 
 	managed := rewriteIndexForTest(t, `<html><head><!-- goframe:preload --><!-- /goframe:preload --></head><body><!-- goframe:runtime --><!-- /goframe:runtime --><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></body></html>`, options)
 	for _, want := range []string{
-		`href="assets/bundle &amp;copy;.wasm"`,
-		`href="assets/my &amp;copy; style.css"`,
-		`src="assets/wasm &quot; &amp;copy;.js"`,
-		`fetch("assets/bundle &copy;.wasm")`,
+		`href="assets/bundle%20%26copy%3B.wasm"`,
+		`href="assets/my%20%26copy%3B%20style.css"`,
+		`src="assets/wasm%20%22%20%26copy%3B.js"`,
+		`fetch("assets/bundle%20%26copy%3B.wasm")`,
 	} {
 		if !strings.Contains(managed, want) {
 			t.Fatalf("managed index missing %q:\n%s", want, managed)
@@ -1071,13 +1220,13 @@ func TestCustomIndexGeneratedHTMLURLSUseContextEncoders(t *testing.T) {
 			name:   "double quoted bootstrap",
 			quote:  `"`,
 			path:   `assets/my " <.wasm`,
-			wanted: `fetch("assets/my \" \u003c.wasm")`,
+			wanted: `fetch("assets/my%20%22%20%3C.wasm")`,
 		},
 		{
 			name:   "single quoted bootstrap",
 			quote:  `'`,
 			path:   `assets/my ' <.wasm`,
-			wanted: `fetch('assets/my \' \u003c.wasm')`,
+			wanted: `fetch('assets/my%20%27%20%3C.wasm')`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

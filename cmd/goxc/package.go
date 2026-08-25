@@ -14,7 +14,6 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -773,7 +772,11 @@ func generateIndexHTML(options htmlRewriteOptions) (string, error) {
 		}
 	}
 	for _, style := range options.stylePaths {
-		encodedStyle, err := encodeGeneratedHTMLAttributeValue(style, htmlAttributeValueDoubleQuoted)
+		styleURL, err := encodePackagePathAsBrowserURL(style)
+		if err != nil {
+			return "", err
+		}
+		encodedStyle, err := encodeGeneratedHTMLAttributeValue(styleURL, htmlAttributeValueDoubleQuoted)
 		if err != nil {
 			return "", err
 		}
@@ -801,11 +804,26 @@ func preloadHTML(options htmlRewriteOptions) (string, error) {
 	if !options.preload {
 		return "", nil
 	}
-	wasmPath, err := encodeGeneratedHTMLAttributeValue(options.wasmPath, htmlAttributeValueDoubleQuoted)
+	wasmURL := ""
+	if options.wasmPath != "" {
+		var err error
+		wasmURL, err = encodePackagePathAsBrowserURL(options.wasmPath)
+		if err != nil {
+			return "", err
+		}
+	}
+	wasmPath, err := encodeGeneratedHTMLAttributeValue(wasmURL, htmlAttributeValueDoubleQuoted)
 	if err != nil {
 		return "", err
 	}
-	runtimePath, err := encodeGeneratedHTMLAttributeValue(options.runtimePath, htmlAttributeValueDoubleQuoted)
+	runtimeURL := ""
+	if options.runtimePath != "" {
+		runtimeURL, err = encodePackagePathAsBrowserURL(options.runtimePath)
+		if err != nil {
+			return "", err
+		}
+	}
+	runtimePath, err := encodeGeneratedHTMLAttributeValue(runtimeURL, htmlAttributeValueDoubleQuoted)
 	if err != nil {
 		return "", err
 	}
@@ -814,7 +832,11 @@ func preloadHTML(options htmlRewriteOptions) (string, error) {
 		fmt.Sprintf(`<link rel="preload" href="%s" as="script">`, runtimePath),
 	}
 	for _, style := range options.stylePaths {
-		encodedStyle, err := encodeGeneratedHTMLAttributeValue(style, htmlAttributeValueDoubleQuoted)
+		styleURL, err := encodePackagePathAsBrowserURL(style)
+		if err != nil {
+			return "", err
+		}
+		encodedStyle, err := encodeGeneratedHTMLAttributeValue(styleURL, htmlAttributeValueDoubleQuoted)
 		if err != nil {
 			return "", err
 		}
@@ -824,7 +846,14 @@ func preloadHTML(options htmlRewriteOptions) (string, error) {
 }
 
 func runtimeHTML(options htmlRewriteOptions) (string, error) {
-	runtimePath, err := encodeGeneratedHTMLAttributeValue(options.runtimePath, htmlAttributeValueDoubleQuoted)
+	if options.runtimePath == "" {
+		return "", nil
+	}
+	runtimeURL, err := encodePackagePathAsBrowserURL(options.runtimePath)
+	if err != nil {
+		return "", err
+	}
+	runtimePath, err := encodeGeneratedHTMLAttributeValue(runtimeURL, htmlAttributeValueDoubleQuoted)
 	if err != nil {
 		return "", err
 	}
@@ -832,7 +861,14 @@ func runtimeHTML(options htmlRewriteOptions) (string, error) {
 }
 
 func bootstrapHTML(options htmlRewriteOptions) (string, error) {
-	wasmPath, err := encodeGeneratedJavaScriptString(options.wasmPath)
+	if options.wasmPath == "" {
+		return "", nil
+	}
+	wasmURL, err := encodePackagePathAsBrowserURL(options.wasmPath)
+	if err != nil {
+		return "", err
+	}
+	wasmPath, err := encodeGeneratedJavaScriptString(wasmURL)
 	if err != nil {
 		return "", err
 	}
@@ -841,29 +877,6 @@ func bootstrapHTML(options htmlRewriteOptions) (string, error) {
     WebAssembly.instantiateStreaming(fetch(%s), go.importObject)
         .then((result) => go.run(result.instance));
 </script>`, wasmPath), nil
-}
-
-func encodeGeneratedJavaScriptString(value string) (string, error) {
-	contents, err := encodeGeneratedJavaScriptStringContents(value, '"')
-	if err != nil {
-		return "", err
-	}
-	return `"` + contents + `"`, nil
-}
-
-func encodeGeneratedJavaScriptStringContents(value string, quote byte) (string, error) {
-	if strings.IndexByte(value, 0) >= 0 {
-		return "", fmt.Errorf("generated package URL contains a NUL byte")
-	}
-	if quote != '\'' && quote != '"' {
-		return "", fmt.Errorf("generated package URL has an invalid JavaScript string context")
-	}
-	quoted := strconv.Quote(value)
-	contents := quoted[1 : len(quoted)-1]
-	if quote == '\'' {
-		contents = strings.ReplaceAll(contents, "'", `\'`)
-	}
-	return strings.ReplaceAll(contents, "<", `\u003c`), nil
 }
 
 func writePackageAsset(sourcePath, assetsDir, logicalName string, options packageOptions) (packageAsset, error) {

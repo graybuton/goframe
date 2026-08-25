@@ -2,9 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +69,117 @@ func TestPackageAssetLogicalNameNormalization(t *testing.T) {
 				t.Fatalf("normalizePackageAssetLogicalName(%q) = %q, want %q", test.input, got, test.want)
 			}
 		})
+	}
+}
+
+func TestGeneratedPackagePathBrowserURLMatrix(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		path  string
+		want  string
+		valid bool
+	}{
+		{name: "ordinary", path: "assets/bundle.wasm", want: "assets/bundle.wasm", valid: true},
+		{name: "nested", path: "assets/styles/theme.css", want: "assets/styles/theme.css", valid: true},
+		{name: "space", path: "assets/foo bar.css", want: "assets/foo%20bar.css", valid: true},
+		{name: "ampersand", path: "assets/foo&bar.css", want: "assets/foo%26bar.css", valid: true},
+		{name: "percent", path: "assets/foo%2e.wasm", want: "assets/foo%252e.wasm", valid: true},
+		{name: "question", path: "assets/foo?bar.wasm", want: "assets/foo%3Fbar.wasm", valid: true},
+		{name: "fragment", path: "assets/foo#bar.wasm", want: "assets/foo%23bar.wasm", valid: true},
+		{name: "quotes", path: "assets/foo\"'bar.css", want: "assets/foo%22%27bar.css", valid: true},
+		{name: "controls", path: "assets/a\x07\tb\nc\rd.css", want: "assets/a%07%09b%0Ac%0Dd.css", valid: true},
+		{name: "Unicode", path: "assets/界.css", want: "assets/%E7%95%8C.css", valid: true},
+		{name: "non-BMP", path: "assets/😀.css", want: "assets/%F0%9F%98%80.css", valid: true},
+		{name: "NUL", path: "assets/bad\x00.css"},
+		{name: "backslash", path: `assets\bad.css`},
+		{name: "non-canonical", path: "assets//bad.css"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := encodePackagePathAsBrowserURL(test.path)
+			if !test.valid {
+				if err == nil || got != "" {
+					t.Fatalf("encodePackagePathAsBrowserURL(%q) = %q, %v, want error", test.path, got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("encodePackagePathAsBrowserURL(%q) error: %v", test.path, err)
+			}
+			if got != test.want {
+				t.Fatalf("encodePackagePathAsBrowserURL(%q) = %q, want %q", test.path, got, test.want)
+			}
+		})
+	}
+}
+
+func TestPackageGeneratedBrowserURLsResolveToExactUnixAssets(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot represent this Unix package-path matrix")
+	}
+
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	wasmName := "bundle space#query?percent%界\x07.wasm"
+	styleName := "style space&query?#percent%\"'\t\n\r界😀.css"
+	manifestContent, err := json.Marshal(map[string]any{
+		"name":     "browser-url",
+		"compiler": "go",
+		"wasm":     wasmName,
+		"assets":   "assets",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, appDir, manifestName, string(manifestContent))
+	writeTestFile(t, appDir, filepath.Join("assets", styleName), "body { color: green; }\n")
+
+	outDir := filepath.Join(t.TempDir(), "package")
+	if err := packageApp(packageOptions{
+		appDir: appDir, compiler: "go", outDir: outDir, preload: true, compress: map[string]bool{},
+	}); err != nil {
+		t.Fatalf("packageApp() error: %v", err)
+	}
+
+	var manifest assetManifest
+	readInspectJSONFixture(t, outDir, assetManifestName, &manifest)
+	wasmAsset := manifest.Assets[wasmName]
+	styleAsset := manifest.Assets[styleName]
+	if wasmAsset.Path != "assets/"+wasmName || styleAsset.Path != "assets/"+styleName {
+		t.Fatalf("manifest paths changed: WASM %q, style %q", wasmAsset.Path, styleAsset.Path)
+	}
+	for _, asset := range []packageAsset{wasmAsset, styleAsset} {
+		if _, err := os.Stat(filepath.Join(outDir, filepath.FromSlash(asset.Path))); err != nil {
+			t.Fatalf("packaged asset %q missing: %v", asset.Path, err)
+		}
+	}
+
+	wasmURL, err := encodePackagePathAsBrowserURL(wasmAsset.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	styleURL, err := encodePackagePathAsBrowserURL(styleAsset.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexContent, err := os.ReadFile(filepath.Join(outDir, indexHTMLAssetName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := string(indexContent)
+	for _, want := range []string{`fetch("` + wasmURL + `")`, `href="` + wasmURL + `"`, `href="` + styleURL + `"`} {
+		if !strings.Contains(index, want) {
+			t.Fatalf("generated index missing %q:\n%s", want, index)
+		}
+	}
+	for _, browserURL := range []string{wasmURL, styleURL} {
+		response := httptest.NewRecorder()
+		staticHandler(outDir).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/"+browserURL, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("serve %q status = %d, want 200", browserURL, response.Code)
+		}
+	}
+	if _, err := inspectPackageGraph(outDir); err != nil {
+		t.Fatalf("inspectPackageGraph() rejected generated unusual paths: %v", err)
 	}
 }
 

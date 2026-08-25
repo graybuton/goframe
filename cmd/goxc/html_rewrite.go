@@ -1346,6 +1346,7 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 }
 
 func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, runtimePath string) error {
+	var runtimeURL string
 	for _, tag := range document.tags {
 		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
@@ -1383,7 +1384,13 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 		if tag.namespace != htmlNamespaceHTML {
 			continue
 		}
-		replacement, err := encodeGeneratedHTMLAttributeValue(runtimePath, source.valueSyntax)
+		if runtimeURL == "" {
+			runtimeURL, err = encodePackagePathAsBrowserURL(runtimePath)
+			if err != nil {
+				return err
+			}
+		}
+		replacement, err := encodeGeneratedHTMLAttributeValue(runtimeURL, source.valueSyntax)
 		if err != nil {
 			return err
 		}
@@ -1398,6 +1405,7 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 }
 
 func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, wasmPath string) error {
+	var wasmURL string
 	for _, tag := range document.tags {
 		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
@@ -1434,7 +1442,13 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		if tag.namespace != htmlNamespaceHTML {
 			continue
 		}
-		replacement, err := encodeGeneratedJavaScriptStringContents(wasmPath, match.quote)
+		if wasmURL == "" {
+			wasmURL, err = encodePackagePathAsBrowserURL(wasmPath)
+			if err != nil {
+				return err
+			}
+		}
+		replacement, err := encodeGeneratedJavaScriptStringContents(wasmURL, match.quote)
 		if err != nil {
 			return err
 		}
@@ -1575,7 +1589,11 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 		if tag.namespace != htmlNamespaceHTML {
 			continue
 		}
-		replacement, err := encodeGeneratedHTMLAttributeValue(destination, href.valueSyntax)
+		destinationURL, err := encodePackagePathAsBrowserURL(destination)
+		if err != nil {
+			return err
+		}
+		replacement, err := encodeGeneratedHTMLAttributeValue(destinationURL, href.valueSyntax)
 		if err != nil {
 			return err
 		}
@@ -1731,6 +1749,10 @@ func matchLegacyURL(value string, units []sourceByte, expected string) (legacyUR
 }
 
 func normalizeLegacyPackageURLPath(value string) (string, bool) {
+	value, ok := decodeLegacyURLPathOnce(value)
+	if !ok {
+		return "", false
+	}
 	if value == "" || value[0] == '/' || value[0] == '\\' || hasLegacyURLScheme(value) {
 		return "", false
 	}
