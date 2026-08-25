@@ -1288,10 +1288,33 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 		runtimeBlockName:   runtime,
 		bootstrapBlockName: bootstrap,
 	}
+	managedOperations := map[string]struct {
+		name        string
+		alternative string
+	}{
+		preloadBlockName: {
+			name:        "goframe:preload output",
+			alternative: "remove the base element or disable GoFrame-managed preload output",
+		},
+		runtimeBlockName: {
+			name:        "goframe:runtime output",
+			alternative: "remove the base element or provide a deployment-safe external runtime integration outside GoFrame ownership",
+		},
+		bootstrapBlockName: {
+			name:        "goframe:bootstrap output",
+			alternative: "remove the base element or use an external deployment-safe loader outside GoFrame ownership",
+		},
+	}
 	for _, name := range []string{preloadBlockName, runtimeBlockName, bootstrapBlockName} {
 		block, ok := blocks[name]
 		if !ok {
 			continue
+		}
+		if managedValues[name] != "" {
+			operation := managedOperations[name]
+			if err := document.profile.requireRelativePackageURLSafety(operation.name, operation.alternative); err != nil {
+				return "", err
+			}
 		}
 		plan.add(htmlReplacement{
 			start:       block.start,
@@ -1346,6 +1369,14 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 		if !ok {
 			continue
 		}
+		if document.profile.complex || tag.namespace == htmlNamespaceHTML {
+			if err := document.profile.requireRelativePackageURLSafety(
+				"markerless runtime rewrite",
+				"remove the base element or provide a deployment-safe external runtime integration outside GoFrame ownership",
+			); err != nil {
+				return err
+			}
+		}
 		if document.profile.complex {
 			return document.profile.markerlessError("runtime", runtimeBlockName)
 		}
@@ -1388,6 +1419,14 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		match, ok := recognizeLegacyGoFrameBootstrap(plan.content, tag.rawStart, tag.rawEnd)
 		if !ok {
 			continue
+		}
+		if document.profile.complex || tag.namespace == htmlNamespaceHTML {
+			if err := document.profile.requireRelativePackageURLSafety(
+				"markerless bootstrap rewrite",
+				"remove the base element or use an external deployment-safe loader outside GoFrame ownership",
+			); err != nil {
+				return err
+			}
 		}
 		if document.profile.complex {
 			return document.profile.markerlessError("bootstrap", bootstrapBlockName)
@@ -1513,10 +1552,22 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 		if !ok {
 			continue
 		}
+		operation := "markerless stylesheet rewrite"
+		if stylePreload && !stylesheet {
+			operation = "markerless style preload rewrite"
+		}
 		if tag.declarativeShadowMode != "" {
 			return fmt.Errorf(
 				"custom index stylesheet rewriting inside declarative Shadow DOM is not part of the preview markerless contract; use an external stable URL or remove asset-managed shadow-root styles",
 			)
+		}
+		if document.profile.complex || tag.namespace == htmlNamespaceHTML {
+			if err := document.profile.requireRelativePackageURLSafety(
+				operation,
+				"remove the base element or use a deployment-safe external stylesheet outside GoFrame ownership",
+			); err != nil {
+				return err
+			}
 		}
 		if document.profile.complex {
 			return document.profile.stylesheetError()
@@ -1627,6 +1678,12 @@ func htmlSpaceTokenSet(value string) map[string]bool {
 }
 
 func planPreloadInsertion(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, preload string) error {
+	if err := document.profile.requireRelativePackageURLSafety(
+		"preload insertion",
+		"remove the base element or disable GoFrame-managed preload output",
+	); err != nil {
+		return err
+	}
 	var closingHeads []htmlTag
 	for _, tag := range document.tags {
 		if tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "head" && tag.templateDepth == 0 && !managedBlockContains(blocks, tag.start) {

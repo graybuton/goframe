@@ -6,8 +6,10 @@ import (
 )
 
 type htmlRewriteProfile struct {
-	complex   bool
-	construct string
+	complex          bool
+	construct        string
+	activeBaseHref   bool
+	activeBaseOffset int
 }
 
 func (profile *htmlRewriteProfile) markComplex(construct string) {
@@ -16,6 +18,26 @@ func (profile *htmlRewriteProfile) markComplex(construct string) {
 	}
 	profile.complex = true
 	profile.construct = construct
+}
+
+func (profile *htmlRewriteProfile) markActiveBaseHref(offset int) {
+	if profile.activeBaseHref {
+		return
+	}
+	profile.activeBaseHref = true
+	profile.activeBaseOffset = offset
+}
+
+func (profile htmlRewriteProfile) requireRelativePackageURLSafety(operation, alternative string) error {
+	if !profile.activeBaseHref {
+		return nil
+	}
+	return fmt.Errorf(
+		"custom index %s cannot use package-relative URLs with an active <base href> near byte %d; %s",
+		operation,
+		profile.activeBaseOffset,
+		alternative,
+	)
 }
 
 func (profile htmlRewriteProfile) markerlessError(operation, managedBlock string) error {
@@ -73,6 +95,9 @@ func classifyHTMLRewriteProfile(content string, document *scannedHTML) {
 		tag := &document.tags[tagIndex]
 		tag.declarativeShadowMode = context.declarativeShadowMode
 		tag.ordinaryTemplateDepth = context.ordinaryTemplateDepth
+		if potentiallyActiveBaseHref(*tag) {
+			document.profile.markActiveBaseHref(tag.start)
+		}
 		if tag.closing {
 			openingIndex, matched := context.close(tag.name, &document.profile)
 			if matched && tag.name == "script" && document.tags[openingIndex].rawStart == 0 {
@@ -96,6 +121,11 @@ func classifyHTMLRewriteProfile(content string, document *scannedHTML) {
 	appendNoscriptManagedMarkers(content, document)
 }
 
+func potentiallyActiveBaseHref(tag htmlTag) bool {
+	return !tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "base" &&
+		hasHTMLAttribute(tag, "href") && tag.ordinaryTemplateDepth == 0 && tag.declarativeShadowMode == ""
+}
+
 func htmlProfileStartTag(content string, tag htmlTag) (construct, shadowMode string, ordinaryTemplate bool) {
 	if tag.namespace == htmlNamespaceHTML && tag.name == "template" {
 		if value, ok := firstHTMLAttributeValue(content, tag, "shadowrootmode"); ok {
@@ -107,9 +137,6 @@ func htmlProfileStartTag(content string, tag htmlTag) (construct, shadowMode str
 			}
 		}
 		return "", "", true
-	}
-	if tag.namespace == htmlNamespaceHTML && tag.name == "base" && hasHTMLAttribute(tag, "href") {
-		return "<base href>", "", false
 	}
 	if tag.namespace != htmlNamespaceHTML {
 		return "", "", false

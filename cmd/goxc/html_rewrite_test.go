@@ -2691,13 +2691,6 @@ func TestCustomIndexManagedFirstMarkerlessProfile(t *testing.T) {
 			guidance:  "goframe:runtime",
 		},
 		{
-			name:      "active base",
-			source:    `<base href="/nested/"><script src="wasm_exec.js"></script>`,
-			options:   htmlRewriteOptions{runtimePath: runtimePath},
-			construct: "<base href>",
-			guidance:  "goframe:runtime",
-		},
-		{
 			name:      "ownership affecting misnesting",
 			source:    `<div><span></div><script src="wasm_exec.js"></script>`,
 			options:   htmlRewriteOptions{runtimePath: runtimePath},
@@ -2752,7 +2745,7 @@ func TestCustomIndexManagedFirstSafeBlocks(t *testing.T) {
 	}
 	baseOnly := `<base href="/nested/"><p>authored</p>`
 	if got := rewriteIndexForTest(t, baseOnly, htmlRewriteOptions{}); got != baseOnly {
-		t.Fatalf("complex document without an owned rewrite changed\ngot:  %q\nwant: %q", got, baseOnly)
+		t.Fatalf("active-base document without an owned rewrite changed\ngot:  %q\nwant: %q", got, baseOnly)
 	}
 
 	for _, test := range []struct {
@@ -2797,6 +2790,322 @@ func TestCustomIndexManagedFirstSafeBlocks(t *testing.T) {
 		got, err := rewriteIndexHTML(source, options)
 		if err == nil || got != "" || !strings.Contains(err.Error(), "goframe:"+name) || !strings.Contains(err.Error(), "<select>") {
 			t.Fatalf("nested goframe:%s block = %q, %v, want placement failure", name, got, err)
+		}
+	}
+}
+
+func TestCustomIndexActiveBaseRejectsManagedRelativeURLs(t *testing.T) {
+	options := htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.11111111.wasm",
+		runtimePath: "assets/wasm_exec.22222222.js",
+		stylePaths:  []string{"assets/styles.33333333.css"},
+	}
+	tests := []struct {
+		name      string
+		source    string
+		options   htmlRewriteOptions
+		operation string
+	}{
+		{
+			name: "runtime",
+			source: `<!doctype html><html><head><base href="/redirected/"></head><body>
+<!-- goframe:runtime --><!-- /goframe:runtime -->
+</body></html>`,
+			options:   htmlRewriteOptions{runtimePath: options.runtimePath},
+			operation: "goframe:runtime",
+		},
+		{
+			name: "bootstrap",
+			source: `<!doctype html><html><head><base href="subdirectory/"></head><body>
+<!-- goframe:bootstrap --><!-- /goframe:bootstrap -->
+</body></html>`,
+			options:   htmlRewriteOptions{wasmPath: options.wasmPath},
+			operation: "goframe:bootstrap",
+		},
+		{
+			name: "preload",
+			source: `<!doctype html><html><head><base href="https://example.invalid/deployment/">
+<!-- goframe:preload --><!-- /goframe:preload -->
+</head><body></body></html>`,
+			options:   options,
+			operation: "goframe:preload",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, test.options)
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() succeeded with %d output bytes under an active base:\n%s", len(got), got)
+			}
+			if got != "" {
+				t.Fatalf("rewriteIndexHTML() returned partial output %q", got)
+			}
+			for _, want := range []string{test.operation, "active <base href>", "package-relative URLs"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestCustomIndexActiveBaseValueMatrix(t *testing.T) {
+	for _, value := range []string{
+		"/other/",
+		"subdirectory/",
+		"https://example.invalid/path/",
+		"//example.invalid/path/",
+		"",
+		".",
+		"./",
+		"#fragment",
+		"?query",
+	} {
+		t.Run(value, func(t *testing.T) {
+			source := `<base href="` + value + `"><!-- goframe:runtime --><!-- /goframe:runtime -->`
+			got, err := rewriteIndexHTML(source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
+			if err == nil || got != "" || !strings.Contains(err.Error(), "active <base href>") {
+				t.Fatalf("rewriteIndexHTML(%q) = %q, %v, want active-base rejection", source, got, err)
+			}
+		})
+	}
+}
+
+func TestCustomIndexActiveBaseContextAndNoOutputControls(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	managedRuntime := `<!-- goframe:runtime --><!-- /goframe:runtime -->`
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "target only",
+			source: `<base target="_blank">` + managedRuntime,
+		},
+		{
+			name:   "ordinary template base",
+			source: `<template><base href="/inert/"></template>` + managedRuntime,
+		},
+		{
+			name:   "declarative shadow base",
+			source: `<host-element><template shadowrootmode="open"><base href="/shadow/"></template></host-element>` + managedRuntime,
+		},
+		{
+			name:   "SVG base lookalike",
+			source: `<svg><base href="/foreign/"></base></svg>` + managedRuntime,
+		},
+		{
+			name:   "MathML base lookalike",
+			source: `<math><base href="/foreign/"></base></math>` + managedRuntime,
+		},
+		{
+			name:   "comment base lookalike",
+			source: `<!-- <base href="/comment/"> -->` + managedRuntime,
+		},
+		{
+			name:   "script base lookalike",
+			source: `<script>const example = '<base href="/script/">';</script>` + managedRuntime,
+		},
+		{
+			name:   "noscript base lookalike",
+			source: `<noscript><base href="/noscript/"></noscript>` + managedRuntime,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, htmlRewriteOptions{runtimePath: runtimePath})
+			if !strings.Contains(got, `<script src="`+runtimePath+`"></script>`) {
+				t.Fatalf("managed runtime output missing:\n%s", got)
+			}
+		})
+	}
+
+	t.Run("ordinary template base does not block markerless output", func(t *testing.T) {
+		source := `<template><base href="/inert/"></template><script src="wasm_exec.js"></script>`
+		want := `<template><base href="/inert/"></template><script src="` + runtimePath + `"></script>`
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+			t.Fatalf("ordinary template base changed markerless ownership\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	t.Run("active base with no owned operation", func(t *testing.T) {
+		source := `<!doctype html><base href="/redirected/"><script src="https://cdn.example/runtime.js"></script><link rel="stylesheet" href="https://cdn.example/styles.css"><script>externalLoader("https://cdn.example/app.wasm")</script>`
+		options := htmlRewriteOptions{
+			wasmPath:    "assets/bundle.11111111.wasm",
+			runtimePath: runtimePath,
+			styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			},
+		}
+		if got := rewriteIndexForTest(t, source, options); got != source {
+			t.Fatalf("authored external document changed\ngot:  %q\nwant: %q", got, source)
+		}
+	})
+
+	t.Run("disabled managed preload is empty and allowed", func(t *testing.T) {
+		source := `<base href="/redirected/"><!-- goframe:preload -->authored<!-- /goframe:preload -->`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{
+			wasmPath:    "assets/bundle.11111111.wasm",
+			runtimePath: runtimePath,
+		})
+		if !strings.Contains(got, "<!-- goframe:preload -->\n\n<!-- /goframe:preload -->") {
+			t.Fatalf("disabled managed preload was not emptied:\n%s", got)
+		}
+	})
+
+	t.Run("active base foreign owned lookalikes remain authored", func(t *testing.T) {
+		source := `<base href="/redirected/"><svg><script src="wasm_exec.js"></script><link rel="stylesheet" href="styles.css"></link></svg>`
+		options := htmlRewriteOptions{
+			runtimePath: runtimePath,
+			styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			},
+		}
+		if got := rewriteIndexForTest(t, source, options); got != source {
+			t.Fatalf("foreign lookalikes changed\ngot:  %q\nwant: %q", got, source)
+		}
+	})
+}
+
+func TestCustomIndexActiveBaseMultiplicity(t *testing.T) {
+	const managedRuntime = `<!-- goframe:runtime --><!-- /goframe:runtime -->`
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "body base",
+			source: `<html><head></head><body><base href="/body/">` + managedRuntime + `</body></html>`,
+		},
+		{
+			name:   "two active bases",
+			source: `<base href="/first/"><base href="/second/">` + managedRuntime,
+		},
+		{
+			name:   "target then active",
+			source: `<base target="_blank"><base href="/active/">` + managedRuntime,
+		},
+		{
+			name:   "uppercase href",
+			source: `<BASE HREF="/active/">` + managedRuntime,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
+			if err == nil || got != "" || !strings.Contains(err.Error(), "active <base href>") {
+				t.Fatalf("rewriteIndexHTML() = %q, %v, want deterministic active-base failure", got, err)
+			}
+		})
+	}
+}
+
+func TestCustomIndexActiveBaseRejectsMarkerlessRelativeURLs(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		options   htmlRewriteOptions
+		operation string
+	}{
+		{
+			name:      "runtime",
+			source:    `<base href="/redirected/"><script src="wasm_exec.js"></script>`,
+			options:   htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"},
+			operation: "runtime",
+		},
+		{
+			name:      "bootstrap",
+			source:    `<base href="/redirected/"><script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then((result) => go.run(result.instance));</script>`,
+			options:   htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"},
+			operation: "bootstrap",
+		},
+		{
+			name:   "stylesheet",
+			source: `<base href="/redirected/"><link rel="stylesheet" href="styles.css">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			operation: "stylesheet",
+		},
+		{
+			name:   "style preload",
+			source: `<base href="/redirected/"><link rel="preload" as="style" href="styles.css">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			operation: "style preload",
+		},
+		{
+			name:      "structural preload",
+			source:    `<html><head><base href="/redirected/"></head><body></body></html>`,
+			options:   htmlRewriteOptions{preload: true, wasmPath: "assets/bundle.11111111.wasm", runtimePath: "assets/wasm_exec.22222222.js"},
+			operation: "preload",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, test.options)
+			if err == nil || got != "" {
+				t.Fatalf("rewriteIndexHTML() = %q, %v, want active-base failure", got, err)
+			}
+			for _, want := range []string{test.operation, "active <base href>", "package-relative URLs"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestPackageCustomIndexActiveBaseManagedFailureIsAtomic(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	source := `<!doctype html><html><head><base href="/redirected/"></head><body><div id="root"></div>
+<!-- goframe:runtime --><!-- /goframe:runtime -->
+</body></html>`
+	writeTestFile(t, appDir, indexHTMLAssetName, source)
+
+	temporaryRoot := t.TempDir()
+	t.Setenv("TMPDIR", temporaryRoot)
+	outDir := filepath.Join(t.TempDir(), "package")
+	writeCompleteCurrentPackage(t, outDir)
+	before := snapshotInspectTree(t, outDir)
+	markerBefore, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var packageErr error
+	output := captureStdout(t, func() {
+		packageErr = packageApp(packageOptions{
+			appDir: appDir, compiler: "go", outDir: outDir, assetHash: true, compress: map[string]bool{},
+		})
+	})
+	if packageErr == nil || !strings.Contains(packageErr.Error(), "active <base href>") || !strings.Contains(packageErr.Error(), "goframe:runtime") {
+		t.Fatalf("packageApp() error = %v, want active-base runtime failure; output = %q", packageErr, output)
+	}
+	if strings.Contains(output, "packaged ") {
+		t.Fatalf("failed package emitted success output: %q", output)
+	}
+	if got := snapshotInspectTree(t, outDir); !reflect.DeepEqual(got, before) {
+		t.Fatalf("active-base failure changed previous package\nbefore: %#v\nafter:  %#v", before, got)
+	}
+	assertFileContent(t, filepath.Join(appDir, indexHTMLAssetName), source)
+	markerAfter, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(markerAfter, markerBefore) {
+		t.Fatalf("active-base failure changed completion marker\nbefore: %q\nafter:  %q", markerBefore, markerAfter)
+	}
+	entries, err := os.ReadDir(temporaryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "goxc-package-") {
+			t.Fatalf("active-base failure retained temporary stage %s", entry.Name())
 		}
 	}
 }
