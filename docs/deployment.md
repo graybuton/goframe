@@ -151,15 +151,23 @@ Custom `index.html` files may use explicit package blocks:
 <!-- /goframe:bootstrap -->
 ```
 
-These exact, case-sensitive comments are build-time ownership delimiters.
-Packaging validates all three block types before changing the document, then
-replaces only the complete managed blocks with final package references. The
+These exact, case-sensitive comments are the authoritative, universal
+build-time ownership mechanism for custom HTML. Packaging validates all three
+block types before changing the document, then replaces only complete managed
+blocks in safe top-level source locations with final package references. The
 comments remain in packaged and development HTML and do not participate in
-application rendering. Duplicate, orphaned, reversed, nested, or interleaved
-managed markers fail packaging before publication. With `--preload` disabled,
-a valid preload block retains its delimiters with an empty interior.
+application rendering. Duplicate, orphaned, reversed, nested, interleaved, or
+tree-builder-sensitive placements fail packaging before publication. With
+`--preload` disabled, a valid preload block retains its delimiters with an
+empty interior.
 
-Markerless compatibility is structural rather than textual. It rewrites only:
+Markerless rewriting is a bounded historical compatibility profile, not full
+HTML tree construction. It is available only when source structure is
+balanced and ownership does not depend on browser recovery or insertion modes.
+In particular, GoFrame does not infer markerless ownership through `select`,
+table-sensitive content, `frameset`, `noscript`, declarative Shadow DOM, an
+active `base[href]`, or ownership-affecting misnesting. Inside the supported
+simple profile, it rewrites only:
 
 - the URL value of an executable `<script src>` that names `wasm_exec.js` or
   `./wasm_exec.js`;
@@ -182,6 +190,14 @@ not validate arbitrary JavaScript; unsupported custom loaders remain unchanged.
 Use an explicit `goframe:bootstrap` block when that code needs a deterministic
 package rewrite.
 
+Authored content outside owned spans remains byte-preserved. When a required
+runtime, bootstrap, preload, or declared stylesheet rewrite would cross a
+tree-builder-sensitive boundary, packaging fails before publication with
+placement guidance rather than publishing a stale reference. Asset-managed
+stylesheet rewriting inside `template[shadowrootmode="open|closed"]` is not in
+the current preview contract; use a stable external URL or move that ownership
+to supported top-level markup.
+
 The rewriter scans the original source and changes only validated byte ranges;
 it does not parse and serialize the whole document. Whitespace, line endings,
 doctype spelling, attribute casing and order, quotes, and formatting outside
@@ -199,11 +215,12 @@ assets:
 ```
 
 CSS preload is included only when CSS assets are packaged through the manifest
-asset directory or explicit asset list. For markerless custom HTML, preload
-markup is inserted immediately before the structural closing `</head>` tag.
-Text resembling `</head>` inside comments, scripts, styles, attributes, or
-examples is ignored. If no unambiguous closing head exists, packaging fails and
-recommends an explicit `goframe:preload` block.
+asset directory or explicit asset list. For simple-profile markerless custom
+HTML, preload markup is inserted immediately before the structural closing
+`</head>` tag. Text resembling `</head>` inside comments, scripts, styles,
+attributes, or examples is ignored. If the document is outside that profile or
+has no unambiguous closing head, packaging fails and recommends an explicit
+top-level `goframe:preload` block.
 
 ## Asset Manifest
 

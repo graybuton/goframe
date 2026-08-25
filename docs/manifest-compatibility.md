@@ -62,17 +62,24 @@ Current input behavior:
   paths;
 - custom `index.html` templates must exist before compilation and must be
   regular non-symlink files;
-- custom templates may give GoFrame explicit ownership of preload, runtime,
-  and bootstrap sections through complete, exact managed comment pairs. The
-  delimiters remain in package and development HTML; malformed, duplicate,
-  nested, or interleaved pairs fail before package publication;
-- without a managed section, compatibility rewriting is limited to structural
-  runtime script URLs, complete historical GoFrame bootstrap scripts, declared
-  stylesheet links, and structural preload insertion. Arbitrary direct fetch
-  calls and scripts with additional authored statements remain unchanged. The
-  recognizer does not validate arbitrary JavaScript; unsupported custom loaders
-  remain unchanged and use the managed bootstrap block when rewriting is
-  required;
+- custom templates give GoFrame explicit ownership of preload, runtime, and
+  bootstrap sections through complete, exact managed comment pairs. These are
+  the universal ownership mechanism. The delimiters remain in package and
+  development HTML; malformed, duplicate, nested, interleaved, or unsafe
+  tree-builder-sensitive placements fail before package publication;
+- without a managed section, compatibility rewriting is limited to a balanced
+  simple historical profile: structural runtime script URLs, complete
+  historical GoFrame bootstrap scripts, declared stylesheet links, and
+  structural preload insertion. GoFrame does not infer markerless ownership
+  through select/table/frameset/noscript insertion modes, declarative Shadow
+  DOM, active base URLs, or ownership-affecting misnesting. A required rewrite
+  in those contexts fails before publication rather than publishing a stale
+  path;
+- arbitrary direct fetch calls and scripts with additional authored statements
+  remain unchanged. The recognizer does not validate arbitrary JavaScript;
+  unsupported custom loaders remain byte-preserved and use an explicit managed
+  block when rewriting is required. Asset-managed stylesheet rewriting inside
+  declarative Shadow DOM is not part of the current preview contract;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 
