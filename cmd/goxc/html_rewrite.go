@@ -33,10 +33,12 @@ func (plan htmlRewritePlan) apply() (string, error) {
 		}
 		return replacements[first].end < replacements[second].end
 	})
+	finalSize := int64(len(plan.content))
 	for index, replacement := range replacements {
 		if replacement.start < 0 || replacement.end < replacement.start || replacement.end > len(plan.content) {
 			return "", fmt.Errorf("custom index rewrite produced an invalid %s span", replacement.description)
 		}
+		finalSize += int64(len(replacement.value)) - int64(replacement.end-replacement.start)
 		if index == 0 {
 			continue
 		}
@@ -49,13 +51,23 @@ func (plan htmlRewritePlan) apply() (string, error) {
 			)
 		}
 	}
-
-	result := plan.content
-	for index := len(replacements) - 1; index >= 0; index-- {
-		replacement := replacements[index]
-		result = result[:replacement.start] + replacement.value + result[replacement.end:]
+	if len(replacements) == 0 {
+		return plan.content, nil
 	}
-	return result, nil
+	if finalSize < 0 || uint64(finalSize) > uint64(^uint(0)>>1) {
+		return "", fmt.Errorf("custom index rewrite result is too large")
+	}
+
+	var result strings.Builder
+	result.Grow(int(finalSize))
+	cursor := 0
+	for _, replacement := range replacements {
+		result.WriteString(plan.content[cursor:replacement.start])
+		result.WriteString(replacement.value)
+		cursor = replacement.end
+	}
+	result.WriteString(plan.content[cursor:])
+	return result.String(), nil
 }
 
 type scannedHTML struct {
@@ -116,10 +128,19 @@ type htmlElementContext struct {
 	namespace               htmlNamespace
 	htmlIntegrationPoint    bool
 	mathMLTextIntegrationPt bool
+	previousSameName        int
 }
 
 type htmlScannerContext struct {
-	elements []htmlElementContext
+	elements  []htmlElementContext
+	topByName map[string]int
+}
+
+type htmlClosingResolution struct {
+	index       int
+	namespace   htmlNamespace
+	matched     bool
+	lookupCount int
 }
 
 func (tag htmlTag) attribute(name string) (*htmlAttribute, error) {
@@ -194,15 +215,18 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			offset++
 			continue
 		}
+		var closing htmlClosingResolution
 		if context.applyForeignBreakout(tag) {
 			document.profile.markComplex("foreign-content parser recovery")
 			if tag.closing {
 				tag.namespace = htmlNamespaceHTML
+				closing = context.resolveClosingTag(tag.name)
 			} else {
 				tag.namespace = namespaceForHTMLStartTag(tag.name)
 			}
 		} else if tag.closing {
-			tag.namespace = context.closingNamespace(tag.name)
+			closing = context.resolveClosingTag(tag.name)
+			tag.namespace = closing.namespace
 		} else {
 			tag.namespace = context.startTagNamespace(tag.name)
 		}
@@ -240,7 +264,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		}
 		document.tags = append(document.tags, tag)
 		if tag.closing {
-			context.close(tag.name)
+			context.close(closing)
 		} else if tag.namespace == htmlNamespaceHTML {
 			if !voidHTMLElement(tag.name) {
 				context.push(content, tag)
@@ -414,13 +438,15 @@ func (context *htmlScannerContext) applyForeignBreakout(tag htmlTag) bool {
 	if !context.usesForeignContentRules(tag) || !foreignContentBreakoutTag(tag) {
 		return false
 	}
-	for len(context.elements) > 0 {
-		current := context.elements[len(context.elements)-1]
+	keep := len(context.elements)
+	for keep > 0 {
+		current := context.elements[keep-1]
 		if current.namespace == htmlNamespaceHTML || current.htmlIntegrationPoint || current.mathMLTextIntegrationPt {
 			break
 		}
-		context.elements = context.elements[:len(context.elements)-1]
+		keep--
 	}
+	context.truncate(keep)
 	return true
 }
 
@@ -477,7 +503,14 @@ func namespaceForHTMLStartTag(name string) htmlNamespace {
 }
 
 func (context *htmlScannerContext) push(content string, tag htmlTag) {
-	element := htmlElementContext{name: tag.name, namespace: tag.namespace}
+	if context.topByName == nil {
+		context.topByName = map[string]int{}
+	}
+	previousSameName := -1
+	if previous, ok := context.topByName[tag.name]; ok {
+		previousSameName = previous
+	}
+	element := htmlElementContext{name: tag.name, namespace: tag.namespace, previousSameName: previousSameName}
 	switch tag.namespace {
 	case htmlNamespaceSVG:
 		switch tag.name {
@@ -496,24 +529,37 @@ func (context *htmlScannerContext) push(content string, tag htmlTag) {
 		}
 	}
 	context.elements = append(context.elements, element)
+	context.topByName[tag.name] = len(context.elements) - 1
 }
 
-func (context htmlScannerContext) closingNamespace(name string) htmlNamespace {
-	for index := len(context.elements) - 1; index >= 0; index-- {
-		if context.elements[index].name == name {
-			return context.elements[index].namespace
-		}
+func (context htmlScannerContext) resolveClosingTag(name string) htmlClosingResolution {
+	resolution := htmlClosingResolution{namespace: context.currentNamespace(), lookupCount: 1}
+	index, ok := context.topByName[name]
+	if !ok {
+		return resolution
 	}
-	return context.currentNamespace()
+	resolution.index = index
+	resolution.namespace = context.elements[index].namespace
+	resolution.matched = true
+	return resolution
 }
 
-func (context *htmlScannerContext) close(name string) {
-	for index := len(context.elements) - 1; index >= 0; index-- {
-		if context.elements[index].name == name {
-			context.elements = context.elements[:index]
-			return
+func (context *htmlScannerContext) close(resolution htmlClosingResolution) {
+	if resolution.matched {
+		context.truncate(resolution.index)
+	}
+}
+
+func (context *htmlScannerContext) truncate(length int) {
+	for index := len(context.elements) - 1; index >= length; index-- {
+		element := context.elements[index]
+		if element.previousSameName < 0 {
+			delete(context.topByName, element.name)
+		} else {
+			context.topByName[element.name] = element.previousSameName
 		}
 	}
+	context.elements = context.elements[:length]
 }
 
 func firstHTMLAttributeValue(content string, tag htmlTag, name string) (string, bool) {

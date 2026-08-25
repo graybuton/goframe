@@ -2893,6 +2893,60 @@ func TestPackageCustomIndexManagedFirstFailureIsAtomic(t *testing.T) {
 	}
 }
 
+func TestCustomIndexScannerClosingLookupIsConstant(t *testing.T) {
+	for _, depth := range []int{1, 1_000, 50_000} {
+		var context htmlScannerContext
+		for range depth {
+			context.push("", htmlTag{name: "div", namespace: htmlNamespaceHTML})
+		}
+		resolution := context.resolveClosingTag("missing")
+		if resolution.matched || resolution.lookupCount != 1 {
+			t.Fatalf("depth %d unmatched resolution = %+v, want one indexed lookup", depth, resolution)
+		}
+		if len(context.elements) != depth {
+			t.Fatalf("depth %d unmatched lookup changed stack length to %d", depth, len(context.elements))
+		}
+	}
+
+	var context htmlScannerContext
+	for _, name := range []string{"div", "span", "div"} {
+		context.push("", htmlTag{name: name, namespace: htmlNamespaceHTML})
+	}
+	span := context.resolveClosingTag("span")
+	context.close(span)
+	if len(context.elements) != 1 || context.elements[0].name != "div" {
+		t.Fatalf("matched suffix close retained %#v, want outer div only", context.elements)
+	}
+	if got := context.resolveClosingTag("div"); !got.matched || got.index != 0 || got.lookupCount != 1 {
+		t.Fatalf("restored same-name index = %+v, want outer div", got)
+	}
+	if got := context.resolveClosingTag("span"); got.matched || got.lookupCount != 1 {
+		t.Fatalf("removed span index = %+v, want one unmatched lookup", got)
+	}
+}
+
+func TestCustomIndexRewritePlanOutputCompatibility(t *testing.T) {
+	plan := htmlRewritePlan{content: "0123456789"}
+	plan.add(htmlReplacement{start: 8, end: 9, value: "eight", description: "late"})
+	plan.add(htmlReplacement{start: 2, end: 4, value: "AB", description: "early"})
+	plan.add(htmlReplacement{start: 6, end: 6, value: "-", description: "insert"})
+	got, err := plan.apply()
+	if err != nil {
+		t.Fatalf("htmlRewritePlan.apply() error: %v", err)
+	}
+	if want := "01AB45-67eight9"; got != want {
+		t.Fatalf("htmlRewritePlan.apply() = %q, want %q", got, want)
+	}
+
+	overlap := htmlRewritePlan{content: "abcdef", replacements: []htmlReplacement{
+		{start: 1, end: 4, value: "x", description: "first"},
+		{start: 3, end: 5, value: "y", description: "second"},
+	}}
+	if got, err := overlap.apply(); err == nil || got != "" || !strings.Contains(err.Error(), "overlap") {
+		t.Fatalf("overlapping plan = %q, %v, want overlap error", got, err)
+	}
+}
+
 func rewriteIndexForTest(t *testing.T, source string, options htmlRewriteOptions) string {
 	t.Helper()
 	got, err := rewriteIndexHTML(source, options)
