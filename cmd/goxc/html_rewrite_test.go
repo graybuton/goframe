@@ -2246,6 +2246,68 @@ func TestCustomIndexHTMLCommentTokenizerStates(t *testing.T) {
 	}
 }
 
+func TestCustomIndexBogusCommentSemantics(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const stylePath = "assets/styles.33333333.css"
+	for _, test := range []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+		old     string
+		new     string
+	}{
+		{
+			name:    "processing instruction looking",
+			source:  `<?x "><script src="wasm_exec.js"></script>">`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			old:     "wasm_exec.js",
+			new:     runtimePath,
+		},
+		{
+			name:   "invalid markup declaration",
+			source: `<!unknown "><link rel="stylesheet" href="styles.css">">`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": stylePath,
+			}},
+			old: "styles.css",
+			new: stylePath,
+		},
+		{
+			name:    "HTML namespace CDATA looking",
+			source:  `<![CDATA["><script src="wasm_exec.js"></script>"]>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			old:     "wasm_exec.js",
+			new:     runtimePath,
+		},
+		{
+			name:    "invalid end tag open",
+			source:  `</?x "><script src="wasm_exec.js"></script>">`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			old:     "wasm_exec.js",
+			new:     runtimePath,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			want := strings.Replace(test.source, test.old, test.new, 1)
+			if got := rewriteIndexForTest(t, test.source, test.options); got != want {
+				t.Fatalf("bogus comment boundary mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, source := range []string{`<?x "opaque`, `<!unknown "opaque`, `<![CDATA["opaque`, `</?x "opaque`} {
+		if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != source {
+			t.Fatalf("EOF bogus comment changed\ngot:  %q\nwant: %q", got, source)
+		}
+	}
+
+	doctype := `<!DOCTYPE html PUBLIC "x>y"><script src="wasm_exec.js"></script>`
+	want := strings.Replace(doctype, "wasm_exec.js", runtimePath, 1)
+	if got := rewriteIndexForTest(t, doctype, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+		t.Fatalf("DOCTYPE path changed\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
 func TestCustomIndexPreloadInsertionMatrix(t *testing.T) {
 	options := htmlRewriteOptions{
 		preload:     true,
