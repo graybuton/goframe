@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createHTTPServer } from "node:http";
 import { createServer as createPortServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -104,6 +104,11 @@ try {
     for (const mode of ["marker", "legacy"]) {
         scenarios.push(await prepareScenario(mode));
     }
+    const targetOnlyFixture = await prepareVariantFixture("base-target", "base-target.html");
+    const targetOnlyScenario = await prepareScenario("base-target", targetOnlyFixture, "marker");
+    const negativeManaged = await verifyActiveBaseManagedFailure(targetOnlyScenario);
+    scenarios.push(targetOnlyScenario);
+    const authoredBase = await prepareAuthoredBaseScenario();
 
     browser = await startBrowser(chrome, [
         "--headless",
@@ -137,10 +142,12 @@ try {
     await client.call("Network.enable");
     const attributeOracle = await runAttributeOracle();
     const semanticOracle = await runManagedFirstSemanticOracle();
+    const baseOracle = await runBaseResolutionOracle();
 
     for (const scenario of scenarios) {
         scenario.browser = await runBrowserScenario(scenario);
     }
+    authoredBase.browser = await runAuthoredBaseBrowserScenario(authoredBase);
 
     const stableScenarios = scenarios.map((scenario) => ({
         mode: scenario.mode,
@@ -151,10 +158,20 @@ try {
         paths: scenario.paths,
         browser: scenario.browser,
     }));
+    const stableAuthoredBase = {
+        indexBytes: authoredBase.indexBytes,
+        indexSha256: authoredBase.indexSha256,
+        sourcePreserved: authoredBase.sourcePreserved,
+        generatedURLCount: authoredBase.generatedURLCount,
+        browser: authoredBase.browser,
+    };
     const report = {
         compiler,
         attributeOracle,
         semanticOracle,
+        baseOracle,
+        negativeManaged,
+        authoredBase: stableAuthoredBase,
         behaviorSha256: sha256(JSON.stringify(stableScenarios)),
         scenarios: stableScenarios,
     };
@@ -176,8 +193,7 @@ try {
     }
 }
 
-async function prepareScenario(mode) {
-    const fixture = join(fixtureRoot, mode);
+async function prepareScenario(mode, fixture = join(fixtureRoot, mode), contractMode = mode) {
     const workspace = join(tempRoot, "workspaces", mode);
     const packageOutput = await runCommand(goxc, [
         "package",
@@ -197,8 +213,8 @@ async function prepareScenario(mode) {
     const packageMetadata = JSON.parse(
         await readFile(join(packageDirectory, "goframe-package.json"), "utf8"),
     );
-    assertAuthoredSentinels(sourceHTML, packagedHTML, mode);
-    assertPackageContract(mode, packagedHTML, assetManifest, packageMetadata);
+    assertAuthoredSentinels(sourceHTML, packagedHTML, mode, contractMode);
+    assertPackageContract(mode, packagedHTML, assetManifest, packageMetadata, contractMode);
 
     const inspectJSON = await runCommand(goxc, [
         "inspect",
@@ -229,6 +245,7 @@ async function prepareScenario(mode) {
 
     return {
         mode,
+        contractMode,
         fixture,
         workspace,
         packageDirectory,
@@ -244,12 +261,91 @@ async function prepareScenario(mode) {
     };
 }
 
-function assertAuthoredSentinels(source, packaged, mode) {
+async function prepareVariantFixture(name, htmlName) {
+    const fixture = join(tempRoot, "fixtures", name);
+    await cp(join(fixtureRoot, "marker"), fixture, { recursive: true });
+    await cp(join(fixtureRoot, htmlName), join(fixture, "index.html"));
+    return fixture;
+}
+
+async function verifyActiveBaseManagedFailure(scenario) {
+    const indexPath = join(scenario.fixture, "index.html");
+    const targetOnlySource = await readFile(indexPath, "utf8");
+    const activeBaseSource = targetOnlySource.replace(
+        '<base target="_blank">',
+        '<base href="/redirected/">',
+    );
+    assert(activeBaseSource !== targetOnlySource, "negative managed fixture did not replace its target-only base");
+    const packageBefore = await snapshotTree(scenario.packageDirectory);
+    await writeFile(indexPath, activeBaseSource);
+    const sourceBefore = await snapshotTree(scenario.fixture);
+    let result;
+    try {
+        result = await runCommandResult(goxc, [
+            "package",
+            scenario.fixture,
+            `--compiler=${compiler}`,
+            `--workspace=${scenario.workspace}`,
+            "--asset-hash",
+            "--preload",
+            "--compress=gzip,br",
+        ], commandEnvironment());
+        const sourceAfter = await snapshotTree(scenario.fixture);
+        const packageAfter = await snapshotTree(scenario.packageDirectory);
+        assertDeepEqual(sourceAfter, sourceBefore, "active-base managed source graph");
+        assertDeepEqual(packageAfter, packageBefore, "active-base managed previous package graph");
+    } finally {
+        await writeFile(indexPath, targetOnlySource);
+    }
+    assert(result.code !== 0, "active-base managed package unexpectedly succeeded");
+    assert(result.output.includes("active <base href>"), `active-base managed error = ${JSON.stringify(result.output)}`);
+    assert(result.output.includes("goframe:preload output"), `active-base managed error omitted the blocked operation: ${JSON.stringify(result.output)}`);
+    assert(!/^packaged /m.test(result.output), `active-base managed package emitted success output: ${JSON.stringify(result.output)}`);
+    return {
+        rejected: true,
+        operation: "goframe:preload output",
+        previousPackagePreserved: true,
+        sourcePreserved: true,
+        successOutputBytes: 0,
+    };
+}
+
+async function prepareAuthoredBaseScenario() {
+    const mode = "base-authored";
+    const fixture = await prepareVariantFixture(mode, "base-authored.html");
+    const workspace = join(tempRoot, "workspaces", mode);
+    const sourceHTML = await readFile(join(fixture, "index.html"), "utf8");
+    const packageOutput = await runCommand(goxc, [
+        "package",
+        fixture,
+        `--compiler=${compiler}`,
+        `--workspace=${workspace}`,
+        "--asset-hash",
+        "--compress=gzip,br",
+    ], commandEnvironment());
+    const packageDirectory = packagedDirectory(packageOutput);
+    const packagedHTML = await readFile(join(packageDirectory, "index.html"), "utf8");
+    assert(packagedHTML === sourceHTML, "authored active-base index changed during packaging");
+    assert(!packagedHTML.includes("assets/"), "authored active-base index gained a package-owned URL");
+    assert(!packagedHTML.includes("goframe:"), "authored active-base index gained a managed marker");
+    return {
+        mode,
+        fixture,
+        workspace,
+        packageDirectory,
+        indexBytes: Buffer.byteLength(packagedHTML),
+        indexSha256: sha256(packagedHTML),
+        sourcePreserved: true,
+        generatedURLCount: 0,
+    };
+}
+
+function assertAuthoredSentinels(source, packaged, mode, contractMode) {
     for (const sentinel of authoredSentinels) {
         assert(source.includes(sentinel), `${mode} source is missing sentinel ${JSON.stringify(sentinel)}`);
         assert(packaged.includes(sentinel), `${mode} package changed sentinel ${JSON.stringify(sentinel)}`);
     }
-    if (mode === "legacy") {
+    if (contractMode === "legacy") {
         assert(source.includes("././wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy source is missing the dot-segment runtime reference");
         assert(source.includes("assets/../my&#32;&amp;copy;&#32;style.css?fixture=legacy&copy;=x#theme"), "legacy source is missing the unquoted semantic stylesheet reference");
         assert(source.includes("assets/%2e%2e/bundle.wasm?fixture=legacy#wasm"), "legacy source is missing the percent-dot bootstrap reference");
@@ -269,7 +365,7 @@ function assertAuthoredSentinels(source, packaged, mode) {
     }
 }
 
-function assertPackageContract(mode, html, manifest, metadata) {
+function assertPackageContract(mode, html, manifest, metadata, contractMode) {
     assert(metadata.hashAssets === true, `${mode} package did not enable asset hashing`);
     assert(metadata.preload === true, `${mode} package did not enable preload`);
     const wasm = manifest.entrypoints.wasm;
@@ -277,7 +373,7 @@ function assertPackageContract(mode, html, manifest, metadata) {
     const styles = manifest.entrypoints.styles;
     assert(Array.isArray(styles) && styles.length === 1, `${mode} package styles = ${JSON.stringify(styles)}`);
     const style = styles[0];
-    const styleLogicalName = mode === "legacy" ? "my &copy; style.css" : "styles.css";
+    const styleLogicalName = contractMode === "legacy" ? "my &copy; style.css" : "styles.css";
     for (const [logicalName, path] of [["bundle.wasm", wasm], ["wasm_exec.js", runtime], [styleLogicalName, style]]) {
         assert(/^assets\/.+\.[0-9a-f]{8}\.[^.]+$/.test(path), `${mode} ${logicalName} path is not hashed: ${path}`);
         const compressed = manifest.assets[logicalName]?.compressed;
@@ -287,7 +383,7 @@ function assertPackageContract(mode, html, manifest, metadata) {
     for (const path of [wasm, runtime, style]) {
         assert(html.includes(`<link rel="preload" href="${encodeDoubleQuotedAttribute(path)}"`), `${mode} preload is missing ${path}`);
     }
-    if (mode === "marker") {
+    if (contractMode === "marker") {
         for (const name of ["preload", "runtime", "bootstrap"]) {
             assert(html.includes(`<!-- goframe:${name} -->`), `marker package lost ${name} start marker`);
             assert(html.includes(`<!-- /goframe:${name} -->`), `marker package lost ${name} end marker`);
@@ -346,7 +442,7 @@ async function runBrowserScenario(scenario) {
     assert(before.bodyExample === "bundle.wasm", `${scenario.mode} data attribute changed`);
     assert(before.inlineJSON === '{"asset":"bundle.wasm","runtime":"wasm_exec.js"}', `${scenario.mode} inline JSON changed`);
     assertDeepEqual(before.runtimeErrors, [], `${scenario.mode} GoFrame runtime errors before interaction`);
-    if (scenario.mode === "legacy") {
+    if (scenario.contractMode === "legacy") {
         for (const [name, value] of [["SVG", before.svgCDATA], ["MathML", before.mathCDATA]]) {
             assert(value.includes('<script src="wasm_exec.js"></script>'), `${name} CDATA runtime decoy changed`);
             assert(value.includes('<link rel="stylesheet" href="styles.css">'), `${name} CDATA style decoy changed`);
@@ -372,6 +468,18 @@ async function runBrowserScenario(scenario) {
         assert(before.encodedStyleAttributeCount === 4, `legacy stylesheet attribute count = ${before.encodedStyleAttributeCount}`);
         assert(before.encodedStyleNamespace === "http://www.w3.org/1999/xhtml", "legacy stylesheet left the HTML namespace");
     }
+    if (scenario.mode === "base-target") {
+        assert(before.baseHref === null, `target-only base href = ${JSON.stringify(before.baseHref)}`);
+        assert(before.baseTarget === "_blank", `target-only base target = ${JSON.stringify(before.baseTarget)}`);
+        assert(before.runtimeSource === scenario.paths.runtime, `target-only runtime source = ${JSON.stringify(before.runtimeSource)}`);
+        assert(before.runtimeResolvedPath === `/${scenario.paths.runtime}`, `target-only resolved runtime path = ${JSON.stringify(before.runtimeResolvedPath)}`);
+        assert(before.stylesheetResolvedPath === `/${scenario.paths.style}`, `target-only resolved stylesheet path = ${JSON.stringify(before.stylesheetResolvedPath)}`);
+        const preloadPaths = before.preloads.map((preload) => preload.raw).sort();
+        assertDeepEqual(preloadPaths, Object.values(scenario.paths).sort(), "target-only preload package paths");
+        for (const preload of before.preloads) {
+            assert(preload.resolvedPath === `/${preload.raw}`, `target-only resolved preload path = ${JSON.stringify(preload)}`);
+        }
+    }
 
     const requestedAssets = [...new Set(cdpPackageAssetRequests
         .filter((request) => request.status === 200)
@@ -379,7 +487,7 @@ async function runBrowserScenario(scenario) {
     for (const path of Object.values(scenario.paths)) {
         assert(requestedAssets.includes(`/${path}`), `${scenario.mode} browser did not request ${path}`);
     }
-    if (scenario.mode === "legacy") {
+    if (scenario.contractMode === "legacy") {
         const entityDecodedStyle = `/${scenario.paths.style.replace("&copy;", "©")}`;
         assert(!cdpPackageAssetRequests.some((request) => request.decodedPathname === "/assets/my"), "legacy stylesheet request was truncated at its generated space");
         assert(!cdpPackageAssetRequests.some((request) => request.decodedPathname === entityDecodedStyle), "legacy stylesheet ampersand was decoded as an HTML named reference");
@@ -421,7 +529,70 @@ async function runBrowserScenario(scenario) {
         punctuationScriptNamespace: after.punctuationScriptNamespace,
         scannerCommentPresent: after.scannerCommentPresent,
         compactInputDisabled: after.compactInputDisabled,
+        baseHref: after.baseHref,
+        baseTarget: after.baseTarget,
+        runtimeResolvedPath: after.runtimeResolvedPath,
+        stylesheetResolvedPath: after.stylesheetResolvedPath,
+        preloadResolvedPaths: after.preloads.map((preload) => preload.resolvedPath).sort(),
         runtimeErrorCount: cdpRuntimeErrors.length + after.runtimeErrors.length,
+        unexpectedHTTPFailureCount: cdpUnexpectedHTTPFailures.length,
+    };
+}
+
+async function runAuthoredBaseBrowserScenario(scenario) {
+    const port = await pickFreePort();
+    serverError = "";
+    server = spawn(goxc, [
+        "serve",
+        `--dir=${scenario.packageDirectory}`,
+        `--port=${port}`,
+    ], {
+        cwd: rootDir,
+        env: commandEnvironment(),
+        stdio: ["ignore", "ignore", "pipe"],
+    });
+    server.stderr.on("data", (chunk) => {
+        serverError += chunk;
+    });
+    server.on("error", (error) => {
+        serverError += error.message;
+    });
+    await waitForServer(port, server);
+
+    cdpRuntimeErrors.length = 0;
+    cdpUnexpectedHTTPFailures.length = 0;
+    cdpDecoyRequests.length = 0;
+    cdpPackageAssetRequests.length = 0;
+    const url = `http://127.0.0.1:${port}/?mode=${scenario.mode}&run=${Date.now()}`;
+    await client.call("Page.navigate", { url });
+    await waitForOracleDocument(url);
+    const state = await client.evaluate(`(() => ({
+        pagePresent: Boolean(document.querySelector("[data-testid='authored-base-page']")),
+        baseHref: document.querySelector("base")?.getAttribute("href") ?? null,
+        baseURI: document.baseURI,
+        authoredHref: document.querySelector("[data-testid='authored-external-link']")?.getAttribute("href") ?? null,
+        authoredResolvedHref: document.querySelector("[data-testid='authored-external-link']")?.href ?? null,
+        generatedAssetElements: document.querySelectorAll("script[src^='assets/'], link[href^='assets/']").length,
+    }))()`);
+    assert(state.pagePresent, "authored active-base page did not load");
+    assert(state.baseHref === "/authored/", `authored active-base href = ${JSON.stringify(state.baseHref)}`);
+    assert(new URL(state.baseURI).pathname === "/authored/", `authored active-base URI = ${JSON.stringify(state.baseURI)}`);
+    assert(state.authoredHref === "https://example.invalid/docs", `authored external href = ${JSON.stringify(state.authoredHref)}`);
+    assert(state.authoredResolvedHref === state.authoredHref, `authored external URL was changed to ${JSON.stringify(state.authoredResolvedHref)}`);
+    assert(state.generatedAssetElements === 0, `authored active-base page gained ${state.generatedAssetElements} generated asset elements`);
+    assert(cdpPackageAssetRequests.length === 0, `authored active-base page requested package assets: ${JSON.stringify(cdpPackageAssetRequests)}`);
+    assert(cdpRuntimeErrors.length === 0, `authored active-base runtime errors: ${JSON.stringify(cdpRuntimeErrors)}`);
+    assert(cdpUnexpectedHTTPFailures.length === 0, `authored active-base HTTP failures: ${JSON.stringify(cdpUnexpectedHTTPFailures)}`);
+
+    await stopProcess(server);
+    server = null;
+    return {
+        baseHref: state.baseHref,
+        basePathname: new URL(state.baseURI).pathname,
+        authoredHref: state.authoredHref,
+        generatedAssetElements: state.generatedAssetElements,
+        packageAssetRequestCount: cdpPackageAssetRequests.length,
+        runtimeErrorCount: cdpRuntimeErrors.length,
         unexpectedHTTPFailureCount: cdpUnexpectedHTTPFailures.length,
     };
 }
@@ -487,6 +658,16 @@ async function pageState() {
             encodedStyleHref: document.querySelector("#fixture-encoded-style")?.getAttribute("href") ?? null,
             encodedStyleAttributeCount: document.querySelector("#fixture-encoded-style")?.attributes.length ?? null,
             encodedStyleNamespace: document.querySelector("#fixture-encoded-style")?.namespaceURI ?? null,
+            baseHref: document.querySelector("base")?.getAttribute("href") ?? null,
+            baseTarget: document.querySelector("base")?.getAttribute("target") ?? null,
+            baseURI: document.baseURI,
+            runtimeSource: document.querySelector("script[src^='assets/']")?.getAttribute("src") ?? null,
+            runtimeResolvedPath: document.querySelector("script[src^='assets/']") ? new URL(document.querySelector("script[src^='assets/']").src).pathname : null,
+            stylesheetResolvedPath: document.querySelector("link[rel~='stylesheet'][href^='assets/']") ? new URL(document.querySelector("link[rel~='stylesheet'][href^='assets/']").href).pathname : null,
+            preloads: Array.from(document.querySelectorAll("link[rel='preload'][href^='assets/']"), (element) => ({
+                raw: element.getAttribute("href"),
+                resolvedPath: new URL(element.href).pathname,
+            })),
             runtimeErrors: Array.from(window.__customIndexRuntimeErrors ?? []),
         };
     })()`);
@@ -558,6 +739,131 @@ async function runAttributeOracle() {
     }
     assert(!results.find((result) => result.name === "literal NUL").value.includes("\0"), "literal NUL remained in the browser attribute value");
     return results;
+}
+
+async function runBaseResolutionOracle() {
+    const pages = new Map();
+    const oracleServer = createHTTPServer((request, response) => {
+        const url = new URL(request.url, "http://127.0.0.1");
+        const source = pages.get(url.pathname);
+        if (source === undefined) {
+            response.writeHead(404).end("missing base oracle case");
+            return;
+        }
+        response.setHeader("cache-control", "no-store");
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(source);
+    });
+    await new Promise((resolveListen, reject) => {
+        oracleServer.once("error", reject);
+        oracleServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const address = oracleServer.address();
+    const origin = `http://127.0.0.1:${address.port}`;
+    const results = [];
+
+    try {
+        const values = [
+            ["root relative", "/other/"],
+            ["relative subdirectory", "subdirectory/"],
+            ["absolute URL", "https://example.invalid/deployment/"],
+            ["protocol relative", "//example.invalid/deployment/"],
+            ["empty", ""],
+            ["dot", "."],
+            ["dot slash", "./"],
+            ["fragment", "#deployment"],
+            ["query", "?deployment=base"],
+        ];
+        for (const [name, href] of values) {
+            await runCase({
+                name: `value: ${name}`,
+                source: `<base href="${href}"><a id="asset" href="assets/runtime.js">asset</a>`,
+                expectedBase(documentURL) {
+                    return new URL(href, documentURL).href;
+                },
+            });
+        }
+
+        const contexts = [
+            {
+                name: "target only",
+                source: `<base target="_blank"><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "body base",
+                source: `<body><base href="/body-base/"><a id="asset" href="assets/runtime.js">asset</a></body>`,
+                expectedHref: "/body-base/",
+            },
+            {
+                name: "ordinary template",
+                source: `<template><base href="/template-base/"></template><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "declarative shadow template",
+                source: `<host-element><template shadowrootmode="open"><base href="/shadow-base/"></template></host-element><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "SVG foreign content",
+                source: `<svg><base href="/svg-base/"></base></svg><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "MathML foreign content",
+                source: `<math><base href="/math-base/"></base></math><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "comment text",
+                source: `<!-- <base href="/comment-base/"> --><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "script text",
+                source: `<script type="application/json"><base href="/script-base/"></script><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "noscript text",
+                source: `<noscript><base href="/noscript-base/"></noscript><a id="asset" href="assets/runtime.js">asset</a>`,
+            },
+            {
+                name: "first active base wins",
+                source: `<base href="/first-base/"><base href="/second-base/"><a id="asset" href="assets/runtime.js">asset</a>`,
+                expectedHref: "/first-base/",
+            },
+        ];
+        for (const test of contexts) {
+            await runCase({
+                name: `context: ${test.name}`,
+                source: test.source,
+                expectedBase(documentURL) {
+                    return test.expectedHref ? new URL(test.expectedHref, documentURL).href : documentURL;
+                },
+            });
+        }
+    } finally {
+        await new Promise((resolveClose) => oracleServer.close(resolveClose));
+    }
+    return results;
+
+    async function runCase(test) {
+        const path = `/base/${encodeURIComponent(test.name)}`;
+        pages.set(path, `<!doctype html><meta charset="utf-8">${test.source}`);
+        const documentURL = `${origin}${path}?run=${Date.now()}`;
+        await client.call("Page.navigate", { url: documentURL });
+        await waitForOracleDocument(documentURL);
+        const result = await client.evaluate(`(() => ({
+            baseURI: document.baseURI,
+            rawAsset: document.querySelector("#asset")?.getAttribute("href") ?? null,
+            resolvedAsset: document.querySelector("#asset")?.href ?? null,
+        }))()`);
+        const expectedBase = test.expectedBase(documentURL);
+        const expectedAsset = new URL("assets/runtime.js", expectedBase).href;
+        assert(result.baseURI === expectedBase, `${test.name} base URI = ${JSON.stringify(result.baseURI)}, want ${JSON.stringify(expectedBase)}`);
+        assert(result.rawAsset === "assets/runtime.js", `${test.name} raw asset path changed`);
+        assert(result.resolvedAsset === expectedAsset, `${test.name} resolved asset = ${JSON.stringify(result.resolvedAsset)}, want ${JSON.stringify(expectedAsset)}`);
+        results.push({
+            name: test.name,
+            baseURI: result.baseURI,
+            resolvedAsset: result.resolvedAsset,
+        });
+    }
 }
 
 async function runManagedFirstSemanticOracle() {
@@ -1018,7 +1324,15 @@ async function connect(url) {
     };
 }
 
-function runCommand(command, args, environment) {
+async function runCommand(command, args, environment) {
+    const result = await runCommandResult(command, args, environment);
+    if (result.code === 0) return result.output;
+    throw new Error(
+        `HARNESS FAILURE: ${command} ${args.join(" ")} failed with ${result.signal ?? result.code}\n${result.output}`,
+    );
+}
+
+function runCommandResult(command, args, environment) {
     return new Promise((resolveCommand, reject) => {
         const child = spawn(command, args, {
             cwd: rootDir,
@@ -1034,13 +1348,7 @@ function runCommand(command, args, environment) {
         });
         child.once("error", reject);
         child.once("exit", (code, signal) => {
-            if (code === 0) {
-                resolveCommand(output);
-                return;
-            }
-            reject(new Error(
-                `HARNESS FAILURE: ${command} ${args.join(" ")} failed with ${signal ?? code}\n${output}`,
-            ));
+            resolveCommand({ code, signal, output });
         });
     });
 }
