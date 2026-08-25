@@ -104,6 +104,7 @@ try {
     for (const mode of ["marker", "legacy"]) {
         scenarios.push(await prepareScenario(mode));
     }
+    const generatedURLScenario = await prepareGeneratedURLScenario();
     const targetOnlyFixture = await prepareVariantFixture("base-target", "base-target.html");
     const targetOnlyScenario = await prepareScenario("base-target", targetOnlyFixture, "marker");
     const negativeManaged = await verifyActiveBaseManagedFailure(targetOnlyScenario);
@@ -143,10 +144,12 @@ try {
     const attributeOracle = await runAttributeOracle();
     const semanticOracle = await runManagedFirstSemanticOracle();
     const baseOracle = await runBaseResolutionOracle();
+    const javascriptSourceOracle = runGeneratedJavaScriptSourceOracle(generatedURLScenario);
 
     for (const scenario of scenarios) {
         scenario.browser = await runBrowserScenario(scenario);
     }
+    generatedURLScenario.browser = await runGeneratedURLBrowserScenario(generatedURLScenario);
     authoredBase.browser = await runAuthoredBaseBrowserScenario(authoredBase);
 
     const stableScenarios = scenarios.map((scenario) => ({
@@ -156,6 +159,7 @@ try {
         inspectContractSha256: scenario.inspectContractSha256,
         artifactCount: scenario.artifactCount,
         paths: scenario.paths,
+        urls: scenario.urls,
         browser: scenario.browser,
     }));
     const stableAuthoredBase = {
@@ -170,8 +174,15 @@ try {
         attributeOracle,
         semanticOracle,
         baseOracle,
+        javascriptSourceOracle,
         negativeManaged,
         authoredBase: stableAuthoredBase,
+        generatedURL: {
+            paths: generatedURLScenario.paths,
+            urls: generatedURLScenario.urls,
+            javascriptLiterals: generatedURLScenario.javascriptLiterals,
+            browser: generatedURLScenario.browser,
+        },
         behaviorSha256: sha256(JSON.stringify(stableScenarios)),
         scenarios: stableScenarios,
     };
@@ -258,6 +269,75 @@ async function prepareScenario(mode, fixture = join(fixtureRoot, mode), contract
             runtime: assetManifest.entrypoints.runtime,
             style: assetManifest.entrypoints.styles[0],
         },
+        urls: {
+            wasm: encodePackagePathAsBrowserURL(assetManifest.entrypoints.wasm),
+            runtime: encodePackagePathAsBrowserURL(assetManifest.entrypoints.runtime),
+            style: encodePackagePathAsBrowserURL(assetManifest.entrypoints.styles[0]),
+        },
+    };
+}
+
+async function prepareGeneratedURLScenario() {
+    const mode = "generated-url";
+    const fixture = join(tempRoot, "fixtures", mode);
+    await cp(join(fixtureRoot, "marker"), fixture, { recursive: true });
+    const styleSource = await readFile(join(fixture, "styles.css"), "utf8");
+    await rm(join(fixture, "index.html"));
+    await rm(join(fixture, "styles.css"));
+
+    const wasmName = "bundle space#query?percent%界😀.wasm";
+    const styleName = "style space&query?#percent%\"'界😀.css";
+    await writeFile(join(fixture, styleName), styleSource);
+    await writeFile(join(fixture, "goframe.json"), `${JSON.stringify({
+        name: "custom-index-generated-url",
+        entry: ".",
+        output: "dist",
+        compiler: "tinygo",
+        wasm: wasmName,
+        assets: [styleName],
+    }, null, 2)}\n`);
+
+    const workspace = join(tempRoot, "workspaces", mode);
+    const packageOutput = await runCommand(goxc, [
+        "package",
+        fixture,
+        `--compiler=${compiler}`,
+        `--workspace=${workspace}`,
+        "--asset-hash",
+        "--preload",
+    ], commandEnvironment());
+    const packageDirectory = packagedDirectory(packageOutput);
+    const packagedHTML = await readFile(join(packageDirectory, "index.html"), "utf8");
+    const manifest = JSON.parse(await readFile(join(packageDirectory, "asset-manifest.json"), "utf8"));
+    const inspectReport = JSON.parse(await runCommand(goxc, [
+        "inspect",
+        `--dir=${packageDirectory}`,
+        "--format=json",
+    ], commandEnvironment()));
+    const paths = {
+        wasm: manifest.entrypoints.wasm,
+        runtime: manifest.entrypoints.runtime,
+        style: manifest.entrypoints.styles[0],
+    };
+    const urls = Object.fromEntries(
+        Object.entries(paths).map(([name, path]) => [name, encodePackagePathAsBrowserURL(path)]),
+    );
+    for (const [name, url] of Object.entries(urls)) {
+        assert(packagedHTML.includes(url), `generated URL package index is missing ${name} URL ${JSON.stringify(url)}`);
+        assert(inspectReport.artifacts.some((artifact) => artifact.path === paths[name]), `generated URL inspect report is missing ${JSON.stringify(paths[name])}`);
+    }
+    assert(!packagedHTML.includes(wasmName), "generated URL package retained the raw WASM package path");
+    assert(!packagedHTML.includes(styleName), "generated URL package retained the raw stylesheet package path");
+
+    return {
+        mode,
+        fixture,
+        workspace,
+        packageDirectory,
+        packagedHTML,
+        paths,
+        urls,
+        javascriptLiterals: [],
     };
 }
 
@@ -346,12 +426,12 @@ function assertAuthoredSentinels(source, packaged, mode, contractMode) {
         assert(packaged.includes(sentinel), `${mode} package changed sentinel ${JSON.stringify(sentinel)}`);
     }
     if (contractMode === "legacy") {
-        assert(source.includes("././wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy source is missing the dot-segment runtime reference");
-        assert(source.includes("assets/../my&#32;&amp;copy;&#32;style.css?fixture=legacy&copy;=x#theme"), "legacy source is missing the unquoted semantic stylesheet reference");
-        assert(source.includes("assets/%2e%2e/bundle.wasm?fixture=legacy#wasm"), "legacy source is missing the percent-dot bootstrap reference");
-        assert(!packaged.includes("wasm&lowbar;exec.js?fixture=legacy#runtime"), "legacy package retained the named runtime reference");
-        assert(!packaged.includes("assets/../my&#32;&amp;copy;&#32;style.css"), "legacy package retained the original stylesheet reference");
-        assert(!packaged.includes("%2e%2e/bundle.wasm?fixture=legacy#wasm"), "legacy package retained the percent-dot bootstrap reference");
+        assert(source.includes("%77asm_exec.js?fixture=legacy#runtime"), "legacy source is missing the percent-encoded runtime reference");
+        assert(source.includes("%6dy%20%26copy%3B%20style.css?fixture=legacy&copy;=x#theme"), "legacy source is missing the percent-encoded stylesheet reference");
+        assert(source.includes("%62undle.wasm?fixture=legacy#wasm"), "legacy source is missing the percent-encoded bootstrap reference");
+        assert(!packaged.includes("%77asm_exec.js?fixture=legacy#runtime"), "legacy package retained the percent-encoded runtime reference");
+        assert(!packaged.includes("%6dy%20%26copy%3B%20style.css"), "legacy package retained the percent-encoded stylesheet reference");
+        assert(!packaged.includes("%62undle.wasm?fixture=legacy#wasm"), "legacy package retained the percent-encoded bootstrap reference");
         const falseHead = '<script>const falseHeadExample = "</head>";</script>';
         assert(source.includes(falseHead) && packaged.includes(falseHead), "legacy false head sentinel changed");
         for (const sentinel of legacyJavaScriptSentinels) {
@@ -373,6 +453,11 @@ function assertPackageContract(mode, html, manifest, metadata, contractMode) {
     const styles = manifest.entrypoints.styles;
     assert(Array.isArray(styles) && styles.length === 1, `${mode} package styles = ${JSON.stringify(styles)}`);
     const style = styles[0];
+    const urls = {
+        wasm: encodePackagePathAsBrowserURL(wasm),
+        runtime: encodePackagePathAsBrowserURL(runtime),
+        style: encodePackagePathAsBrowserURL(style),
+    };
     const styleLogicalName = contractMode === "legacy" ? "my &copy; style.css" : "styles.css";
     for (const [logicalName, path] of [["bundle.wasm", wasm], ["wasm_exec.js", runtime], [styleLogicalName, style]]) {
         assert(/^assets\/.+\.[0-9a-f]{8}\.[^.]+$/.test(path), `${mode} ${logicalName} path is not hashed: ${path}`);
@@ -380,25 +465,25 @@ function assertPackageContract(mode, html, manifest, metadata, contractMode) {
         assert(compressed?.gzip === `${path}.gz`, `${mode} ${logicalName} gzip sidecar is missing`);
         assert(compressed?.br === `${path}.br`, `${mode} ${logicalName} Brotli sidecar is missing`);
     }
-    for (const path of [wasm, runtime, style]) {
-        assert(html.includes(`<link rel="preload" href="${encodeDoubleQuotedAttribute(path)}"`), `${mode} preload is missing ${path}`);
+    for (const url of Object.values(urls)) {
+        assert(html.includes(`<link rel="preload" href="${encodeDoubleQuotedAttribute(url)}"`), `${mode} preload is missing ${url}`);
     }
     if (contractMode === "marker") {
         for (const name of ["preload", "runtime", "bootstrap"]) {
             assert(html.includes(`<!-- goframe:${name} -->`), `marker package lost ${name} start marker`);
             assert(html.includes(`<!-- /goframe:${name} -->`), `marker package lost ${name} end marker`);
         }
-        assert(html.includes(`<script src="${runtime}"></script>`), "marker runtime target is stale");
-        assert(html.includes(`fetch("${wasm}")`), "marker WASM target is stale");
-        assert(html.includes(`href="${encodeDoubleQuotedAttribute(style)}?fixture=marker#theme"`), "marker stylesheet target is stale");
+        assert(html.includes(`<script src="${urls.runtime}"></script>`), "marker runtime target is stale");
+        assert(html.includes(`fetch("${urls.wasm}")`), "marker WASM target is stale");
+        assert(html.includes(`href="${encodeDoubleQuotedAttribute(urls.style)}?fixture=marker#theme"`), "marker stylesheet target is stale");
         assert(!html.includes("authored preload interior"), "marker preload interior was not replaced");
     } else {
-        assert(html.includes(`SRC=' ${runtime}?fixture=legacy#runtime '`), "legacy runtime target is stale");
-        assert(html.includes(`fetch ( ' ${wasm}?fixture=legacy#wasm ' )`), "legacy WASM target is stale");
-        assert(html.includes(`href=${encodeUnquotedAttribute(style)}?fixture=legacy&copy;=x#theme`), "legacy stylesheet target is stale");
+        assert(html.includes(`SRC=' ${urls.runtime}?fixture=legacy#runtime '`), "legacy runtime target is stale");
+        assert(html.includes(`fetch ( ' ${urls.wasm}?fixture=legacy#wasm ' )`), "legacy WASM target is stale");
+        assert(html.includes(`href=${encodeUnquotedAttribute(urls.style)}?fixture=legacy&copy;=x#theme`), "legacy stylesheet target is stale");
         assert(html.includes('type="text/javascript1.5"'), "legacy runtime MIME type changed");
         assert(html.includes('<input id="fixture-compact-input" disabled/>'), "compact boolean tag changed");
-        const preload = html.indexOf(`<link rel="preload" href="${wasm}"`);
+        const preload = html.indexOf(`<link rel="preload" href="${urls.wasm}"`);
         const structuralHead = html.lastIndexOf("</head>");
         const falseHead = html.indexOf('const falseHeadExample = "</head>";');
         assert(falseHead >= 0 && preload > falseHead && preload < structuralHead, "legacy preload was not structurally inserted");
@@ -464,18 +549,18 @@ async function runBrowserScenario(scenario) {
         assert(before.punctuationScriptNamespace === "http://www.w3.org/2000/svg", "punctuation tag child left the SVG namespace");
         assert(before.scannerCommentPresent === true, "incorrectly closed authored comment was not exposed as a browser comment");
         assert(before.compactInputDisabled === true, "compact boolean attribute was not accepted");
-        assert(before.encodedStyleHref === `${scenario.paths.style}?fixture=legacy©=x#theme`, `legacy stylesheet semantic href = ${JSON.stringify(before.encodedStyleHref)}`);
+        assert(before.encodedStyleHref === `${scenario.urls.style}?fixture=legacy©=x#theme`, `legacy stylesheet semantic href = ${JSON.stringify(before.encodedStyleHref)}`);
         assert(before.encodedStyleAttributeCount === 4, `legacy stylesheet attribute count = ${before.encodedStyleAttributeCount}`);
         assert(before.encodedStyleNamespace === "http://www.w3.org/1999/xhtml", "legacy stylesheet left the HTML namespace");
     }
     if (scenario.mode === "base-target") {
         assert(before.baseHref === null, `target-only base href = ${JSON.stringify(before.baseHref)}`);
         assert(before.baseTarget === "_blank", `target-only base target = ${JSON.stringify(before.baseTarget)}`);
-        assert(before.runtimeSource === scenario.paths.runtime, `target-only runtime source = ${JSON.stringify(before.runtimeSource)}`);
-        assert(before.runtimeResolvedPath === `/${scenario.paths.runtime}`, `target-only resolved runtime path = ${JSON.stringify(before.runtimeResolvedPath)}`);
-        assert(before.stylesheetResolvedPath === `/${scenario.paths.style}`, `target-only resolved stylesheet path = ${JSON.stringify(before.stylesheetResolvedPath)}`);
+        assert(before.runtimeSource === scenario.urls.runtime, `target-only runtime source = ${JSON.stringify(before.runtimeSource)}`);
+        assert(before.runtimeResolvedPath === `/${scenario.urls.runtime}`, `target-only resolved runtime path = ${JSON.stringify(before.runtimeResolvedPath)}`);
+        assert(before.stylesheetResolvedPath === `/${scenario.urls.style}`, `target-only resolved stylesheet path = ${JSON.stringify(before.stylesheetResolvedPath)}`);
         const preloadPaths = before.preloads.map((preload) => preload.raw).sort();
-        assertDeepEqual(preloadPaths, Object.values(scenario.paths).sort(), "target-only preload package paths");
+        assertDeepEqual(preloadPaths, Object.values(scenario.urls).sort(), "target-only preload package URLs");
         for (const preload of before.preloads) {
             assert(preload.resolvedPath === `/${preload.raw}`, `target-only resolved preload path = ${JSON.stringify(preload)}`);
         }
@@ -493,12 +578,17 @@ async function runBrowserScenario(scenario) {
         assert(!cdpPackageAssetRequests.some((request) => request.decodedPathname === entityDecodedStyle), "legacy stylesheet ampersand was decoded as an HTML named reference");
     }
 
-    const assetStatuses = await client.evaluate(`Promise.all(${JSON.stringify(Object.values(scenario.paths))}.map(async (path) => {
-        const response = await fetch("/" + path, { cache: "no-store" });
-        return [path, response.status, response.headers.get("content-type")];
+    const expectedAssets = Object.keys(scenario.paths).map((name) => ({
+        path: scenario.paths[name],
+        url: scenario.urls[name],
+    }));
+    const assetStatuses = await client.evaluate(`Promise.all(${JSON.stringify(expectedAssets)}.map(async (asset) => {
+        const response = await fetch("/" + asset.url, { cache: "no-store" });
+        return [asset.path, asset.url, response.status, response.headers.get("content-type")];
     }))`);
-    for (const [path, status] of assetStatuses) {
+    for (const [path, urlPath, status] of assetStatuses) {
         assert(status === 200, `${scenario.mode} final asset ${path} returned ${status}`);
+        assert(urlPath === encodePackagePathAsBrowserURL(path), `${scenario.mode} browser URL for ${path} changed to ${urlPath}`);
     }
 
     await client.evaluate(`document.querySelector("[data-testid='custom-index-increment']").click()`);
@@ -534,6 +624,97 @@ async function runBrowserScenario(scenario) {
         runtimeResolvedPath: after.runtimeResolvedPath,
         stylesheetResolvedPath: after.stylesheetResolvedPath,
         preloadResolvedPaths: after.preloads.map((preload) => preload.resolvedPath).sort(),
+        runtimeErrorCount: cdpRuntimeErrors.length + after.runtimeErrors.length,
+        unexpectedHTTPFailureCount: cdpUnexpectedHTTPFailures.length,
+    };
+}
+
+function runGeneratedJavaScriptSourceOracle(scenario) {
+    const literals = [];
+    const pattern = /\bfetch\(\s*((['"])(?:\\.|(?!\2)[^\\])*\2)\s*\)/g;
+    for (const match of scenario.packagedHTML.matchAll(pattern)) {
+        const source = match[1];
+        let value;
+        try {
+            value = Function(`"use strict"; return (${source});`)();
+        } catch (error) {
+            throw new Error(`APP FAILURE: generated JavaScript literal ${JSON.stringify(source)} did not evaluate: ${error.message}`);
+        }
+        assert(value === scenario.urls.wasm, `generated JavaScript literal evaluated to ${JSON.stringify(value)}, want ${JSON.stringify(scenario.urls.wasm)}`);
+        assert(!source.includes("\\a") && !source.includes("\\U"), `generated JavaScript literal contains a Go-only escape: ${JSON.stringify(source)}`);
+        literals.push({ source, value });
+    }
+    assert(literals.length === 1, `generated index JavaScript literal count = ${literals.length}, want 1`);
+    scenario.javascriptLiterals = literals;
+    return literals;
+}
+
+async function runGeneratedURLBrowserScenario(scenario) {
+    const port = await pickFreePort();
+    serverError = "";
+    server = spawn(goxc, [
+        "serve",
+        `--dir=${scenario.packageDirectory}`,
+        `--port=${port}`,
+    ], {
+        cwd: rootDir,
+        env: commandEnvironment(),
+        stdio: ["ignore", "ignore", "pipe"],
+    });
+    server.stderr.on("data", (chunk) => {
+        serverError += chunk;
+    });
+    server.on("error", (error) => {
+        serverError += error.message;
+    });
+    await waitForServer(port, server);
+
+    cdpRuntimeErrors.length = 0;
+    cdpUnexpectedHTTPFailures.length = 0;
+    cdpDecoyRequests.length = 0;
+    cdpPackageAssetRequests.length = 0;
+    const url = `http://127.0.0.1:${port}/?mode=${scenario.mode}&compiler=${compiler}&run=${Date.now()}`;
+    await client.call("Page.navigate", { url });
+    await waitForFixture(url);
+    const before = await pageState();
+    assert(before.count === "0", `generated URL initial count = ${JSON.stringify(before.count)}`);
+    assert(before.appColor === "rgb(13, 71, 161)", `generated URL stylesheet color = ${before.appColor}`);
+    assert(before.runtimeSource === scenario.urls.runtime, `generated runtime source = ${JSON.stringify(before.runtimeSource)}`);
+    assert(before.runtimeResolvedPath === `/${scenario.urls.runtime}`, `generated runtime request path = ${JSON.stringify(before.runtimeResolvedPath)}`);
+    assert(before.stylesheetResolvedPath === `/${scenario.urls.style}`, `generated stylesheet request path = ${JSON.stringify(before.stylesheetResolvedPath)}`);
+
+    const successfulRequests = cdpPackageAssetRequests.filter((request) => request.status === 200);
+    for (const name of Object.keys(scenario.paths)) {
+        const expectedPathname = `/${scenario.urls[name]}`;
+        const expectedDecodedPathname = `/${scenario.paths[name]}`;
+        assert(successfulRequests.some((request) => request.pathname === expectedPathname && request.decodedPathname === expectedDecodedPathname), `generated ${name} request did not preserve the exact package filename: ${JSON.stringify(successfulRequests)}`);
+    }
+    const assetStatuses = await client.evaluate(`Promise.all(${JSON.stringify(Object.entries(scenario.urls))}.map(async ([name, urlPath]) => {
+        const response = await fetch("/" + urlPath, { cache: "no-store" });
+        return [name, urlPath, response.status];
+    }))`);
+    for (const [name, urlPath, status] of assetStatuses) {
+        assert(status === 200, `generated URL ${name} asset ${urlPath} returned ${status}`);
+    }
+
+    await client.evaluate(`document.querySelector("[data-testid='custom-index-increment']").click()`);
+    for (let attempt = 0; attempt < 100; attempt++) {
+        if ((await pageState()).count === "1") break;
+        await wait(20);
+    }
+    const after = await pageState();
+    assert(after.count === "1", "generated URL interaction did not update the application");
+    assertDeepEqual(after.runtimeErrors, [], "generated URL GoFrame runtime errors");
+    assert(cdpRuntimeErrors.length === 0, `generated URL CDP runtime errors: ${JSON.stringify(cdpRuntimeErrors)}`);
+    assert(cdpUnexpectedHTTPFailures.length === 0, `generated URL HTTP failures: ${JSON.stringify(cdpUnexpectedHTTPFailures)}`);
+
+    await stopProcess(server);
+    server = null;
+    return {
+        initialCount: before.count,
+        finalCount: after.count,
+        requests: successfulRequests,
+        assetStatuses,
         runtimeErrorCount: cdpRuntimeErrors.length + after.runtimeErrors.length,
         unexpectedHTTPFailureCount: cdpUnexpectedHTTPFailures.length,
     };
@@ -905,6 +1086,72 @@ async function runManagedFirstSemanticOracle() {
     const results = [];
 
     try {
+        for (const test of [
+            { name: "quotation mark", rawValue: `a"`, expectedValue: `a"` },
+            { name: "apostrophe", rawValue: `a'`, expectedValue: `a'` },
+            { name: "equals", rawValue: "a=b", expectedValue: "a=b" },
+            { name: "grave accent", rawValue: "a`b", expectedValue: "a`b" },
+            { name: "less-than", rawValue: "a<b", expectedValue: "a<b" },
+        ]) {
+            const runtimePath = `/runtime/tag-state-${encodeURIComponent(test.name)}.js`;
+            await runCase({
+                name: `tag state unquoted ${test.name}`,
+                classification: "simple profile",
+                source: `<div id=target data-x=${test.rawValue}><script id=runtime src="${origin}${runtimePath}"></script>`,
+                expression: `(() => {
+                    const target = document.querySelector("#target");
+                    const runtime = document.querySelector("#runtime");
+                    return {
+                        value: target?.getAttribute("data-x") ?? null,
+                        attributeCount: target?.attributes.length ?? null,
+                        runtimePresent: Boolean(runtime),
+                        runtimeNamespace: runtime?.namespaceURI ?? null,
+                        executed: (window.__oracleRuntimeLoads ?? []).includes(${JSON.stringify(runtimePath)}),
+                    };
+                })()`,
+                validate(result, caseRequests) {
+                    assert(result.value === test.expectedValue, `unquoted ${test.name} value = ${JSON.stringify(result.value)}`);
+                    assert(result.attributeCount === 2, `unquoted ${test.name} attribute count = ${result.attributeCount}`);
+                    assert(result.runtimePresent && result.runtimeNamespace === "http://www.w3.org/1999/xhtml", `unquoted ${test.name} hid the following script`);
+                    assert(result.executed && caseRequests.includes(runtimePath), `unquoted ${test.name} runtime was not requested`);
+                },
+            });
+        }
+        for (const quote of ['"', "'"]) {
+            const name = quote === '"' ? "double quoted greater-than" : "single quoted greater-than";
+            const runtimePath = `/runtime/tag-state-${encodeURIComponent(name)}.js`;
+            await runCase({
+                name: `tag state ${name}`,
+                classification: "simple profile",
+                source: `<div id=target data-x=${quote}a>b${quote}><script id=runtime src="${origin}${runtimePath}"></script>`,
+                expression: `(() => ({
+                    value: document.querySelector("#target")?.getAttribute("data-x") ?? null,
+                    runtimePresent: Boolean(document.querySelector("#runtime")),
+                    executed: (window.__oracleRuntimeLoads ?? []).includes(${JSON.stringify(runtimePath)}),
+                }))()`,
+                validate(result, caseRequests) {
+                    assert(result.value === "a>b", `${name} value = ${JSON.stringify(result.value)}`);
+                    assert(result.runtimePresent && result.executed && caseRequests.includes(runtimePath), `${name} did not preserve the following runtime request`);
+                },
+            });
+        }
+        await runCase({
+            name: "tag state compact solidus",
+            classification: "simple profile",
+            source: `<input id=boolean disabled/><input id=unquoted value=x/><input id=quoted value="x"/>`,
+            expression: `(() => ({
+                booleanDisabled: document.querySelector("#boolean")?.disabled ?? null,
+                booleanAttributeCount: document.querySelector("#boolean")?.attributes.length ?? null,
+                unquotedValue: document.querySelector("#unquoted")?.getAttribute("value") ?? null,
+                quotedValue: document.querySelector("#quoted")?.getAttribute("value") ?? null,
+                inputCount: document.querySelectorAll("input").length,
+            }))()`,
+            validate(result) {
+                assert(result.booleanDisabled && result.booleanAttributeCount === 2, "compact boolean solidus behavior changed");
+                assert(result.unquotedValue === "x/", `unquoted solidus value = ${JSON.stringify(result.unquotedValue)}`);
+                assert(result.quotedValue === "x" && result.inputCount === 3, "quoted solidus behavior changed");
+            },
+        });
         await runCase({
             name: "select runtime",
             classification: "unsupported markerless rewrite",
@@ -1154,6 +1401,22 @@ function encodeUnquotedAttribute(value) {
         [">", "&gt;"],
     ]);
     return Array.from(value, (character) => replacements.get(character) ?? character).join("");
+}
+
+function encodePackagePathAsBrowserURL(value) {
+    const unreserved = (byte) =>
+        (byte >= 0x41 && byte <= 0x5a) ||
+        (byte >= 0x61 && byte <= 0x7a) ||
+        (byte >= 0x30 && byte <= 0x39) ||
+        byte === 0x2d || byte === 0x2e || byte === 0x5f || byte === 0x7e;
+    return value.split("/").map((segment) => {
+        let encoded = "";
+        for (const byte of Buffer.from(segment, "utf8")) {
+            assert(byte !== 0, "package URL oracle received a NUL byte");
+            encoded += unreserved(byte) ? String.fromCharCode(byte) : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+        }
+        return encoded;
+    }).join("/");
 }
 
 function decodeURLPathname(pathname) {

@@ -60,13 +60,13 @@
     <div id="fixture-legacy-owned" style="display:none">
     <p id="fixture-legacy-html"></p>
     <input id="fixture-compact-input" disabled/>
-    <link id=fixture-encoded-style data-authored=legacy-style href=assets/../my&#32;&amp;copy;&#32;style.css?fixture=legacy&copy;=x#theme rel=STYLESHEET>
+    <link id=fixture-encoded-style data-authored=legacy-style href=%6dy%20%26copy%3B%20style.css?fixture=legacy&copy;=x#theme rel=STYLESHEET>
     <!-- authored scanner close --!>
-    <script id="fixture-legacy-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' ././wasm&lowbar;exec.js?fixture=legacy#runtime '></script>
+    <script id="fixture-legacy-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' %77asm_exec.js?fixture=legacy#runtime '></script>
     <script data-authored="legacy-bootstrap">
         const go = new Go();
         WebAssembly.instantiateStreaming(
-            fetch ( ' assets/%2e%2e/bundle.wasm?fixture=legacy#wasm ' ),
+            fetch ( ' %62undle.wasm?fixture=legacy#wasm ' ),
             go.importObject,
         ).then((result) => go.run(result.instance));
     </script>
