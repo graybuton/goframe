@@ -61,26 +61,29 @@ func (plan htmlRewritePlan) apply() (string, error) {
 type scannedHTML struct {
 	comments []htmlComment
 	tags     []htmlTag
+	profile  htmlRewriteProfile
 }
 
 type htmlComment struct {
-	start         int
-	end           int
-	eof           bool
-	templateDepth int
+	start                int
+	end                  int
+	eof                  bool
+	unsupportedEnclosing string
 }
 
 type htmlTag struct {
-	start         int
-	end           int
-	name          string
-	namespace     htmlNamespace
-	closing       bool
-	selfClosing   bool
-	attributes    []htmlAttribute
-	templateDepth int
-	rawStart      int
-	rawEnd        int
+	start                 int
+	end                   int
+	name                  string
+	namespace             htmlNamespace
+	closing               bool
+	selfClosing           bool
+	attributes            []htmlAttribute
+	templateDepth         int
+	ordinaryTemplateDepth int
+	declarativeShadowMode string
+	rawStart              int
+	rawEnd                int
 }
 
 type htmlAttribute struct {
@@ -146,10 +149,9 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		if strings.HasPrefix(content[offset:], "<!--") {
 			end, eof := scanHTMLComment(content, offset)
 			document.comments = append(document.comments, htmlComment{
-				start:         offset,
-				end:           end,
-				eof:           eof,
-				templateDepth: templateDepth,
+				start: offset,
+				end:   end,
+				eof:   eof,
 			})
 			offset = end
 			continue
@@ -180,6 +182,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			continue
 		}
 		if context.applyForeignBreakout(tag) {
+			document.profile.markComplex("foreign-content parser recovery")
 			if tag.closing {
 				tag.namespace = htmlNamespaceHTML
 			} else {
@@ -199,6 +202,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		tag.templateDepth = templateDepth
 		if !tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "plaintext" {
 			document.tags = append(document.tags, tag)
+			classifyHTMLRewriteProfile(content, &document)
 			return document, nil
 		}
 		if !tag.closing && tag.namespace == htmlNamespaceHTML && opaqueHTMLTextElement(tag.name) {
@@ -239,6 +243,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 	if templateDepth != 0 {
 		return scannedHTML{}, fmt.Errorf("custom index has an opening <template> without a matching closing tag")
 	}
+	classifyHTMLRewriteProfile(content, &document)
 	return document, nil
 }
 
@@ -1109,13 +1114,17 @@ func validateManagedHTMLBlocks(content string, document scannedHTML) (map[string
 	names := []string{preloadBlockName, runtimeBlockName, bootstrapBlockName}
 	markers := map[string][]managedMarker{}
 	for _, comment := range document.comments {
-		if comment.templateDepth != 0 {
-			continue
-		}
 		raw := content[comment.start:comment.end]
 		for _, name := range names {
 			for _, start := range []bool{true, false} {
 				if raw == managedMarkerText(name, start) {
+					if comment.unsupportedEnclosing != "" {
+						return nil, fmt.Errorf(
+							"goframe:%s managed block marker is nested inside %s; move the complete block to a safe top-level source location",
+							name,
+							comment.unsupportedEnclosing,
+						)
+					}
 					markers[name] = append(markers[name], managedMarker{name: name, start: start, span: comment})
 				}
 			}
@@ -1249,7 +1258,7 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 
 func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, runtimePath string) error {
 	for _, tag := range document.tags {
-		if tag.closing || tag.namespace != htmlNamespaceHTML || tag.name != "script" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
@@ -1271,6 +1280,12 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 		if !ok {
 			continue
 		}
+		if document.profile.complex {
+			return document.profile.markerlessError("runtime", runtimeBlockName)
+		}
+		if tag.namespace != htmlNamespaceHTML {
+			continue
+		}
 		replacement, err := encodeGeneratedHTMLAttributeValue(runtimePath, source.valueSyntax)
 		if err != nil {
 			return err
@@ -1287,7 +1302,7 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 
 func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, wasmPath string) error {
 	for _, tag := range document.tags {
-		if tag.closing || tag.namespace != htmlNamespaceHTML || tag.name != "script" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
@@ -1306,6 +1321,12 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		}
 		match, ok := recognizeLegacyGoFrameBootstrap(plan.content, tag.rawStart, tag.rawEnd)
 		if !ok {
+			continue
+		}
+		if document.profile.complex {
+			return document.profile.markerlessError("bootstrap", bootstrapBlockName)
+		}
+		if tag.namespace != htmlNamespaceHTML {
 			continue
 		}
 		replacement, err := encodeGeneratedJavaScriptStringContents(wasmPath, match.quote)
@@ -1389,7 +1410,7 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 	}
 	_, preloadManaged := blocks[preloadBlockName]
 	for _, tag := range document.tags {
-		if tag.closing || tag.namespace != htmlNamespaceHTML || tag.name != "link" || tag.templateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.name != "link" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		href, err := tag.attribute("href")
@@ -1424,6 +1445,17 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 		}
 		destination, ok := rewrites[base]
 		if !ok {
+			continue
+		}
+		if tag.declarativeShadowMode != "" {
+			return fmt.Errorf(
+				"custom index stylesheet rewriting inside declarative Shadow DOM is not part of the preview markerless contract; use an external stable URL or remove asset-managed shadow-root styles",
+			)
+		}
+		if document.profile.complex {
+			return document.profile.stylesheetError()
+		}
+		if tag.namespace != htmlNamespaceHTML {
 			continue
 		}
 		replacement, err := encodeGeneratedHTMLAttributeValue(destination, href.valueSyntax)
@@ -1540,6 +1572,9 @@ func planPreloadInsertion(plan *htmlRewritePlan, document scannedHTML, blocks ma
 	}
 	if len(closingHeads) > 1 {
 		return fmt.Errorf("custom index has multiple structural </head> tags; keep one closing </head> tag or add an explicit goframe:preload block")
+	}
+	if document.profile.complex {
+		return document.profile.preloadError()
 	}
 	if strings.HasSuffix(plan.content[:closingHeads[0].start], preload+"\n") {
 		return nil

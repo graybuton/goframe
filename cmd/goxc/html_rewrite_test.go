@@ -306,17 +306,27 @@ func TestCustomIndexCompleteTagNameState(t *testing.T) {
 	for _, element := range []struct {
 		name       string
 		attributes string
+		breakout   bool
 	}{
 		{name: "title"},
 		{name: "foreignObject"},
 		{name: "desc"},
-		{name: "p"},
-		{name: "div"},
-		{name: "font", attributes: ` color="red"`},
+		{name: "p", breakout: true},
+		{name: "div", breakout: true},
+		{name: "font", attributes: ` color="red"`, breakout: true},
 	} {
 		t.Run("genuine control "+element.name, func(t *testing.T) {
 			source := `<svg><` + element.name + element.attributes + `><script src="wasm_exec.js?html"></script></` + element.name + `></svg>`
-			got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+			got, err := rewriteIndexHTML(source, htmlRewriteOptions{runtimePath: runtimePath})
+			if element.breakout {
+				if err == nil || got != "" || !strings.Contains(err.Error(), "foreign-content parser recovery") {
+					t.Fatalf("genuine %q breakout = %q, %v, want managed-first failure", element.name, got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("genuine %q integration point error: %v", element.name, err)
+			}
 			if !strings.Contains(got, `src="`+runtimePath+`?html"`) {
 				t.Fatalf("genuine %q control did not expose HTML content: %q", element.name, got)
 			}
@@ -487,65 +497,24 @@ func TestCustomIndexHTMLWhitespaceClassification(t *testing.T) {
 	})
 }
 
-func TestCustomIndexForeignBreakoutBrowserSemantics(t *testing.T) {
-	const runtimePath = "assets/wasm_exec.22222222.js"
-	options := htmlRewriteOptions{runtimePath: runtimePath}
-	breakoutNames := []string{
-		"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div", "dl", "dt",
-		"em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head", "hr", "i", "img",
-		"li", "listing", "menu", "meta", "nobr", "ol", "p", "pre", "ruby", "s", "small",
-		"span", "strong", "strike", "sub", "sup", "table", "tt", "u", "ul", "var",
-	}
-	for _, name := range breakoutNames {
-		t.Run("SVG start "+name, func(t *testing.T) {
-			source := `<svg><` + name + `><script src="wasm_exec.js?` + name + `"></script>`
-			got := rewriteIndexForTest(t, source, options)
-			want := `src="` + runtimePath + `?` + name + `"`
-			if !strings.Contains(got, want) {
-				t.Fatalf("foreign breakout <%s> did not reprocess the runtime script as HTML\ngot: %s", name, got)
-			}
-		})
-	}
-
-	for _, test := range []struct {
-		name    string
-		source  string
-		rewrite bool
-	}{
-		{name: "MathML start", source: `<math><div><script src="wasm_exec.js?math"></script>`, rewrite: true},
-		{name: "font color", source: `<svg><font color="red"><script src="wasm_exec.js?color"></script>`, rewrite: true},
-		{name: "font face", source: `<svg><font face="sans"><script src="wasm_exec.js?face"></script>`, rewrite: true},
-		{name: "font size", source: `<svg><font size="2"><script src="wasm_exec.js?size"></script>`, rewrite: true},
-		{name: "font without trigger", source: `<svg><font><script src="wasm_exec.js?plain"></script>`},
-		{name: "closing p", source: `<svg></p><script src="wasm_exec.js?end-p"></script>`, rewrite: true},
-		{name: "closing br", source: `<math></br><script src="wasm_exec.js?end-br"></script>`, rewrite: true},
-		{name: "ordinary SVG child", source: `<svg><g><script src="wasm_exec.js?g"></script></g></svg>`},
-		{name: "HTML integration point", source: `<svg><foreignObject><p><script src="wasm_exec.js?integration"></script>`, rewrite: true},
+func TestCustomIndexForeignBreakoutRequiresManagedOwnership(t *testing.T) {
+	for _, source := range []string{
+		`<svg><p><script src="wasm_exec.js"></script>`,
+		`<math><div><script src="wasm_exec.js"></script>`,
+		`<svg></p><script src="wasm_exec.js"></script>`,
+		`<svg><font color="red"><script src="wasm_exec.js"></script>`,
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			got := rewriteIndexForTest(t, test.source, options)
-			rewritten := strings.Contains(got, runtimePath)
-			if rewritten != test.rewrite {
-				t.Fatalf("foreign-content classification rewrite = %v, want %v\ngot: %s", rewritten, test.rewrite, got)
-			}
-		})
+		got, err := rewriteIndexHTML(source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
+		if err == nil || got != "" || !strings.Contains(err.Error(), "foreign-content parser recovery") ||
+			!strings.Contains(err.Error(), "goframe:runtime") {
+			t.Fatalf("foreign breakout rewrite = %q, %v, want managed-first failure", got, err)
+		}
 	}
 
-	t.Run("combined owned references", func(t *testing.T) {
-		source := `<svg><p><link rel="stylesheet" href="styles.css"><script src="wasm_exec.js"></script><script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then((result) => go.run(result.instance));</script>`
-		got := rewriteIndexForTest(t, source, htmlRewriteOptions{
-			wasmPath:    "assets/bundle.11111111.wasm",
-			runtimePath: runtimePath,
-			styleRewrites: map[string]string{
-				"styles.css": "assets/styles.33333333.css",
-			},
-		})
-		for _, want := range []string{runtimePath, "assets/styles.33333333.css", "assets/bundle.11111111.wasm"} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("breakout rewrite missing %q:\n%s", want, got)
-			}
-		}
-	})
+	balancedForeign := `<svg><g><script src="wasm_exec.js"></script></g></svg>`
+	if got := rewriteIndexForTest(t, balancedForeign, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"}); got != balancedForeign {
+		t.Fatalf("balanced foreign authored content changed\ngot:  %q\nwant: %q", got, balancedForeign)
+	}
 }
 
 func TestCustomIndexScriptClassificationBrowserSemantics(t *testing.T) {
@@ -696,11 +665,11 @@ func TestCustomIndexSelfClosingSolidusBrowserSemantics(t *testing.T) {
 		})
 	}
 
-	t.Run("HTML non-void flag does not close context", func(t *testing.T) {
+	t.Run("HTML non-void flag requires managed ownership after misnesting", func(t *testing.T) {
 		source := `<svg><foreignObject><div/><![CDATA[x > <script src="wasm_exec.js?html"></script>]]></foreignObject></svg>`
-		got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
-		if !strings.Contains(got, `src="assets/wasm_exec.22222222.js?html"`) {
-			t.Fatalf("self-closing HTML div incorrectly closed its HTML context: %s", got)
+		got, err := rewriteIndexHTML(source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
+		if err == nil || got != "" || !strings.Contains(err.Error(), "misnested") || !strings.Contains(err.Error(), "goframe:runtime") {
+			t.Fatalf("self-closing HTML recovery = %q, %v, want managed-first failure", got, err)
 		}
 	})
 
@@ -2596,6 +2565,269 @@ func TestPackageCustomIndexBrowserSemanticsFailuresAreAtomic(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCustomIndexManagedFirstMarkerlessProfile(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	tests := []struct {
+		name      string
+		source    string
+		options   htmlRewriteOptions
+		construct string
+		guidance  string
+	}{
+		{
+			name:      "select",
+			source:    `<select><svg><script src="wasm_exec.js"></script></svg></select>`,
+			options:   htmlRewriteOptions{runtimePath: runtimePath},
+			construct: "<select>",
+			guidance:  "goframe:runtime",
+		},
+		{
+			name:      "select in table",
+			source:    `<table><select><svg><script src="wasm_exec.js"></script></svg></select></table>`,
+			options:   htmlRewriteOptions{runtimePath: runtimePath},
+			construct: "<table>",
+			guidance:  "goframe:runtime",
+		},
+		{
+			name:      "table",
+			source:    `<table><tr><td><script src="wasm_exec.js"></script></td></tr></table>`,
+			options:   htmlRewriteOptions{runtimePath: runtimePath},
+			construct: "<table>",
+			guidance:  "goframe:runtime",
+		},
+		{
+			name:   "table stylesheet",
+			source: `<table><tr><td><link rel="stylesheet" href="styles.css"></td></tr></table>`,
+			options: htmlRewriteOptions{styleRewrites: map[string]string{
+				"styles.css": "assets/styles.33333333.css",
+			}},
+			construct: "<table>",
+			guidance:  "stylesheet",
+		},
+		{
+			name:      "select historical bootstrap",
+			source:    `<select><script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then((result) => go.run(result.instance));</script></select>`,
+			options:   htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"},
+			construct: "<select>",
+			guidance:  "goframe:bootstrap",
+		},
+		{
+			name:      "frameset",
+			source:    `<frameset><script src="wasm_exec.js"></script></frameset>`,
+			options:   htmlRewriteOptions{runtimePath: runtimePath},
+			construct: "<frameset>",
+			guidance:  "goframe:runtime",
+		},
+		{
+			name:      "noscript",
+			source:    `<noscript>fallback</noscript><script src="wasm_exec.js"></script>`,
+			options:   htmlRewriteOptions{runtimePath: runtimePath},
+			construct: "<noscript>",
+			guidance:  "goframe:runtime",
+		},
+		{
+			name:      "active base",
+			source:    `<base href="/nested/"><script src="wasm_exec.js"></script>`,
+			options:   htmlRewriteOptions{runtimePath: runtimePath},
+			construct: "<base href>",
+			guidance:  "goframe:runtime",
+		},
+		{
+			name:      "ownership affecting misnesting",
+			source:    `<div><span></div><script src="wasm_exec.js"></script>`,
+			options:   htmlRewriteOptions{runtimePath: runtimePath},
+			construct: "misnested",
+			guidance:  "goframe:runtime",
+		},
+		{
+			name:      "structural preload in select document",
+			source:    `<html><head></head><body><select><option>x</option></select></body></html>`,
+			options:   htmlRewriteOptions{preload: true, wasmPath: "assets/bundle.11111111.wasm"},
+			construct: "<select>",
+			guidance:  "goframe:preload",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, test.options)
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want managed-first compatibility error", got)
+			}
+			if got != "" {
+				t.Fatalf("rewriteIndexHTML() returned partial output %q", got)
+			}
+			for _, want := range []string{test.construct, test.guidance} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestCustomIndexManagedFirstSafeBlocks(t *testing.T) {
+	options := htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    "assets/bundle.11111111.wasm",
+		runtimePath: "assets/wasm_exec.22222222.js",
+	}
+	source := `<!doctype html><html><head>
+<!-- goframe:preload --><!-- /goframe:preload -->
+</head><body>
+<!-- goframe:runtime --><!-- /goframe:runtime -->
+<!-- goframe:bootstrap --><!-- /goframe:bootstrap -->
+<select><option>authored</option></select>
+</body></html>`
+	got := rewriteIndexForTest(t, source, options)
+	for _, want := range []string{options.wasmPath, options.runtimePath, "<select><option>authored</option></select>"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("safe managed complex document missing %q:\n%s", want, got)
+		}
+	}
+	baseOnly := `<base href="/nested/"><p>authored</p>`
+	if got := rewriteIndexForTest(t, baseOnly, htmlRewriteOptions{}); got != baseOnly {
+		t.Fatalf("complex document without an owned rewrite changed\ngot:  %q\nwant: %q", got, baseOnly)
+	}
+
+	for _, test := range []struct {
+		name      string
+		source    string
+		construct string
+	}{
+		{
+			name:      "select",
+			source:    `<select><!-- goframe:runtime --><!-- /goframe:runtime --></select>`,
+			construct: "<select>",
+		},
+		{
+			name:      "ordinary template",
+			source:    `<template><!-- goframe:runtime --><!-- /goframe:runtime --></template>`,
+			construct: "<template>",
+		},
+		{
+			name:      "declarative shadow template",
+			source:    `<template shadowrootmode="open"><!-- goframe:runtime --><!-- /goframe:runtime --></template>`,
+			construct: "declarative Shadow DOM",
+		},
+		{
+			name:      "noscript",
+			source:    `<noscript><!-- goframe:runtime --><!-- /goframe:runtime --></noscript>`,
+			construct: "<noscript>",
+		},
+	} {
+		t.Run("reject nested "+test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, htmlRewriteOptions{runtimePath: options.runtimePath})
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want managed placement error", got)
+			}
+			if got != "" || !strings.Contains(err.Error(), "goframe:runtime") || !strings.Contains(err.Error(), test.construct) {
+				t.Fatalf("rewriteIndexHTML() = %q, %v, want managed placement guidance", got, err)
+			}
+		})
+	}
+
+	for _, name := range []string{preloadBlockName, bootstrapBlockName} {
+		source := `<select>` + managedMarkerText(name, true) + managedMarkerText(name, false) + `</select>`
+		got, err := rewriteIndexHTML(source, options)
+		if err == nil || got != "" || !strings.Contains(err.Error(), "goframe:"+name) || !strings.Contains(err.Error(), "<select>") {
+			t.Fatalf("nested goframe:%s block = %q, %v, want placement failure", name, got, err)
+		}
+	}
+}
+
+func TestCustomIndexDeclarativeShadowStylesheetProfile(t *testing.T) {
+	options := htmlRewriteOptions{styleRewrites: map[string]string{
+		"styles.css": "assets/styles.33333333.css",
+	}}
+	for _, mode := range []string{"open", "closed", "OPEN"} {
+		t.Run(mode, func(t *testing.T) {
+			source := `<host-element><template shadowrootmode="` + mode + `"><link rel="stylesheet" href="styles.css"></template></host-element>`
+			got, err := rewriteIndexHTML(source, options)
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want declarative Shadow DOM stylesheet error", got)
+			}
+			if got != "" || !strings.Contains(err.Error(), "declarative Shadow DOM") || !strings.Contains(err.Error(), "stylesheet") {
+				t.Fatalf("rewriteIndexHTML() = %q, %v, want shadow stylesheet guidance", got, err)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "invalid mode is ordinary template",
+			source: `<host-element><template shadowrootmode=" open "><link rel="stylesheet" href="styles.css"></template></host-element>`,
+		},
+		{
+			name:   "ordinary template",
+			source: `<template><template><link rel="stylesheet" href="styles.css"></template></template>`,
+		},
+		{
+			name:   "external shadow stylesheet",
+			source: `<host-element><template shadowrootmode="open"><link rel="stylesheet" href="https://cdn.example/styles.css"></template></host-element>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := rewriteIndexForTest(t, test.source, options); got != test.source {
+				t.Fatalf("authored template bytes changed\ngot:  %q\nwant: %q", got, test.source)
+			}
+		})
+	}
+}
+
+func TestPackageCustomIndexManagedFirstFailureIsAtomic(t *testing.T) {
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	source := `<html><head></head><body><select><svg><script src="wasm_exec.js"></script></svg></select></body></html>`
+	writeTestFile(t, appDir, indexHTMLAssetName, source)
+
+	temporaryRoot := t.TempDir()
+	t.Setenv("TMPDIR", temporaryRoot)
+	outDir := filepath.Join(t.TempDir(), "package")
+	writeCompleteCurrentPackage(t, outDir)
+	before := snapshotInspectTree(t, outDir)
+	markerBefore, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var packageErr error
+	output := captureStdout(t, func() {
+		packageErr = packageApp(packageOptions{
+			appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{},
+		})
+	})
+	if packageErr == nil || !strings.Contains(packageErr.Error(), "<select>") {
+		t.Fatalf("packageApp() error = %v, want select profile rejection", packageErr)
+	}
+	if strings.Contains(output, "packaged ") {
+		t.Fatalf("failed package emitted success output: %q", output)
+	}
+	if got := snapshotInspectTree(t, outDir); !reflect.DeepEqual(got, before) {
+		t.Fatalf("managed-first failure changed previous package\nbefore: %#v\nafter:  %#v", before, got)
+	}
+	assertFileContent(t, filepath.Join(appDir, indexHTMLAssetName), source)
+	markerAfter, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(markerAfter, markerBefore) {
+		t.Fatalf("managed-first failure changed completion marker\nbefore: %q\nafter:  %q", markerBefore, markerAfter)
+	}
+	entries, err := os.ReadDir(temporaryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "goxc-package-") {
+			t.Fatalf("managed-first failure retained temporary stage %s", entry.Name())
+		}
 	}
 }
 
