@@ -1122,6 +1122,15 @@ async function runBaseResolutionOracle() {
 async function runManagedFirstSemanticOracle() {
     const pages = new Map();
     const requests = [];
+    const orderedRuntimeDelayMS = 75;
+    const orderedRuntimeResources = new Set([
+        "blocking.js",
+        "reversed.js",
+        "async.js",
+        "defer.js",
+        "module.js",
+    ]);
+    const orderedRuntimeSchedules = [];
     const oracleServer = createHTTPServer((request, response) => {
         const url = new URL(request.url, "http://127.0.0.1");
         requests.push(url.pathname);
@@ -1143,11 +1152,20 @@ async function runManagedFirstSemanticOracle() {
             return;
         }
         if (url.pathname.startsWith("/ordered-runtime/")) {
+            const resource = url.pathname.slice("/ordered-runtime/".length);
+            if (!orderedRuntimeResources.has(resource)) {
+                response.writeHead(404).end("missing ordered runtime resource");
+                return;
+            }
             response.setHeader("content-type", "text/javascript; charset=utf-8");
-            const delay = Number(url.searchParams.get("delay") ?? 0);
+            orderedRuntimeSchedules.push({
+                resource,
+                query: url.search,
+                delayMS: orderedRuntimeDelayMS,
+            });
             setTimeout(() => {
                 response.end(`window.__oracleRuntimeReady = true; window.__oracleOrder.push("runtime");`);
-            }, Number.isFinite(delay) ? delay : 0);
+            }, orderedRuntimeDelayMS);
             return;
         }
         if (url.pathname.startsWith("/style/")) {
@@ -1429,31 +1447,31 @@ async function runManagedFirstSemanticOracle() {
         for (const test of [
             {
                 name: "blocking runtime before bootstrap",
-                runtime: `<script src="${origin}/ordered-runtime/blocking.js?delay=75"></script>`,
+                runtime: `<script src="${origin}/ordered-runtime/blocking.js?fixture=ignored"></script>`,
                 beforeRuntime: "",
                 want: ["runtime", "bootstrap:true"],
             },
             {
                 name: "bootstrap before blocking runtime",
-                runtime: `<script src="${origin}/ordered-runtime/reversed.js?delay=75"></script>`,
+                runtime: `<script src="${origin}/ordered-runtime/reversed.js"></script>`,
                 beforeRuntime: `<script>window.__oracleOrder.push("bootstrap:" + Boolean(window.__oracleRuntimeReady));</script>`,
                 want: ["bootstrap:false", "runtime"],
             },
             {
                 name: "async runtime before bootstrap",
-                runtime: `<script async src="${origin}/ordered-runtime/async.js?delay=75"></script>`,
+                runtime: `<script async src="${origin}/ordered-runtime/async.js"></script>`,
                 beforeRuntime: "",
                 want: ["bootstrap:false", "runtime"],
             },
             {
                 name: "defer runtime before bootstrap",
-                runtime: `<script defer src="${origin}/ordered-runtime/defer.js?delay=75"></script>`,
+                runtime: `<script defer src="${origin}/ordered-runtime/defer.js"></script>`,
                 beforeRuntime: "",
                 want: ["bootstrap:false", "runtime"],
             },
             {
                 name: "module runtime before bootstrap",
-                runtime: `<script type="module" src="${origin}/ordered-runtime/module.js?delay=75"></script>`,
+                runtime: `<script type="module" src="${origin}/ordered-runtime/module.js"></script>`,
                 beforeRuntime: "",
                 want: ["bootstrap:false", "runtime"],
             },
@@ -1469,6 +1487,38 @@ async function runManagedFirstSemanticOracle() {
                 },
             });
         }
+        const schedulesBeforeUnknown = orderedRuntimeSchedules.length;
+        const unknownResponse = await fetch(
+            `${origin}/ordered-runtime/unknown.js?delay=999999`,
+        );
+        assert(unknownResponse.status === 404, "unknown ordered runtime resource was not rejected");
+        await unknownResponse.text();
+        assert(
+            orderedRuntimeSchedules.length === schedulesBeforeUnknown,
+            "unknown ordered runtime resource scheduled work",
+        );
+        assertDeepEqual(
+            orderedRuntimeSchedules.map(({ resource }) => resource).sort(),
+            [...orderedRuntimeResources].sort(),
+            "ordered runtime scheduled resources",
+        );
+        assert(
+            orderedRuntimeSchedules.every(({ delayMS }) => delayMS === orderedRuntimeDelayMS),
+            "ordered runtime delay was not fixture-owned",
+        );
+        assert(
+            orderedRuntimeSchedules.find(({ resource }) => resource === "blocking.js")?.query ===
+                "?fixture=ignored",
+            "irrelevant ordered runtime query was not preserved as inert input",
+        );
+        results.push({
+            name: "ordered runtime fixture boundary",
+            classification: "fixture-owned timing",
+            delayMS: orderedRuntimeDelayMS,
+            resources: orderedRuntimeSchedules.map(({ resource }) => resource).sort(),
+            unknownStatus: unknownResponse.status,
+            unknownScheduledTimers: orderedRuntimeSchedules.length - schedulesBeforeUnknown,
+        });
         await runCase({
             name: "balanced foreign content",
             classification: "simple profile",
