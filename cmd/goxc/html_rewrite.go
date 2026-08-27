@@ -2097,7 +2097,7 @@ func parseGeneratedArrowBootstrap(parser *legacyBootstrapParser) (legacyBootstra
 	match, ok := parser.streamingCall()
 	if !ok || !parser.token(".") || !parser.word("then") || !parser.token("(") ||
 		!parser.token("(") || !parser.word("result") || !parser.token(")") ||
-		!parser.token("=>") || !parser.word("go") || !parser.token(".") ||
+		!parser.tokenWithoutLineTerminator("=>") || !parser.word("go") || !parser.token(".") ||
 		!parser.word("run") || !parser.token("(") || !parser.word("result") ||
 		!parser.token(".") || !parser.word("instance") || !parser.token(")") ||
 		!parser.token(")") || !parser.token(";") {
@@ -2152,7 +2152,9 @@ func (parser *legacyBootstrapParser) streamingCall() (legacyBootstrapMatch, bool
 		!parser.token(".") || !parser.word("importObject") {
 		return legacyBootstrapMatch{}, false
 	}
-	parser.optionalToken(",")
+	if !parser.optionalToken(",") {
+		return legacyBootstrapMatch{}, false
+	}
 	if !parser.token(")") {
 		return legacyBootstrapMatch{}, false
 	}
@@ -2160,68 +2162,34 @@ func (parser *legacyBootstrapParser) streamingCall() (legacyBootstrapMatch, bool
 }
 
 func (parser *legacyBootstrapParser) legacyWASMURL() (legacyBootstrapMatch, bool) {
-	parser.skipSpace()
-	if parser.offset >= parser.end || parser.content[parser.offset] != '\'' && parser.content[parser.offset] != '"' {
+	if _, ok := parser.skipTrivia(); !ok {
 		return legacyBootstrapMatch{}, false
 	}
-	quote := parser.content[parser.offset]
-	valueStart := parser.offset + 1
-	units := make([]sourceByte, 0, 32)
-	for offset := valueStart; offset < parser.end; {
-		switch parser.content[offset] {
-		case '\n', '\r':
-			return legacyBootstrapMatch{}, false
-		case '\\':
-			if offset+1 >= parser.end {
-				return legacyBootstrapMatch{}, false
-			}
-			var decoded byte
-			switch parser.content[offset+1] {
-			case 't':
-				decoded = '\t'
-			case 'n':
-				decoded = '\n'
-			case 'r':
-				decoded = '\r'
-			default:
-				return legacyBootstrapMatch{}, false
-			}
-			units = append(units, sourceByte{
-				value: decoded,
-				start: offset - valueStart,
-				end:   offset + 2 - valueStart,
-			})
-			offset += 2
-		case quote:
-			value := parser.content[valueStart:offset]
-			for _, legacy := range []string{"bundle.wasm", "main.wasm"} {
-				reference, ok := matchLegacyURL(value, units, legacy)
-				if !ok {
-					continue
-				}
-				parser.offset = offset + 1
-				return legacyBootstrapMatch{
-					urlStart: valueStart + reference.start,
-					urlEnd:   valueStart + reference.end,
-					suffix:   reference.suffix,
-					quote:    quote,
-				}, true
-			}
-			return legacyBootstrapMatch{}, false
-		default:
-			units = append(units, sourceByte{
-				value: parser.content[offset],
-				start: offset - valueStart,
-				end:   offset + 1 - valueStart,
-			})
-			offset++
+	decoded, ok := decodeJavaScriptString(parser.content, parser.offset, parser.end)
+	if !ok {
+		return legacyBootstrapMatch{}, false
+	}
+	value := parser.content[decoded.valueStart:decoded.valueEnd]
+	for _, legacy := range []string{"bundle.wasm", "main.wasm"} {
+		reference, ok := matchLegacyURL(value, decoded.units, legacy)
+		if !ok {
+			continue
 		}
+		parser.offset = decoded.end
+		return legacyBootstrapMatch{
+			urlStart: decoded.valueStart + reference.start,
+			urlEnd:   decoded.valueStart + reference.end,
+			suffix:   reference.suffix,
+			quote:    decoded.quote,
+		}, true
 	}
 	return legacyBootstrapMatch{}, false
 }
 
 func (parser *legacyBootstrapParser) word(value string) bool {
-	parser.skipSpace()
+	if _, ok := parser.skipTrivia(); !ok {
+		return false
+	}
 	end := parser.offset + len(value)
 	if end > parser.end || parser.content[parser.offset:end] != value {
 		return false
@@ -2234,7 +2202,23 @@ func (parser *legacyBootstrapParser) word(value string) bool {
 }
 
 func (parser *legacyBootstrapParser) token(value string) bool {
-	parser.skipSpace()
+	if _, ok := parser.skipTrivia(); !ok {
+		return false
+	}
+	return parser.tokenAtCurrentOffset(value)
+}
+
+func (parser *legacyBootstrapParser) tokenWithoutLineTerminator(value string) bool {
+	// The generated arrow is the only supported historical shape with a
+	// restricted-production boundary.
+	trivia, ok := parser.skipTrivia()
+	if !ok || trivia.sawLineTerminator {
+		return false
+	}
+	return parser.tokenAtCurrentOffset(value)
+}
+
+func (parser *legacyBootstrapParser) tokenAtCurrentOffset(value string) bool {
 	end := parser.offset + len(value)
 	if end > parser.end || parser.content[parser.offset:end] != value {
 		return false
@@ -2243,23 +2227,20 @@ func (parser *legacyBootstrapParser) token(value string) bool {
 	return true
 }
 
-func (parser *legacyBootstrapParser) optionalToken(value string) {
-	parser.skipSpace()
+func (parser *legacyBootstrapParser) optionalToken(value string) bool {
+	if _, ok := parser.skipTrivia(); !ok {
+		return false
+	}
 	end := parser.offset + len(value)
 	if end <= parser.end && parser.content[parser.offset:end] == value {
 		parser.offset = end
 	}
+	return true
 }
 
 func (parser *legacyBootstrapParser) complete() bool {
-	parser.skipSpace()
-	return parser.offset == parser.end
-}
-
-func (parser *legacyBootstrapParser) skipSpace() {
-	for parser.offset < parser.end && isHTMLSpace(parser.content[parser.offset]) {
-		parser.offset++
-	}
+	_, ok := parser.skipTrivia()
+	return ok && parser.offset == parser.end
 }
 
 func isLegacyBootstrapIdentifierPart(value byte) bool {

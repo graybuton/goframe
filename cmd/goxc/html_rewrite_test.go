@@ -2429,6 +2429,296 @@ func TestCustomIndexHistoricalBootstrapCorpus(t *testing.T) {
 	}
 }
 
+func TestCustomIndexHistoricalBootstrapECMAScriptTrivia(t *testing.T) {
+	positive := []struct {
+		name   string
+		trivia string
+	}{
+		{name: "tab", trivia: "\t"},
+		{name: "vertical tab", trivia: "\v"},
+		{name: "form feed", trivia: "\f"},
+		{name: "space", trivia: " "},
+		{name: "no-break space", trivia: "\u00a0"},
+		{name: "ogham space mark", trivia: "\u1680"},
+		{name: "en quad", trivia: "\u2000"},
+		{name: "em quad", trivia: "\u2001"},
+		{name: "en space", trivia: "\u2002"},
+		{name: "em space", trivia: "\u2003"},
+		{name: "three-per-em space", trivia: "\u2004"},
+		{name: "four-per-em space", trivia: "\u2005"},
+		{name: "six-per-em space", trivia: "\u2006"},
+		{name: "figure space", trivia: "\u2007"},
+		{name: "punctuation space", trivia: "\u2008"},
+		{name: "thin space", trivia: "\u2009"},
+		{name: "hair space", trivia: "\u200a"},
+		{name: "narrow no-break space", trivia: "\u202f"},
+		{name: "medium mathematical space", trivia: "\u205f"},
+		{name: "ideographic space", trivia: "\u3000"},
+		{name: "byte order mark", trivia: "\ufeff"},
+		{name: "line feed", trivia: "\n"},
+		{name: "carriage return", trivia: "\r"},
+		{name: "carriage return line feed", trivia: "\r\n"},
+		{name: "line separator", trivia: "\u2028"},
+		{name: "paragraph separator", trivia: "\u2029"},
+		{name: "block comment", trivia: `/* fixture fetch("main.wasm") */`},
+		{name: "multiline block comment", trivia: "/* fixture\u2028line */"},
+		{name: "line comment line feed", trivia: "// fixture\n"},
+		{name: "line comment line separator", trivia: "// fixture\u2028"},
+	}
+
+	const wasmPath = "assets/bundle.12345678.wasm"
+	for _, test := range positive {
+		t.Run("accept "+test.name, func(t *testing.T) {
+			body := historicalArrowBootstrapWithTrivia(test.trivia, `"bundle.wasm"`)
+			source := "<script>" + body + "</script>"
+			want := strings.Replace(source, "bundle.wasm", wasmPath, 1)
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath})
+			if got != want {
+				t.Fatalf("trivia rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "legacy function with comments", body: historicalFunctionBootstrapWithTrivia("/* fixture */", `"bundle.wasm"`)},
+		{name: "load wrapper with Unicode space", body: historicalLoadBootstrapWithTrivia("\u00a0", `"main.wasm"`)},
+		{name: "load wrapper with line comments", body: historicalLoadBootstrapWithTrivia("// fixture\n", `"bundle.wasm"`)},
+	} {
+		t.Run("accept "+test.name, func(t *testing.T) {
+			source := "<script>" + test.body + "</script>"
+			want := strings.NewReplacer("bundle.wasm", wasmPath, "main.wasm", wasmPath).Replace(source)
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath})
+			if got != want {
+				t.Fatalf("historical shape trivia mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name   string
+		trivia string
+	}{
+		{name: "next line", trivia: "\u0085"},
+		{name: "mongolian vowel separator", trivia: "\u180e"},
+		{name: "zero width space", trivia: "\u200b"},
+		{name: "invalid UTF-8", trivia: string([]byte{0xff})},
+	} {
+		t.Run("preserve "+test.name, func(t *testing.T) {
+			source := "<script>" + historicalArrowBootstrapWithTrivia(test.trivia, `"bundle.wasm"`) + "</script>"
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath}); got != source {
+				t.Fatalf("unsupported trivia changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+
+	base := historicalArrowBootstrapWithTrivia(" ", `"bundle.wasm"`)
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "line comment at EOF", body: base + "// trailing fixture"},
+		{name: "unterminated block comment", body: base + "/* trailing fixture"},
+		{name: "line terminator before arrow", body: strings.Replace(base, ") =>", ")\n=>", 1)},
+		{name: "multiline comment before arrow", body: strings.Replace(base, ") =>", ")/*\n*/=>", 1)},
+		{name: "escaped identifier", body: strings.Replace(base, "const", `c\u006Fnst`, 1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "<script>" + test.body + "</script>"
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath})
+			if test.name == "line comment at EOF" {
+				want := strings.Replace(source, "bundle.wasm", wasmPath, 1)
+				if got != want {
+					t.Fatalf("EOF line-comment rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+				}
+				return
+			}
+			if got != source {
+				t.Fatalf("unsupported candidate changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
+func TestCustomIndexHistoricalBootstrapStaticStringEscapes(t *testing.T) {
+	const wasmPath = "assets/bundle.12345678.wasm"
+	for _, test := range []struct {
+		name      string
+		quotedURL string
+		rawPath   string
+		rawSuffix string
+	}{
+		{name: "hex", quotedURL: `"bundle\x2ewasm"`, rawPath: `bundle\x2ewasm`},
+		{name: "four digit Unicode", quotedURL: `"bundle\u002ewasm"`, rawPath: `bundle\u002ewasm`},
+		{name: "code point Unicode", quotedURL: `"bundle\u{2e}wasm"`, rawPath: `bundle\u{2e}wasm`},
+		{name: "identity escape", quotedURL: `"bundle\.wasm"`, rawPath: `bundle\.wasm`},
+		{name: "single quoted main", quotedURL: `'main\x2ewasm'`, rawPath: `main\x2ewasm`},
+		{name: "escaped query and fragment", quotedURL: `"bundle\x2ewasm\x3fmode=1\u0023app"`, rawPath: `bundle\x2ewasm`, rawSuffix: `\x3fmode=1\u0023app`},
+		{name: "line feed continuation", quotedURL: "\"bundle.\\\nwasm\"", rawPath: "bundle.\\\nwasm"},
+		{name: "carriage return line feed continuation", quotedURL: "\"bundle.\\\r\nwasm\"", rawPath: "bundle.\\\r\nwasm"},
+		{name: "line separator continuation", quotedURL: "\"bundle.\\\u2028wasm\"", rawPath: "bundle.\\\u2028wasm"},
+		{name: "paragraph separator continuation", quotedURL: "\"bundle.\\\u2029wasm\"", rawPath: "bundle.\\\u2029wasm"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := historicalArrowBootstrapWithTrivia(" ", test.quotedURL)
+			source := "<script>" + body + "</script>"
+			want := strings.Replace(source, test.rawPath+test.rawSuffix, wasmPath+test.rawSuffix, 1)
+			got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath})
+			if got != want {
+				t.Fatalf("escaped URL rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+			if second := rewriteIndexForTest(t, got, htmlRewriteOptions{wasmPath: wasmPath}); second != got {
+				t.Fatalf("escaped URL rewrite is not idempotent\nfirst:  %q\nsecond: %q", got, second)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name      string
+		quotedURL string
+	}{
+		{name: "escaped backslash does not double decode", quotedURL: `"bundle\\x2ewasm"`},
+		{name: "exact missing hex digits", quotedURL: `"bundle.wasm\x"`},
+		{name: "exact short hex", quotedURL: `"bundle.wasm\x2"`},
+		{name: "short hex", quotedURL: `"bundle\x2wasm"`},
+		{name: "invalid hex", quotedURL: `"bundle\xGGwasm"`},
+		{name: "exact missing Unicode digits", quotedURL: `"bundle.wasm\u"`},
+		{name: "exact short Unicode", quotedURL: `"bundle.wasm\u123"`},
+		{name: "empty Unicode", quotedURL: `"bundle\uwasm"`},
+		{name: "short Unicode", quotedURL: `"bundle\u123wasm"`},
+		{name: "invalid Unicode", quotedURL: `"bundle\u12GGwasm"`},
+		{name: "empty code point", quotedURL: `"bundle\u{}wasm"`},
+		{name: "out of range code point", quotedURL: `"bundle\u{110000}wasm"`},
+		{name: "surrogate code point", quotedURL: `"bundle\u{D800}wasm"`},
+		{name: "lone high surrogate", quotedURL: `"bundle\uD800wasm"`},
+		{name: "lone low surrogate", quotedURL: `"bundle\uDC00wasm"`},
+		{name: "octal one", quotedURL: `"bundle\1.wasm"`},
+		{name: "octal zero seven", quotedURL: `"bundle\07.wasm"`},
+		{name: "octal three digits", quotedURL: `"bundle\377.wasm"`},
+		{name: "non octal eight", quotedURL: `"bundle\8.wasm"`},
+		{name: "non octal nine", quotedURL: `"bundle\9.wasm"`},
+		{name: "trailing backslash", quotedURL: `"bundle.wasm\`},
+		{name: "unescaped active quote", quotedURL: `"bundle".wasm"`},
+		{name: "raw line feed", quotedURL: "\"bundle.\nwasm\""},
+		{name: "raw carriage return", quotedURL: "\"bundle.\rwasm\""},
+		{name: "raw line separator", quotedURL: "\"bundle.\u2028wasm\""},
+		{name: "raw paragraph separator", quotedURL: "\"bundle.\u2029wasm\""},
+	} {
+		t.Run("preserve "+test.name, func(t *testing.T) {
+			source := "<script>" + historicalArrowBootstrapWithTrivia(" ", test.quotedURL) + "</script>"
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath}); got != source {
+				t.Fatalf("unsupported string changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
+func TestDecodeJavaScriptString(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		source  string
+		want    string
+		wantOK  bool
+		wantEnd int
+	}{
+		{name: "double quote", source: `"a\"b"`, want: `a"b`, wantOK: true},
+		{name: "single quote", source: `'a\'b'`, want: `a'b`, wantOK: true},
+		{name: "backslash", source: `"a\\b"`, want: `a\b`, wantOK: true},
+		{name: "single escapes", source: `"\b\f\n\r\t\v"`, want: "\b\f\n\r\t\v", wantOK: true},
+		{name: "null", source: `"\0"`, want: "\x00", wantOK: true},
+		{name: "hex and Unicode", source: `"\x41\u0042\u{43}"`, want: "ABC", wantOK: true},
+		{name: "identity", source: `"\."`, want: ".", wantOK: true},
+		{name: "line continuations", source: "\"a\\\nb\\\rc\\\r\nd\\\u2028e\\\u2029f\"", want: "abcdef", wantOK: true},
+		{name: "surrogate pair", source: `"\uD83D\uDE00"`, want: "😀", wantOK: true},
+		{name: "raw non-BMP", source: `"😀"`, want: "😀", wantOK: true},
+		{name: "maximum scalar", source: `"\u{10FFFF}"`, want: "\U0010ffff", wantOK: true},
+		{name: "escaped line separators", source: `"\u2028\u2029"`, want: "\u2028\u2029", wantOK: true},
+		{name: "trailing authored tokens", source: `"ok" trailing`, want: "ok", wantOK: true, wantEnd: 4},
+		{name: "invalid UTF-8", source: string([]byte{'"', 0xff, '"'})},
+		{name: "null followed by digit", source: `"\07"`},
+		{name: "lone high surrogate", source: `"\uD83D"`},
+		{name: "lone low surrogate", source: `"\uDE00"`},
+		{name: "raw line separator", source: "\"a\u2028b\""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, ok := decodeJavaScriptString(test.source, 0, len(test.source))
+			if ok != test.wantOK {
+				t.Fatalf("decodeJavaScriptString() ok = %v, want %v; decoded = %+v", ok, test.wantOK, decoded)
+			}
+			if !ok {
+				return
+			}
+			var value strings.Builder
+			for _, unit := range decoded.units {
+				value.WriteByte(unit.value)
+			}
+			if value.String() != test.want {
+				t.Fatalf("decodeJavaScriptString() value = %q, want %q", value.String(), test.want)
+			}
+			wantEnd := test.wantEnd
+			if wantEnd == 0 {
+				wantEnd = len(test.source)
+			}
+			if decoded.end != wantEnd {
+				t.Fatalf("decodeJavaScriptString() end = %d, want %d", decoded.end, wantEnd)
+			}
+		})
+	}
+}
+
+func TestDecodeJavaScriptStringSourceSpans(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		source    string
+		semantic  string
+		index     int
+		wantStart int
+		wantEnd   int
+	}{
+		{name: "hex escape", source: `"bundle\x2ewasm"`, semantic: "bundle.wasm", index: 6, wantStart: 6, wantEnd: 10},
+		{name: "surrogate pair", source: `"\uD83D\uDE00"`, semantic: "😀", index: 0, wantStart: 0, wantEnd: 12},
+		{name: "raw non-BMP", source: `"😀"`, semantic: "😀", index: 0, wantStart: 0, wantEnd: 4},
+		{name: "after line continuation", source: "\"a\\\r\nb\"", semantic: "ab", index: 1, wantStart: 4, wantEnd: 5},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, ok := decodeJavaScriptString(test.source, 0, len(test.source))
+			if !ok {
+				t.Fatal("decodeJavaScriptString() did not recognize static string")
+			}
+			if len(decoded.units) != len(test.semantic) {
+				t.Fatalf("semantic unit count = %d, want %d", len(decoded.units), len(test.semantic))
+			}
+			for index, want := range []byte(test.semantic) {
+				if decoded.units[index].value != want {
+					t.Fatalf("unit %d = %#x, want %#x", index, decoded.units[index].value, want)
+				}
+			}
+			unit := decoded.units[test.index]
+			if unit.start != test.wantStart || unit.end != test.wantEnd {
+				t.Fatalf("mapped span = [%d,%d), want [%d,%d)", unit.start, unit.end, test.wantStart, test.wantEnd)
+			}
+		})
+	}
+}
+
+func historicalArrowBootstrapWithTrivia(trivia, quotedURL string) string {
+	return trivia + "const" + trivia + "go" + trivia + "=" + trivia + "new" + trivia + "Go" + trivia + "(" + trivia + ")" + trivia + ";" +
+		trivia + "WebAssembly" + trivia + "." + trivia + "instantiateStreaming" + trivia + "(" + trivia + "fetch" + trivia + "(" + trivia + quotedURL + trivia + ")" + trivia + "," + trivia + "go" + trivia + "." + trivia + "importObject" + trivia + ")" + trivia + "." + trivia + "then" + trivia + "(" + trivia + "(" + trivia + "result" + trivia + ") =>" + trivia + "go" + trivia + "." + trivia + "run" + trivia + "(" + trivia + "result" + trivia + "." + trivia + "instance" + trivia + ")" + trivia + ")" + trivia + ";" + trivia
+}
+
+func historicalFunctionBootstrapWithTrivia(trivia, quotedURL string) string {
+	return trivia + "var" + trivia + "go" + trivia + "=" + trivia + "new" + trivia + "Go" + trivia + "(" + trivia + ")" + trivia + ";" +
+		trivia + "WebAssembly" + trivia + "." + trivia + "instantiateStreaming" + trivia + "(" + trivia + "fetch" + trivia + "(" + trivia + quotedURL + trivia + ")" + trivia + "," + trivia + "go" + trivia + "." + trivia + "importObject" + trivia + ")" + trivia + "." + trivia + "then" + trivia + "(" + trivia + "function" + trivia + "(" + trivia + "result" + trivia + ")" + trivia + "{" + trivia + "go" + trivia + "." + trivia + "run" + trivia + "(" + trivia + "result" + trivia + "." + trivia + "instance" + trivia + ")" + trivia + ";" + trivia + "}" + trivia + ")" + trivia + ";" + trivia
+}
+
+func historicalLoadBootstrapWithTrivia(trivia, quotedURL string) string {
+	return trivia + "window" + trivia + "." + trivia + "addEventListener" + trivia + "(" + trivia + `"load"` + trivia + "," + trivia + "function" + trivia + "(" + trivia + ")" + trivia + "{" +
+		historicalFunctionBootstrapWithTrivia(trivia, quotedURL) +
+		"}" + trivia + "," + trivia + "{" + trivia + "once" + trivia + ":" + trivia + "true" + trivia + "}" + trivia + ")" + trivia + ";" + trivia
+}
+
 func TestCustomIndexHistoricalBootstrapMultipleScripts(t *testing.T) {
 	source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => go.run(result.instance));</script>
 <script>const go = new Go(); WebAssembly.instantiateStreaming(fetch('./bundle.wasm?v=1#app'), go.importObject,).then((result) => go.run(result.instance));</script>`
@@ -2559,6 +2849,22 @@ WebAssembly.instantiateStreaming(
     fetch("bundle.wasm"),
     go.importObject,
 ).then((result) => go.run(result.instance));`,
+		},
+		{
+			name:   "template URL",
+			script: "const go = new Go(); WebAssembly.instantiateStreaming(fetch(`bundle.wasm`), go.importObject).then((result) => go.run(result.instance));",
+		},
+		{
+			name:   "concatenated URL",
+			script: `const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle." + "wasm"), go.importObject).then((result) => go.run(result.instance));`,
+		},
+		{
+			name:   "variable URL",
+			script: `const go = new Go(); WebAssembly.instantiateStreaming(fetch(url), go.importObject).then((result) => go.run(result.instance));`,
+		},
+		{
+			name:   "escaped declaration identifier",
+			script: `c\u006Fnst go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then((result) => go.run(result.instance));`,
 		},
 	}
 
