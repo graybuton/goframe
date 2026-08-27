@@ -194,11 +194,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			continue
 		}
 		if strings.HasPrefix(content[offset:], "<!") {
-			end, err := scanHTMLConstructEnd(content, offset+2)
-			if err != nil {
-				return scannedHTML{}, err
-			}
-			offset = end
+			offset = scanHTMLDoctypeEnd(content, offset+2)
 			continue
 		}
 		if strings.HasPrefix(content[offset:], "</") && offset+2 < len(content) &&
@@ -702,25 +698,11 @@ func opaqueHTMLTextElement(name string) bool {
 	}
 }
 
-func scanHTMLConstructEnd(content string, start int) (int, error) {
-	quote := byte(0)
-	for offset := start; offset < len(content); offset++ {
-		current := content[offset]
-		if quote != 0 {
-			if current == quote {
-				quote = 0
-			}
-			continue
-		}
-		if current == '\'' || current == '"' {
-			quote = current
-			continue
-		}
-		if current == '>' {
-			return offset + 1, nil
-		}
+func scanHTMLDoctypeEnd(content string, start int) int {
+	if end := strings.IndexByte(content[start:], '>'); end >= 0 {
+		return start + end + 1
 	}
-	return 0, fmt.Errorf("custom index has an unterminated declaration or processing instruction")
+	return len(content)
 }
 
 func scanHTMLBogusCommentEnd(content string, start int) int {

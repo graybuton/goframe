@@ -2518,6 +2518,66 @@ func TestCustomIndexBogusCommentSemantics(t *testing.T) {
 	}
 }
 
+func TestCustomIndexDoctypeTokenizerBoundary(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const stylePath = "assets/styles.33333333.css"
+	tests := []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+		old     string
+		new     string
+	}{
+		{name: "normal", source: `<!doctype html><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "PUBLIC double quoted", source: `<!DOCTYPE html PUBLIC "id"><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "PUBLIC single quoted", source: `<!DOCTYPE html PUBLIC 'id'><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "SYSTEM double quoted", source: `<!DOCTYPE html SYSTEM "id"><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "SYSTEM single quoted", source: `<!DOCTYPE html SYSTEM 'id'><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "abrupt PUBLIC double quoted", source: `<!DOCTYPE html PUBLIC "x><script src="wasm_exec.js"></script>">`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "abrupt PUBLIC single quoted", source: `<!DOCTYPE html PUBLIC 'x><script src="wasm_exec.js"></script>'>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "abrupt SYSTEM double quoted style", source: `<!DOCTYPE html SYSTEM "x><link rel="stylesheet" href="styles.css">">`, options: htmlRewriteOptions{styleRewrites: map[string]string{"styles.css": stylePath}}, old: "styles.css", new: stylePath},
+		{name: "abrupt SYSTEM single quoted", source: `<!DOCTYPE html SYSTEM 'x><script src="wasm_exec.js"></script>'>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "bare DOCTYPE", source: `<!DOCTYPE><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "PUBLIC without identifier", source: `<!DOCTYPE html PUBLIC><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+		{name: "SYSTEM without identifier", source: `<!DOCTYPE html SYSTEM><script src="wasm_exec.js"></script>`, options: htmlRewriteOptions{runtimePath: runtimePath}, old: runtimeAssetName, new: runtimePath},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			want := strings.Replace(test.source, test.old, test.new, 1)
+			got, err := rewriteIndexHTML(test.source, test.options)
+			if err != nil {
+				t.Fatalf("rewriteIndexHTML() error: %v", err)
+			}
+			if got != want {
+				t.Fatalf("DOCTYPE boundary mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		`<!DOCTYPE html PUBLIC "opaque <script src=wasm_exec.js"`,
+		`<!DOCTYPE html SYSTEM 'opaque <link rel=stylesheet href=styles.css'`,
+		`<!DOCTYPE html PUBLIC "<!-- goframe:runtime -->`,
+	} {
+		t.Run("EOF "+source, func(t *testing.T) {
+			got, err := rewriteIndexHTML(source, htmlRewriteOptions{
+				wasmPath:    "assets/bundle.11111111.wasm",
+				runtimePath: runtimePath,
+				styleRewrites: map[string]string{
+					"styles.css": stylePath,
+				},
+			})
+			if err != nil {
+				t.Fatalf("EOF DOCTYPE became a package error: %v", err)
+			}
+			if got != source {
+				t.Fatalf("EOF DOCTYPE changed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
 func TestCustomIndexPreloadInsertionMatrix(t *testing.T) {
 	options := htmlRewriteOptions{
 		preload:     true,
