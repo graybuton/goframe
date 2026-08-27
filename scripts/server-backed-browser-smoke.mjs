@@ -18,6 +18,17 @@ const debugPort = Number(process.env.GOFRAME_SERVER_BACKED_CHROME_DEBUG_PORT ?? 
 const backendPort = Number(process.env.GOFRAME_SERVER_BACKED_SMOKE_PORT ?? await pickFreePort());
 const profile = await mkdtempCompat("goframe-server-backed-smoke-");
 const appURL = `http://127.0.0.1:${backendPort}/?smoke=${Date.now()}`;
+const directHashIterations = Number(
+    process.env.GOFRAME_SERVER_BACKED_DIRECT_HASH_ITERATIONS ?? 1,
+);
+if (!Number.isInteger(directHashIterations) ||
+    directHashIterations < 1 ||
+    directHashIterations > 100) {
+    throw new Error(
+        "HARNESS FAILURE: GOFRAME_SERVER_BACKED_DIRECT_HASH_ITERATIONS must be an integer from 1 to 100",
+    );
+}
+const directHashPressure = directHashIterations > 1;
 const expectedApp = new URL(appURL);
 const initialName = "GoFrame";
 const initialMessage = "Hello, GoFrame, from Go backend!";
@@ -68,6 +79,8 @@ let browser = null;
 let backendError = "";
 let browserError = "";
 let browserExit = null;
+const runtimeExceptions = [];
+const unexpectedHTTPFailures = [];
 
 try {
     await runCommand("go", ["run", "./cmd/goxc", "package", "./examples/server-backed", "--compiler=go"], { cwd: rootDir });
@@ -119,8 +132,18 @@ try {
 
     const page = await waitForPage(debugPort);
     const client = await connect(page.webSocketDebuggerUrl);
+    client.on("Runtime.exceptionThrown", (params) => {
+        runtimeExceptions.push(params.exceptionDetails?.text ?? "runtime exception");
+    });
+    client.on("Network.responseReceived", (params) => {
+        const response = params.response;
+        if (response.status >= 400 && !isExpectedBrowserHTTPFailure(response.url, response.status)) {
+            unexpectedHTTPFailures.push({ url: response.url, status: response.status });
+        }
+    });
     await client.call("Runtime.enable");
     await client.call("Page.enable");
+    await client.call("Network.enable");
     await client.call("Page.addScriptToEvaluateOnNewDocument", {
         source: installServerBackedEvidenceExpression(),
     });
@@ -129,6 +152,7 @@ try {
     await initializeBrowserEvidence(client);
     await assertPreBootDocumentEvidence(client);
 
+    scenarioSuite: {
     assertState(await appState(client), {
         app: true,
         shell: true,
@@ -163,61 +187,70 @@ try {
         routeContentIdentityChanges: 0,
     }, "initial route evidence");
 
-    const documentScopeIdentity = await documentScopeIdentityState(client);
-    await clickDocumentScopeControl(client, "server-backed-document-scope-unmount");
-    await assertDocumentState(
-        client,
-        "authored-baseline",
-        authoredDocumentState,
-        "server-backed authored document baseline after scope unmount",
-    );
-    assertState(await documentScopeIdentityState(client), {
-        appSame: true,
-        shellSame: true,
-        routeContentSame: true,
-        scopeInactive: true,
-    }, "server-backed document scope unmount identity");
-    await clickDocumentScopeControl(client, "server-backed-document-scope-remount");
-    await assertDocumentState(
-        client,
-        "route",
-        homeDocumentState(),
-        "server-backed Home document state after scope remount",
-    );
-    assertState(await documentScopeIdentityState(client), {
-        appSame: true,
-        shellSame: true,
-        routeContentSame: true,
-        scopeInactive: false,
-    }, "server-backed document scope remount identity");
-    if (!documentScopeIdentity.app ||
-        !documentScopeIdentity.shell ||
-        !documentScopeIdentity.routeContent) {
-        throw new Error(`APP FAILURE: document scope identity baseline is incomplete: ${JSON.stringify(documentScopeIdentity)}`);
+    await prepareDirectHashDocumentBaseline(client, "initial");
+    const directReports = [];
+    for (let iteration = 1; iteration <= directHashIterations; iteration++) {
+        if (iteration > 1) {
+            await navigateHome(client);
+            await waitForRoute(client, "home", "/");
+            await assertDocumentState(
+                client,
+                "route",
+                homeDocumentState(),
+                `direct hash pressure ${iteration} Home document state`,
+            );
+            await prepareDirectHashDocumentBaseline(client, `pressure-${iteration}`);
+        }
+        if (directHashPressure) {
+            await client.evaluate("window.requestAnimationFrame(() => {})");
+        }
+        const directLabel = directHashPressure
+            ? `direct-hash-navigation-${iteration}`
+            : "direct-hash-navigation";
+        await startScenario(client, directLabel);
+        await navigateGreetingHash(client, directName);
+        await waitForLoading(client, directName, `direct Lin route loading ${iteration}`);
+        await waitForGreeting(client, directMessage, `direct Lin backend greeting ${iteration}`);
+        const directReport = await finishScenario(client, directLabel);
+        assertGreetingRouteReport(directReport, `direct hash navigation ${iteration}`, {
+            outcome: "success",
+            routeChanges: 1,
+            samePattern: false,
+        });
+        assertState(await appState(client), {
+            route: "greeting",
+            hash: greetingHash(directName),
+            routeTarget: greetingTarget(directName),
+            key: `/api/greeting?name=${encodeURIComponent(directName)}`,
+            status: "ready",
+            message: directMessage,
+            input: directName,
+            appSame: true,
+            shellSame: true,
+            routeContentSame: true,
+        }, `server-backed direct hash navigation ${iteration}`);
+        directReports.push(directReport);
     }
-
-    await startScenario(client, "direct-hash-navigation");
-    await navigateGreetingHash(client, directName);
-    await waitForLoading(client, directName, "direct Lin route loading");
-    await waitForGreeting(client, directMessage, "direct Lin backend greeting");
-    const directReport = await finishScenario(client, "direct-hash-navigation");
-    assertGreetingRouteReport(directReport, "direct hash navigation", {
-        outcome: "success",
-        routeChanges: 1,
-        samePattern: false,
-    });
-    assertState(await appState(client), {
-        route: "greeting",
-        hash: greetingHash(directName),
-        routeTarget: greetingTarget(directName),
-        key: `/api/greeting?name=${encodeURIComponent(directName)}`,
-        status: "ready",
-        message: directMessage,
-        input: directName,
-        appSame: true,
-        shellSame: true,
-        routeContentSame: true,
-    }, "server-backed direct hash navigation");
+    if (directHashPressure) {
+        const pressureEvidence = await evidenceState(client);
+        assertState(pressureEvidence.document, {
+            invalidPairs: 0,
+            duplicateDescriptionObservations: 0,
+            staleMetadataAppearances: 0,
+            titleIdentityStable: true,
+            descriptionIdentityStable: true,
+            viewportIdentityStable: true,
+        }, "direct hash pressure document evidence");
+        console.log(`server-backed direct hash pressure: ${JSON.stringify({
+            iterations: directReports.length,
+            failures: 0,
+            retries: 0,
+            runtimeExceptions: runtimeExceptions.length,
+            unexpectedHTTPFailures: unexpectedHTTPFailures.length,
+            staleDocumentSnapshots: pressureEvidence.document.staleMetadataAppearances,
+        })}`);
+        break scenarioSuite;
+    }
 
     await prepareGreetingName(client, updatedName);
     await startScenario(client, "successful-navigation");
@@ -1428,12 +1461,37 @@ try {
         savedEditorReleases: finalEvidence.document.savedEditorReleases,
     })}`);
 
+    }
+    assertBrowserProtocolEvidence(
+        directHashPressure ? "direct hash pressure" : "full server-backed flow",
+    );
     client.close();
     console.log("Server-backed browser smoke: ok");
 } finally {
     await stopProcess(browser, { processGroup: false });
     await stopProcess(backend, { processGroup: true });
     await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+function isExpectedBrowserHTTPFailure(rawURL, status) {
+    const url = new URL(rawURL);
+    if (url.pathname === "/favicon.ico" && status === 404) {
+        return true;
+    }
+    if (status !== 500) {
+        return false;
+    }
+    return (url.pathname === "/api/greeting" && url.searchParams.get("name") === failureName) ||
+        url.pathname === "/api/saved-greeting";
+}
+
+function assertBrowserProtocolEvidence(label) {
+    if (runtimeExceptions.length > 0 || unexpectedHTTPFailures.length > 0) {
+        throw new Error(`APP FAILURE: ${label} browser protocol evidence failed: ${JSON.stringify({
+            runtimeExceptions,
+            unexpectedHTTPFailures,
+        })}`);
+    }
 }
 
 async function assertBackendAPI(name, expected) {
@@ -1644,29 +1702,63 @@ async function assertDocumentState(client, owner, expected, label) {
 }
 
 async function waitForDocumentStateToSettle(client, label) {
-    let state = null;
-    await waitForCondition(async () => {
-        state = await appState(client);
-        const schedulingSettled = await client.evaluate(
-            "window.__serverBackedAudit?.schedulingSettled() ?? false",
+    const startedAt = Date.now();
+    const attempts = [];
+    let lastState = null;
+    for (let attempt = 1; attempt <= 120; attempt++) {
+        lastState = await client.evaluate(
+            "window.__serverBackedAudit?.settlingState() ?? null",
         );
-        return schedulingSettled &&
-            state.documentExpectedTitle !== "" &&
-            state.documentExpectedDescription !== "" &&
-            state.documentTitle === state.documentExpectedTitle &&
-            state.documentDescription === state.documentExpectedDescription &&
-            state.documentDescriptionCount === 1 &&
-            state.documentTitleIdentityStable &&
-            state.documentDescriptionIdentityStable &&
-            state.documentViewportIdentityStable &&
-            state.documentViewportContent === authoredViewportContent;
-    }, `${label} document state settled`);
-    const snapshot = await client.callFunction(`function(phase) {
-        return window.__serverBackedEvidence?.captureDocumentSnapshot(phase) ?? null;
-    }`, `settled:${label}`);
-    if (!snapshot?.valid) {
-        throw new Error(`APP FAILURE: ${label} settled document snapshot is invalid: ${JSON.stringify(snapshot)}`);
+        if (!lastState) {
+            throw new Error(`HARNESS FAILURE: ${label} has no server-backed audit state`);
+        }
+        const predicates = documentSettlingPredicates(lastState);
+        const falsePredicates = Object.entries(predicates)
+            .filter(([, value]) => !value)
+            .map(([name]) => name);
+        if (falsePredicates.length === 0) {
+            const snapshot = await client.callFunction(`function(phase) {
+                return window.__serverBackedEvidence?.captureDocumentSnapshot(phase) ?? null;
+            }`, `settled:${label}`);
+            if (!snapshot?.valid) {
+                throw new Error(
+                    `APP FAILURE: ${label} settled document snapshot is invalid: ${JSON.stringify(snapshot)}`,
+                );
+            }
+            return;
+        }
+        attempts.push({
+            attempt,
+            elapsedMS: Date.now() - startedAt,
+            falsePredicates,
+        });
+        await wait(100);
     }
+    throw new Error(`HARNESS FAILURE: timed out waiting for ${label} document state settled\n${JSON.stringify({
+        label,
+        elapsedMS: Date.now() - startedAt,
+        attempts,
+        lastState,
+        runtimeExceptions,
+        unexpectedHTTPFailures,
+        backendStderr: backendError.slice(-4000),
+    }, null, 2)}`);
+}
+
+function documentSettlingPredicates(state) {
+    const document = state.document;
+    return {
+        schedulingSettled: state.schedulingSettled,
+        expectedTitlePresent: document.expectedTitle !== "",
+        expectedDescriptionPresent: document.expectedDescription !== "",
+        titleMatches: document.actualTitle === document.expectedTitle,
+        descriptionMatches: document.actualDescription === document.expectedDescription,
+        descriptionCount: document.descriptionCount === 1,
+        titleIdentityStable: document.titleIdentityStable,
+        descriptionIdentityStable: document.descriptionIdentityStable,
+        viewportIdentityStable: document.viewportIdentityStable,
+        viewportContent: document.viewportContent === authoredViewportContent,
+    };
 }
 
 async function documentScopeIdentityState(client) {
@@ -1684,6 +1776,41 @@ async function documentScopeIdentityState(client) {
             ),
         };
     }`);
+}
+
+async function prepareDirectHashDocumentBaseline(client, label) {
+    const identity = await documentScopeIdentityState(client);
+    if (!identity.app || !identity.shell || !identity.routeContent) {
+        throw new Error(
+            `APP FAILURE: ${label} document scope identity baseline is incomplete: ${JSON.stringify(identity)}`,
+        );
+    }
+    await clickDocumentScopeControl(client, "server-backed-document-scope-unmount");
+    await assertDocumentState(
+        client,
+        "authored-baseline",
+        authoredDocumentState,
+        `${label} authored document baseline after scope unmount`,
+    );
+    assertState(await documentScopeIdentityState(client), {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        scopeInactive: true,
+    }, `${label} document scope unmount identity`);
+    await clickDocumentScopeControl(client, "server-backed-document-scope-remount");
+    await assertDocumentState(
+        client,
+        "route",
+        homeDocumentState(),
+        `${label} Home document state after scope remount`,
+    );
+    assertState(await documentScopeIdentityState(client), {
+        appSame: true,
+        shellSame: true,
+        routeContentSame: true,
+        scopeInactive: false,
+    }, `${label} document scope remount identity`);
 }
 
 async function clickDocumentScopeControl(client, testID) {
@@ -2598,12 +2725,30 @@ async function captureSavedSubmitOwnership(client, phase, baseline = null) {
 }
 
 async function startScenario(client, label) {
-    const started = await client.callFunction(`function(label) {
-        return window.__serverBackedAudit?.start(label) ?? false;
-    }`, label);
-    if (!started) {
-        throw new Error(`APP FAILURE: server-backed audit did not start ${label}`);
+    const startedAt = Date.now();
+    const attempts = [];
+    for (let attempt = 1; attempt <= 120; attempt++) {
+        const result = await client.callFunction(`function(label) {
+            const audit = window.__serverBackedAudit;
+            if (!audit) return { started: false, state: null };
+            return { started: audit.start(label), state: audit.settlingState() };
+        }`, label);
+        if (result?.started) {
+            return;
+        }
+        attempts.push({
+            attempt,
+            elapsedMS: Date.now() - startedAt,
+            state: result?.state ?? null,
+        });
+        await wait(100);
     }
+    throw new Error(`HARNESS FAILURE: server-backed audit did not reach a quiescent start for ${label}\n${JSON.stringify({
+        attempts,
+        runtimeExceptions,
+        unexpectedHTTPFailures,
+        backendStderr: backendError.slice(-4000),
+    }, null, 2)}`);
 }
 
 async function finishScenario(client, label) {
@@ -3394,9 +3539,12 @@ function installServerBackedEvidenceExpression() {
         savedFormBaseline: null,
         savedInputBaseline: null,
         committedValueBaseline: 0,
+        schedulingBaseline: null,
+        label: "",
         start(label) {
+            if (this.label || !this.schedulingSettled()) return false;
             for (const name of Object.keys(operations)) operations[name] = 0;
-            for (const name of Object.keys(scheduling)) scheduling[name] = 0;
+            this.schedulingBaseline = { ...scheduling };
             this.componentBaseline = snapshotComponentCounts();
             this.renderBaseline = renderReports.length;
             this.requestBaseline = {
@@ -3453,11 +3601,15 @@ function installServerBackedEvidenceExpression() {
                 componentPatches[name] = current.patches[name] - this.componentBaseline.patches[name];
             }
             const updates = renderReports.slice(this.renderBaseline).filter((entry) => entry.phase === "update");
-            return {
+            const schedulingReport = {};
+            for (const name of Object.keys(scheduling)) {
+                schedulingReport[name] = scheduling[name] - this.schedulingBaseline[name];
+            }
+            const report = {
                 scenario: label,
                 flushes: updates.length,
                 updateDurations: updates.map((entry) => entry.duration),
-                scheduling: { ...scheduling },
+                scheduling: schedulingReport,
                 operations: { ...operations },
                 componentRenders,
                 componentPatches,
@@ -3528,12 +3680,58 @@ function installServerBackedEvidenceExpression() {
                 },
                 committedValues: committedValuesObserved.slice(this.committedValueBaseline),
             };
+            this.componentBaseline = null;
+            this.schedulingBaseline = null;
+            this.label = "";
+            return report;
         },
         schedulingSettled() {
             return scheduling.requestAnimationFrame ===
                 scheduling.requestAnimationFrameCallbacks &&
                 scheduling.queueMicrotask ===
                 scheduling.queueMicrotaskCallbacks;
+        },
+        settlingState() {
+            const title = document.querySelector("head title");
+            const description = document.querySelector("head meta[name='description']");
+            const viewport = document.querySelector("head meta[name='viewport']");
+            const schedulingSinceStart = {};
+            for (const name of Object.keys(scheduling)) {
+                schedulingSinceStart[name] = this.schedulingBaseline
+                    ? scheduling[name] - this.schedulingBaseline[name]
+                    : 0;
+            }
+            return {
+                href: window.location.href,
+                hash: window.location.hash,
+                route: renderedRouteName(),
+                routeTarget: document.querySelector("[data-testid='server-backed-route-target']")?.textContent.trim() || "",
+                activeScenario: this.label || "",
+                schedulingTotals: { ...scheduling },
+                schedulingSinceStart,
+                schedulingSettled: this.schedulingSettled(),
+                activeRequests: requests.filter((request) => request.outcome === "pending").length,
+                activeTransitionRequests,
+                activeMutationRequests,
+                pendingExpectedMutationReloads,
+                document: {
+                    owner: document.querySelector("[data-testid='server-backed-document-owner']")?.textContent.trim() || "",
+                    expectedTitle: document.querySelector("[data-testid='server-backed-document-title']")?.textContent.trim() || "",
+                    expectedDescription: document.querySelector("[data-testid='server-backed-document-description']")?.textContent.trim() || "",
+                    actualTitle: title?.textContent || "",
+                    actualDescription: description?.getAttribute("content") || "",
+                    descriptionCount: document.querySelectorAll("head meta[name='description']").length,
+                    viewportContent: viewport?.getAttribute("content") || "",
+                    titleIdentityStable: Boolean(authoredHead && title === authoredHead.title && title?.isConnected),
+                    descriptionIdentityStable: Boolean(
+                        authoredHead && description === authoredHead.description && description?.isConnected,
+                    ),
+                    viewportIdentityStable: Boolean(
+                        authoredHead && viewport === authoredHead.viewport && viewport?.isConnected,
+                    ),
+                },
+                recentDocumentSnapshots: documentSnapshots.slice(-8).map((snapshot) => ({ ...snapshot })),
+            };
         },
     };
     window.__serverBackedAudit = audit;
@@ -4110,7 +4308,12 @@ async function harnessFailure(client, message, detail) {
 }
 
 async function collectDiagnostics(client) {
-    const diagnostics = { targets: [], page: null };
+    const diagnostics = {
+        targets: [],
+        page: null,
+        runtimeExceptions: [...runtimeExceptions],
+        unexpectedHTTPFailures: [...unexpectedHTTPFailures],
+    };
     try {
         diagnostics.targets = (await fetchTargets(debugPort)).map((target) => ({
             id: target.id,
@@ -4152,8 +4355,15 @@ async function connect(url) {
 
     let nextID = 1;
     const pending = new Map();
+    const listeners = new Map();
     socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data);
+        if (!message.id && message.method) {
+            for (const listener of listeners.get(message.method) ?? []) {
+                listener(message.params ?? {});
+            }
+            return;
+        }
         if (!message.id || !pending.has(message.id)) {
             return;
         }
@@ -4192,6 +4402,11 @@ async function connect(url) {
     return {
         call,
         close: () => socket.close(),
+        on: (method, listener) => {
+            const methodListeners = listeners.get(method) ?? [];
+            methodListeners.push(listener);
+            listeners.set(method, methodListeners);
+        },
         evaluate: async (expression) => {
             const result = await call("Runtime.evaluate", {
                 expression,
