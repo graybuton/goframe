@@ -32,9 +32,13 @@
   `base` and active-base documents with no package-owned URL output remain
   accepted. Both markers of a managed block must share one concrete safe HTML
   parent; document-level, cross-parent, and SVG/MathML-ancestor placements fail
-  before publication. A GoFrame-owned blocking runtime must precede an owned
-  bootstrap. Malformed DOCTYPE spans end at their first `>` so later structural
-  references are not hidden by quoted source text.
+  before publication. An executable parser-blocking GoFrame-owned runtime must
+  precede an owned bootstrap; `nomodule` and other nonblocking or suppressed
+  forms cannot establish that order. Historical bootstrap matching now follows
+  ECMAScript whitespace, comment, and bounded static-string escape semantics
+  while preserving exact authored source spans. Malformed DOCTYPE spans end at
+  their first `>` so later structural references are not hidden by quoted
+  source text.
 - `VirtualList` and `VirtualTable` now track the pixel viewport separately from
   the rendered overscan window. Collection shrink and empty transitions clamp
   the persisted viewport, while height, item or row height, and overscan

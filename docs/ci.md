@@ -69,8 +69,10 @@ tests require select/table/frameset/noscript, declarative Shadow DOM, and
 ownership-affecting misnesting to fail closed when a markerless owned rewrite
 would be uncertain. The managed topology matrix requires one concrete safe HTML
 parent, rejects document-level, cross-parent, foreign-ancestor, and uncertain
-contexts, and proves that a blocking owned runtime precedes each owned
-bootstrap. A separate active-base matrix covers every managed and
+contexts, and proves that an executable parser-blocking owned runtime precedes
+each owned bootstrap. It distinguishes URL ownership from browser execution for
+classic, async, deferred, module, `nomodule`, and legacy `event`/`for` scripts.
+A separate active-base matrix covers every managed and
 markerless relative-URL operation, active and inert base contexts, multiple
 bases, target-only and disabled-preload controls, zero partial output, and
 preservation of an earlier complete package. Operation-count tests and
@@ -84,10 +86,13 @@ delivery, applied CSS, interactive state updates, unchanged authored sentinels,
 and zero browser runtime errors. Its Chrome semantic oracle records namespace,
 parenting, resource requests, execution, template/Shadow DOM behavior, bogus
 comments, malformed DOCTYPE termination, foreign content, runtime/bootstrap
-execution order, and misnested closing tags for the managed-first classification
-matrix. Negative package fixtures preserve their source and previous complete
-package while rejecting foreign markers, cross-parent pairs, and reversed owned
-execution order. The base-resolution oracle characterizes active href
+requests and execution order, and misnested closing tags for the managed-first
+classification matrix. It also characterizes the complete ECMAScript
+whitespace and line-terminator sets, bounded comments, and decoded static string
+escapes used by historical bootstrap recognition. Negative package fixtures
+preserve their source and previous complete package while rejecting foreign
+markers, cross-parent pairs, and unproven owned execution order. The
+base-resolution oracle characterizes active href
 values, target-only base elements, body placement, inert and foreign contexts,
 and first-base behavior. It also requires an active-base managed package to
 fail atomically, a target-only managed package to boot with all asset requests

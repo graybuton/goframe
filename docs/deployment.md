@@ -169,11 +169,14 @@ Duplicate, orphaned, reversed, nested, interleaved, or unsupported placements
 fail packaging before publication. With `--preload` disabled, a valid preload
 block retains its delimiters with an empty interior.
 
-When GoFrame owns both integrations, a blocking runtime integration must appear
-before the owned bootstrap so the bootstrap cannot execute before the runtime
-defines its browser globals. Async, deferred, module, or source-reversed owned
-runtime arrangements fail before publication. An external runtime that GoFrame
-does not rewrite remains authored integration responsibility.
+When GoFrame owns both integrations, an executable parser-blocking runtime
+integration must appear before the owned bootstrap so the bootstrap cannot
+execute before the runtime defines its browser globals. Async, deferred,
+module, `nomodule`, or source-reversed owned runtime arrangements cannot prove
+that order. A paired legacy `event`/`for` form is eligible only for `window`
+`onload` execution after character-reference decoding and HTML ASCII trimming;
+other paired values are suppressed. An external runtime that GoFrame does not
+rewrite remains authored integration responsibility.
 
 Managed blocks establish which source spans GoFrame owns; they do not override
 browser base-URL resolution. The current package references emitted for the
@@ -217,9 +220,14 @@ strings, template literals, and regular expressions remain authored bytes.
 Markerless bootstrap recognition is structural and applies to the complete
 script body. Arbitrary direct `fetch(...)` calls are not rewritten, and
 additional authored statements make a script non-owned. The recognizer does
-not validate arbitrary JavaScript; unsupported custom loaders remain unchanged.
-Use an explicit `goframe:bootstrap` block under one safe HTML parent when that
-code needs a deterministic package rewrite.
+not validate arbitrary JavaScript. Within a recognized historical shape it
+accepts ECMAScript whitespace, line terminators, and bounded comments as
+trivia, and decodes the static quoted WASM URL using bounded ECMAScript string
+escapes while retaining the exact authored replacement span. Dynamic
+expressions, templates, concatenation, escaped identifiers, malformed escapes,
+legacy octal or decimal escapes, and unsupported custom loaders remain
+unchanged. Use an explicit `goframe:bootstrap` block under one safe HTML parent
+when that code needs a deterministic package rewrite.
 
 Authored content outside owned spans remains byte-preserved. When a required
 runtime, bootstrap, preload, or declared stylesheet rewrite would cross a
