@@ -47,6 +47,12 @@ const legacyJavaScriptSentinels = [
     'class AuthoredSyntax {\n            #value = "fetch(\\"bundle.wasm\\")";\n        }',
 ];
 
+const legacyBootstrapTriviaSentinels = [
+    "\ufeff/* ECMAScript bootstrap trivia */",
+    "const\v/* vertical-tab */\u00a0go\u3000=\u3000new Go();",
+    "WebAssembly\u2028.\u2029instantiateStreaming(",
+];
+
 const legacyHTMLSentinels = [
     '<script id="fixture-double-escaped" type="application/json"><!--<script></script><script src="wasm_exec.js?fixture=double-escaped"></script>--></script>',
     `<svg id="fixture-svg-cdata" style="display:none">
@@ -417,7 +423,7 @@ async function verifyManagedStructureFailures(scenario) {
         {
             name: "reversed owned runtime order",
             source: `<!doctype html><html><head></head><body><!-- goframe:bootstrap --><!-- /goframe:bootstrap --><!-- goframe:runtime --><!-- /goframe:runtime --></body></html>`,
-            wants: ["GoFrame-owned bootstrap may execute before its runtime", "blocking runtime integration before the bootstrap"],
+            wants: ["GoFrame-owned bootstrap may execute before an executable blocking runtime", "blocking classic runtime without nomodule/async/defer"],
         },
     ];
     const results = [];
@@ -500,15 +506,19 @@ function assertAuthoredSentinels(source, packaged, mode, contractMode) {
     if (contractMode === "legacy") {
         assert(source.includes("%77asm_exec.js?fixture=legacy#runtime"), "legacy source is missing the percent-encoded runtime reference");
         assert(source.includes("%6dy%20%26copy%3B%20style.css?fixture=legacy&copy;=x#theme"), "legacy source is missing the percent-encoded stylesheet reference");
-        assert(source.includes("%62undle.wasm?fixture=legacy#wasm"), "legacy source is missing the percent-encoded bootstrap reference");
+        assert(source.includes(String.raw`\x2e/%62undle\u{2e}wasm\x3ffixture=legacy\u0023wasm`), "legacy source is missing the escaped bootstrap reference");
         assert(!packaged.includes("%77asm_exec.js?fixture=legacy#runtime"), "legacy package retained the percent-encoded runtime reference");
         assert(!packaged.includes("%6dy%20%26copy%3B%20style.css"), "legacy package retained the percent-encoded stylesheet reference");
-        assert(!packaged.includes("%62undle.wasm?fixture=legacy#wasm"), "legacy package retained the percent-encoded bootstrap reference");
+        assert(!packaged.includes(String.raw`\x2e/%62undle\u{2e}wasm`), "legacy package retained the escaped bootstrap path");
         const falseHead = '<script>const falseHeadExample = "</head>";</script>';
         assert(source.includes(falseHead) && packaged.includes(falseHead), "legacy false head sentinel changed");
         for (const sentinel of legacyJavaScriptSentinels) {
             assert(source.includes(sentinel), `legacy source is missing JavaScript sentinel ${JSON.stringify(sentinel)}`);
             assert(packaged.includes(sentinel), `legacy package changed JavaScript sentinel ${JSON.stringify(sentinel)}`);
+        }
+        for (const sentinel of legacyBootstrapTriviaSentinels) {
+            assert(source.includes(sentinel), `legacy source is missing bootstrap trivia ${JSON.stringify(sentinel)}`);
+            assert(packaged.includes(sentinel), `legacy package changed bootstrap trivia ${JSON.stringify(sentinel)}`);
         }
         for (const sentinel of legacyHTMLSentinels) {
             assert(source.includes(sentinel), `legacy source is missing HTML sentinel ${JSON.stringify(sentinel)}`);
@@ -551,7 +561,7 @@ function assertPackageContract(mode, html, manifest, metadata, contractMode) {
         assert(!html.includes("authored preload interior"), "marker preload interior was not replaced");
     } else {
         assert(html.includes(`SRC=' ${urls.runtime}?fixture=legacy#runtime '`), "legacy runtime target is stale");
-        assert(html.includes(`fetch ( ' ${urls.wasm}?fixture=legacy#wasm ' )`), "legacy WASM target is stale");
+        assert(html.includes(`fetch ( ' ${urls.wasm}\\x3ffixture=legacy\\u0023wasm ' )`), "legacy WASM target is stale");
         assert(html.includes(`href=${encodeUnquotedAttribute(urls.style)}?fixture=legacy&copy;=x#theme`), "legacy stylesheet target is stale");
         assert(html.includes('type="text/javascript1.5"'), "legacy runtime MIME type changed");
         assert(html.includes('<input id="fixture-compact-input" disabled/>'), "compact boolean tag changed");
@@ -1129,6 +1139,12 @@ async function runManagedFirstSemanticOracle() {
         "async.js",
         "defer.js",
         "module.js",
+        "nomodule.js",
+        "nomodule-false.js",
+        "event-for-valid.js",
+        "event-for-invalid.js",
+        "event-only.js",
+        "for-only.js",
     ]);
     const orderedRuntimeSchedules = [];
     const oracleServer = createHTTPServer((request, response) => {
@@ -1164,7 +1180,7 @@ async function runManagedFirstSemanticOracle() {
                 delayMS: orderedRuntimeDelayMS,
             });
             setTimeout(() => {
-                response.end(`window.__oracleRuntimeReady = true; window.__oracleOrder.push("runtime");`);
+                response.end(`window.__oracleRuntimeReady = true; window.Go ??= function OracleGo() {}; window.__oracleOrder.push("runtime");`);
             }, orderedRuntimeDelayMS);
             return;
         }
@@ -1444,46 +1460,218 @@ async function runManagedFirstSemanticOracle() {
                 result.requested = caseRequests.includes("/runtime/foreign-managed.js");
             },
         });
-        for (const test of [
+        const lexicalTriviaCases = [
+            { name: "TAB", source: "\t" },
+            { name: "VT", source: "\v" },
+            { name: "FF", source: "\f" },
+            { name: "SPACE", source: " " },
+            { name: "NBSP", source: "\u00a0" },
+            { name: "OGHAM SPACE MARK", source: "\u1680" },
+            { name: "EN QUAD", source: "\u2000" },
+            { name: "EM QUAD", source: "\u2001" },
+            { name: "EN SPACE", source: "\u2002" },
+            { name: "EM SPACE", source: "\u2003" },
+            { name: "THREE-PER-EM SPACE", source: "\u2004" },
+            { name: "FOUR-PER-EM SPACE", source: "\u2005" },
+            { name: "SIX-PER-EM SPACE", source: "\u2006" },
+            { name: "FIGURE SPACE", source: "\u2007" },
+            { name: "PUNCTUATION SPACE", source: "\u2008" },
+            { name: "THIN SPACE", source: "\u2009" },
+            { name: "HAIR SPACE", source: "\u200a" },
+            { name: "NARROW NO-BREAK SPACE", source: "\u202f" },
+            { name: "MEDIUM MATHEMATICAL SPACE", source: "\u205f" },
+            { name: "IDEOGRAPHIC SPACE", source: "\u3000" },
+            { name: "BOM", source: "\ufeff" },
+            { name: "LF", source: "\n" },
+            { name: "CR", source: "\r" },
+            { name: "CRLF", source: "\r\n" },
+            { name: "LINE SEPARATOR", source: "\u2028" },
+            { name: "PARAGRAPH SEPARATOR", source: "\u2029" },
+            { name: "block comment", source: "/* fixture */" },
+            { name: "multiline block comment", source: "/* fixture\u2028line */" },
+            { name: "line comment", source: "// fixture\n" },
+        ];
+        await runCase({
+            name: "ECMAScript bootstrap trivia",
+            classification: "legacy bootstrap lexical oracle",
+            source: `<script>window.__oracleTrivia = [];
+                ${lexicalTriviaCases.map((test, index) => `const${test.source}value${index} = ${index}; window.__oracleTrivia.push(value${index});`).join("\n")}
+            </script>`,
+            expression: `({ names: ${JSON.stringify(lexicalTriviaCases.map(({ name }) => name))}, values: window.__oracleTrivia })`,
+            validate(result) {
+                assertDeepEqual(result.values, lexicalTriviaCases.map((_, index) => index), "ECMAScript trivia values");
+            },
+        });
+
+        const lexicalStringCases = [
+            { name: "hex", literal: String.raw`"bundle\x2ewasm"`, want: "bundle.wasm" },
+            { name: "four-digit Unicode", literal: String.raw`"bundle\u002ewasm"`, want: "bundle.wasm" },
+            { name: "code-point Unicode", literal: String.raw`"bundle\u{2e}wasm"`, want: "bundle.wasm" },
+            { name: "identity", literal: String.raw`"bundle\.wasm"`, want: "bundle.wasm" },
+            { name: "line continuation LF", literal: "\"bundle.\\\nwasm\"", want: "bundle.wasm" },
+            { name: "line continuation CRLF", literal: "\"bundle.\\\r\nwasm\"", want: "bundle.wasm" },
+            { name: "line continuation LS", literal: "\"bundle.\\\u2028wasm\"", want: "bundle.wasm" },
+            { name: "line continuation PS", literal: "\"bundle.\\\u2029wasm\"", want: "bundle.wasm" },
+            { name: "escaped active quote", literal: String.raw`"bundle\".wasm"`, want: `bundle".wasm` },
+            { name: "surrogate pair", literal: String.raw`"\uD83D\uDE00"`, want: "😀" },
+            { name: "escaped backslash remains data", literal: String.raw`"bundle\\x2ewasm"`, want: String.raw`bundle\x2ewasm` },
+        ];
+        await runCase({
+            name: "ECMAScript static string escapes",
+            classification: "legacy bootstrap string oracle",
+            source: `<script>window.__oracleStrings = [${lexicalStringCases.map(({ literal }) => literal).join(",")}];</script>`,
+            expression: `({ names: ${JSON.stringify(lexicalStringCases.map(({ name }) => name))}, values: window.__oracleStrings })`,
+            validate(result) {
+                assertDeepEqual(result.values, lexicalStringCases.map(({ want }) => want), "ECMAScript static string values");
+            },
+        });
+
+        const runtimeOrderCases = [
             {
                 name: "blocking runtime before bootstrap",
-                runtime: `<script src="${origin}/ordered-runtime/blocking.js?fixture=ignored"></script>`,
-                beforeRuntime: "",
+                resource: "blocking.js",
+                query: "?fixture=ignored",
+                attributes: "",
+                expectedAttributes: {},
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: true,
                 want: ["runtime", "bootstrap:true"],
             },
             {
                 name: "bootstrap before blocking runtime",
-                runtime: `<script src="${origin}/ordered-runtime/reversed.js"></script>`,
-                beforeRuntime: `<script>window.__oracleOrder.push("bootstrap:" + Boolean(window.__oracleRuntimeReady));</script>`,
+                resource: "reversed.js",
+                attributes: "",
+                expectedAttributes: {},
+                bootstrapBeforeRuntime: true,
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: false,
                 want: ["bootstrap:false", "runtime"],
             },
             {
                 name: "async runtime before bootstrap",
-                runtime: `<script async src="${origin}/ordered-runtime/async.js"></script>`,
-                beforeRuntime: "",
+                resource: "async.js",
+                attributes: " async",
+                expectedAttributes: { async: "" },
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: false,
                 want: ["bootstrap:false", "runtime"],
             },
             {
                 name: "defer runtime before bootstrap",
-                runtime: `<script defer src="${origin}/ordered-runtime/defer.js"></script>`,
-                beforeRuntime: "",
+                resource: "defer.js",
+                attributes: " defer",
+                expectedAttributes: { defer: "" },
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: false,
                 want: ["bootstrap:false", "runtime"],
             },
             {
                 name: "module runtime before bootstrap",
-                runtime: `<script type="module" src="${origin}/ordered-runtime/module.js"></script>`,
-                beforeRuntime: "",
+                resource: "module.js",
+                attributes: ` type="module"`,
+                expectedAttributes: { type: "module" },
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: false,
                 want: ["bootstrap:false", "runtime"],
             },
-        ]) {
-            const bootstrap = test.beforeRuntime === "" ? `<script>window.__oracleOrder.push("bootstrap:" + Boolean(window.__oracleRuntimeReady));</script>` : "";
+            {
+                name: "nomodule runtime before bootstrap",
+                resource: "nomodule.js",
+                attributes: " nomodule",
+                expectedAttributes: { nomodule: "" },
+                wantRequested: false,
+                wantExecuted: false,
+                wantBootstrapReady: false,
+                want: ["bootstrap:false"],
+            },
+            {
+                name: "nomodule false runtime before bootstrap",
+                resource: "nomodule-false.js",
+                attributes: ` nomodule="false"`,
+                expectedAttributes: { nomodule: "false" },
+                wantRequested: false,
+                wantExecuted: false,
+                wantBootstrapReady: false,
+                want: ["bootstrap:false"],
+            },
+            {
+                name: "valid event for runtime before bootstrap",
+                resource: "event-for-valid.js",
+                attributes: ` for="window" event="onload()"`,
+                expectedAttributes: { for: "window", event: "onload()" },
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: true,
+                want: ["runtime", "bootstrap:true"],
+            },
+            {
+                name: "invalid event for runtime before bootstrap",
+                resource: "event-for-invalid.js",
+                attributes: ` for="window" event="onclick"`,
+                expectedAttributes: { for: "window", event: "onclick" },
+                wantRequested: true,
+                wantExecuted: false,
+                wantBootstrapReady: false,
+                want: ["bootstrap:false"],
+            },
+            {
+                name: "event only runtime before bootstrap",
+                resource: "event-only.js",
+                attributes: ` event="onclick"`,
+                expectedAttributes: { event: "onclick" },
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: true,
+                want: ["runtime", "bootstrap:true"],
+            },
+            {
+                name: "for only runtime before bootstrap",
+                resource: "for-only.js",
+                attributes: ` for="document"`,
+                expectedAttributes: { for: "document" },
+                wantRequested: true,
+                wantExecuted: true,
+                wantBootstrapReady: true,
+                want: ["runtime", "bootstrap:true"],
+            },
+        ];
+        for (const test of runtimeOrderCases) {
+            const initialize = `<script>window.__oracleOrder = []; window.__oracleInteraction = 0; window.__oracleInteract = () => ++window.__oracleInteraction;</script>`;
+            const runtime = `<script id="ordered-runtime"${test.attributes} src="${origin}/ordered-runtime/${test.resource}${test.query ?? ""}"></script>`;
+            const bootstrap = `<script>window.__oracleBootstrapReady = Boolean(window.__oracleRuntimeReady && typeof window.Go === "function"); window.__oracleOrder.push("bootstrap:" + window.__oracleBootstrapReady);</script>`;
+            const integrations = test.bootstrapBeforeRuntime ? bootstrap + runtime : runtime + bootstrap;
             await runCase({
                 name: test.name,
-                classification: test.want[0] === "runtime" ? "proven runtime order" : "unproven runtime order",
-                source: `<script>window.__oracleOrder = [];</script>${test.beforeRuntime}${test.runtime}${bootstrap}`,
-                expression: `window.__oracleOrder`,
-                validate(result) {
-                    assertDeepEqual(result, test.want, `${test.name} execution order`);
+                classification: test.wantBootstrapReady ? "proven runtime order" : "unproven runtime order",
+                source: initialize + integrations,
+                expression: `(() => {
+                    window.__oracleInteract();
+                    const runtime = document.querySelector("#ordered-runtime");
+                    return {
+                        order: window.__oracleOrder,
+                        runtimeReady: Boolean(window.__oracleRuntimeReady),
+                        goAvailable: typeof window.Go === "function",
+                        bootstrapReady: Boolean(window.__oracleBootstrapReady),
+                        interaction: window.__oracleInteraction,
+                        attributes: Object.fromEntries(Array.from(runtime?.attributes ?? [], (attribute) => [attribute.name, attribute.value])),
+                    };
+                })()`,
+                validate(result, caseRequests) {
+                    result.requested = caseRequests.includes(`/ordered-runtime/${test.resource}`);
+                    assertDeepEqual(result.order, test.want, `${test.name} execution order`);
+                    assert(result.requested === test.wantRequested, `${test.name} request = ${result.requested}, want ${test.wantRequested}`);
+                    assert(result.runtimeReady === test.wantExecuted, `${test.name} runtime execution = ${result.runtimeReady}, want ${test.wantExecuted}`);
+                    assert(result.goAvailable === test.wantExecuted, `${test.name} Go availability = ${result.goAvailable}, want ${test.wantExecuted}`);
+                    assert(result.bootstrapReady === test.wantBootstrapReady, `${test.name} bootstrap sentinel = ${result.bootstrapReady}, want ${test.wantBootstrapReady}`);
+                    assert(result.interaction === 1, `${test.name} interaction count = ${result.interaction}`);
+                    for (const [name, value] of Object.entries(test.expectedAttributes)) {
+                        assert(result.attributes[name] === value, `${test.name} parsed ${name} = ${JSON.stringify(result.attributes[name])}, want ${JSON.stringify(value)}`);
+                    }
                 },
             });
         }
@@ -1499,7 +1687,7 @@ async function runManagedFirstSemanticOracle() {
         );
         assertDeepEqual(
             orderedRuntimeSchedules.map(({ resource }) => resource).sort(),
-            [...orderedRuntimeResources].sort(),
+            runtimeOrderCases.filter(({ wantRequested }) => wantRequested).map(({ resource }) => resource).sort(),
             "ordered runtime scheduled resources",
         );
         assert(
