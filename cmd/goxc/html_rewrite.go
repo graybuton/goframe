@@ -1430,7 +1430,10 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 		})
 		switch {
 		case name == runtimeBlockName && managedValues[name] != "":
-			ownedRuntimes = append(ownedRuntimes, ownedRuntimeIntegration{offset: block.start, blocking: true})
+			ownedRuntimes = append(ownedRuntimes, ownedRuntimeIntegration{
+				offset:    block.start,
+				execution: ownedRuntimeParserBlocking,
+			})
 		case name == bootstrapBlockName && managedValues[name] != "":
 			ownedBootstraps = append(ownedBootstraps, ownedBootstrapIntegration{offset: block.start})
 		}
@@ -1464,9 +1467,17 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 	return plan.apply()
 }
 
+type ownedRuntimeExecution uint8
+
+const (
+	ownedRuntimeUnavailable ownedRuntimeExecution = iota
+	ownedRuntimeNonBlocking
+	ownedRuntimeParserBlocking
+)
+
 type ownedRuntimeIntegration struct {
-	offset   int
-	blocking bool
+	offset    int
+	execution ownedRuntimeExecution
 }
 
 type ownedBootstrapIntegration struct {
@@ -1480,14 +1491,14 @@ func validateOwnedRuntimeBootstrapOrder(runtimes []ownedRuntimeIntegration, boot
 	for _, bootstrap := range bootstraps {
 		ordered := false
 		for _, runtime := range runtimes {
-			if runtime.blocking && runtime.offset < bootstrap.offset {
+			if runtime.execution == ownedRuntimeParserBlocking && runtime.offset < bootstrap.offset {
 				ordered = true
 				break
 			}
 		}
 		if !ordered {
 			return fmt.Errorf(
-				"custom index GoFrame-owned bootstrap may execute before its runtime; place a blocking runtime integration before the bootstrap or use one external loader that owns both steps",
+				"custom index GoFrame-owned bootstrap may execute before an executable blocking runtime; use a blocking classic runtime without nomodule/async/defer or use one external loader that owns both steps",
 			)
 		}
 	}
@@ -1550,12 +1561,41 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 			value:       replacement + match.suffix,
 			description: "legacy runtime script source",
 		})
-		integrations = append(integrations, ownedRuntimeIntegration{
-			offset:   tag.start,
-			blocking: kind == scriptKindClassic && !hasHTMLAttribute(tag, "async") && !hasHTMLAttribute(tag, "defer"),
-		})
+		execution, err := classifyOwnedRuntimeExecution(plan.content, tag, kind)
+		if err != nil {
+			return nil, err
+		}
+		integrations = append(integrations, ownedRuntimeIntegration{offset: tag.start, execution: execution})
 	}
 	return integrations, nil
+}
+
+func classifyOwnedRuntimeExecution(content string, tag htmlTag, kind scriptKind) (ownedRuntimeExecution, error) {
+	if hasHTMLAttribute(tag, "nomodule") {
+		return ownedRuntimeUnavailable, nil
+	}
+	if kind != scriptKindClassic || hasHTMLAttribute(tag, "async") || hasHTMLAttribute(tag, "defer") {
+		return ownedRuntimeNonBlocking, nil
+	}
+
+	eventAttribute, err := tag.attribute("event")
+	if err != nil {
+		return ownedRuntimeUnavailable, err
+	}
+	forAttribute, err := tag.attribute("for")
+	if err != nil {
+		return ownedRuntimeUnavailable, err
+	}
+	if eventAttribute == nil || forAttribute == nil {
+		return ownedRuntimeParserBlocking, nil
+	}
+
+	event := trimHTMLSpace(semanticHTMLAttributeValue(content, eventAttribute))
+	target := trimHTMLSpace(semanticHTMLAttributeValue(content, forAttribute))
+	if asciiFoldEqual(target, "window") && (asciiFoldEqual(event, "onload") || asciiFoldEqual(event, "onload()")) {
+		return ownedRuntimeParserBlocking, nil
+	}
+	return ownedRuntimeUnavailable, nil
 }
 
 func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, wasmPath string) ([]ownedBootstrapIntegration, error) {

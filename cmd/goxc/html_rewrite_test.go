@@ -2128,14 +2128,87 @@ func TestCustomIndexOwnedRuntimeBootstrapOrdering(t *testing.T) {
 				t.Fatalf("ordering failure returned partial output %q", got)
 			}
 			for _, want := range []string{
-				"GoFrame-owned bootstrap may execute before its runtime",
-				"blocking runtime integration before the bootstrap",
+				"GoFrame-owned bootstrap may execute before an executable blocking runtime",
+				"blocking classic runtime without nomodule/async/defer",
 			} {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
 				}
 			}
 		})
+	}
+}
+
+func TestCustomIndexOwnedRuntimeExecutionClassification(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const wasmPath = "assets/bundle.11111111.wasm"
+	const managedBootstrap = `<!-- goframe:bootstrap --><!-- /goframe:bootstrap -->`
+	options := htmlRewriteOptions{runtimePath: runtimePath, wasmPath: wasmPath}
+
+	for _, test := range []struct {
+		name       string
+		attributes string
+		wantSafe   bool
+	}{
+		{name: "classic", wantSafe: true},
+		{name: "async", attributes: " async"},
+		{name: "defer", attributes: " defer"},
+		{name: "module", attributes: ` type="module"`},
+		{name: "nomodule", attributes: " nomodule"},
+		{name: "nomodule false", attributes: ` nomodule="false"`},
+		{name: "uppercase nomodule", attributes: " NOMODULE"},
+		{name: "valid event and for", attributes: ` for="&#x20;WiNdOw&#9;" event="&#10;OnLoAd()&#13;"`, wantSafe: true},
+		{name: "valid onload without parentheses", attributes: ` event="ONLOAD" for="WINDOW"`, wantSafe: true},
+		{name: "invalid event", attributes: ` for="window" event="onclick"`},
+		{name: "invalid for", attributes: ` for="document" event="onload"`},
+		{name: "boolean event and for", attributes: " event for"},
+		{name: "non HTML space is not trimmed", attributes: " for=\"\u00a0window\u00a0\" event=onload"},
+		{name: "event only keeps classic behavior", attributes: ` event="onclick"`, wantSafe: true},
+		{name: "for only keeps classic behavior", attributes: ` for="document"`, wantSafe: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := `<body><script` + test.attributes + ` src="wasm_exec.js"></script>` + managedBootstrap + `</body>`
+			got, err := rewriteIndexHTML(source, options)
+			if test.wantSafe {
+				if err != nil {
+					t.Fatalf("rewriteIndexHTML() error: %v", err)
+				}
+				for _, want := range []string{runtimePath, wasmPath} {
+					if !strings.Contains(got, want) {
+						t.Fatalf("rewriteIndexHTML() missing %q:\n%s", want, got)
+					}
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want executable blocking runtime error", got)
+			}
+			if got != "" {
+				t.Fatalf("ordering failure returned partial output %q", got)
+			}
+			if !strings.Contains(err.Error(), "GoFrame-owned bootstrap may execute before") {
+				t.Fatalf("rewriteIndexHTML() error = %v, want runtime ordering guidance", err)
+			}
+		})
+	}
+}
+
+func TestCustomIndexLegacyRuntimeOwnershipIsIndependentOfExecution(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, attributes := range []string{
+		" nomodule",
+		` nomodule="false"`,
+		" async",
+		" defer",
+		` type="module"`,
+		` for="document" event="onclick"`,
+	} {
+		source := `<script` + attributes + ` src="wasm_exec.js"></script>`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath})
+		want := strings.Replace(source, "wasm_exec.js", runtimePath, 1)
+		if got != want {
+			t.Fatalf("runtime with attributes %q = %q, want URL-only rewrite %q", attributes, got, want)
+		}
 	}
 }
 
@@ -3762,7 +3835,12 @@ func TestPackageCustomIndexManagedStructureFailureIsAtomic(t *testing.T) {
 		{
 			name:   "reversed runtime bootstrap",
 			source: `<html><head></head><body><!-- goframe:bootstrap --><!-- /goframe:bootstrap --><!-- goframe:runtime --><!-- /goframe:runtime --></body></html>`,
-			want:   "GoFrame-owned bootstrap may execute before its runtime",
+			want:   "GoFrame-owned bootstrap may execute before an executable blocking runtime",
+		},
+		{
+			name:   "nomodule runtime before bootstrap",
+			source: `<html><head></head><body><script nomodule src="wasm_exec.js"></script><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></body></html>`,
+			want:   "GoFrame-owned bootstrap may execute before",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
