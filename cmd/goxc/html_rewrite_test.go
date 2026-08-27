@@ -1922,6 +1922,223 @@ authored preload interior
 	}
 }
 
+func TestCustomIndexManagedBlockStructuralContext(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const wasmPath = "assets/bundle.11111111.wasm"
+	for _, test := range []struct {
+		name      string
+		blockName string
+		source    string
+		want      string
+	}{
+		{
+			name:      "SVG runtime",
+			blockName: runtimeBlockName,
+			source:    `<svg><!-- goframe:runtime --><!-- /goframe:runtime --></svg>`,
+			want:      "SVG or MathML ancestry",
+		},
+		{
+			name:      "MathML bootstrap",
+			blockName: bootstrapBlockName,
+			source:    `<math><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></math>`,
+			want:      "SVG or MathML ancestry",
+		},
+		{
+			name:      "SVG integration point descendant",
+			blockName: runtimeBlockName,
+			source:    `<svg><foreignObject><div><!-- goframe:runtime --><!-- /goframe:runtime --></div></foreignObject></svg>`,
+			want:      "SVG or MathML ancestry",
+		},
+		{
+			name:      "MathML integration point descendant",
+			blockName: bootstrapBlockName,
+			source:    `<math><annotation-xml encoding="text/html"><div><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></div></annotation-xml></math>`,
+			want:      "SVG or MathML ancestry",
+		},
+		{
+			name:      "head to body",
+			blockName: runtimeBlockName,
+			source:    `<html><head><!-- goframe:runtime --></head><body id="app"><!-- /goframe:runtime --></body></html>`,
+			want:      "different structural contexts",
+		},
+		{
+			name:      "sibling containers",
+			blockName: runtimeBlockName,
+			source:    `<body><div><!-- goframe:runtime --></div><div><!-- /goframe:runtime --></div></body>`,
+			want:      "different structural contexts",
+		},
+		{
+			name:      "document level",
+			blockName: runtimeBlockName,
+			source:    `<!-- goframe:runtime --><!-- /goframe:runtime -->`,
+			want:      "document level",
+		},
+		{
+			name:      "document to head",
+			blockName: runtimeBlockName,
+			source:    `<!-- goframe:runtime --><head><!-- /goframe:runtime --></head>`,
+			want:      "document level",
+		},
+		{
+			name:      "direct child of html",
+			blockName: runtimeBlockName,
+			source:    `<html><!-- goframe:runtime --><!-- /goframe:runtime --></html>`,
+			want:      "directly under <html>",
+		},
+		{
+			name:      "HTML to SVG",
+			blockName: runtimeBlockName,
+			source:    `<body><!-- goframe:runtime --><svg><!-- /goframe:runtime --></svg></body>`,
+			want:      "SVG or MathML ancestry",
+		},
+		{
+			name:      "SVG to HTML",
+			blockName: runtimeBlockName,
+			source:    `<svg><!-- goframe:runtime --></svg><body><!-- /goframe:runtime --></body>`,
+			want:      "SVG or MathML ancestry",
+		},
+		{
+			name:      "foreign breakout recovery",
+			blockName: runtimeBlockName,
+			source:    `<svg><p><!-- goframe:runtime --><!-- /goframe:runtime --></p></svg>`,
+			want:      "structurally uncertain",
+		},
+		{
+			name:      "outside to ordinary template",
+			blockName: runtimeBlockName,
+			source:    `<body><!-- goframe:runtime --><template><!-- /goframe:runtime --></template></body>`,
+			want:      "<template>",
+		},
+		{
+			name:      "same names different elements",
+			blockName: bootstrapBlockName,
+			source:    `<body><div><!-- goframe:bootstrap --></div><div><!-- /goframe:bootstrap --></div></body>`,
+			want:      "different structural contexts",
+		},
+		{
+			name:      "ownership affecting misnesting",
+			blockName: runtimeBlockName,
+			source:    `<body><div><!-- goframe:runtime --><span></div><!-- /goframe:runtime --></body>`,
+			want:      "structurally uncertain",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, htmlRewriteOptions{
+				wasmPath:    wasmPath,
+				runtimePath: runtimePath,
+			})
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want managed structural-context error", got)
+			}
+			if got != "" {
+				t.Fatalf("managed structural-context failure returned partial output %q", got)
+			}
+			for _, want := range []string{"goframe:" + test.blockName, test.want, "safe HTML parent"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+		want    string
+	}{
+		{
+			name:    "head preload with complete child",
+			source:  `<html><head><!-- goframe:preload --><meta name="owned" content="yes"><!-- /goframe:preload --></head><body></body></html>`,
+			options: htmlRewriteOptions{preload: true, wasmPath: wasmPath, runtimePath: runtimePath},
+			want:    `<link rel="preload" href="` + wasmPath + `"`,
+		},
+		{
+			name:    "body runtime",
+			source:  `<html><body><!-- goframe:runtime --><!-- /goframe:runtime --></body></html>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    `<script src="` + runtimePath + `"></script>`,
+		},
+		{
+			name:    "safe div bootstrap with complete child",
+			source:  `<html><body><div id="managed"><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></div></body></html>`,
+			options: htmlRewriteOptions{wasmPath: wasmPath},
+			want:    `fetch("` + wasmPath + `")`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, test.options)
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("safe managed block missing %q:\n%s", test.want, got)
+			}
+		})
+	}
+}
+
+func TestCustomIndexOwnedRuntimeBootstrapOrdering(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const wasmPath = "assets/bundle.11111111.wasm"
+	const historicalBootstrap = `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then((result) => go.run(result.instance));</script>`
+	const managedRuntime = `<!-- goframe:runtime --><!-- /goframe:runtime -->`
+	const managedBootstrap = `<!-- goframe:bootstrap --><!-- /goframe:bootstrap -->`
+	options := htmlRewriteOptions{runtimePath: runtimePath, wasmPath: wasmPath}
+
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{name: "managed before managed", source: `<body>` + managedRuntime + managedBootstrap + `</body>`},
+		{name: "managed runtime before markerless bootstrap", source: `<body>` + managedRuntime + historicalBootstrap + `</body>`},
+		{name: "markerless runtime before managed bootstrap", source: `<body><script src="wasm_exec.js"></script>` + managedBootstrap + `</body>`},
+		{name: "both markerless", source: `<body><script src="wasm_exec.js"></script>` + historicalBootstrap + `</body>`},
+		{name: "external runtime boundary", source: `<body><script src="https://cdn.example/runtime.js"></script>` + managedBootstrap + `</body>`},
+	} {
+		t.Run("safe "+test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, options)
+			if err != nil {
+				t.Fatalf("rewriteIndexHTML() error: %v", err)
+			}
+			if strings.Contains(test.source, runtimeAssetName) && !strings.Contains(got, runtimePath) {
+				t.Fatalf("owned runtime was not rewritten:\n%s", got)
+			}
+			if (strings.Contains(test.source, bootstrapBlockName) || strings.Contains(test.source, "bundle.wasm")) && !strings.Contains(got, wasmPath) {
+				t.Fatalf("owned bootstrap was not rewritten:\n%s", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{name: "managed bootstrap before managed runtime", source: `<body>` + managedBootstrap + managedRuntime + `</body>`},
+		{name: "managed bootstrap before markerless runtime", source: `<body>` + managedBootstrap + `<script src="wasm_exec.js"></script></body>`},
+		{name: "markerless bootstrap before managed runtime", source: `<body>` + historicalBootstrap + managedRuntime + `</body>`},
+		{name: "markerless bootstrap before markerless runtime", source: `<body>` + historicalBootstrap + `<script src="wasm_exec.js"></script></body>`},
+		{name: "async markerless runtime", source: `<body><script async src="wasm_exec.js"></script>` + managedBootstrap + `</body>`},
+		{name: "defer markerless runtime", source: `<body><script defer src="wasm_exec.js"></script>` + managedBootstrap + `</body>`},
+		{name: "module markerless runtime", source: `<body><script type="module" src="wasm_exec.js"></script>` + managedBootstrap + `</body>`},
+	} {
+		t.Run("reject "+test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, options)
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want owned runtime/bootstrap ordering error", got)
+			}
+			if got != "" {
+				t.Fatalf("ordering failure returned partial output %q", got)
+			}
+			for _, want := range []string{
+				"GoFrame-owned bootstrap may execute before its runtime",
+				"blocking runtime integration before the bootstrap",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestCustomIndexLegacyRuntimeReferenceMatrix(t *testing.T) {
 	source := `<!-- <script src="wasm_exec.js"></script> -->
 <script defer src="wasm_exec.js"></script>
@@ -3134,7 +3351,7 @@ func TestCustomIndexActiveBaseValueMatrix(t *testing.T) {
 		"?query",
 	} {
 		t.Run(value, func(t *testing.T) {
-			source := `<base href="` + value + `"><!-- goframe:runtime --><!-- /goframe:runtime -->`
+			source := `<html><head><base href="` + value + `"></head><body><!-- goframe:runtime --><!-- /goframe:runtime --></body></html>`
 			got, err := rewriteIndexHTML(source, htmlRewriteOptions{runtimePath: "assets/wasm_exec.22222222.js"})
 			if err == nil || got != "" || !strings.Contains(err.Error(), "active <base href>") {
 				t.Fatalf("rewriteIndexHTML(%q) = %q, %v, want active-base rejection", source, got, err)
@@ -3145,7 +3362,7 @@ func TestCustomIndexActiveBaseValueMatrix(t *testing.T) {
 
 func TestCustomIndexActiveBaseContextAndNoOutputControls(t *testing.T) {
 	const runtimePath = "assets/wasm_exec.22222222.js"
-	managedRuntime := `<!-- goframe:runtime --><!-- /goframe:runtime -->`
+	managedRuntime := `<body><!-- goframe:runtime --><!-- /goframe:runtime --></body>`
 	for _, test := range []struct {
 		name   string
 		source string
@@ -3214,7 +3431,7 @@ func TestCustomIndexActiveBaseContextAndNoOutputControls(t *testing.T) {
 	})
 
 	t.Run("disabled managed preload is empty and allowed", func(t *testing.T) {
-		source := `<base href="/redirected/"><!-- goframe:preload -->authored<!-- /goframe:preload -->`
+		source := `<html><head><base href="/redirected/"><!-- goframe:preload -->authored<!-- /goframe:preload --></head><body></body></html>`
 		got := rewriteIndexForTest(t, source, htmlRewriteOptions{
 			wasmPath:    "assets/bundle.11111111.wasm",
 			runtimePath: runtimePath,
@@ -3250,15 +3467,15 @@ func TestCustomIndexActiveBaseMultiplicity(t *testing.T) {
 		},
 		{
 			name:   "two active bases",
-			source: `<base href="/first/"><base href="/second/">` + managedRuntime,
+			source: `<html><head><base href="/first/"><base href="/second/"></head><body>` + managedRuntime + `</body></html>`,
 		},
 		{
 			name:   "target then active",
-			source: `<base target="_blank"><base href="/active/">` + managedRuntime,
+			source: `<html><head><base target="_blank"><base href="/active/"></head><body>` + managedRuntime + `</body></html>`,
 		},
 		{
 			name:   "uppercase href",
-			source: `<BASE HREF="/active/">` + managedRuntime,
+			source: `<html><head><BASE HREF="/active/"></head><body>` + managedRuntime + `</body></html>`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -3523,6 +3740,79 @@ func TestCustomIndexRewritePlanOutputCompatibility(t *testing.T) {
 	}}
 	if got, err := overlap.apply(); err == nil || got != "" || !strings.Contains(err.Error(), "overlap") {
 		t.Fatalf("overlapping plan = %q, %v, want overlap error", got, err)
+	}
+}
+
+func TestPackageCustomIndexManagedStructureFailureIsAtomic(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "foreign runtime block",
+			source: `<html><head></head><body><svg><!-- goframe:runtime --><!-- /goframe:runtime --></svg></body></html>`,
+			want:   "SVG or MathML ancestry",
+		},
+		{
+			name:   "head body crossing",
+			source: `<html><head><!-- goframe:runtime --></head><body id="app"><!-- /goframe:runtime --></body></html>`,
+			want:   "different structural contexts",
+		},
+		{
+			name:   "reversed runtime bootstrap",
+			source: `<html><head></head><body><!-- goframe:bootstrap --><!-- /goframe:bootstrap --><!-- goframe:runtime --><!-- /goframe:runtime --></body></html>`,
+			want:   "GoFrame-owned bootstrap may execute before its runtime",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := t.TempDir()
+			writeMinimalPackageApp(t, appDir)
+			writeTestFile(t, appDir, indexHTMLAssetName, test.source)
+
+			temporaryRoot := t.TempDir()
+			t.Setenv("TMPDIR", temporaryRoot)
+			outDir := filepath.Join(t.TempDir(), "package")
+			writeCompleteCurrentPackage(t, outDir)
+			before := snapshotInspectTree(t, outDir)
+			markerBefore, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var packageErr error
+			output := captureStdout(t, func() {
+				packageErr = packageApp(packageOptions{
+					appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{},
+				})
+			})
+			if packageErr == nil || !strings.Contains(packageErr.Error(), test.want) {
+				t.Fatalf("packageApp() error = %v, want %q; output = %q", packageErr, test.want, output)
+			}
+			if strings.Contains(output, "packaged ") {
+				t.Fatalf("failed package emitted success output: %q", output)
+			}
+			if got := snapshotInspectTree(t, outDir); !reflect.DeepEqual(got, before) {
+				t.Fatalf("managed-structure failure changed previous package\nbefore: %#v\nafter:  %#v", before, got)
+			}
+			assertFileContent(t, filepath.Join(appDir, indexHTMLAssetName), test.source)
+			markerAfter, err := os.ReadFile(filepath.Join(outDir, packageMetadataName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(markerAfter, markerBefore) {
+				t.Fatalf("managed-structure failure changed completion marker\nbefore: %q\nafter:  %q", markerBefore, markerAfter)
+			}
+			entries, err := os.ReadDir(temporaryRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), "goxc-package-") {
+					t.Fatalf("managed-structure failure retained temporary stage %s", entry.Name())
+				}
+			}
+		})
 	}
 }
 

@@ -87,7 +87,10 @@ func classifyHTMLRewriteProfile(content string, document *scannedHTML) {
 	for tagIndex < len(document.tags) || commentIndex < len(document.comments) {
 		if commentIndex < len(document.comments) &&
 			(tagIndex == len(document.tags) || document.comments[commentIndex].start < document.tags[tagIndex].start) {
-			document.comments[commentIndex].unsupportedEnclosing = context.unsupportedEnclosing
+			comment := &document.comments[commentIndex]
+			comment.sourceContext.unsupported = context.unsupportedEnclosing
+			comment.sourceContext.ordinaryTemplate = context.ordinaryTemplateDepth != 0
+			comment.sourceContext.declarativeShadow = context.declarativeShadowMode != ""
 			commentIndex++
 			continue
 		}
@@ -244,9 +247,15 @@ func appendNoscriptManagedMarkers(content string, document *scannedHTML) {
 					}
 					markerStart := search + relative
 					document.comments = append(document.comments, htmlComment{
-						start:                markerStart,
-						end:                  markerStart + len(marker),
-						unsupportedEnclosing: "<noscript>",
+						start: markerStart,
+						end:   markerStart + len(marker),
+						sourceContext: managedSourceContext{
+							parentID:            tag.start,
+							parentName:          tag.name,
+							namespace:           tag.namespace,
+							unsupported:         "<noscript>",
+							structurallyCertain: true,
+						},
 					})
 					search = markerStart + len(marker)
 				}

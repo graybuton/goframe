@@ -77,10 +77,10 @@ type scannedHTML struct {
 }
 
 type htmlComment struct {
-	start                int
-	end                  int
-	eof                  bool
-	unsupportedEnclosing string
+	start         int
+	end           int
+	eof           bool
+	sourceContext managedSourceContext
 }
 
 type htmlTag struct {
@@ -126,6 +126,8 @@ const (
 type htmlElementContext struct {
 	name                    string
 	namespace               htmlNamespace
+	sourceStart             int
+	foreignAncestor         bool
 	htmlIntegrationPoint    bool
 	mathMLTextIntegrationPt bool
 	previousSameName        int
@@ -134,6 +136,7 @@ type htmlElementContext struct {
 type htmlScannerContext struct {
 	elements  []htmlElementContext
 	topByName map[string]int
+	uncertain bool
 }
 
 type htmlClosingResolution struct {
@@ -170,9 +173,10 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		if strings.HasPrefix(content[offset:], "<!--") {
 			end, eof := scanHTMLComment(content, offset)
 			document.comments = append(document.comments, htmlComment{
-				start: offset,
-				end:   end,
-				eof:   eof,
+				start:         offset,
+				end:           end,
+				eof:           eof,
+				sourceContext: context.managedSourceContext(),
 			})
 			offset = end
 			continue
@@ -214,6 +218,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		var closing htmlClosingResolution
 		if context.applyForeignBreakout(tag) {
 			document.profile.markComplex("foreign-content parser recovery")
+			context.uncertain = true
 			if tag.closing {
 				tag.namespace = htmlNamespaceHTML
 				closing = context.resolveClosingTag(tag.name)
@@ -225,6 +230,9 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			tag.namespace = closing.namespace
 		} else {
 			tag.namespace = context.startTagNamespace(tag.name)
+		}
+		if tag.closing && (!closing.matched || closing.index != len(context.elements)-1) {
+			context.uncertain = true
 		}
 		if tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "template" {
 			if templateDepth == 0 {
@@ -506,7 +514,17 @@ func (context *htmlScannerContext) push(content string, tag htmlTag) {
 	if previous, ok := context.topByName[tag.name]; ok {
 		previousSameName = previous
 	}
-	element := htmlElementContext{name: tag.name, namespace: tag.namespace, previousSameName: previousSameName}
+	foreignAncestor := tag.namespace != htmlNamespaceHTML
+	if len(context.elements) != 0 && context.elements[len(context.elements)-1].foreignAncestor {
+		foreignAncestor = true
+	}
+	element := htmlElementContext{
+		name:             tag.name,
+		namespace:        tag.namespace,
+		sourceStart:      tag.start,
+		foreignAncestor:  foreignAncestor,
+		previousSameName: previousSameName,
+	}
 	switch tag.namespace {
 	case htmlNamespaceSVG:
 		switch tag.name {
@@ -1261,18 +1279,12 @@ func managedMarkerText(name string, start bool) string {
 func validateManagedHTMLBlocks(content string, document scannedHTML) (map[string]managedHTMLBlock, error) {
 	names := []string{preloadBlockName, runtimeBlockName, bootstrapBlockName}
 	markers := map[string][]managedMarker{}
+	pairs := map[string][2]managedMarker{}
 	for _, comment := range document.comments {
 		raw := content[comment.start:comment.end]
 		for _, name := range names {
 			for _, start := range []bool{true, false} {
 				if raw == managedMarkerText(name, start) {
-					if comment.unsupportedEnclosing != "" {
-						return nil, fmt.Errorf(
-							"goframe:%s managed block marker is nested inside %s; move the complete block to a safe top-level source location",
-							name,
-							comment.unsupportedEnclosing,
-						)
-					}
 					markers[name] = append(markers[name], managedMarker{name: name, start: start, span: comment})
 				}
 			}
@@ -1307,6 +1319,7 @@ func validateManagedHTMLBlocks(content string, document scannedHTML) (map[string
 		if ends[0].span.start < starts[0].span.start {
 			return nil, fmt.Errorf("goframe:%s managed block end marker appears before its start marker; place the markers in start/end order", name)
 		}
+		pairs[name] = [2]managedMarker{starts[0], ends[0]}
 		blocks[name] = managedHTMLBlock{
 			name:  name,
 			start: starts[0].span.start,
@@ -1328,6 +1341,15 @@ func validateManagedHTMLBlocks(content string, document scannedHTML) (map[string
 				previous.name,
 				current.name,
 			)
+		}
+	}
+	for _, name := range names {
+		pair, ok := pairs[name]
+		if !ok {
+			continue
+		}
+		if err := validateManagedBlockContexts(name, pair[0], pair[1]); err != nil {
+			return nil, err
 		}
 	}
 	return blocks, nil
@@ -1387,6 +1409,8 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 			alternative: "remove the base element or use an external deployment-safe loader outside GoFrame ownership",
 		},
 	}
+	var ownedRuntimes []ownedRuntimeIntegration
+	var ownedBootstraps []ownedBootstrapIntegration
 	for _, name := range []string{preloadBlockName, runtimeBlockName, bootstrapBlockName} {
 		block, ok := blocks[name]
 		if !ok {
@@ -1404,17 +1428,30 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 			value:       managedMarkerText(name, true) + "\n" + managedValues[name] + "\n" + managedMarkerText(name, false),
 			description: "goframe:" + name + " managed block",
 		})
+		switch {
+		case name == runtimeBlockName && managedValues[name] != "":
+			ownedRuntimes = append(ownedRuntimes, ownedRuntimeIntegration{offset: block.start, blocking: true})
+		case name == bootstrapBlockName && managedValues[name] != "":
+			ownedBootstraps = append(ownedBootstraps, ownedBootstrapIntegration{offset: block.start})
+		}
 	}
 
 	if _, managed := blocks[runtimeBlockName]; !managed {
-		if err := planLegacyRuntimeRewrites(&plan, document, blocks, options.runtimePath); err != nil {
+		legacyRuntimes, err := planLegacyRuntimeRewrites(&plan, document, blocks, options.runtimePath)
+		if err != nil {
 			return "", err
 		}
+		ownedRuntimes = append(ownedRuntimes, legacyRuntimes...)
 	}
 	if _, managed := blocks[bootstrapBlockName]; !managed {
-		if err := planLegacyWASMRewrites(&plan, document, blocks, options.wasmPath); err != nil {
+		legacyBootstraps, err := planLegacyWASMRewrites(&plan, document, blocks, options.wasmPath)
+		if err != nil {
 			return "", err
 		}
+		ownedBootstraps = append(ownedBootstraps, legacyBootstraps...)
+	}
+	if err := validateOwnedRuntimeBootstrapOrder(ownedRuntimes, ownedBootstraps); err != nil {
+		return "", err
 	}
 	if err := planLegacyStyleRewrites(&plan, document, blocks, options.styleRewrites); err != nil {
 		return "", err
@@ -1427,22 +1464,53 @@ func rewriteIndexHTML(content string, options htmlRewriteOptions) (string, error
 	return plan.apply()
 }
 
-func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, runtimePath string) error {
+type ownedRuntimeIntegration struct {
+	offset   int
+	blocking bool
+}
+
+type ownedBootstrapIntegration struct {
+	offset int
+}
+
+func validateOwnedRuntimeBootstrapOrder(runtimes []ownedRuntimeIntegration, bootstraps []ownedBootstrapIntegration) error {
+	if len(runtimes) == 0 || len(bootstraps) == 0 {
+		return nil
+	}
+	for _, bootstrap := range bootstraps {
+		ordered := false
+		for _, runtime := range runtimes {
+			if runtime.blocking && runtime.offset < bootstrap.offset {
+				ordered = true
+				break
+			}
+		}
+		if !ordered {
+			return fmt.Errorf(
+				"custom index GoFrame-owned bootstrap may execute before its runtime; place a blocking runtime integration before the bootstrap or use one external loader that owns both steps",
+			)
+		}
+	}
+	return nil
+}
+
+func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, runtimePath string) ([]ownedRuntimeIntegration, error) {
 	var runtimeURL string
+	var integrations []ownedRuntimeIntegration
 	for _, tag := range document.tags {
 		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if source == nil || !source.hasValue {
 			continue
 		}
 		kind, err := classifyScriptTag(plan.content, tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if kind != scriptKindClassic && kind != scriptKindModule {
 			continue
@@ -1457,11 +1525,11 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 				"markerless runtime rewrite",
 				"remove the base element or provide a deployment-safe external runtime integration outside GoFrame ownership",
 			); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if document.profile.complex {
-			return document.profile.markerlessError("runtime", runtimeBlockName)
+			return nil, document.profile.markerlessError("runtime", runtimeBlockName)
 		}
 		if tag.namespace != htmlNamespaceHTML {
 			continue
@@ -1469,12 +1537,12 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 		if runtimeURL == "" {
 			runtimeURL, err = encodePackagePathAsBrowserURL(runtimePath)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 		replacement, err := encodeGeneratedHTMLAttributeValue(runtimeURL, source.valueSyntax)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		plan.add(htmlReplacement{
 			start:       source.valueStart + match.start,
@@ -1482,26 +1550,31 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 			value:       replacement + match.suffix,
 			description: "legacy runtime script source",
 		})
+		integrations = append(integrations, ownedRuntimeIntegration{
+			offset:   tag.start,
+			blocking: kind == scriptKindClassic && !hasHTMLAttribute(tag, "async") && !hasHTMLAttribute(tag, "defer"),
+		})
 	}
-	return nil
+	return integrations, nil
 }
 
-func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, wasmPath string) error {
+func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks map[string]managedHTMLBlock, wasmPath string) ([]ownedBootstrapIntegration, error) {
 	var wasmURL string
+	var integrations []ownedBootstrapIntegration
 	for _, tag := range document.tags {
 		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if source != nil {
 			continue
 		}
 		kind, err := classifyScriptTag(plan.content, tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if kind != scriptKindClassic && kind != scriptKindModule {
 			continue
@@ -1515,11 +1588,11 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 				"markerless bootstrap rewrite",
 				"remove the base element or use an external deployment-safe loader outside GoFrame ownership",
 			); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if document.profile.complex {
-			return document.profile.markerlessError("bootstrap", bootstrapBlockName)
+			return nil, document.profile.markerlessError("bootstrap", bootstrapBlockName)
 		}
 		if tag.namespace != htmlNamespaceHTML {
 			continue
@@ -1527,12 +1600,12 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		if wasmURL == "" {
 			wasmURL, err = encodePackagePathAsBrowserURL(wasmPath)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 		replacement, err := encodeGeneratedJavaScriptStringContents(wasmURL, match.quote)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		plan.add(htmlReplacement{
 			start:       match.urlStart,
@@ -1540,8 +1613,9 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 			value:       replacement + match.suffix,
 			description: "legacy GoFrame bootstrap WASM URL",
 		})
+		integrations = append(integrations, ownedBootstrapIntegration{offset: tag.start})
 	}
-	return nil
+	return integrations, nil
 }
 
 type scriptKind uint8
