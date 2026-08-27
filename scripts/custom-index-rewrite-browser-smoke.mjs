@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createHTTPServer } from "node:http";
 import { createServer as createPortServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -108,6 +108,7 @@ try {
     const targetOnlyFixture = await prepareVariantFixture("base-target", "base-target.html");
     const targetOnlyScenario = await prepareScenario("base-target", targetOnlyFixture, "marker");
     const negativeManaged = await verifyActiveBaseManagedFailure(targetOnlyScenario);
+    const negativeManagedStructure = await verifyManagedStructureFailures(targetOnlyScenario);
     scenarios.push(targetOnlyScenario);
     const authoredBase = await prepareAuthoredBaseScenario();
 
@@ -176,6 +177,7 @@ try {
         baseOracle,
         javascriptSourceOracle,
         negativeManaged,
+        negativeManagedStructure,
         authoredBase: stableAuthoredBase,
         generatedURL: {
             paths: generatedURLScenario.paths,
@@ -388,6 +390,76 @@ async function verifyActiveBaseManagedFailure(scenario) {
         sourcePreserved: true,
         successOutputBytes: 0,
     };
+}
+
+async function verifyManagedStructureFailures(scenario) {
+    const indexPath = join(scenario.fixture, "index.html");
+    const originalSource = await readFile(indexPath, "utf8");
+    const packageBefore = await snapshotTree(scenario.packageDirectory);
+    const temporaryRoot = join(tempRoot, "managed-structure-tmp");
+    await mkdir(temporaryRoot, { recursive: true });
+    const cases = [
+        {
+            name: "foreign runtime block",
+            source: `<!doctype html><html><head></head><body><svg><!-- goframe:runtime --><!-- /goframe:runtime --></svg></body></html>`,
+            wants: ["goframe:runtime", "SVG or MathML ancestry", "safe HTML parent"],
+        },
+        {
+            name: "foreign bootstrap block",
+            source: `<!doctype html><html><head></head><body><math><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></math></body></html>`,
+            wants: ["goframe:bootstrap", "SVG or MathML ancestry", "safe HTML parent"],
+        },
+        {
+            name: "cross-parent runtime block",
+            source: `<!doctype html><html><head><!-- goframe:runtime --></head><body id="app"><!-- /goframe:runtime --></body></html>`,
+            wants: ["goframe:runtime", "different structural contexts", "safe HTML parent"],
+        },
+        {
+            name: "reversed owned runtime order",
+            source: `<!doctype html><html><head></head><body><!-- goframe:bootstrap --><!-- /goframe:bootstrap --><!-- goframe:runtime --><!-- /goframe:runtime --></body></html>`,
+            wants: ["GoFrame-owned bootstrap may execute before its runtime", "blocking runtime integration before the bootstrap"],
+        },
+    ];
+    const results = [];
+    try {
+        for (const test of cases) {
+            await writeFile(indexPath, test.source);
+            const sourceBefore = await snapshotTree(scenario.fixture);
+            const result = await runCommandResult(goxc, [
+                "package",
+                scenario.fixture,
+                `--compiler=${compiler}`,
+                `--workspace=${scenario.workspace}`,
+                "--asset-hash",
+                "--preload",
+                "--compress=gzip,br",
+            ], {
+                ...commandEnvironment(),
+                TMPDIR: temporaryRoot,
+            });
+            assert(result.code !== 0, `${test.name} unexpectedly packaged successfully`);
+            for (const want of test.wants) {
+                assert(result.output.includes(want), `${test.name} error omitted ${JSON.stringify(want)}: ${JSON.stringify(result.output)}`);
+            }
+            const successOutput = result.output.match(/^packaged .+$/gm)?.join("\n") ?? "";
+            assert(successOutput.length === 0, `${test.name} emitted success output: ${JSON.stringify(result.output)}`);
+            assertDeepEqual(await snapshotTree(scenario.fixture), sourceBefore, `${test.name} source graph`);
+            assertDeepEqual(await snapshotTree(scenario.packageDirectory), packageBefore, `${test.name} previous package graph`);
+            assertDeepEqual(await readdir(temporaryRoot), [], `${test.name} temporary stage cleanup`);
+            results.push({
+                name: test.name,
+                rejected: true,
+                sourcePreserved: true,
+                previousPackagePreserved: true,
+                temporaryStageRemoved: true,
+                successOutputBytes: Buffer.byteLength(successOutput),
+            });
+        }
+    } finally {
+        await writeFile(indexPath, originalSource);
+    }
+    assertDeepEqual(await snapshotTree(scenario.packageDirectory), packageBefore, "managed-structure final previous package graph");
+    return results;
 }
 
 async function prepareAuthoredBaseScenario() {
@@ -1070,6 +1142,14 @@ async function runManagedFirstSemanticOracle() {
             response.end(`window.__oracleRuntimeLoads = [...(window.__oracleRuntimeLoads ?? []), ${JSON.stringify(url.pathname)}];`);
             return;
         }
+        if (url.pathname.startsWith("/ordered-runtime/")) {
+            response.setHeader("content-type", "text/javascript; charset=utf-8");
+            const delay = Number(url.searchParams.get("delay") ?? 0);
+            setTimeout(() => {
+                response.end(`window.__oracleRuntimeReady = true; window.__oracleOrder.push("runtime");`);
+            }, Number.isFinite(delay) ? delay : 0);
+            return;
+        }
         if (url.pathname.startsWith("/style/")) {
             response.setHeader("content-type", "text/css; charset=utf-8");
             response.end(`:host, html { --goframe-oracle-style: ${JSON.stringify(url.pathname)}; }`);
@@ -1319,6 +1399,76 @@ async function runManagedFirstSemanticOracle() {
                 assert(result.afterPIParent === "pi" && result.afterDeclarationParent === "declaration" && result.afterCDATAParent === "cdata", "bogus-comment boundary changed");
             },
         });
+        await runCase({
+            name: "abrupt doctype termination",
+            classification: "simple profile",
+            source: `<!DOCTYPE html PUBLIC "x><script id="runtime" src="${origin}/runtime/doctype.js"></script>">`,
+            expression: `(() => ({
+                runtimePresent: Boolean(document.querySelector("#runtime")),
+                runtimeNamespace: document.querySelector("#runtime")?.namespaceURI ?? null,
+                executed: (window.__oracleRuntimeLoads ?? []).includes("/runtime/doctype.js"),
+            }))()`,
+            validate(result, caseRequests) {
+                assert(result.runtimePresent && result.runtimeNamespace === "http://www.w3.org/1999/xhtml", "abrupt DOCTYPE did not expose the following HTML script");
+                assert(result.executed && caseRequests.includes("/runtime/doctype.js"), "abrupt DOCTYPE runtime was not requested");
+            },
+        });
+        await runCase({
+            name: "foreign runtime src",
+            classification: "unsupported managed placement",
+            source: `<svg><script id="foreign-runtime" src="${origin}/runtime/foreign-managed.js"></script></svg>`,
+            expression: `(() => ({
+                namespace: document.querySelector("#foreign-runtime")?.namespaceURI ?? null,
+                executed: (window.__oracleRuntimeLoads ?? []).includes("/runtime/foreign-managed.js"),
+            }))()`,
+            validate(result, caseRequests) {
+                assert(result.namespace === "http://www.w3.org/2000/svg", "foreign managed runtime would not create an SVG script");
+                result.requested = caseRequests.includes("/runtime/foreign-managed.js");
+            },
+        });
+        for (const test of [
+            {
+                name: "blocking runtime before bootstrap",
+                runtime: `<script src="${origin}/ordered-runtime/blocking.js?delay=75"></script>`,
+                beforeRuntime: "",
+                want: ["runtime", "bootstrap:true"],
+            },
+            {
+                name: "bootstrap before blocking runtime",
+                runtime: `<script src="${origin}/ordered-runtime/reversed.js?delay=75"></script>`,
+                beforeRuntime: `<script>window.__oracleOrder.push("bootstrap:" + Boolean(window.__oracleRuntimeReady));</script>`,
+                want: ["bootstrap:false", "runtime"],
+            },
+            {
+                name: "async runtime before bootstrap",
+                runtime: `<script async src="${origin}/ordered-runtime/async.js?delay=75"></script>`,
+                beforeRuntime: "",
+                want: ["bootstrap:false", "runtime"],
+            },
+            {
+                name: "defer runtime before bootstrap",
+                runtime: `<script defer src="${origin}/ordered-runtime/defer.js?delay=75"></script>`,
+                beforeRuntime: "",
+                want: ["bootstrap:false", "runtime"],
+            },
+            {
+                name: "module runtime before bootstrap",
+                runtime: `<script type="module" src="${origin}/ordered-runtime/module.js?delay=75"></script>`,
+                beforeRuntime: "",
+                want: ["bootstrap:false", "runtime"],
+            },
+        ]) {
+            const bootstrap = test.beforeRuntime === "" ? `<script>window.__oracleOrder.push("bootstrap:" + Boolean(window.__oracleRuntimeReady));</script>` : "";
+            await runCase({
+                name: test.name,
+                classification: test.want[0] === "runtime" ? "proven runtime order" : "unproven runtime order",
+                source: `<script>window.__oracleOrder = [];</script>${test.beforeRuntime}${test.runtime}${bootstrap}`,
+                expression: `window.__oracleOrder`,
+                validate(result) {
+                    assertDeepEqual(result, test.want, `${test.name} execution order`);
+                },
+            });
+        }
         await runCase({
             name: "balanced foreign content",
             classification: "simple profile",
