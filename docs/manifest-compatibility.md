@@ -65,8 +65,14 @@ Current input behavior:
 - custom templates give GoFrame explicit ownership of preload, runtime, and
   bootstrap sections through complete, exact managed comment pairs. These are
   the universal ownership mechanism. The delimiters remain in package and
-  development HTML; malformed, duplicate, nested, interleaved, or unsafe
-  tree-builder-sensitive placements fail before package publication;
+  development HTML. Both markers must share one concrete safe HTML parent;
+  document-level, direct-`html`, cross-parent, structurally uncertain, and
+  SVG/MathML-ancestor placements fail before package publication. Malformed,
+  duplicate, nested, and interleaved marker shapes also fail;
+- when GoFrame owns both runtime and bootstrap integrations, a blocking owned
+  runtime must precede the owned bootstrap. Reversed, async, deferred, or module
+  owned runtime arrangements are rejected rather than publishing an execution
+  order that cannot be proven;
 - managed ownership does not change browser URL resolution. Runtime, WASM,
   stylesheet, and enabled-preload references emitted by the current packager
   are package-relative, so a potentially active HTML `base[href]` rejects any
@@ -86,6 +92,9 @@ Current input behavior:
   unsupported custom loaders remain byte-preserved and use an explicit managed
   block when rewriting is required. Asset-managed stylesheet rewriting inside
   declarative Shadow DOM is not part of the current preview contract;
+- custom-index DOCTYPE source spans end at the first literal `>` even when a
+  malformed public or system identifier contains an unmatched quote. A DOCTYPE
+  through EOF remains opaque authored source;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 

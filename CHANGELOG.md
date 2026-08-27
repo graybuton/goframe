@@ -30,7 +30,11 @@
   remain relative, so an active HTML `base[href]` now fails before publication
   whenever a managed or markerless operation would emit one. A target-only
   `base` and active-base documents with no package-owned URL output remain
-  accepted.
+  accepted. Both markers of a managed block must share one concrete safe HTML
+  parent; document-level, cross-parent, and SVG/MathML-ancestor placements fail
+  before publication. A GoFrame-owned blocking runtime must precede an owned
+  bootstrap. Malformed DOCTYPE spans end at their first `>` so later structural
+  references are not hidden by quoted source text.
 - `VirtualList` and `VirtualTable` now track the pixel viewport separately from
   the rendered overscan window. Collection shrink and empty transitions clamp
   the persisted viewport, while height, item or row height, and overscan

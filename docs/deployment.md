@@ -135,31 +135,45 @@ contract: packaging prints a message and skips them.
 Custom `index.html` files may use explicit package blocks:
 
 ```html
-<!-- goframe:preload -->
-<!-- /goframe:preload -->
+<html>
+<head>
+  <!-- goframe:preload -->
+  <!-- /goframe:preload -->
+</head>
+<body>
+  <!-- goframe:runtime -->
+  <script src="wasm_exec.js"></script>
+  <!-- /goframe:runtime -->
 
-<!-- goframe:runtime -->
-<script src="wasm_exec.js"></script>
-<!-- /goframe:runtime -->
-
-<!-- goframe:bootstrap -->
-<script>
-  const go = new Go();
-  WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
-      .then((result) => go.run(result.instance));
-</script>
-<!-- /goframe:bootstrap -->
+  <!-- goframe:bootstrap -->
+  <script>
+    const go = new Go();
+    WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+        .then((result) => go.run(result.instance));
+  </script>
+  <!-- /goframe:bootstrap -->
+</body>
+</html>
 ```
 
 These exact, case-sensitive comments are the authoritative, universal
 build-time ownership mechanism for custom HTML. Packaging validates all three
 block types before changing the document, then replaces only complete managed
-blocks in safe top-level source locations with final package references. The
-comments remain in packaged and development HTML and do not participate in
-application rendering. Duplicate, orphaned, reversed, nested, interleaved, or
-tree-builder-sensitive placements fail packaging before publication. With
-`--preload` disabled, a valid preload block retains its delimiters with an
-empty interior.
+blocks whose two markers share one concrete safe HTML parent. A block may be a
+child of the same `head`, `body`, or ordinary HTML container. Document-level
+markers, direct children of `html`, cross-parent pairs, structurally uncertain
+contexts, and every placement under SVG or MathML ancestry are unsupported,
+including descendants of HTML integration points. The comments remain in
+packaged and development HTML and do not participate in application rendering.
+Duplicate, orphaned, reversed, nested, interleaved, or unsupported placements
+fail packaging before publication. With `--preload` disabled, a valid preload
+block retains its delimiters with an empty interior.
+
+When GoFrame owns both integrations, a blocking runtime integration must appear
+before the owned bootstrap so the bootstrap cannot execute before the runtime
+defines its browser globals. Async, deferred, module, or source-reversed owned
+runtime arrangements fail before publication. An external runtime that GoFrame
+does not rewrite remains authored integration responsibility.
 
 Managed blocks establish which source spans GoFrame owns; they do not override
 browser base-URL resolution. The current package references emitted for the
@@ -204,8 +218,8 @@ Markerless bootstrap recognition is structural and applies to the complete
 script body. Arbitrary direct `fetch(...)` calls are not rewritten, and
 additional authored statements make a script non-owned. The recognizer does
 not validate arbitrary JavaScript; unsupported custom loaders remain unchanged.
-Use an explicit `goframe:bootstrap` block when that code needs a deterministic
-package rewrite.
+Use an explicit `goframe:bootstrap` block under one safe HTML parent when that
+code needs a deterministic package rewrite.
 
 Authored content outside owned spans remains byte-preserved. When a required
 runtime, bootstrap, preload, or declared stylesheet rewrite would cross a
@@ -218,7 +232,10 @@ to supported top-level markup.
 The rewriter scans the original source and changes only validated byte ranges;
 it does not parse and serialize the whole document. Whitespace, line endings,
 doctype spelling, attribute casing and order, quotes, and formatting outside
-managed or recognized reference spans are preserved.
+managed or recognized reference spans are preserved. DOCTYPE source spans end
+at the first literal `>` even inside a malformed quoted identifier, matching the
+browser tokenizer boundary; a DOCTYPE that reaches EOF remains opaque authored
+source.
 
 ## Preload Hints
 
@@ -237,7 +254,7 @@ HTML, preload markup is inserted immediately before the structural closing
 `</head>` tag. Text resembling `</head>` inside comments, scripts, styles,
 attributes, or examples is ignored. If the document is outside that profile or
 has no unambiguous closing head, packaging fails and recommends an explicit
-top-level `goframe:preload` block.
+`goframe:preload` block whose markers share one safe HTML parent.
 
 ## Asset Manifest
 
