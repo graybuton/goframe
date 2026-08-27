@@ -26,6 +26,14 @@ selected GOX golden tests. The two supported Linux entries additionally run
 the artifact, module-path, docs, and race gates. Every entry is required; no
 matrix lane is advisory.
 
+Before those commands, the Windows entry verifies that the exact selected Go
+version exposes its executable, compiler tools, standard-library source tree,
+and `internal/goarch` package through a physically resolvable `GOROOT`. It uses
+the physical target of a hosted-toolcache junction when necessary. If that
+installation is incomplete, the job installs the same pinned Go release under
+`RUNNER_TEMP`, verifies its published SHA-256 before extraction, and repeats the
+full integrity probe before continuing.
+
 It checks:
 
 - tracked artifact gate;
