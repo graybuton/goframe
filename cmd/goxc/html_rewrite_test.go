@@ -3601,6 +3601,166 @@ func TestPackageCustomIndexBrowserSemanticsFailuresAreAtomic(t *testing.T) {
 	}
 }
 
+func TestCustomIndexForeignMarkerlessLookalikesAreExcludedBeforeHTMLOwnership(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const wasmPath = "assets/bundle.11111111.wasm"
+	const stylePath = "assets/styles.33333333.css"
+	const bootstrap = `const go = new Go(); WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject).then((result) => go.run(result.instance));`
+	options := htmlRewriteOptions{
+		runtimePath: runtimePath,
+		wasmPath:    wasmPath,
+		styleRewrites: map[string]string{
+			"styles.css": stylePath,
+		},
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "complex profile SVG runtime",
+			source: `<table></table><svg><script src="wasm_exec.js"></script></svg>`,
+		},
+		{
+			name:   "complex profile MathML runtime",
+			source: `<table></table><math><script src="wasm_exec.js"></script></math>`,
+		},
+		{
+			name:   "active base and complex profile SVG runtime",
+			source: `<base href="/redirected/"><table></table><svg><script src="wasm_exec.js"></script></svg>`,
+		},
+		{
+			name:   "complex profile SVG bootstrap",
+			source: `<table></table><svg><script>` + bootstrap + `</script></svg>`,
+		},
+		{
+			name:   "active base SVG bootstrap",
+			source: `<base href="/redirected/"><svg><script>` + bootstrap + `</script></svg>`,
+		},
+		{
+			name:   "complex profile SVG stylesheet",
+			source: `<table></table><svg><link rel="stylesheet" href="styles.css"></link></svg>`,
+		},
+		{
+			name:   "active base SVG stylesheet",
+			source: `<base href="/redirected/"><svg><link rel="stylesheet" href="styles.css"></link></svg>`,
+		},
+		{
+			name:   "complex profile MathML style preload",
+			source: `<table></table><math><link rel="preload" as="style" href="styles.css"></link></math>`,
+		},
+		{
+			name:   "active base MathML style preload",
+			source: `<base href="/redirected/"><math><link rel="preload" as="style" href="styles.css"></link></math>`,
+		},
+		{
+			name:   "foreign runtime duplicate src",
+			source: `<table></table><svg><script src="wasm_exec.js" src="other.js"></script></svg>`,
+		},
+		{
+			name:   "foreign runtime duplicate type",
+			source: `<table></table><math><script type="text/javascript" type="application/json" src="wasm_exec.js"></script></math>`,
+		},
+		{
+			name:   "foreign stylesheet duplicate attributes",
+			source: `<table></table><svg><link rel="stylesheet" rel="icon" as="style" as="script" href="styles.css" href="other.css"></link></svg>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, options)
+			if err != nil {
+				t.Fatalf("rewriteIndexHTML() rejected foreign authored content: %v", err)
+			}
+			if got != test.source {
+				t.Fatalf("foreign authored content changed\ngot:  %q\nwant: %q", got, test.source)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name      string
+		source    string
+		operation string
+	}{
+		{
+			name:      "real HTML runtime",
+			source:    `<table></table><svg><script src="wasm_exec.js"></script></svg><script src="wasm_exec.js"></script>`,
+			operation: "goframe:runtime",
+		},
+		{
+			name:      "real HTML bootstrap",
+			source:    `<table></table><svg><script>` + bootstrap + `</script></svg><script>` + bootstrap + `</script>`,
+			operation: "goframe:bootstrap",
+		},
+		{
+			name:      "real HTML stylesheet",
+			source:    `<table></table><svg><link rel="stylesheet" href="styles.css"></link></svg><link rel="stylesheet" href="styles.css">`,
+			operation: "stylesheet",
+		},
+		{
+			name:      "real HTML style preload",
+			source:    `<table></table><math><link rel="preload" as="style" href="styles.css"></link></math><link rel="preload" as="style" href="styles.css">`,
+			operation: "stylesheet",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, options)
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want real HTML markerless-profile failure", got)
+			}
+			if got != "" || !strings.Contains(err.Error(), "<table>") || !strings.Contains(err.Error(), test.operation) {
+				t.Fatalf("rewriteIndexHTML() = %q, %v, want real HTML fail-closed guidance", got, err)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+		old    string
+		new    string
+	}{
+		{
+			name:   "SVG runtime",
+			source: `<svg><foreignObject><script src="wasm_exec.js"></script></foreignObject></svg>`,
+			old:    runtimeAssetName,
+			new:    runtimePath,
+		},
+		{
+			name:   "MathML runtime",
+			source: `<math><annotation-xml encoding="text/html"><script src="wasm_exec.js"></script></annotation-xml></math>`,
+			old:    runtimeAssetName,
+			new:    runtimePath,
+		},
+		{
+			name:   "SVG bootstrap",
+			source: `<svg><foreignObject><script>` + bootstrap + `</script></foreignObject></svg>`,
+			old:    `bundle.wasm`,
+			new:    wasmPath,
+		},
+		{
+			name:   "MathML stylesheet",
+			source: `<math><annotation-xml encoding="text/html"><link rel="stylesheet" href="styles.css"></annotation-xml></math>`,
+			old:    `styles.css`,
+			new:    stylePath,
+		},
+		{
+			name:   "SVG style preload",
+			source: `<svg><foreignObject><link rel="preload" as="style" href="styles.css"></foreignObject></svg>`,
+			old:    `styles.css`,
+			new:    stylePath,
+		},
+	} {
+		t.Run("HTML integration point "+test.name, func(t *testing.T) {
+			want := strings.Replace(test.source, test.old, test.new, 1)
+			if got := rewriteIndexForTest(t, test.source, options); got != want {
+				t.Fatalf("HTML integration-point mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+}
+
 func TestCustomIndexManagedFirstMarkerlessProfile(t *testing.T) {
 	const runtimePath = "assets/wasm_exec.22222222.js"
 	tests := []struct {

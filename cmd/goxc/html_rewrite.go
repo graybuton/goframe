@@ -1509,7 +1509,8 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 	var runtimeURL string
 	var integrations []ownedRuntimeIntegration
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.name != "script" || tag.namespace != htmlNamespaceHTML ||
+			tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
@@ -1531,19 +1532,14 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 		if !ok {
 			continue
 		}
-		if document.profile.complex || tag.namespace == htmlNamespaceHTML {
-			if err := document.profile.requireRelativePackageURLSafety(
-				"markerless runtime rewrite",
-				"remove the base element or provide a deployment-safe external runtime integration outside GoFrame ownership",
-			); err != nil {
-				return nil, err
-			}
+		if err := document.profile.requireRelativePackageURLSafety(
+			"markerless runtime rewrite",
+			"remove the base element or provide a deployment-safe external runtime integration outside GoFrame ownership",
+		); err != nil {
+			return nil, err
 		}
 		if document.profile.complex {
 			return nil, document.profile.markerlessError("runtime", runtimeBlockName)
-		}
-		if tag.namespace != htmlNamespaceHTML {
-			continue
 		}
 		if runtimeURL == "" {
 			runtimeURL, err = encodePackagePathAsBrowserURL(runtimePath)
@@ -1602,7 +1598,8 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 	var wasmURL string
 	var integrations []ownedBootstrapIntegration
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "script" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.name != "script" || tag.namespace != htmlNamespaceHTML ||
+			tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		source, err := tag.attribute("src")
@@ -1623,19 +1620,14 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 		if !ok {
 			continue
 		}
-		if document.profile.complex || tag.namespace == htmlNamespaceHTML {
-			if err := document.profile.requireRelativePackageURLSafety(
-				"markerless bootstrap rewrite",
-				"remove the base element or use an external deployment-safe loader outside GoFrame ownership",
-			); err != nil {
-				return nil, err
-			}
+		if err := document.profile.requireRelativePackageURLSafety(
+			"markerless bootstrap rewrite",
+			"remove the base element or use an external deployment-safe loader outside GoFrame ownership",
+		); err != nil {
+			return nil, err
 		}
 		if document.profile.complex {
 			return nil, document.profile.markerlessError("bootstrap", bootstrapBlockName)
-		}
-		if tag.namespace != htmlNamespaceHTML {
-			continue
 		}
 		if wasmURL == "" {
 			wasmURL, err = encodePackagePathAsBrowserURL(wasmPath)
@@ -1725,7 +1717,8 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 	}
 	_, preloadManaged := blocks[preloadBlockName]
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "link" || tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
+		if tag.closing || tag.name != "link" || tag.namespace != htmlNamespaceHTML ||
+			tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
 		href, err := tag.attribute("href")
@@ -1771,19 +1764,14 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 				"custom index stylesheet rewriting inside declarative Shadow DOM is not part of the preview markerless contract; use an external stable URL or remove asset-managed shadow-root styles",
 			)
 		}
-		if document.profile.complex || tag.namespace == htmlNamespaceHTML {
-			if err := document.profile.requireRelativePackageURLSafety(
-				operation,
-				"remove the base element or use a deployment-safe external stylesheet outside GoFrame ownership",
-			); err != nil {
-				return err
-			}
+		if err := document.profile.requireRelativePackageURLSafety(
+			operation,
+			"remove the base element or use a deployment-safe external stylesheet outside GoFrame ownership",
+		); err != nil {
+			return err
 		}
 		if document.profile.complex {
 			return document.profile.stylesheetError()
-		}
-		if tag.namespace != htmlNamespaceHTML {
-			continue
 		}
 		destinationURL, err := encodePackagePathAsBrowserURL(destination)
 		if err != nil {
