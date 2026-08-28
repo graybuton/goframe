@@ -1426,6 +1426,111 @@ func TestCustomIndexLegacyURLPathNormalization(t *testing.T) {
 	}
 }
 
+func TestCustomIndexLegacyURLNormalizationDecodesPercentOnce(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	for _, value := range []string{
+		"%2e/wasm_exec.js",
+		"%2E/wasm_exec.js",
+		"assets/%2e%2e/wasm_exec.js",
+		"assets/.%2e/wasm_exec.js",
+		"assets/%2e./wasm_exec.js",
+		"&#37;2e/wasm_exec.js",
+	} {
+		t.Run("runtime once encoded "+value, func(t *testing.T) {
+			source := `<script src="` + value + `?v=1#runtime"></script>`
+			want := `<script src="` + runtimePath + `?v=1#runtime"></script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != want {
+				t.Fatalf("once-encoded runtime mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	const stylePath = "assets/styles.33333333.css"
+	for _, value := range []string{
+		"%2e/styles.css",
+		"assets/%2E%2E/styles.css",
+		"&#37;2e/styles.css",
+	} {
+		t.Run("style once encoded "+value, func(t *testing.T) {
+			for _, link := range []string{
+				`<link rel="stylesheet" href="` + value + `?v=1#theme">`,
+				`<link rel="preload" as="style" href="` + value + `?v=1#theme">`,
+			} {
+				want := strings.Replace(link, value, stylePath, 1)
+				got := rewriteIndexForTest(t, link, htmlRewriteOptions{styleRewrites: map[string]string{
+					"styles.css": stylePath,
+				}})
+				if got != want {
+					t.Fatalf("once-encoded style mismatch\ngot:  %q\nwant: %q", got, want)
+				}
+			}
+		})
+	}
+
+	const wasmPath = "assets/bundle.11111111.wasm"
+	for _, value := range []string{
+		"%2e/bundle.wasm",
+		"assets/%2E%2E/main.wasm",
+		`\x252e/bundle.wasm`,
+	} {
+		t.Run("bootstrap once encoded "+value, func(t *testing.T) {
+			source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("` + value + `?v=1#app"), go.importObject).then((result) => go.run(result.instance));</script>`
+			want := strings.Replace(source, value, wasmPath, 1)
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath}); got != want {
+				t.Fatalf("once-encoded bootstrap mismatch\ngot:  %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	for _, value := range []string{
+		"%252e/wasm_exec.js",
+		"%252e%252e/wasm_exec.js",
+		".%252e/wasm_exec.js",
+		"%252e./wasm_exec.js",
+		"%25%32%65/wasm_exec.js",
+		"&#37;252e/wasm_exec.js",
+	} {
+		t.Run("runtime double encoded "+value, func(t *testing.T) {
+			source := `<script src="` + value + `?v=1#authored"></script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != source {
+				t.Fatalf("double-encoded runtime was claimed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+
+	for _, value := range []string{
+		"%252e/styles.css",
+		"%25%32%65/styles.css",
+	} {
+		t.Run("style double encoded "+value, func(t *testing.T) {
+			for _, link := range []string{
+				`<link rel="stylesheet" href="` + value + `">`,
+				`<link rel="preload" as="style" href="` + value + `">`,
+			} {
+				got := rewriteIndexForTest(t, link, htmlRewriteOptions{styleRewrites: map[string]string{
+					"styles.css": stylePath,
+				}})
+				if got != link {
+					t.Fatalf("double-encoded style was claimed\ngot:  %q\nwant: %q", got, link)
+				}
+			}
+		})
+	}
+
+	for _, value := range []string{
+		"%252e/bundle.wasm",
+		"%25%32%65/main.wasm",
+		`\x25252e/bundle.wasm`,
+	} {
+		t.Run("bootstrap double encoded "+value, func(t *testing.T) {
+			source := `<script>const go = new Go(); WebAssembly.instantiateStreaming(fetch("` + value + `"), go.importObject).then((result) => go.run(result.instance));</script>`
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{wasmPath: wasmPath}); got != source {
+				t.Fatalf("double-encoded bootstrap was claimed\ngot:  %q\nwant: %q", got, source)
+			}
+		})
+	}
+}
+
 func TestCustomIndexNumericAttributeReferencesUseBrowserValues(t *testing.T) {
 	const runtimePath = "assets/wasm_exec.22222222.js"
 	for _, test := range []struct {

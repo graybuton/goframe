@@ -1961,11 +1961,11 @@ func normalizeLegacyPackageURLPath(value string) (string, bool) {
 		}
 		segment := value[start:offset]
 		switch {
-		case singleDotURLPathSegment(segment):
+		case segment == ".":
 			if offset == len(value) {
 				segments = append(segments, "")
 			}
-		case doubleDotURLPathSegment(segment):
+		case segment == "..":
 			if len(segments) == 0 {
 				return "", false
 			}
@@ -1979,15 +1979,6 @@ func normalizeLegacyPackageURLPath(value string) (string, bool) {
 		start = offset + 1
 	}
 	return strings.Join(segments, "/"), true
-}
-
-func singleDotURLPathSegment(value string) bool {
-	return value == "." || asciiFoldEqual(value, "%2e")
-}
-
-func doubleDotURLPathSegment(value string) bool {
-	return value == ".." || asciiFoldEqual(value, ".%2e") ||
-		asciiFoldEqual(value, "%2e.") || asciiFoldEqual(value, "%2e%2e")
 }
 
 func hasLegacyURLScheme(value string) bool {
