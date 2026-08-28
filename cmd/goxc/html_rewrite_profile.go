@@ -98,6 +98,7 @@ func classifyHTMLRewriteProfile(content string, document *scannedHTML) {
 		tag := &document.tags[tagIndex]
 		tag.declarativeShadowMode = context.declarativeShadowMode
 		tag.ordinaryTemplateDepth = context.ordinaryTemplateDepth
+		tag.foreignNamespaceCertain = tag.namespace != htmlNamespaceHTML && context.unsupportedEnclosing == ""
 		if potentiallyActiveBaseHref(*tag) {
 			document.profile.markActiveBaseHref(tag.start)
 		}

@@ -149,6 +149,7 @@ try {
     await client.call("Page.enable");
     await client.call("Network.enable");
     const attributeOracle = await runAttributeOracle();
+    const managedSpanOracle = await runManagedSpanTreeOracle();
     const semanticOracle = await runManagedFirstSemanticOracle();
     const baseOracle = await runBaseResolutionOracle();
     const javascriptSourceOracle = runGeneratedJavaScriptSourceOracle(generatedURLScenario);
@@ -179,6 +180,7 @@ try {
     const report = {
         compiler,
         attributeOracle,
+        managedSpanOracle,
         semanticOracle,
         baseOracle,
         javascriptSourceOracle,
@@ -419,6 +421,36 @@ async function verifyManagedStructureFailures(scenario) {
             name: "cross-parent runtime block",
             source: `<!doctype html><html><head><!-- goframe:runtime --></head><body id="app"><!-- /goframe:runtime --></body></html>`,
             wants: ["goframe:runtime", "different structural contexts", "safe HTML parent"],
+        },
+        {
+            name: "paragraph implicitly closed by block",
+            source: `<!doctype html><html><head></head><body><p><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></p></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+        },
+        {
+            name: "head implicitly closed by body content",
+            source: `<!doctype html><html><head><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></head><body></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+        },
+        {
+            name: "nested button implicitly closes parent",
+            source: `<!doctype html><html><head></head><body><button><!-- goframe:bootstrap --><button>owned</button><!-- /goframe:bootstrap --></button></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+        },
+        {
+            name: "nested anchor implicitly closes parent",
+            source: `<!doctype html><html><head></head><body><a href="#"><!-- goframe:bootstrap --><a href="#">owned</a><!-- /goframe:bootstrap --></a></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+        },
+        {
+            name: "list item implicitly closes parent",
+            source: `<!doctype html><html><head></head><body><ul><li><!-- goframe:bootstrap --><li>owned</li><!-- /goframe:bootstrap --></li></ul></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+        },
+        {
+            name: "description item implicitly closes parent",
+            source: `<!doctype html><html><head></head><body><dl><dt><!-- goframe:bootstrap --><dd>owned</dd><!-- /goframe:bootstrap --></dt></dl></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
         },
         {
             name: "reversed owned runtime order",
@@ -1001,6 +1033,75 @@ async function runAttributeOracle() {
         assert(result.namespace === "http://www.w3.org/1999/xhtml", `${test.name} browser namespace = ${result.namespace}`);
     }
     assert(!results.find((result) => result.name === "literal NUL").value.includes("\0"), "literal NUL remained in the browser attribute value");
+    return results;
+}
+
+async function runManagedSpanTreeOracle() {
+    const cases = [
+        {
+            name: "paragraph closed by block",
+            source: `<p><!-- START --><div id="owned"></div><!-- END --></p>`,
+            startParent: "p",
+            endParent: "body",
+        },
+        {
+            name: "head closed by body content",
+            source: `<html><head><!-- START --><div id="owned"></div><!-- END --></head><body></body></html>`,
+            startParent: "head",
+            endParent: "body",
+        },
+        {
+            name: "nested button",
+            source: `<button><!-- START --><button>owned</button><!-- END --></button>`,
+            startParent: "button",
+            endParent: "body",
+        },
+        {
+            name: "nested anchor",
+            source: `<a href="#"><!-- START --><a href="#">owned</a><!-- END --></a>`,
+            startParent: "a",
+            endParent: "body",
+        },
+        {
+            name: "implicit list item close",
+            source: `<ul><li><!-- START --><li>owned</li><!-- END --></li></ul>`,
+            startParent: "li",
+            endParent: "ul",
+        },
+        {
+            name: "implicit description item close",
+            source: `<dl><dt><!-- START --><dd>owned</dd><!-- END --></dt></dl>`,
+            startParent: "dt",
+            endParent: "dl",
+        },
+    ];
+    const results = await client.evaluate(`(() => {
+        const cases = ${JSON.stringify(cases)};
+        return cases.map((test) => {
+            const document = new DOMParser().parseFromString(test.source, "text/html");
+            const walker = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+            const comments = [];
+            for (let comment = walker.nextNode(); comment; comment = walker.nextNode()) {
+                comments.push({
+                    data: comment.data.trim(),
+                    parent: comment.parentElement?.localName ?? null,
+                });
+            }
+            return {
+                name: test.name,
+                comments,
+                head: document.head.innerHTML,
+                body: document.body.innerHTML,
+            };
+        });
+    })()`);
+    for (const [index, test] of cases.entries()) {
+        const result = results[index];
+        assertDeepEqual(result.comments.map(({ data }) => data), ["START", "END"], `${test.name} marker data`);
+        assert(result.comments[0].parent === test.startParent, `${test.name} start parent = ${JSON.stringify(result.comments[0].parent)}`);
+        assert(result.comments[1].parent === test.endParent, `${test.name} end parent = ${JSON.stringify(result.comments[1].parent)}`);
+        assert(result.comments[0].parent !== result.comments[1].parent, `${test.name} unexpectedly retained one browser parent`);
+    }
     return results;
 }
 

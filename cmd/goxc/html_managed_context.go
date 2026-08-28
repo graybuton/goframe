@@ -29,6 +29,7 @@ func (context htmlScannerContext) managedSourceContext() managedSourceContext {
 	result.parentName = parent.name
 	result.namespace = parent.namespace
 	result.foreignAncestor = parent.foreignAncestor
+	result.structurallyCertain = result.structurallyCertain && parent.stableBrowserParent
 	return result
 }
 

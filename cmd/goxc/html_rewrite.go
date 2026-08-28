@@ -84,18 +84,19 @@ type htmlComment struct {
 }
 
 type htmlTag struct {
-	start                 int
-	end                   int
-	name                  string
-	namespace             htmlNamespace
-	closing               bool
-	selfClosing           bool
-	attributes            []htmlAttribute
-	templateDepth         int
-	ordinaryTemplateDepth int
-	declarativeShadowMode string
-	rawStart              int
-	rawEnd                int
+	start                   int
+	end                     int
+	name                    string
+	namespace               htmlNamespace
+	closing                 bool
+	selfClosing             bool
+	attributes              []htmlAttribute
+	templateDepth           int
+	ordinaryTemplateDepth   int
+	declarativeShadowMode   string
+	foreignNamespaceCertain bool
+	rawStart                int
+	rawEnd                  int
 }
 
 type htmlAttribute struct {
@@ -130,6 +131,7 @@ type htmlElementContext struct {
 	foreignAncestor         bool
 	htmlIntegrationPoint    bool
 	mathMLTextIntegrationPt bool
+	stableBrowserParent     bool
 	previousSameName        int
 }
 
@@ -233,6 +235,9 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		}
 		if tag.closing && (!closing.matched || closing.index != len(context.elements)-1) {
 			context.uncertain = true
+		}
+		if !tag.closing && tag.namespace == htmlNamespaceHTML {
+			context.markImplicitlyClosedManagedParents(tag.name)
 		}
 		if tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "template" {
 			if templateDepth == 0 {
@@ -519,11 +524,12 @@ func (context *htmlScannerContext) push(content string, tag htmlTag) {
 		foreignAncestor = true
 	}
 	element := htmlElementContext{
-		name:             tag.name,
-		namespace:        tag.namespace,
-		sourceStart:      tag.start,
-		foreignAncestor:  foreignAncestor,
-		previousSameName: previousSameName,
+		name:                tag.name,
+		namespace:           tag.namespace,
+		sourceStart:         tag.start,
+		foreignAncestor:     foreignAncestor,
+		stableBrowserParent: true,
+		previousSameName:    previousSameName,
 	}
 	switch tag.namespace {
 	case htmlNamespaceSVG:
@@ -544,6 +550,67 @@ func (context *htmlScannerContext) push(content string, tag htmlTag) {
 	}
 	context.elements = append(context.elements, element)
 	context.topByName[tag.name] = len(context.elements) - 1
+}
+
+// markImplicitlyClosedManagedParents covers the bounded implied-close cases
+// that can separate managed comments in the browser tree. It does not attempt
+// to construct the browser tree; it only invalidates source-parent certainty.
+func (context *htmlScannerContext) markImplicitlyClosedManagedParents(startName string) {
+	firstUnstable := len(context.elements)
+	mark := func(name string) {
+		for index := len(context.elements) - 1; index >= 0; index-- {
+			element := context.elements[index]
+			if element.name == name && element.namespace == htmlNamespaceHTML {
+				if index < firstUnstable {
+					firstUnstable = index
+				}
+				return
+			}
+		}
+	}
+
+	if htmlStartTagClosesParagraph(startName) {
+		mark("p")
+	}
+	switch startName {
+	case "a":
+		mark("a")
+	case "button":
+		mark("button")
+	case "li":
+		mark("li")
+	case "dd", "dt":
+		mark("dd")
+		mark("dt")
+	}
+	if !htmlStartTagStaysInHead(startName) {
+		mark("head")
+	}
+
+	for index := firstUnstable; index < len(context.elements); index++ {
+		context.elements[index].stableBrowserParent = false
+	}
+}
+
+func htmlStartTagClosesParagraph(name string) bool {
+	switch name {
+	case "address", "article", "aside", "blockquote", "center", "dd", "details", "dialog", "dir", "div", "dl", "dt",
+		"fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup",
+		"hr", "li", "listing", "main", "menu", "nav", "ol", "p", "plaintext", "pre", "search", "section", "summary",
+		"table", "ul", "xmp":
+		return true
+	default:
+		return false
+	}
+}
+
+func htmlStartTagStaysInHead(name string) bool {
+	switch name {
+	case "html", "base", "basefont", "bgsound", "link", "meta", "noframes", "noscript", "script", "style", "template", "title":
+		return true
+	default:
+		return false
+	}
 }
 
 func (context htmlScannerContext) resolveClosingTag(name string) htmlClosingResolution {
@@ -1509,7 +1576,7 @@ func planLegacyRuntimeRewrites(plan *htmlRewritePlan, document scannedHTML, bloc
 	var runtimeURL string
 	var integrations []ownedRuntimeIntegration
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "script" || tag.namespace != htmlNamespaceHTML ||
+		if tag.closing || tag.name != "script" || (tag.namespace != htmlNamespaceHTML && tag.foreignNamespaceCertain) ||
 			tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
@@ -1598,7 +1665,7 @@ func planLegacyWASMRewrites(plan *htmlRewritePlan, document scannedHTML, blocks 
 	var wasmURL string
 	var integrations []ownedBootstrapIntegration
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "script" || tag.namespace != htmlNamespaceHTML ||
+		if tag.closing || tag.name != "script" || (tag.namespace != htmlNamespaceHTML && tag.foreignNamespaceCertain) ||
 			tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}
@@ -1717,7 +1784,7 @@ func planLegacyStyleRewrites(plan *htmlRewritePlan, document scannedHTML, blocks
 	}
 	_, preloadManaged := blocks[preloadBlockName]
 	for _, tag := range document.tags {
-		if tag.closing || tag.name != "link" || tag.namespace != htmlNamespaceHTML ||
+		if tag.closing || tag.name != "link" || (tag.namespace != htmlNamespaceHTML && tag.foreignNamespaceCertain) ||
 			tag.ordinaryTemplateDepth != 0 || managedBlockContains(blocks, tag.start) {
 			continue
 		}

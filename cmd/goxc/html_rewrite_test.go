@@ -2180,6 +2180,89 @@ func TestCustomIndexManagedBlockStructuralContext(t *testing.T) {
 	}
 }
 
+func TestCustomIndexManagedBlockRejectsImplicitlyClosedSourceParent(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		parentName string
+		source     string
+	}{
+		{
+			name:       "paragraph closed by block",
+			parentName: "p",
+			source:     `<body><p><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></p></body>`,
+		},
+		{
+			name:       "head closed by body content",
+			parentName: "head",
+			source:     `<html><head><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></head><body></body></html>`,
+		},
+		{
+			name:       "nested button",
+			parentName: "button",
+			source:     `<body><button><!-- goframe:bootstrap --><button>owned</button><!-- /goframe:bootstrap --></button></body>`,
+		},
+		{
+			name:       "nested anchor",
+			parentName: "a",
+			source:     `<body><a href="#"><!-- goframe:bootstrap --><a href="#">owned</a><!-- /goframe:bootstrap --></a></body>`,
+		},
+		{
+			name:       "implicit list item close",
+			parentName: "li",
+			source:     `<body><ul><li><!-- goframe:bootstrap --><li>owned</li><!-- /goframe:bootstrap --></li></ul></body>`,
+		},
+		{
+			name:       "implicit description item close",
+			parentName: "dt",
+			source:     `<body><dl><dt><!-- goframe:bootstrap --><dd>owned</dd><!-- /goframe:bootstrap --></dt></dl></body>`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document, err := scanCustomIndexHTML(test.source)
+			if err != nil {
+				t.Fatalf("scanCustomIndexHTML() error: %v", err)
+			}
+			if len(document.comments) != 2 {
+				t.Fatalf("scanCustomIndexHTML() comments = %d, want 2", len(document.comments))
+			}
+			startContext := document.comments[0].sourceContext
+			endContext := document.comments[1].sourceContext
+			if startContext.parentID != endContext.parentID || startContext.parentName != test.parentName || endContext.parentName != test.parentName {
+				t.Fatalf("source contexts = %#v, %#v, want shared <%s> parent", startContext, endContext, test.parentName)
+			}
+			if !startContext.structurallyCertain || endContext.structurallyCertain {
+				t.Fatalf("source certainty = start %t, end %t, want true then false", startContext.structurallyCertain, endContext.structurallyCertain)
+			}
+
+			got, err := rewriteIndexHTML(test.source, htmlRewriteOptions{})
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want unstable managed-parent error", got)
+			}
+			if got != "" {
+				t.Fatalf("managed structural-context failure returned partial output %q", got)
+			}
+			for _, want := range []string{"goframe:bootstrap", "structurally uncertain", "safe HTML parent"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+
+	for _, source := range []string{
+		`<body><p><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></p></body>`,
+		`<html><head><!-- goframe:bootstrap --><meta name="owned" content="yes"><!-- /goframe:bootstrap --></head><body></body></html>`,
+		`<body><button><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></button></body>`,
+		`<body><a href="#"><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></a></body>`,
+		`<body><ul><li><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></li></ul></body>`,
+		`<body><dl><dt><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></dt></dl></body>`,
+	} {
+		if _, err := rewriteIndexHTML(source, htmlRewriteOptions{}); err != nil {
+			t.Fatalf("safe managed placement rejected: %v\n%s", err, source)
+		}
+	}
+}
+
 func TestCustomIndexOwnedRuntimeBootstrapOrdering(t *testing.T) {
 	const runtimePath = "assets/wasm_exec.22222222.js"
 	const wasmPath = "assets/bundle.11111111.wasm"
