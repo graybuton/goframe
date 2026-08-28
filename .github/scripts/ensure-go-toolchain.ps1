@@ -20,6 +20,45 @@ $script:SupportedWindowsGoArtifacts = @{
     }
 }
 
+function Select-GoExecutablePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Candidates
+    )
+
+    foreach ($candidate in $Candidates) {
+        if ($null -eq $candidate) {
+            continue
+        }
+        $sourceProperty = $candidate.PSObject.Properties["Source"]
+        if ($null -eq $sourceProperty) {
+            continue
+        }
+        $source = [string]$sourceProperty.Value
+        if (-not [string]::IsNullOrWhiteSpace($source)) {
+            return [string]$source
+        }
+    }
+
+    throw "no usable Go application command with a non-empty Source was found on PATH"
+}
+
+function Resolve-SelectedGoExecutable {
+    try {
+        $commands = @(
+            Get-Command go `
+                -CommandType Application `
+                -All `
+                -ErrorAction Stop
+        )
+    } catch {
+        throw "could not resolve a Go application command from PATH: $($_.Exception.Message)"
+    }
+
+    return [string](Select-GoExecutablePath -Candidates $commands)
+}
+
 function Invoke-GoCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -403,7 +442,7 @@ function Ensure-GoToolchain {
         -RequestedVersion $RequestedVersion `
         -RequestedArchitecture $RequestedArchitecture)
 
-    $initialGo = (Get-Command go -CommandType Application -ErrorAction Stop).Source
+    $initialGo = Resolve-SelectedGoExecutable
     $reportedRoot = Invoke-GoCommand -Executable $initialGo -Arguments @("env", "GOROOT")
     Write-GoToolchainDiagnostics `
         -GoExecutable $initialGo `

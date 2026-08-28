@@ -23,8 +23,58 @@ function Assert-Condition {
     }
 }
 
+$multipleCommands = @(
+    [pscustomobject]@{ Source = "first-go.exe" },
+    [pscustomobject]@{ Source = "second-go.exe" }
+)
+$selectedMultiple = Select-GoExecutablePath -Candidates $multipleCommands
+Assert-Condition `
+    -Condition ($selectedMultiple.GetType().FullName -eq "System.String") `
+    -Message "multiple Go application commands did not resolve to one scalar executable path"
+Assert-Condition `
+    -Condition ($selectedMultiple -ceq "first-go.exe") `
+    -Message "multiple Go application commands did not preserve command precedence"
+
+$selectedSingle = Select-GoExecutablePath `
+    -Candidates @([pscustomobject]@{ Source = "only-go.exe" })
+Assert-Condition `
+    -Condition ($selectedSingle -ceq "only-go.exe") `
+    -Message "single Go application command was not returned unchanged"
+
+$selectedAfterEmpty = Select-GoExecutablePath -Candidates @(
+    [pscustomobject]@{ Source = "" },
+    [pscustomobject]@{ Source = "valid-go.exe" }
+)
+Assert-Condition `
+    -Condition ($selectedAfterEmpty -ceq "valid-go.exe") `
+    -Message "empty Go application command source was not skipped deterministically"
+
+$noCandidateFailed = $false
+try {
+    [void](Select-GoExecutablePath -Candidates @())
+} catch {
+    $noCandidateFailed = $_.Exception.Message -like "*no usable Go application command*"
+}
+Assert-Condition `
+    -Condition $noCandidateFailed `
+    -Message "empty Go application command inventory did not fail actionably"
+
+$emptyCandidateFailed = $false
+try {
+    [void](Select-GoExecutablePath `
+        -Candidates @([pscustomobject]@{ Source = "  " }))
+} catch {
+    $emptyCandidateFailed = $_.Exception.Message -like "*no usable Go application command*"
+}
+Assert-Condition `
+    -Condition $emptyCandidateFailed `
+    -Message "empty Go application command source did not fail actionably"
+
+Write-Host "Portable Go executable selection controls: ok"
+
 if (-not $IsWindows) {
-    throw "Windows Go toolchain helper controls require Windows"
+    Write-Host "Windows-only Go toolchain layout controls: skipped on non-Windows host"
+    return
 }
 if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     throw "RUNNER_TEMP is required for Windows Go toolchain helper controls"
@@ -33,30 +83,25 @@ if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
 $testRoot = Join-Path $env:RUNNER_TEMP "goframe-go-toolchain-tests-$PID"
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 try {
-    $selectedGo = (Get-Command go -CommandType Application -ErrorAction Stop).Source
-    $selectedToolDir = Invoke-GoCommand -Executable $selectedGo -Arguments @("env", "GOTOOLDIR")
-
     $incompleteRoot = Join-Path $testRoot "incomplete"
     New-Item -ItemType Directory -Path (Join-Path $incompleteRoot "bin") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $incompleteRoot "pkg\tool\windows_amd64") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $incompleteRoot "src\runtime") | Out-Null
-    Copy-Item -LiteralPath $selectedGo -Destination (Join-Path $incompleteRoot "bin\go.exe")
-    Copy-Item `
-        -LiteralPath (Join-Path $selectedToolDir "compile.exe") `
-        -Destination (Join-Path $incompleteRoot "pkg\tool\windows_amd64\compile.exe")
+    [IO.File]::WriteAllBytes(
+        (Join-Path $incompleteRoot "bin\go.exe"),
+        [byte[]]::new(0)
+    )
+    [IO.File]::WriteAllBytes(
+        (Join-Path $incompleteRoot "pkg\tool\windows_amd64\compile.exe"),
+        [byte[]]::new(0)
+    )
 
-    $versionOutput = Invoke-GoCommand `
-        -Executable (Join-Path $incompleteRoot "bin\go.exe") `
-        -Arguments @("version")
-    Assert-Condition `
-        -Condition ($versionOutput -eq "go version go1.26.6 windows/amd64") `
-        -Message "incomplete fixture did not retain the expected executable version"
     $incompleteLayout = Test-GoToolchainLayout `
         -Root $incompleteRoot `
         -RequestedArchitecture "amd64"
     Assert-Condition `
         -Condition (-not $incompleteLayout.Complete) `
-        -Message "layout accepted a go.exe-only installation without internal/goarch"
+        -Message "layout accepted a synthetic installation without internal/goarch"
     Assert-Condition `
         -Condition (($incompleteLayout.Missing -join "|") -like "*src\internal\goarch*") `
         -Message "incomplete layout did not identify the missing internal/goarch tree"
