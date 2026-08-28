@@ -2087,6 +2087,159 @@ authored preload interior
 	}
 }
 
+func TestCustomIndexParserPoppedHeadElementsPreserveManagedParent(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const wasmPath = "assets/bundle.11111111.wasm"
+	const stylePath = "assets/styles.33333333.css"
+	options := htmlRewriteOptions{
+		preload:     true,
+		wasmPath:    wasmPath,
+		runtimePath: runtimePath,
+		stylePaths:  []string{stylePath},
+	}
+
+	preload := preloadHTMLForTest(t, options)
+	runtime, err := runtimeHTML(options)
+	if err != nil {
+		t.Fatalf("runtimeHTML() error: %v", err)
+	}
+	bootstrap, err := bootstrapHTML(options)
+	if err != nil {
+		t.Fatalf("bootstrapHTML() error: %v", err)
+	}
+
+	for _, element := range []string{"basefont", "bgsound"} {
+		t.Run(element, func(t *testing.T) {
+			preloadBlock := managedMarkerText(preloadBlockName, true) + "authored preload" + managedMarkerText(preloadBlockName, false)
+			runtimeBlock := managedMarkerText(runtimeBlockName, true) + "authored runtime" + managedMarkerText(runtimeBlockName, false)
+			bootstrapBlock := managedMarkerText(bootstrapBlockName, true) + "authored bootstrap" + managedMarkerText(bootstrapBlockName, false)
+			source := `<html><head><` + element + ` data-authored="preserve-me">` +
+				`<meta name="before" content="preserve-me">` + preloadBlock + runtimeBlock + bootstrapBlock +
+				`<meta name="after" content="preserve-me"></head><body></body></html>`
+
+			document, err := scanCustomIndexHTML(source)
+			if err != nil {
+				t.Fatalf("scanCustomIndexHTML() error: %v", err)
+			}
+			if len(document.comments) != 6 {
+				t.Fatalf("managed marker count = %d, want 6", len(document.comments))
+			}
+			for index, comment := range document.comments {
+				if comment.sourceContext.parentName != "head" {
+					t.Fatalf("managed marker %d parent = %q, want head", index, comment.sourceContext.parentName)
+				}
+			}
+
+			want := strings.Replace(source, preloadBlock,
+				managedMarkerText(preloadBlockName, true)+"\n"+preload+"\n"+managedMarkerText(preloadBlockName, false), 1)
+			want = strings.Replace(want, runtimeBlock,
+				managedMarkerText(runtimeBlockName, true)+"\n"+runtime+"\n"+managedMarkerText(runtimeBlockName, false), 1)
+			want = strings.Replace(want, bootstrapBlock,
+				managedMarkerText(bootstrapBlockName, true)+"\n"+bootstrap+"\n"+managedMarkerText(bootstrapBlockName, false), 1)
+			got := rewriteIndexForTest(t, source, options)
+			if got != want {
+				t.Fatalf("managed rewrite changed bytes outside owned spans\ngot:  %q\nwant: %q", got, want)
+			}
+			if second := rewriteIndexForTest(t, got, options); second != got {
+				t.Fatalf("managed rewrite is not idempotent\nfirst:  %q\nsecond: %q", got, second)
+			}
+		})
+	}
+}
+
+func TestCustomIndexParserPoppedHeadElementsPreserveMarkerlessOwnership(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const stylePath = "assets/styles.33333333.css"
+	options := htmlRewriteOptions{
+		runtimePath: runtimePath,
+		styleRewrites: map[string]string{
+			"styles.css": stylePath,
+		},
+	}
+
+	for _, element := range []string{"basefont", "bgsound"} {
+		t.Run(element, func(t *testing.T) {
+			source := `<html><head><` + element + ` data-authored="preserve-me">` +
+				`<meta name="before" content="preserve-me">` +
+				`<script id="owned-runtime" src="wasm_exec.js?fixture=runtime#app"></script>` +
+				`<link id="owned-style" rel="stylesheet" href="styles.css?fixture=style#theme">` +
+				`<link id="owned-preload" rel="preload" as="style" href="styles.css?fixture=preload#theme">` +
+				`<meta name="after" content="preserve-me"></head><body></body></html>`
+			want := strings.Replace(source, "wasm_exec.js?fixture=runtime#app", runtimePath+"?fixture=runtime#app", 1)
+			want = strings.Replace(want, "styles.css?fixture=style#theme", stylePath+"?fixture=style#theme", 1)
+			want = strings.Replace(want, "styles.css?fixture=preload#theme", stylePath+"?fixture=preload#theme", 1)
+
+			got := rewriteIndexForTest(t, source, options)
+			if got != want {
+				t.Fatalf("markerless rewrite changed bytes outside owned spans\ngot:  %q\nwant: %q", got, want)
+			}
+			if second := rewriteIndexForTest(t, got, options); second != got {
+				t.Fatalf("markerless rewrite is not idempotent\nfirst:  %q\nsecond: %q", got, second)
+			}
+		})
+	}
+}
+
+func TestCustomIndexHeadModeStackContract(t *testing.T) {
+	const block = `<!-- goframe:preload --><!-- /goframe:preload -->`
+	for _, test := range []struct {
+		name          string
+		beforeBlock   string
+		wantParent    string
+		managedAccept bool
+		wantError     string
+	}{
+		{name: "html", beforeBlock: `<html data-duplicate="yes">`, wantParent: "html", wantError: "directly under <html>"},
+		{name: "base", beforeBlock: `<base target="_blank">`, wantParent: "head", managedAccept: true},
+		{name: "basefont", beforeBlock: `<basefont color="red">`, wantParent: "head", managedAccept: true},
+		{name: "bgsound", beforeBlock: `<bgsound src="tone.wav">`, wantParent: "head", managedAccept: true},
+		{name: "link", beforeBlock: `<link rel="author" href="author.html">`, wantParent: "head", managedAccept: true},
+		{name: "meta", beforeBlock: `<meta name="fixture" content="yes">`, wantParent: "head", managedAccept: true},
+		{name: "noframes", beforeBlock: `<noframes>authored</noframes>`, wantParent: "head", managedAccept: true},
+		{name: "noscript", beforeBlock: `<noscript>authored</noscript>`, wantParent: "head", managedAccept: true},
+		{name: "script", beforeBlock: `<script>const authored = true;</script>`, wantParent: "head", managedAccept: true},
+		{name: "style", beforeBlock: `<style>body { color: black; }</style>`, wantParent: "head", managedAccept: true},
+		{name: "template", beforeBlock: `<template></template>`, wantParent: "head", managedAccept: true},
+		{name: "title", beforeBlock: `<title>Authored</title>`, wantParent: "head", managedAccept: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if !htmlStartTagStaysInHead(test.name) {
+				t.Fatalf("htmlStartTagStaysInHead(%q) = false, want true", test.name)
+			}
+			source := `<html><head>` + test.beforeBlock + block + `</head><body></body></html>`
+			document, err := scanCustomIndexHTML(source)
+			if err != nil {
+				t.Fatalf("scanCustomIndexHTML() error: %v", err)
+			}
+			if len(document.comments) != 2 {
+				t.Fatalf("managed marker count = %d, want 2", len(document.comments))
+			}
+			for index, comment := range document.comments {
+				if comment.sourceContext.parentName != test.wantParent {
+					t.Fatalf("managed marker %d parent = %q, want %q", index, comment.sourceContext.parentName, test.wantParent)
+				}
+			}
+
+			got, err := rewriteIndexHTML(source, htmlRewriteOptions{
+				preload:  true,
+				wasmPath: "assets/bundle.11111111.wasm",
+			})
+			if test.managedAccept {
+				if err != nil {
+					t.Fatalf("rewriteIndexHTML() error: %v", err)
+				}
+				if !strings.Contains(got, `rel="preload"`) {
+					t.Fatalf("managed preload output missing:\n%s", got)
+				}
+				return
+			}
+			if err == nil || got != "" || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("duplicate document token rewrite = %q, %v, want managed placement failure", got, err)
+			}
+		})
+	}
+}
+
 func TestCustomIndexManagedBlockStructuralContext(t *testing.T) {
 	const runtimePath = "assets/wasm_exec.22222222.js"
 	const wasmPath = "assets/bundle.11111111.wasm"
@@ -4632,6 +4785,11 @@ func TestPackageCustomIndexManagedStructureFailureIsAtomic(t *testing.T) {
 			name:   "preload under body",
 			source: `<html><head></head><body><!-- goframe:preload --><!-- /goframe:preload --></body></html>`,
 			want:   "goframe:preload must be a direct child of <head>",
+		},
+		{
+			name:   "duplicate html token in head",
+			source: `<html><head><html><!-- goframe:preload --><!-- /goframe:preload --></head><body></body></html>`,
+			want:   "directly under <html>",
 		},
 		{
 			name:   "heading implicit close",

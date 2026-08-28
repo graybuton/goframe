@@ -176,7 +176,7 @@ func hasHTMLAttribute(tag htmlTag, name string) bool {
 
 func htmlProfileElementStaysOpen(tag htmlTag) bool {
 	if tag.namespace == htmlNamespaceHTML {
-		return !voidHTMLElement(tag.name)
+		return htmlStartTagRemainsOpenInScanner(tag.name)
 	}
 	return !tag.selfClosing
 }

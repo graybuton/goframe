@@ -277,7 +277,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 		if tag.closing {
 			context.close(closing)
 		} else if tag.namespace == htmlNamespaceHTML {
-			if !voidHTMLElement(tag.name) {
+			if htmlStartTagRemainsOpenInScanner(tag.name) {
 				context.push(content, tag)
 			}
 		} else if !tag.selfClosing {
@@ -764,6 +764,21 @@ func voidHTMLElement(name string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// Some obsolete HTML elements are not void, but browser tree construction
+// inserts and immediately pops them. They therefore cannot become the source
+// scanner parent of following content.
+func htmlStartTagRemainsOpenInScanner(name string) bool {
+	if voidHTMLElement(name) {
+		return false
+	}
+	switch name {
+	case "basefont", "bgsound":
+		return false
+	default:
+		return true
 	}
 }
 
