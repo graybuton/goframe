@@ -1591,6 +1591,146 @@ func TestCustomIndexLegacyURLNormalizationDecodesPercentOnce(t *testing.T) {
 	}
 }
 
+func TestCustomIndexLegacyURLSchemeDetectionPrecedesPercentDecoding(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+		want  string
+		ok    bool
+	}{
+		{name: "literal drive scheme", value: "C:style.css"},
+		{name: "literal lower drive scheme", value: "c:style.css"},
+		{name: "literal HTTP scheme", value: "http:style.css"},
+		{name: "literal HTTPS scheme", value: "https:style.css"},
+		{name: "literal data scheme", value: "data:text/css,x"},
+		{name: "literal custom scheme", value: "custom+scheme:asset.css"},
+		{name: "encoded colon uppercase", value: "C%3Astyle.css", want: "C:style.css", ok: true},
+		{name: "encoded colon lowercase", value: "C%3astyle.css", want: "C:style.css", ok: true},
+		{name: "encoded leading character", value: "%43:style.css", want: "C:style.css", ok: true},
+		{name: "encoded leading character and colon", value: "%43%3Astyle.css", want: "C:style.css", ok: true},
+		{name: "encoded HTTP character", value: "h%74tp:style.css", want: "http:style.css", ok: true},
+		{name: "encoded HTTP colon", value: "http%3Astyle.css", want: "http:style.css", ok: true},
+		{name: "double encoded colon", value: "C%253Astyle.css", want: "C%3Astyle.css", ok: true},
+		{name: "double encoded leading character and colon", value: "%2543%253Astyle.css", want: "%43%3Astyle.css", ok: true},
+		{name: "triple encoded colon fragment", value: "%25253A", want: "%253A", ok: true},
+		{name: "malformed short percent", value: "%"},
+		{name: "malformed percent digits", value: "%GGstyle.css"},
+		{name: "encoded slash", value: "assets%2Fstyle.css"},
+		{name: "encoded backslash", value: "assets%5Cstyle.css"},
+		{name: "encoded NUL", value: "style%00.css"},
+		{name: "absolute", value: "/style.css"},
+		{name: "authority", value: "//host/style.css"},
+		{name: "root escape", value: "../style.css"},
+		{name: "nested root escape", value: "assets/../../style.css"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := normalizeLegacyPackageURLPath(test.value)
+			if ok != test.ok || got != test.want {
+				t.Fatalf("normalizeLegacyPackageURLPath(%q) = %q, %v, want %q, %v", test.value, got, ok, test.want, test.ok)
+			}
+		})
+	}
+
+	const (
+		logicalName = "C:style.css"
+		stylePath   = "assets/C:style.12345678.css"
+		styleURL    = "assets/C%3Astyle.12345678.css"
+	)
+	options := htmlRewriteOptions{styleRewrites: map[string]string{logicalName: stylePath}}
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "encoded colon preserves suffix",
+			source: `<link rel="stylesheet" href="C%3Astyle.css?v=1#fragment">`,
+			want:   `<link rel="stylesheet" href="` + styleURL + `?v=1#fragment">`,
+		},
+		{
+			name:   "encoded leading character preserves raw suffix",
+			source: `<link rel='stylesheet' href='%43%3Astyle.css?x=%253A#raw'>`,
+			want:   `<link rel='stylesheet' href='` + styleURL + `?x=%253A#raw'>`,
+		},
+		{
+			name:   "unquoted style preload",
+			source: `<link rel=preload as=style href=C%3astyle.css?x=1#preload>`,
+			want:   `<link rel=preload as=style href=` + styleURL + `?x=1#preload>`,
+		},
+		{
+			name:   "HTML reference produces literal scheme",
+			source: `<link rel="stylesheet" href="C&#58;style.css">`,
+			want:   `<link rel="stylesheet" href="C&#58;style.css">`,
+		},
+		{
+			name:   "hex HTML reference produces literal scheme",
+			source: `<link rel="stylesheet" href="C&#x3A;style.css">`,
+			want:   `<link rel="stylesheet" href="C&#x3A;style.css">`,
+		},
+		{
+			name:   "HTML reference produces percent spelling",
+			source: `<link rel="stylesheet" href="C&#37;3Astyle.css?v=1&amp;x#theme">`,
+			want:   `<link rel="stylesheet" href="` + styleURL + `?v=1&amp;x#theme">`,
+		},
+		{
+			name:   "literal scheme remains authored",
+			source: `<link rel="stylesheet" href="C:style.css">`,
+			want:   `<link rel="stylesheet" href="C:style.css">`,
+		},
+		{
+			name:   "double encoding matches only literal percent name",
+			source: `<link rel="stylesheet" href="C%253Astyle.css">`,
+			want:   `<link rel="stylesheet" href="C%253Astyle.css">`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, options)
+			if got != test.want {
+				t.Fatalf("scheme-order rewrite mismatch\ngot:  %q\nwant: %q", got, test.want)
+			}
+			if second := rewriteIndexForTest(t, got, options); second != got {
+				t.Fatalf("scheme-order rewrite is not idempotent\nfirst:  %q\nsecond: %q", got, second)
+			}
+		})
+	}
+
+	t.Run("double encoding matches literal percent logical name", func(t *testing.T) {
+		source := `<link rel="stylesheet" href="C%253Astyle.css">`
+		want := `<link rel="stylesheet" href="assets/C%253Astyle.87654321.css">`
+		got := rewriteIndexForTest(t, source, htmlRewriteOptions{styleRewrites: map[string]string{
+			"C%3Astyle.css": "assets/C%3Astyle.87654321.css",
+		}})
+		if got != want {
+			t.Fatalf("literal percent logical-name rewrite mismatch\ngot:  %q\nwant: %q", got, want)
+		}
+	})
+
+	for _, test := range []struct {
+		name    string
+		source  string
+		wantOK  bool
+		wantRaw string
+	}{
+		{name: "ECMAScript escape produces percent spelling", source: `"\x43\x25\x33\x41style.css?v=1#app"`, wantOK: true, wantRaw: `?v=1#app`},
+		{name: "ECMAScript escape produces literal scheme", source: `"\x43\x3Astyle.css"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, ok := decodeJavaScriptString(test.source, 0, len(test.source))
+			if !ok {
+				t.Fatal("decodeJavaScriptString() did not recognize static source")
+			}
+			raw := test.source[decoded.valueStart:decoded.valueEnd]
+			match, gotOK := matchLegacyURL(raw, decoded.units, logicalName)
+			if gotOK != test.wantOK {
+				t.Fatalf("matchLegacyURL(%q) ok = %v, want %v; match = %+v", test.source, gotOK, test.wantOK, match)
+			}
+			if gotOK && match.suffix != test.wantRaw {
+				t.Fatalf("matchLegacyURL(%q) suffix = %q, want %q", test.source, match.suffix, test.wantRaw)
+			}
+		})
+	}
+}
+
 func TestCustomIndexNumericAttributeReferencesUseBrowserValues(t *testing.T) {
 	const runtimePath = "assets/wasm_exec.22222222.js"
 	for _, test := range []struct {

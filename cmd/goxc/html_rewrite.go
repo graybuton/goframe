@@ -2014,11 +2014,11 @@ func matchLegacyURL(value string, units []sourceByte, expected string) (legacyUR
 }
 
 func normalizeLegacyPackageURLPath(value string) (string, bool) {
-	value, ok := decodeLegacyURLPathOnce(value)
-	if !ok {
+	if value == "" || value[0] == '/' || value[0] == '\\' || hasLegacyURLScheme(value) {
 		return "", false
 	}
-	if value == "" || value[0] == '/' || value[0] == '\\' || hasLegacyURLScheme(value) {
+	value, ok := decodeLegacyURLPathOnce(value)
+	if !ok || value == "" || value[0] == '/' || value[0] == '\\' {
 		return "", false
 	}
 

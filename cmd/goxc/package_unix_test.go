@@ -68,6 +68,82 @@ func TestDriveLikeLogicalNameProducerConsumerRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPackageCustomIndexEncodedColonStylesheet(t *testing.T) {
+	const (
+		logicalName = "C:style.css"
+		styleBody   = "body { color: rgb(13, 71, 161); }\n"
+	)
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	writeTestFile(t, appDir, manifestName, `{"name":"encoded-colon-style","compiler":"go","assets":"assets"}`)
+	writeTestFile(t, appDir, "assets/index.html", `<!doctype html><html><head><link rel="stylesheet" href="C%3Astyle.css?v=1#theme"></head><body><div id="root"></div></body></html>`)
+	writeTestFile(t, appDir, "assets/"+logicalName, styleBody)
+
+	if err := packageApp(packageOptions{
+		appDir: appDir, compiler: "go", assetHash: true, compress: map[string]bool{},
+	}); err != nil {
+		t.Fatalf("packageApp() error: %v", err)
+	}
+	layout, err := newBuildLayout(layoutOptions{appDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	packageDir := layout.PackageDir
+
+	var manifest assetManifest
+	readInspectJSONFixture(t, packageDir, assetManifestName, &manifest)
+	style, ok := manifest.Assets[logicalName]
+	if !ok {
+		t.Fatalf("logical stylesheet %q missing from manifest", logicalName)
+	}
+	if style.Hash == "" || style.Path == "assets/"+logicalName {
+		t.Fatalf("hashed stylesheet = %+v, want generated hashed path", style)
+	}
+	styleURL, err := encodePackagePathAsBrowserURL(style.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexBytes, err := os.ReadFile(filepath.Join(packageDir, indexHTMLAssetName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := string(indexBytes)
+	wantReference := `href="` + styleURL + `?v=1#theme"`
+	if !strings.Contains(index, wantReference) {
+		t.Fatalf("packaged index missing %q:\n%s", wantReference, index)
+	}
+	if strings.Contains(index, `href="C%3Astyle.css?v=1#theme"`) {
+		t.Fatalf("packaged index retained stale encoded-colon reference:\n%s", index)
+	}
+
+	generatedResponse := httptest.NewRecorder()
+	staticHandler(packageDir).ServeHTTP(generatedResponse, httptest.NewRequest(http.MethodGet, "/"+styleURL, nil))
+	if generatedResponse.Code != http.StatusOK || generatedResponse.Body.String() != styleBody {
+		t.Fatalf("generated stylesheet response = %d, %q, want 200 and exact body", generatedResponse.Code, generatedResponse.Body.String())
+	}
+	staleResponse := httptest.NewRecorder()
+	staticHandler(packageDir).ServeHTTP(staleResponse, httptest.NewRequest(http.MethodGet, "/C%3Astyle.css", nil))
+	if staleResponse.Code != http.StatusNotFound {
+		t.Fatalf("stale authored stylesheet response = %d, want 404", staleResponse.Code)
+	}
+
+	if _, err := inspectPackageGraph(packageDir); err != nil {
+		t.Fatalf("inspectPackageGraph(package) error: %v", err)
+	}
+	exportDir := filepath.Join(t.TempDir(), "export")
+	var exportOutput bytes.Buffer
+	if err := exportApp(exportOptions{appDir: appDir, outDir: exportDir, stdout: &exportOutput}); err != nil {
+		t.Fatalf("exportApp() error: %v", err)
+	}
+	if _, err := inspectPackageGraph(exportDir); err != nil {
+		t.Fatalf("inspectPackageGraph(export) error: %v", err)
+	}
+	assertFileContent(t, filepath.Join(exportDir, indexHTMLAssetName), index)
+	if strings.Count(exportOutput.String(), "exported ") != 1 {
+		t.Fatalf("export success output = %q, want exactly one line", exportOutput.String())
+	}
+}
+
 func TestPackageRejectsUnixLiteralBackslashAssetNames(t *testing.T) {
 	for _, logicalName := range []string{
 		`foo\bar.txt`,
