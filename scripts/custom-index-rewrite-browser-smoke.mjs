@@ -86,6 +86,7 @@ const legacyHTMLSentinels = [
     </svg>`,
     '<!-- authored scanner close --!>',
     '<div id="fixture-legacy-owned" style="display:none">',
+    '<div =x id="fixture-leading-equals">',
     '<p id="fixture-legacy-html"></p>',
     '<input id="fixture-compact-input" disabled/>',
     'type="text/javascript1.5"',
@@ -410,47 +411,87 @@ async function verifyManagedStructureFailures(scenario) {
         {
             name: "foreign runtime block",
             source: `<!doctype html><html><head></head><body><svg><!-- goframe:runtime --><!-- /goframe:runtime --></svg></body></html>`,
-            wants: ["goframe:runtime", "SVG or MathML ancestry", "safe HTML parent"],
+            wants: ["goframe:runtime", "SVG or MathML ancestry", "directly under one concrete"],
         },
         {
             name: "foreign bootstrap block",
             source: `<!doctype html><html><head></head><body><math><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></math></body></html>`,
-            wants: ["goframe:bootstrap", "SVG or MathML ancestry", "safe HTML parent"],
+            wants: ["goframe:bootstrap", "SVG or MathML ancestry", "directly under one concrete"],
         },
         {
             name: "cross-parent runtime block",
             source: `<!doctype html><html><head><!-- goframe:runtime --></head><body id="app"><!-- /goframe:runtime --></body></html>`,
-            wants: ["goframe:runtime", "different structural contexts", "safe HTML parent"],
+            wants: ["goframe:runtime", "different structural contexts", "directly under one concrete"],
+        },
+        {
+            name: "runtime under ordinary container",
+            source: `<!doctype html><html><head></head><body><div><!-- goframe:runtime --><!-- /goframe:runtime --></div></body></html>`,
+            wants: ["goframe:runtime blocks", "direct children", "<head> or <body>"],
+        },
+        {
+            name: "heading closed by heading",
+            source: `<!doctype html><html><head></head><body><h1><!-- goframe:bootstrap --><h2>owned</h2><!-- /goframe:bootstrap --></h1></body></html>`,
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
+        },
+        {
+            name: "preload under body",
+            source: `<!doctype html><html><head></head><body><!-- goframe:preload --><!-- /goframe:preload --></body></html>`,
+            wants: ["goframe:preload", "direct child of <head>"],
         },
         {
             name: "paragraph implicitly closed by block",
             source: `<!doctype html><html><head></head><body><p><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></p></body></html>`,
-            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
         },
         {
             name: "head implicitly closed by body content",
             source: `<!doctype html><html><head><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></head><body></body></html>`,
-            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+            wants: ["goframe:bootstrap", "structurally uncertain", "directly under one concrete"],
         },
         {
             name: "nested button implicitly closes parent",
             source: `<!doctype html><html><head></head><body><button><!-- goframe:bootstrap --><button>owned</button><!-- /goframe:bootstrap --></button></body></html>`,
-            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
         },
         {
             name: "nested anchor implicitly closes parent",
             source: `<!doctype html><html><head></head><body><a href="#"><!-- goframe:bootstrap --><a href="#">owned</a><!-- /goframe:bootstrap --></a></body></html>`,
-            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
         },
         {
             name: "list item implicitly closes parent",
             source: `<!doctype html><html><head></head><body><ul><li><!-- goframe:bootstrap --><li>owned</li><!-- /goframe:bootstrap --></li></ul></body></html>`,
-            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
         },
         {
             name: "description item implicitly closes parent",
             source: `<!doctype html><html><head></head><body><dl><dt><!-- goframe:bootstrap --><dd>owned</dd><!-- /goframe:bootstrap --></dt></dl></body></html>`,
-            wants: ["goframe:bootstrap", "structurally uncertain", "safe HTML parent"],
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
+        },
+        {
+            name: "nested form recovery",
+            source: `<!doctype html><html><head></head><body><form><!-- goframe:bootstrap --><form>owned</form><!-- /goframe:bootstrap --></form></body></html>`,
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
+        },
+        {
+            name: "nested nobr recovery",
+            source: `<!doctype html><html><head></head><body><nobr><!-- goframe:bootstrap --><nobr>owned</nobr><!-- /goframe:bootstrap --></nobr></body></html>`,
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
+        },
+        {
+            name: "ruby recovery",
+            source: `<!doctype html><html><head></head><body><ruby><rt><!-- goframe:bootstrap --><rp>owned</rp><!-- /goframe:bootstrap --></rt></ruby></body></html>`,
+            wants: ["goframe:bootstrap blocks", "direct children", "<head> or <body>"],
+        },
+        {
+            name: "duplicate head",
+            source: `<!doctype html><html><head><head><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></head></head><body></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "directly under one concrete"],
+        },
+        {
+            name: "duplicate body",
+            source: `<!doctype html><html><head></head><body><body><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></body></body></html>`,
+            wants: ["goframe:bootstrap", "structurally uncertain", "directly under one concrete"],
         },
         {
             name: "reversed owned runtime order",
@@ -663,6 +704,8 @@ async function runBrowserScenario(scenario) {
         assert(before.punctuationScriptNamespace === "http://www.w3.org/2000/svg", "punctuation tag child left the SVG namespace");
         assert(before.scannerCommentPresent === true, "incorrectly closed authored comment was not exposed as a browser comment");
         assert(before.compactInputDisabled === true, "compact boolean attribute was not accepted");
+        assertDeepEqual(before.leadingEqualsAttributes, [{ name: "=x", value: "" }, { name: "id", value: "fixture-leading-equals" }], "legacy leading-equals attributes");
+        assert(before.leadingEqualsRuntimeChild === true, "legacy runtime did not remain under the leading-equals div");
         assert(before.encodedStyleHref === `${scenario.urls.style}?fixture=legacy©=x#theme`, `legacy stylesheet semantic href = ${JSON.stringify(before.encodedStyleHref)}`);
         assert(before.encodedStyleAttributeCount === 4, `legacy stylesheet attribute count = ${before.encodedStyleAttributeCount}`);
         assert(before.encodedStyleNamespace === "http://www.w3.org/1999/xhtml", "legacy stylesheet left the HTML namespace");
@@ -916,6 +959,7 @@ async function pageState() {
         const button = document.querySelector("[data-testid='custom-index-increment']");
         const legacyHTML = document.querySelector("#fixture-legacy-html");
         const runtime = document.querySelector("#fixture-legacy-runtime");
+        const leadingEquals = document.querySelector("#fixture-leading-equals");
         const compactInput = document.querySelector("#fixture-compact-input");
         const spacedAnnotationScript = document.querySelector("#fixture-spaced-annotation-script");
         const punctuationTag = document.querySelector("#fixture-punctuation-tag");
@@ -950,6 +994,8 @@ async function pageState() {
             punctuationScriptNamespace: punctuationScript?.namespaceURI ?? null,
             scannerCommentPresent,
             compactInputDisabled: compactInput?.disabled ?? null,
+            leadingEqualsAttributes: Array.from(leadingEquals?.attributes ?? [], ({ name, value }) => ({ name, value })),
+            leadingEqualsRuntimeChild: runtime?.parentElement === leadingEquals,
             encodedStyleHref: document.querySelector("#fixture-encoded-style")?.getAttribute("href") ?? null,
             encodedStyleAttributeCount: document.querySelector("#fixture-encoded-style")?.attributes.length ?? null,
             encodedStyleNamespace: document.querySelector("#fixture-encoded-style")?.namespaceURI ?? null,
@@ -1033,46 +1079,169 @@ async function runAttributeOracle() {
         assert(result.namespace === "http://www.w3.org/1999/xhtml", `${test.name} browser namespace = ${result.namespace}`);
     }
     assert(!results.find((result) => result.name === "literal NUL").value.includes("\0"), "literal NUL remained in the browser attribute value");
-    return results;
+
+    const leadingEqualsCases = [
+        { name: "one equals", opening: `<div =x>`, attributes: [{ name: "=x", value: "" }] },
+        { name: "two equals", opening: `<div ==x>`, attributes: [{ name: "=", value: "x" }] },
+        { name: "equals in value", opening: `<div =x=y>`, attributes: [{ name: "=x", value: "y" }] },
+        { name: "equals before space", opening: `<div = >`, attributes: [{ name: "=", value: "" }] },
+        { name: "following attribute", opening: `<div =x foo=bar>`, attributes: [{ name: "=x", value: "" }, { name: "foo", value: "bar" }] },
+        { name: "empty value", opening: `<div =x=>`, attributes: [{ name: "=x", value: "" }] },
+        { name: "compact solidus", opening: `<div =x/>`, attributes: [{ name: "=x", value: "" }] },
+    ];
+    const leadingEqualsResults = await client.evaluate(`(() => {
+        const cases = ${JSON.stringify(leadingEqualsCases)};
+        return cases.map((test) => {
+            const source = test.opening + '<script id="runtime" src="wasm_exec.js"></script></div>';
+            const document = new DOMParser().parseFromString(source, "text/html");
+            const div = document.querySelector("div");
+            const runtime = document.querySelector("#runtime");
+            return {
+                name: test.name,
+                attributes: Array.from(div?.attributes ?? [], ({ name, value }) => ({ name, value })),
+                divParent: div?.parentElement?.localName ?? null,
+                runtimeParent: runtime?.parentElement?.localName ?? null,
+                runtimeSource: runtime?.getAttribute("src") ?? null,
+            };
+        });
+    })()`);
+    for (const [index, test] of leadingEqualsCases.entries()) {
+        const result = leadingEqualsResults[index];
+        assertDeepEqual(result.attributes, test.attributes, `${test.name} leading-equals attributes`);
+        assert(result.divParent === "body", `${test.name} div parent = ${JSON.stringify(result.divParent)}`);
+        assert(result.runtimeParent === "div", `${test.name} runtime parent = ${JSON.stringify(result.runtimeParent)}`);
+        assert(result.runtimeSource === "wasm_exec.js", `${test.name} runtime source = ${JSON.stringify(result.runtimeSource)}`);
+    }
+    return { standard: results, leadingEquals: leadingEqualsResults };
 }
 
 async function runManagedSpanTreeOracle() {
     const cases = [
         {
-            name: "paragraph closed by block",
-            source: `<p><!-- START --><div id="owned"></div><!-- END --></p>`,
-            startParent: "p",
-            endParent: "body",
+            name: "heading closed by heading",
+            source: `<h1><!-- START --><h2>owned</h2><!-- END --></h1>`,
+            sourceStartParent: "h1", sourceEndParent: "h1", sourceSameParent: true,
+            startParent: "h1", endParent: "body", startingContract: "accepted", finalContract: "rejected",
         },
         {
-            name: "head closed by body content",
-            source: `<html><head><!-- START --><div id="owned"></div><!-- END --></head><body></body></html>`,
-            startParent: "head",
-            endParent: "body",
+            name: "nested form",
+            source: `<form><!-- START --><form>owned</form><!-- END --></form>`,
+            sourceStartParent: "form", sourceEndParent: "form", sourceSameParent: true,
+            startParent: "form", endParent: "body", startingContract: "accepted", finalContract: "rejected",
+        },
+        {
+            name: "nested nobr",
+            source: `<nobr><!-- START --><nobr>owned</nobr><!-- END --></nobr>`,
+            sourceStartParent: "nobr", sourceEndParent: "nobr", sourceSameParent: true,
+            startParent: "nobr", endParent: "body", startingContract: "accepted", finalContract: "rejected",
+        },
+        {
+            name: "repeated body around pair",
+            source: `<html><body><body><!-- START -->owned<!-- END --></body></body></html>`,
+            sourceStartParent: "body", sourceEndParent: "body", sourceSameParent: true,
+            startParent: "body", endParent: "body", startingContract: "accepted", finalContract: "rejected",
+        },
+        {
+            name: "repeated body across pair",
+            source: `<html><body><!-- START --><body>owned<!-- END --></body></html>`,
+            sourceStartParent: "body", sourceEndParent: "body", sourceSameParent: false,
+            startParent: "body", endParent: "body", startingContract: "rejected", finalContract: "rejected",
+        },
+        {
+            name: "repeated html around pair",
+            source: `<html><body><html><!-- START -->owned<!-- END --></html></body></html>`,
+            sourceStartParent: "html", sourceEndParent: "html", sourceSameParent: true,
+            startParent: "body", endParent: "body", startingContract: "rejected", finalContract: "rejected",
+        },
+        {
+            name: "repeated html across pair",
+            source: `<html><body><!-- START --><html>owned<!-- END --></body></html>`,
+            sourceStartParent: "body", sourceEndParent: "html", sourceSameParent: false,
+            startParent: "body", endParent: "body", startingContract: "rejected", finalContract: "rejected",
+        },
+        {
+            name: "ruby rt rp",
+            source: `<ruby><rt><!-- START --><rp>owned</rp><!-- END --></rt></ruby>`,
+            sourceStartParent: "rt", sourceEndParent: "rt", sourceSameParent: true,
+            startParent: "rt", endParent: "ruby", startingContract: "accepted", finalContract: "rejected",
+        },
+        {
+            name: "ruby rb rtc",
+            source: `<ruby><rb><!-- START --><rtc>owned</rtc><!-- END --></rb></ruby>`,
+            sourceStartParent: "rb", sourceEndParent: "rb", sourceSameParent: true,
+            startParent: "rb", endParent: "ruby", startingContract: "accepted", finalContract: "rejected",
+        },
+        {
+            name: "paragraph closed by block",
+            source: `<p><!-- START --><div id="owned"></div><!-- END --></p>`,
+            sourceStartParent: "p", sourceEndParent: "p", sourceSameParent: true,
+            startParent: "p", endParent: "body", startingContract: "rejected by provisional heuristic", finalContract: "rejected",
         },
         {
             name: "nested button",
             source: `<button><!-- START --><button>owned</button><!-- END --></button>`,
-            startParent: "button",
-            endParent: "body",
+            sourceStartParent: "button", sourceEndParent: "button", sourceSameParent: true,
+            startParent: "button", endParent: "body", startingContract: "rejected by provisional heuristic", finalContract: "rejected",
         },
         {
             name: "nested anchor",
             source: `<a href="#"><!-- START --><a href="#">owned</a><!-- END --></a>`,
-            startParent: "a",
-            endParent: "body",
+            sourceStartParent: "a", sourceEndParent: "a", sourceSameParent: true,
+            startParent: "a", endParent: "body", startingContract: "rejected by provisional heuristic", finalContract: "rejected",
         },
         {
             name: "implicit list item close",
             source: `<ul><li><!-- START --><li>owned</li><!-- END --></li></ul>`,
-            startParent: "li",
-            endParent: "ul",
+            sourceStartParent: "li", sourceEndParent: "li", sourceSameParent: true,
+            startParent: "li", endParent: "ul", startingContract: "rejected by provisional heuristic", finalContract: "rejected",
         },
         {
             name: "implicit description item close",
             source: `<dl><dt><!-- START --><dd>owned</dd><!-- END --></dt></dl>`,
-            startParent: "dt",
-            endParent: "dl",
+            sourceStartParent: "dt", sourceEndParent: "dt", sourceSameParent: true,
+            startParent: "dt", endParent: "dl", startingContract: "rejected by provisional heuristic", finalContract: "rejected",
+        },
+        {
+            name: "direct head",
+            source: `<html><head><!-- START --><meta name="owned" content="yes"><!-- END --></head><body></body></html>`,
+            sourceStartParent: "head", sourceEndParent: "head", sourceSameParent: true,
+            startParent: "head", endParent: "head", startingContract: "accepted", finalContract: "accepted",
+        },
+        {
+            name: "direct body",
+            source: `<html><head></head><body><!-- START -->owned<!-- END --></body></html>`,
+            sourceStartParent: "body", sourceEndParent: "body", sourceSameParent: true,
+            startParent: "body", endParent: "body", startingContract: "accepted", finalContract: "accepted",
+        },
+        {
+            name: "direct body with owned nested content",
+            source: `<html><head></head><body><!-- START --><div>owned</div><!-- END --></body></html>`,
+            sourceStartParent: "body", sourceEndParent: "body", sourceSameParent: true,
+            startParent: "body", endParent: "body", startingContract: "accepted", finalContract: "accepted",
+        },
+        {
+            name: "head closed by body content",
+            source: `<html><head><!-- START --><div id="owned"></div><!-- END --></head><body></body></html>`,
+            sourceStartParent: "head", sourceEndParent: "head", sourceSameParent: true,
+            startParent: "head", endParent: "body", startingContract: "rejected", finalContract: "rejected",
+        },
+        {
+            name: "second head around pair",
+            source: `<html><head><head><!-- START -->owned<!-- END --></head></head><body></body></html>`,
+            sourceStartParent: "head", sourceEndParent: "head", sourceSameParent: true,
+            startParent: "head", endParent: "body", startingContract: "accepted", finalContract: "rejected",
+        },
+        {
+            name: "frameset-sensitive body",
+            source: `<html><body><!-- START --><frameset><frame></frameset><!-- END --></body></html>`,
+            sourceStartParent: "body", sourceEndParent: "body", sourceSameParent: true,
+            startParent: "body", endParent: "body", startingContract: "rejected", finalContract: "rejected",
+        },
+        {
+            name: "explicit body close",
+            source: `<html><body><!-- START --></body><!-- END --></html>`,
+            sourceStartParent: "body", sourceEndParent: "html", sourceSameParent: false,
+            startParent: "body", endParent: "html", startingContract: "rejected", finalContract: "rejected",
         },
     ];
     const results = await client.evaluate(`(() => {
@@ -1100,9 +1269,15 @@ async function runManagedSpanTreeOracle() {
         assertDeepEqual(result.comments.map(({ data }) => data), ["START", "END"], `${test.name} marker data`);
         assert(result.comments[0].parent === test.startParent, `${test.name} start parent = ${JSON.stringify(result.comments[0].parent)}`);
         assert(result.comments[1].parent === test.endParent, `${test.name} end parent = ${JSON.stringify(result.comments[1].parent)}`);
-        assert(result.comments[0].parent !== result.comments[1].parent, `${test.name} unexpectedly retained one browser parent`);
     }
-    return results;
+    return results.map((result, index) => ({
+        ...result,
+        sourceStartParent: cases[index].sourceStartParent,
+        sourceEndParent: cases[index].sourceEndParent,
+        sourceSameParent: cases[index].sourceSameParent,
+        startingContract: cases[index].startingContract,
+        finalContract: cases[index].finalContract,
+    }));
 }
 
 async function runBaseResolutionOracle() {
