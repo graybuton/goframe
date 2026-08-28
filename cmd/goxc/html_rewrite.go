@@ -139,6 +139,8 @@ type htmlScannerContext struct {
 	elements  []htmlElementContext
 	topByName map[string]int
 	uncertain bool
+	seenHead  bool
+	seenBody  bool
 }
 
 type htmlClosingResolution struct {
@@ -237,7 +239,7 @@ func scanCustomIndexHTML(content string) (scannedHTML, error) {
 			context.uncertain = true
 		}
 		if !tag.closing && tag.namespace == htmlNamespaceHTML {
-			context.markImplicitlyClosedManagedParents(tag.name)
+			context.markManagedDocumentContainerInstability(tag.name)
 		}
 		if tag.closing && tag.namespace == htmlNamespaceHTML && tag.name == "template" {
 			if templateDepth == 0 {
@@ -523,12 +525,23 @@ func (context *htmlScannerContext) push(content string, tag htmlTag) {
 	if len(context.elements) != 0 && context.elements[len(context.elements)-1].foreignAncestor {
 		foreignAncestor = true
 	}
+	stableBrowserParent := true
+	if tag.namespace == htmlNamespaceHTML {
+		switch tag.name {
+		case "head":
+			stableBrowserParent = !context.seenHead && !context.seenBody && context.canStartDocumentContainer("head")
+			context.seenHead = true
+		case "body":
+			stableBrowserParent = !context.seenBody && context.canStartDocumentContainer("body")
+			context.seenBody = true
+		}
+	}
 	element := htmlElementContext{
 		name:                tag.name,
 		namespace:           tag.namespace,
 		sourceStart:         tag.start,
 		foreignAncestor:     foreignAncestor,
-		stableBrowserParent: true,
+		stableBrowserParent: stableBrowserParent,
 		previousSameName:    previousSameName,
 	}
 	switch tag.namespace {
@@ -552,55 +565,35 @@ func (context *htmlScannerContext) push(content string, tag htmlTag) {
 	context.topByName[tag.name] = len(context.elements) - 1
 }
 
-// markImplicitlyClosedManagedParents covers the bounded implied-close cases
-// that can separate managed comments in the browser tree. It does not attempt
-// to construct the browser tree; it only invalidates source-parent certainty.
-func (context *htmlScannerContext) markImplicitlyClosedManagedParents(startName string) {
-	firstUnstable := len(context.elements)
-	mark := func(name string) {
-		for index := len(context.elements) - 1; index >= 0; index-- {
-			element := context.elements[index]
-			if element.name == name && element.namespace == htmlNamespaceHTML {
-				if index < firstUnstable {
-					firstUnstable = index
-				}
-				return
-			}
-		}
+func (context htmlScannerContext) canStartDocumentContainer(name string) bool {
+	if len(context.elements) == 0 {
+		return true
 	}
-
-	if htmlStartTagClosesParagraph(startName) {
-		mark("p")
+	parent := context.elements[len(context.elements)-1]
+	if parent.namespace != htmlNamespaceHTML {
+		return false
 	}
-	switch startName {
-	case "a":
-		mark("a")
-	case "button":
-		mark("button")
-	case "li":
-		mark("li")
-	case "dd", "dt":
-		mark("dd")
-		mark("dt")
+	if parent.name == "html" {
+		return true
 	}
-	if !htmlStartTagStaysInHead(startName) {
-		mark("head")
-	}
-
-	for index := firstUnstable; index < len(context.elements); index++ {
-		context.elements[index].stableBrowserParent = false
-	}
+	return name == "body" && parent.name == "head"
 }
 
-func htmlStartTagClosesParagraph(name string) bool {
-	switch name {
-	case "address", "article", "aside", "blockquote", "center", "dd", "details", "dialog", "dir", "div", "dl", "dt",
-		"fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup",
-		"hr", "li", "listing", "main", "menu", "nav", "ol", "p", "plaintext", "pre", "search", "section", "summary",
-		"table", "ul", "xmp":
-		return true
-	default:
-		return false
+// Managed blocks only use head and body as browser structural parents. A body
+// content token ends head insertion even when the source omits </head>.
+func (context *htmlScannerContext) markManagedDocumentContainerInstability(startName string) {
+	if htmlStartTagStaysInHead(startName) {
+		return
+	}
+	for index := len(context.elements) - 1; index >= 0; index-- {
+		element := context.elements[index]
+		if element.name != "head" || element.namespace != htmlNamespaceHTML {
+			continue
+		}
+		for unstable := index; unstable < len(context.elements); unstable++ {
+			context.elements[unstable].stableBrowserParent = false
+		}
+		return
 	}
 }
 

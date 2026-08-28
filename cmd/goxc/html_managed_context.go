@@ -45,17 +45,54 @@ func validateManagedBlockContexts(name string, start, end managedMarker) error {
 	if !startContext.sameStructuralContext(endContext) {
 		return managedBlockContextError(name, "different structural contexts", startContext, endContext)
 	}
+	if err := validateManagedBlockParent(name, startContext, endContext); err != nil {
+		return err
+	}
 	return nil
 }
 
 func managedBlockContextError(name, reason string, start, end managedSourceContext) error {
 	return fmt.Errorf(
-		"goframe:%s managed block has %s (start context: %s; end context: %s); place the complete pair under one safe HTML parent",
+		"goframe:%s managed block has %s (start context: %s; end context: %s); %s",
 		name,
 		reason,
 		start.description(),
 		end.description(),
+		managedBlockPlacementGuidance(name),
 	)
+}
+
+func validateManagedBlockParent(name string, start, end managedSourceContext) error {
+	switch name {
+	case preloadBlockName:
+		if start.parentName == "head" {
+			return nil
+		}
+		return fmt.Errorf(
+			"custom index goframe:preload must be a direct child of <head> in the current preview contract (start context: %s; end context: %s)",
+			start.description(),
+			end.description(),
+		)
+	case runtimeBlockName, bootstrapBlockName:
+		if start.parentName == "head" || start.parentName == "body" {
+			return nil
+		}
+		return fmt.Errorf(
+			"custom index goframe:%s blocks must be direct children of one concrete <head> or <body> element in the current preview contract (start context: %s; end context: %s)",
+			name,
+			start.description(),
+			end.description(),
+		)
+	default:
+		return fmt.Errorf("custom index has unsupported managed block goframe:%s", name)
+	}
+}
+
+func managedBlockPlacementGuidance(name string) string {
+	if name == preloadBlockName {
+		return "place the complete pair directly under one concrete <head> element"
+	}
+	return "place the complete pair directly under one concrete <head> or <body> element"
 }
 
 func (context managedSourceContext) unsupportedReason() string {

@@ -2138,7 +2138,7 @@ func TestCustomIndexManagedBlockStructuralContext(t *testing.T) {
 			if got != "" {
 				t.Fatalf("managed structural-context failure returned partial output %q", got)
 			}
-			for _, want := range []string{"goframe:" + test.blockName, test.want, "safe HTML parent"} {
+			for _, want := range []string{"goframe:" + test.blockName, test.want, "directly under one concrete"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
 				}
@@ -2165,8 +2165,8 @@ func TestCustomIndexManagedBlockStructuralContext(t *testing.T) {
 			want:    `<script src="` + runtimePath + `"></script>`,
 		},
 		{
-			name:    "safe div bootstrap with complete child",
-			source:  `<html><body><div id="managed"><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></div></body></html>`,
+			name:    "body bootstrap with complete child",
+			source:  `<html><body><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></body></html>`,
 			options: htmlRewriteOptions{wasmPath: wasmPath},
 			want:    `fetch("` + wasmPath + `")`,
 		},
@@ -2180,42 +2180,79 @@ func TestCustomIndexManagedBlockStructuralContext(t *testing.T) {
 	}
 }
 
-func TestCustomIndexManagedBlockRejectsImplicitlyClosedSourceParent(t *testing.T) {
+func TestCustomIndexManagedBlocksRequireDocumentContainerParent(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const wasmPath = "assets/bundle.11111111.wasm"
+	for _, test := range []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+		want    string
+	}{
+		{
+			name:    "runtime under div",
+			source:  `<body><div><!-- goframe:runtime --><!-- /goframe:runtime --></div></body>`,
+			options: htmlRewriteOptions{runtimePath: runtimePath},
+			want:    "goframe:runtime blocks must be direct children of one concrete <head> or <body> element",
+		},
+		{
+			name:    "bootstrap under heading",
+			source:  `<body><h1><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></h1></body>`,
+			options: htmlRewriteOptions{wasmPath: wasmPath},
+			want:    "goframe:bootstrap blocks must be direct children of one concrete <head> or <body> element",
+		},
+		{
+			name:    "heading implicitly closed",
+			source:  `<body><h1><!-- goframe:bootstrap --><h2>owned</h2><!-- /goframe:bootstrap --></h1></body>`,
+			options: htmlRewriteOptions{wasmPath: wasmPath},
+			want:    "goframe:bootstrap blocks must be direct children of one concrete <head> or <body> element",
+		},
+		{
+			name:    "preload under body",
+			source:  `<body><!-- goframe:preload --><!-- /goframe:preload --></body>`,
+			options: htmlRewriteOptions{preload: true, wasmPath: wasmPath, runtimePath: runtimePath},
+			want:    "goframe:preload must be a direct child of <head>",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, test.options)
+			if err == nil {
+				t.Fatalf("rewriteIndexHTML() = %q, want managed placement error", got)
+			}
+			if got != "" {
+				t.Fatalf("managed placement failure returned partial output %q", got)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestCustomIndexManagedBlockRejectsOrdinaryContainerParents(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		parentName string
 		source     string
 	}{
-		{
-			name:       "paragraph closed by block",
-			parentName: "p",
-			source:     `<body><p><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></p></body>`,
-		},
-		{
-			name:       "head closed by body content",
-			parentName: "head",
-			source:     `<html><head><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></head><body></body></html>`,
-		},
-		{
-			name:       "nested button",
-			parentName: "button",
-			source:     `<body><button><!-- goframe:bootstrap --><button>owned</button><!-- /goframe:bootstrap --></button></body>`,
-		},
-		{
-			name:       "nested anchor",
-			parentName: "a",
-			source:     `<body><a href="#"><!-- goframe:bootstrap --><a href="#">owned</a><!-- /goframe:bootstrap --></a></body>`,
-		},
-		{
-			name:       "implicit list item close",
-			parentName: "li",
-			source:     `<body><ul><li><!-- goframe:bootstrap --><li>owned</li><!-- /goframe:bootstrap --></li></ul></body>`,
-		},
-		{
-			name:       "implicit description item close",
-			parentName: "dt",
-			source:     `<body><dl><dt><!-- goframe:bootstrap --><dd>owned</dd><!-- /goframe:bootstrap --></dt></dl></body>`,
-		},
+		{name: "div", parentName: "div", source: `<body><div><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></div></body>`},
+		{name: "section", parentName: "section", source: `<body><section><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></section></body>`},
+		{name: "main", parentName: "main", source: `<body><main><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></main></body>`},
+		{name: "article", parentName: "article", source: `<body><article><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></article></body>`},
+		{name: "aside", parentName: "aside", source: `<body><aside><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></aside></body>`},
+		{name: "nav", parentName: "nav", source: `<body><nav><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></nav></body>`},
+		{name: "form", parentName: "form", source: `<body><form><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></form></body>`},
+		{name: "paragraph", parentName: "p", source: `<body><p><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></p></body>`},
+		{name: "heading", parentName: "h1", source: `<body><h1><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></h1></body>`},
+		{name: "button", parentName: "button", source: `<body><button><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></button></body>`},
+		{name: "anchor", parentName: "a", source: `<body><a href="#"><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></a></body>`},
+		{name: "nobr", parentName: "nobr", source: `<body><nobr><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></nobr></body>`},
+		{name: "list item", parentName: "li", source: `<body><ul><li><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></li></ul></body>`},
+		{name: "description term", parentName: "dt", source: `<body><dl><dt><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></dt></dl></body>`},
+		{name: "description detail", parentName: "dd", source: `<body><dl><dd><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></dd></dl></body>`},
+		{name: "ruby text", parentName: "rt", source: `<body><ruby><rt><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></rt></ruby></body>`},
+		{name: "custom element", parentName: "app-shell", source: `<body><app-shell><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></app-shell></body>`},
+		{name: "heading implicit close", parentName: "h1", source: `<body><h1><!-- goframe:bootstrap --><h2>owned</h2><!-- /goframe:bootstrap --></h1></body>`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			document, err := scanCustomIndexHTML(test.source)
@@ -2230,18 +2267,18 @@ func TestCustomIndexManagedBlockRejectsImplicitlyClosedSourceParent(t *testing.T
 			if startContext.parentID != endContext.parentID || startContext.parentName != test.parentName || endContext.parentName != test.parentName {
 				t.Fatalf("source contexts = %#v, %#v, want shared <%s> parent", startContext, endContext, test.parentName)
 			}
-			if !startContext.structurallyCertain || endContext.structurallyCertain {
-				t.Fatalf("source certainty = start %t, end %t, want true then false", startContext.structurallyCertain, endContext.structurallyCertain)
+			if !startContext.structurallyCertain || !endContext.structurallyCertain {
+				t.Fatalf("source certainty = start %t, end %t, want both true", startContext.structurallyCertain, endContext.structurallyCertain)
 			}
 
-			got, err := rewriteIndexHTML(test.source, htmlRewriteOptions{})
+			got, err := rewriteIndexHTML(test.source, htmlRewriteOptions{wasmPath: "assets/bundle.11111111.wasm"})
 			if err == nil {
-				t.Fatalf("rewriteIndexHTML() = %q, want unstable managed-parent error", got)
+				t.Fatalf("rewriteIndexHTML() = %q, want managed placement error", got)
 			}
 			if got != "" {
 				t.Fatalf("managed structural-context failure returned partial output %q", got)
 			}
-			for _, want := range []string{"goframe:bootstrap", "structurally uncertain", "safe HTML parent"} {
+			for _, want := range []string{"goframe:bootstrap blocks", "direct children", "<head> or <body>", test.parentName} {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("rewriteIndexHTML() error = %v, want %q", err, want)
 				}
@@ -2249,17 +2286,52 @@ func TestCustomIndexManagedBlockRejectsImplicitlyClosedSourceParent(t *testing.T
 		})
 	}
 
-	for _, source := range []string{
-		`<body><p><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></p></body>`,
-		`<html><head><!-- goframe:bootstrap --><meta name="owned" content="yes"><!-- /goframe:bootstrap --></head><body></body></html>`,
-		`<body><button><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></button></body>`,
-		`<body><a href="#"><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></a></body>`,
-		`<body><ul><li><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></li></ul></body>`,
-		`<body><dl><dt><!-- goframe:bootstrap --><span>owned</span><!-- /goframe:bootstrap --></dt></dl></body>`,
+}
+
+func TestCustomIndexManagedBlockDocumentContainerPressure(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	const wasmPath = "assets/bundle.11111111.wasm"
+	for _, test := range []struct {
+		name    string
+		source  string
+		options htmlRewriteOptions
+		want    string
+	}{
+		{name: "head preload", source: `<html><head><!-- goframe:preload --><!-- /goframe:preload --></head><body></body></html>`, options: htmlRewriteOptions{preload: true, wasmPath: wasmPath, runtimePath: runtimePath}, want: `rel="preload"`},
+		{name: "head runtime", source: `<html><head><!-- goframe:runtime --><!-- /goframe:runtime --></head><body></body></html>`, options: htmlRewriteOptions{runtimePath: runtimePath}, want: runtimePath},
+		{name: "head bootstrap", source: `<html><head><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></head><body></body></html>`, options: htmlRewriteOptions{wasmPath: wasmPath}, want: wasmPath},
+		{name: "body runtime", source: `<html><head></head><body><!-- goframe:runtime --><!-- /goframe:runtime --></body></html>`, options: htmlRewriteOptions{runtimePath: runtimePath}, want: runtimePath},
+		{name: "body bootstrap", source: `<html><head></head><body><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></body></html>`, options: htmlRewriteOptions{wasmPath: wasmPath}, want: wasmPath},
+		{name: "body nested owned content", source: `<html><head></head><body><!-- goframe:bootstrap --><div><span>owned</span></div><!-- /goframe:bootstrap --></body></html>`, options: htmlRewriteOptions{wasmPath: wasmPath}, want: wasmPath},
 	} {
-		if _, err := rewriteIndexHTML(source, htmlRewriteOptions{}); err != nil {
-			t.Fatalf("safe managed placement rejected: %v\n%s", err, source)
-		}
+		t.Run("accept "+test.name, func(t *testing.T) {
+			got := rewriteIndexForTest(t, test.source, test.options)
+			if !strings.Contains(got, test.want) {
+				t.Fatalf("managed output missing %q:\n%s", test.want, got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "body content closes head", source: `<html><head><!-- goframe:bootstrap --><div>owned</div><!-- /goframe:bootstrap --></head><body></body></html>`, want: "structurally uncertain"},
+		{name: "duplicate head", source: `<html><head><head><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></head></head><body></body></html>`, want: "structurally uncertain"},
+		{name: "duplicate body", source: `<html><head></head><body><body><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></body></body></html>`, want: "structurally uncertain"},
+		{name: "repeated body crosses pair", source: `<html><head></head><body><!-- goframe:bootstrap --><body>owned<!-- /goframe:bootstrap --></body></html>`, want: "structurally uncertain"},
+		{name: "repeated html parent", source: `<html><head></head><body><html><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></html></body></html>`, want: "directly under <html>"},
+		{name: "frameset-sensitive body", source: `<html><head></head><body><!-- goframe:bootstrap --><frameset><frame></frameset><!-- /goframe:bootstrap --></body></html>`, want: "structurally uncertain"},
+		{name: "explicit head close", source: `<html><head><!-- goframe:bootstrap --></head><!-- /goframe:bootstrap --><body></body></html>`, want: "directly under <html>"},
+		{name: "explicit body close", source: `<html><head></head><body><!-- goframe:bootstrap --></body><!-- /goframe:bootstrap --></html>`, want: "directly under <html>"},
+	} {
+		t.Run("reject "+test.name, func(t *testing.T) {
+			got, err := rewriteIndexHTML(test.source, htmlRewriteOptions{wasmPath: wasmPath})
+			if err == nil || got != "" || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("rewriteIndexHTML() = %q, %v, want %q", got, err, test.want)
+			}
+		})
 	}
 }
 
@@ -4485,6 +4557,26 @@ func TestPackageCustomIndexManagedStructureFailureIsAtomic(t *testing.T) {
 			name:   "head body crossing",
 			source: `<html><head><!-- goframe:runtime --></head><body id="app"><!-- /goframe:runtime --></body></html>`,
 			want:   "different structural contexts",
+		},
+		{
+			name:   "runtime under div",
+			source: `<html><head></head><body><div><!-- goframe:runtime --><!-- /goframe:runtime --></div></body></html>`,
+			want:   "goframe:runtime blocks must be direct children",
+		},
+		{
+			name:   "bootstrap under heading",
+			source: `<html><head></head><body><h1><!-- goframe:bootstrap --><!-- /goframe:bootstrap --></h1></body></html>`,
+			want:   "goframe:bootstrap blocks must be direct children",
+		},
+		{
+			name:   "preload under body",
+			source: `<html><head></head><body><!-- goframe:preload --><!-- /goframe:preload --></body></html>`,
+			want:   "goframe:preload must be a direct child of <head>",
+		},
+		{
+			name:   "heading implicit close",
+			source: `<html><head></head><body><h1><!-- goframe:bootstrap --><h2>owned</h2><!-- /goframe:bootstrap --></h1></body></html>`,
+			want:   "goframe:bootstrap blocks must be direct children",
 		},
 		{
 			name:   "reversed runtime bootstrap",
