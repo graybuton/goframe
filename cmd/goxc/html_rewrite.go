@@ -876,7 +876,9 @@ func scanHTMLTagAttributes(content string, start int, tag *htmlTag) error {
 				finishTag(offset+1, false)
 				return nil
 			case current == '=':
-				return fmt.Errorf("custom index <%s> has a malformed attribute near byte %d", tag.name, offset)
+				nameStart = offset
+				state = htmlAttributeName
+				offset++
 			default:
 				nameStart = offset
 				state = htmlAttributeName
@@ -939,7 +941,11 @@ func scanHTMLTagAttributes(content string, start int, tag *htmlTag) error {
 				state = htmlTagAttributeValueSingleQuoted
 				offset++
 			case current == '>':
-				return fmt.Errorf("custom index <%s> attribute %s has no value", tag.name, attribute.name)
+				attribute.valueSyntax = htmlAttributeValueUnquoted
+				attribute.valueStart = offset
+				attribute.valueEnd = offset
+				finishTag(offset+1, false)
+				return nil
 			default:
 				attribute.valueSyntax = htmlAttributeValueUnquoted
 				attribute.valueStart = offset

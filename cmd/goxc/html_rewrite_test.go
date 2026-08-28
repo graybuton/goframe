@@ -972,6 +972,66 @@ func TestCustomIndexUnquotedAttributeTagState(t *testing.T) {
 	}
 }
 
+func TestCustomIndexLeadingEqualsAttributeRecovery(t *testing.T) {
+	const runtimePath = "assets/wasm_exec.22222222.js"
+	type expectedAttribute struct {
+		name     string
+		value    string
+		hasValue bool
+	}
+	for _, test := range []struct {
+		name       string
+		openingTag string
+		attributes []expectedAttribute
+	}{
+		{name: "one equals", openingTag: `<div =x>`, attributes: []expectedAttribute{{name: "=x"}}},
+		{name: "two equals", openingTag: `<div ==x>`, attributes: []expectedAttribute{{name: "=", value: "x", hasValue: true}}},
+		{name: "equals in value", openingTag: `<div =x=y>`, attributes: []expectedAttribute{{name: "=x", value: "y", hasValue: true}}},
+		{name: "equals before space", openingTag: `<div = >`, attributes: []expectedAttribute{{name: "="}}},
+		{name: "following attribute", openingTag: `<div =x foo=bar>`, attributes: []expectedAttribute{{name: "=x"}, {name: "foo", value: "bar", hasValue: true}}},
+		{name: "empty value", openingTag: `<div =x=>`, attributes: []expectedAttribute{{name: "=x", value: "", hasValue: true}}},
+		{name: "compact solidus", openingTag: `<div =x/>`, attributes: []expectedAttribute{{name: "=x"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := test.openingTag + `<script src="wasm_exec.js"></script></div>`
+			tag, ok, err := scanHTMLTag(source, 0)
+			if err != nil || !ok {
+				t.Fatalf("scanHTMLTag() = %+v, %v, %v", tag, ok, err)
+			}
+			if tag.end != len(test.openingTag) {
+				t.Fatalf("tag end = %d, want %d", tag.end, len(test.openingTag))
+			}
+			if len(tag.attributes) != len(test.attributes) {
+				t.Fatalf("attributes = %#v, want %#v", tag.attributes, test.attributes)
+			}
+			for index, want := range test.attributes {
+				got := tag.attributes[index]
+				if got.name != want.name || got.hasValue != want.hasValue {
+					t.Fatalf("attribute %d = %#v, want name %q hasValue %t", index, got, want.name, want.hasValue)
+				}
+				wantSyntax := htmlAttributeValueNone
+				if want.hasValue {
+					wantSyntax = htmlAttributeValueUnquoted
+				}
+				if got.valueSyntax != wantSyntax {
+					t.Fatalf("attribute %d syntax = %v, want %v", index, got.valueSyntax, wantSyntax)
+				}
+				if gotValue := semanticHTMLAttributeValue(source, &got); gotValue != want.value {
+					t.Fatalf("attribute %d value = %q, want %q", index, gotValue, want.value)
+				}
+				if got.hasValue && source[got.valueStart:got.valueEnd] != want.value {
+					t.Fatalf("attribute %d raw value = %q, want %q", index, source[got.valueStart:got.valueEnd], want.value)
+				}
+			}
+
+			wantSource := strings.Replace(source, runtimeAssetName, runtimePath, 1)
+			if got := rewriteIndexForTest(t, source, htmlRewriteOptions{runtimePath: runtimePath}); got != wantSource {
+				t.Fatalf("runtime after leading-equals recovery mismatch\ngot:  %q\nwant: %q", got, wantSource)
+			}
+		})
+	}
+}
+
 func TestCustomIndexAttributeURLRewritePreservesBrowserSemantics(t *testing.T) {
 	tests := []struct {
 		name         string
