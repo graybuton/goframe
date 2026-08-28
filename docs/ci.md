@@ -75,11 +75,14 @@ across quote styles, ASCII tag casing, query/fragment suffixes, raw text,
 templates, malformed syntax, and similar authored names. Managed-first profile
 tests require select/table/frameset/noscript, declarative Shadow DOM, and
 ownership-affecting misnesting to fail closed when a markerless owned rewrite
-would be uncertain. The managed topology matrix requires one concrete safe HTML
-parent, rejects document-level, cross-parent, foreign-ancestor, and uncertain
-contexts, and proves that an executable parser-blocking owned runtime precedes
-each owned bootstrap. It distinguishes URL ownership from browser execution for
-classic, async, deferred, module, `nomodule`, and legacy `event`/`for` scripts.
+would be uncertain. The managed topology matrix requires preload markers to be
+direct children of one concrete `head` and runtime or bootstrap markers to be
+direct children of one concrete `head` or `body`. It rejects arbitrary
+ordinary-container, document-level, cross-parent, foreign-ancestor, duplicate
+document-container, and uncertain contexts, and proves that an executable
+parser-blocking owned runtime precedes each owned bootstrap. It distinguishes
+URL ownership from browser execution for classic, async, deferred, module,
+`nomodule`, and legacy `event`/`for` scripts.
 A separate active-base matrix covers every managed and
 markerless relative-URL operation, active and inert base contexts, multiple
 bases, target-only and disabled-preload controls, zero partial output, and
@@ -99,7 +102,10 @@ classification matrix. It also characterizes the complete ECMAScript
 whitespace and line-terminator sets, bounded comments, and decoded static string
 escapes used by historical bootstrap recognition. Negative package fixtures
 preserve their source and previous complete package while rejecting foreign
-markers, cross-parent pairs, and unproven owned execution order. The
+markers, cross-parent pairs, ordinary-container blocks, browser-unstable
+heading/form/formatting/list/ruby placements, and unproven owned execution
+order. A Chrome attribute oracle covers leading-`=` recovery and verifies that
+following HTML-owned runtime elements remain structurally visible. The
 base-resolution oracle characterizes active href
 values, target-only base elements, body placement, inert and foreign contexts,
 and first-base behavior. It also requires an active-base managed package to

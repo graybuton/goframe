@@ -65,9 +65,12 @@ Current input behavior:
 - custom templates give GoFrame explicit ownership of preload, runtime, and
   bootstrap sections through complete, exact managed comment pairs. These are
   the universal ownership mechanism. The delimiters remain in package and
-  development HTML. Both markers must share one concrete safe HTML parent;
-  document-level, direct-`html`, cross-parent, structurally uncertain, and
-  SVG/MathML-ancestor placements fail before package publication. Malformed,
+  development HTML. Preload markers must be direct children of one concrete
+  `head`; runtime and bootstrap markers must be direct children of one concrete
+  `head` or `body`. Arbitrary ordinary-container, document-level,
+  direct-`html`, cross-parent, structurally uncertain, and
+  SVG/MathML-ancestor placements fail before package publication because the
+  rewriter does not infer arbitrary browser tree-builder recovery. Malformed,
   duplicate, nested, and interleaved marker shapes also fail;
 - when GoFrame owns both runtime and bootstrap integrations, an executable
   parser-blocking owned runtime must precede the owned bootstrap. Reversed,

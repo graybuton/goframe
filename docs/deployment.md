@@ -159,15 +159,18 @@ Custom `index.html` files may use explicit package blocks:
 These exact, case-sensitive comments are the authoritative, universal
 build-time ownership mechanism for custom HTML. Packaging validates all three
 block types before changing the document, then replaces only complete managed
-blocks whose two markers share one concrete safe HTML parent. A block may be a
-child of the same `head`, `body`, or ordinary HTML container. Document-level
-markers, direct children of `html`, cross-parent pairs, structurally uncertain
-contexts, and every placement under SVG or MathML ancestry are unsupported,
-including descendants of HTML integration points. The comments remain in
-packaged and development HTML and do not participate in application rendering.
-Duplicate, orphaned, reversed, nested, interleaved, or unsupported placements
-fail packaging before publication. With `--preload` disabled, a valid preload
-block retains its delimiters with an empty interior.
+blocks in concrete document containers. Both `goframe:preload` markers must be
+direct children of the same `head`. Both `goframe:runtime` or
+`goframe:bootstrap` markers must be direct children of the same `head` or
+`body`. Arbitrary ordinary-container, document-level, direct-`html`,
+cross-parent, structurally uncertain, and SVG/MathML-ancestor placements are
+unsupported, including descendants of HTML integration points. GoFrame
+intentionally does not infer arbitrary browser tree-builder recovery for
+managed ownership. The comments remain in packaged and development HTML and do
+not participate in application rendering. Duplicate, orphaned, reversed,
+nested, interleaved, or unsupported placements fail packaging before
+publication. With `--preload` disabled, a valid preload block retains its
+delimiters with an empty interior.
 
 When GoFrame owns both integrations, an executable parser-blocking runtime
 integration must appear before the owned bootstrap so the bootstrap cannot
@@ -226,8 +229,8 @@ trivia, and decodes the static quoted WASM URL using bounded ECMAScript string
 escapes while retaining the exact authored replacement span. Dynamic
 expressions, templates, concatenation, escaped identifiers, malformed escapes,
 legacy octal or decimal escapes, and unsupported custom loaders remain
-unchanged. Use an explicit `goframe:bootstrap` block under one safe HTML parent
-when that code needs a deterministic package rewrite.
+unchanged. Use an explicit `goframe:bootstrap` block directly under `head` or
+`body` when that code needs a deterministic package rewrite.
 
 Authored content outside owned spans remains byte-preserved. When a required
 runtime, bootstrap, preload, or declared stylesheet rewrite would cross a
@@ -262,7 +265,8 @@ HTML, preload markup is inserted immediately before the structural closing
 `</head>` tag. Text resembling `</head>` inside comments, scripts, styles,
 attributes, or examples is ignored. If the document is outside that profile or
 has no unambiguous closing head, packaging fails and recommends an explicit
-`goframe:preload` block whose markers share one safe HTML parent.
+`goframe:preload` block whose markers are direct children of one concrete
+`head`.
 
 ## Asset Manifest
 

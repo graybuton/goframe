@@ -30,15 +30,18 @@
   remain relative, so an active HTML `base[href]` now fails before publication
   whenever a managed or markerless operation would emit one. A target-only
   `base` and active-base documents with no package-owned URL output remain
-  accepted. Both markers of a managed block must share one concrete safe HTML
-  parent; document-level, cross-parent, and SVG/MathML-ancestor placements fail
-  before publication. An executable parser-blocking GoFrame-owned runtime must
-  precede an owned bootstrap; `nomodule` and other nonblocking or suppressed
-  forms cannot establish that order. Historical bootstrap matching now follows
-  ECMAScript whitespace, comment, and bounded static-string escape semantics
-  while preserving exact authored source spans. Malformed DOCTYPE spans end at
-  their first `>` so later structural references are not hidden by quoted
-  source text.
+  accepted. Managed preload markers must be direct children of one concrete
+  `head`; runtime and bootstrap markers must be direct children of one concrete
+  `head` or `body`. Arbitrary ordinary-container, document-level, cross-parent,
+  and SVG/MathML-ancestor placements fail before publication. An executable
+  parser-blocking GoFrame-owned runtime must precede an owned bootstrap;
+  `nomodule` and other nonblocking or suppressed forms cannot establish that
+  order. Historical bootstrap matching now follows ECMAScript whitespace,
+  comment, and bounded static-string escape semantics while preserving exact
+  authored source spans. Malformed DOCTYPE spans end at their first `>` so
+  later structural references are not hidden by quoted source text. Leading
+  `=` bytes in the before-attribute-name state now follow browser recovery and
+  no longer hide a following owned reference from the source scanner.
 - `VirtualList` and `VirtualTable` now track the pixel viewport separately from
   the rendered overscan window. Collection shrink and empty transitions clamp
   the persisted viewport, while height, item or row height, and overscan
