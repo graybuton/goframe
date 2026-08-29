@@ -44,6 +44,19 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
+      - name: Verify Windows Go toolchain integrity
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./.github/scripts/ensure-go-toolchain.ps1 `
+            -Version '${{ matrix.go }}' `
+            -Architecture 'amd64'
+
+      - name: Test Windows Go toolchain integrity helper
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/scripts/ensure-go-toolchain.tests.ps1
+
       - name: Setup Node.js
         if: matrix.full
         uses: actions/setup-node@v6

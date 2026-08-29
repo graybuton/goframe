@@ -1,0 +1,78 @@
+<!DoCtYpE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Legacy custom index rewrite fixture</title>
+    <!-- authored sentinel: bundle.wasm wasm_exec.js styles.css -->
+    <script>const falseHeadExample = "</head>";</script>
+    <script type="application/json" id="fixture-json">{"asset":"bundle.wasm","runtime":"wasm_exec.js"}</script>
+    <script id="fixture-double-escaped" type="application/json"><!--<script></script><script src="wasm_exec.js?fixture=double-escaped"></script>--></script>
+    <style id="fixture-style">.sentinel::after { content: "bundle.wasm"; }</style>
+    <svg id="fixture-svg-cdata" style="display:none">
+<![CDATA[
+<script src="wasm_exec.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<!-- goframe:runtime -->
+]]>
+    </svg>
+    <math id="fixture-math-cdata" style="display:none">
+<![CDATA[
+<script src="wasm_exec.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<!-- goframe:runtime -->
+]]>
+    </math>
+    <script id="fixture-nbsp-script" type=" application/javascript" src="wasm_exec.js"></script>
+    <link id="fixture-nbsp-rel" rel="alternate stylesheet" href="styles.css">
+    <link id="fixture-nbsp-as" rel="preload" as=" style" href="styles.css">
+</head>
+<body data-example="bundle.wasm">
+    <p data-testid="authored-text">bundle.wasm is documented here.</p>
+    <a data-testid="authored-link" href="styles.css">Stylesheet documentation</a>
+    <div id="root"></div>
+    <script>
+        const documentation = "bundle.wasm";
+        const runtimeExample = "wasm_exec.js";
+        const similarNames = "my-bundle.wasm bundle.wasm.backup bundle.wasm.map wasm_exec.js.map custom-wasm_exec.js";
+        const quotient = 10 / 2;
+        let counter = 0;
+        const postfixed = counter++ / 2;
+        const legacyFetchPattern = /fetch\("bundle\.wasm"\)/;
+        const nestedTemplate = `outer ${`fetch("bundle.wasm")`}`;
+        if (true) {}
+        /fetch("bundle.wasm")/.test("value");
+        class AuthoredSyntax {
+            #value = "fetch(\"bundle.wasm\")";
+        }
+    </script>
+    <math id="fixture-spaced-annotation" style="display:none">
+        <annotation-xml encoding=" text/html ">
+            <script id="fixture-spaced-annotation-script" type="application/json" src="wasm_exec.js?fixture=annotation-decoy"></script>
+        </annotation-xml>
+    </math>
+    <svg id="fixture-punctuation-svg" style="display:none">
+        <title_extra id="fixture-punctuation-tag">
+            <script id="fixture-punctuation-script" type="application/json" src="wasm_exec.js?fixture=punctuation-decoy"></script>
+        </title_extra>
+    </svg>
+    <div id="fixture-legacy-owned" style="display:none">
+    <p id="fixture-legacy-html"></p>
+    <input id="fixture-compact-input" disabled/>
+    <link id=fixture-encoded-style data-authored=legacy-style href=%6dy%20%26copy%3B%20style.css?fixture=legacy&copy;=x#theme rel=STYLESHEET>
+    <!-- authored scanner close --!>
+    <div =x id="fixture-leading-equals">
+    <script id="fixture-legacy-runtime" data-authored="legacy-runtime" type="text/javascript1.5" SRC=' %77asm_exec.js?fixture=legacy#runtime '></script>
+    </div>
+    <script data-authored="legacy-bootstrap">﻿/* ECMAScript bootstrap trivia */
+        const/* vertical-tab */ go　=　new Go();
+        WebAssembly . instantiateStreaming(
+            // Static source-mapped URL fixture.
+            fetch ( ' \x2e/%62undle\u{2e}wasm\x3ffixture=legacy\u0023wasm ' ),
+            go.importObject,
+        ).then((result) => go.run(result.instance));
+    </script>
+    </div>
+</body>
+</html>

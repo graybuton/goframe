@@ -135,25 +135,118 @@ contract: packaging prints a message and skips them.
 Custom `index.html` files may use explicit package blocks:
 
 ```html
-<!-- goframe:preload -->
-<!-- /goframe:preload -->
+<html>
+<head>
+  <!-- goframe:preload -->
+  <!-- /goframe:preload -->
+</head>
+<body>
+  <!-- goframe:runtime -->
+  <script src="wasm_exec.js"></script>
+  <!-- /goframe:runtime -->
 
-<!-- goframe:runtime -->
-<script src="wasm_exec.js"></script>
-<!-- /goframe:runtime -->
-
-<!-- goframe:bootstrap -->
-<script>
-  const go = new Go();
-  WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
-      .then((result) => go.run(result.instance));
-</script>
-<!-- /goframe:bootstrap -->
+  <!-- goframe:bootstrap -->
+  <script>
+    const go = new Go();
+    WebAssembly.instantiateStreaming(fetch("bundle.wasm"), go.importObject)
+        .then((result) => go.run(result.instance));
+  </script>
+  <!-- /goframe:bootstrap -->
+</body>
+</html>
 ```
 
-Packaging rewrites those blocks to the final asset paths. If a legacy HTML file
-does not have the markers, packaging falls back to simple `wasm_exec.js` and
-`main.wasm`/`bundle.wasm` string rewrites.
+These exact, case-sensitive comments are the authoritative, universal
+build-time ownership mechanism for custom HTML. Packaging validates all three
+block types before changing the document, then replaces only complete managed
+blocks in concrete document containers. Both `goframe:preload` markers must be
+direct children of the same `head`. Both `goframe:runtime` or
+`goframe:bootstrap` markers must be direct children of the same `head` or
+`body`. Arbitrary ordinary-container, document-level, direct-`html`,
+cross-parent, structurally uncertain, and SVG/MathML-ancestor placements are
+unsupported, including descendants of HTML integration points. GoFrame
+intentionally does not infer arbitrary browser tree-builder recovery for
+managed ownership. The comments remain in packaged and development HTML and do
+not participate in application rendering. Duplicate, orphaned, reversed,
+nested, interleaved, or unsupported placements fail packaging before
+publication. With `--preload` disabled, a valid preload block retains its
+delimiters with an empty interior.
+
+When GoFrame owns both integrations, an executable parser-blocking runtime
+integration must appear before the owned bootstrap so the bootstrap cannot
+execute before the runtime defines its browser globals. Async, deferred,
+module, `nomodule`, or source-reversed owned runtime arrangements cannot prove
+that order. A paired legacy `event`/`for` form is eligible only for `window`
+`onload` execution after character-reference decoding and HTML ASCII trimming;
+other paired values are suppressed. An external runtime that GoFrame does not
+rewrite remains authored integration responsibility.
+
+Managed blocks establish which source spans GoFrame owns; they do not override
+browser base-URL resolution. The current package references emitted for the
+runtime, WASM bootstrap, stylesheets, and enabled preload hints are relative.
+If a potentially active HTML `<base href>` is present, packaging therefore
+rejects any managed or markerless operation that would emit one of those URLs,
+before replacing a previous package. The diagnostic identifies the blocked
+operation and recommends removing the base or supplying deployment-safe
+authored markup outside that managed operation.
+
+`<base target="_blank">` without `href` remains valid. A document with an
+active base may also package unchanged when it has no GoFrame-owned relative
+URL operation; authored absolute references remain authored content. A
+disabled managed preload block is allowed because it emits no URL. Configurable
+deployment-base output and full active-base support are outside the current
+preview contract.
+
+Markerless rewriting is a bounded historical compatibility profile, not full
+HTML tree construction. It is available only when source structure is
+balanced and ownership does not depend on browser recovery or insertion modes.
+In particular, GoFrame does not infer markerless ownership through `select`,
+table-sensitive content, `frameset`, `noscript`, declarative Shadow DOM, or
+ownership-affecting misnesting. The active-base restriction above applies
+independently to both managed and markerless output. Inside the supported simple
+profile, markerless compatibility rewrites only:
+
+- the URL value of an executable `<script src>` that names `wasm_exec.js` or
+  `./wasm_exec.js`;
+- the static single- or double-quoted `bundle.wasm` or `main.wasm` URL inside
+  an executable inline script whose complete body matches a historical
+  GoFrame bootstrap;
+- the URL value of a stylesheet or style-preload `<link>` that names a
+  declared packaged stylesheet.
+
+Those forms retain a query string or fragment. Absolute, protocol-relative,
+root-relative, data, blob, dynamic-loader, and similar-name references are not
+rewritten. Comments, text, data attributes, inline JSON, import maps,
+speculation rules, templates, style text, JavaScript comments, unrelated
+strings, template literals, and regular expressions remain authored bytes.
+
+Markerless bootstrap recognition is structural and applies to the complete
+script body. Arbitrary direct `fetch(...)` calls are not rewritten, and
+additional authored statements make a script non-owned. The recognizer does
+not validate arbitrary JavaScript. Within a recognized historical shape it
+accepts ECMAScript whitespace, line terminators, and bounded comments as
+trivia, and decodes the static quoted WASM URL using bounded ECMAScript string
+escapes while retaining the exact authored replacement span. Dynamic
+expressions, templates, concatenation, escaped identifiers, malformed escapes,
+legacy octal or decimal escapes, and unsupported custom loaders remain
+unchanged. Use an explicit `goframe:bootstrap` block directly under `head` or
+`body` when that code needs a deterministic package rewrite.
+
+Authored content outside owned spans remains byte-preserved. When a required
+runtime, bootstrap, preload, or declared stylesheet rewrite would cross a
+tree-builder-sensitive boundary, packaging fails before publication with
+placement guidance rather than publishing a stale reference. Asset-managed
+stylesheet rewriting inside `template[shadowrootmode="open|closed"]` is not in
+the current preview contract; use a stable external URL or move that ownership
+to supported top-level markup.
+
+The rewriter scans the original source and changes only validated byte ranges;
+it does not parse and serialize the whole document. Whitespace, line endings,
+doctype spelling, attribute casing and order, quotes, and formatting outside
+managed or recognized reference spans are preserved. DOCTYPE source spans end
+at the first literal `>` even inside a malformed quoted identifier, matching the
+browser tokenizer boundary; a DOCTYPE that reaches EOF remains opaque authored
+source.
 
 ## Preload Hints
 
@@ -167,7 +260,13 @@ assets:
 ```
 
 CSS preload is included only when CSS assets are packaged through the manifest
-asset directory or explicit asset list.
+asset directory or explicit asset list. For simple-profile markerless custom
+HTML, preload markup is inserted immediately before the structural closing
+`</head>` tag. Text resembling `</head>` inside comments, scripts, styles,
+attributes, or examples is ignored. If the document is outside that profile or
+has no unambiguous closing head, packaging fails and recommends an explicit
+`goframe:preload` block whose markers are direct children of one concrete
+`head`.
 
 ## Asset Manifest
 

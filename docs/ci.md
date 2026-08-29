@@ -26,6 +26,14 @@ selected GOX golden tests. The two supported Linux entries additionally run
 the artifact, module-path, docs, and race gates. Every entry is required; no
 matrix lane is advisory.
 
+Before those commands, the Windows entry verifies that the exact selected Go
+version exposes its executable, compiler tools, standard-library source tree,
+and `internal/goarch` package through a physically resolvable `GOROOT`. It uses
+the physical target of a hosted-toolcache junction when necessary. If that
+installation is incomplete, the job installs the same pinned Go release under
+`RUNNER_TEMP`, verifies its published SHA-256 before extraction, and repeats the
+full integrity probe before continuing.
+
 It checks:
 
 - tracked artifact gate;
@@ -60,6 +68,52 @@ physical aliases, and completion-marker replacement. Package staging fails
 before replacing a prior complete package, export validates its source before
 destination mutation and validates a private stage before publication, and a
 damaged tool-owned package remains eligible for safe cleanup.
+
+Custom-index tests validate all managed-marker shapes before replacement and
+exercise source-preserving runtime, WASM, stylesheet, and preload rewrites
+across quote styles, ASCII tag casing, query/fragment suffixes, raw text,
+templates, malformed syntax, and similar authored names. Managed-first profile
+tests require select/table/frameset/noscript, declarative Shadow DOM, and
+ownership-affecting misnesting to fail closed when a markerless owned rewrite
+would be uncertain. The managed topology matrix requires preload markers to be
+direct children of one concrete `head` and runtime or bootstrap markers to be
+direct children of one concrete `head` or `body`. It rejects arbitrary
+ordinary-container, document-level, cross-parent, foreign-ancestor, duplicate
+document-container, and uncertain contexts, and proves that an executable
+parser-blocking owned runtime precedes each owned bootstrap. It distinguishes
+URL ownership from browser execution for classic, async, deferred, module,
+`nomodule`, and legacy `event`/`for` scripts.
+A separate active-base matrix covers every managed and
+markerless relative-URL operation, active and inert base contexts, multiple
+bases, target-only and disabled-preload controls, zero partial output, and
+preservation of an earlier complete package. Operation-count tests and
+benchmarks cover indexed close-tag resolution and one-pass replacement
+application.
+
+A private browser fixture packages explicit-marker and simple-profile
+markerless documents with asset hashing, preload, gzip, and Brotli under
+standard Go and TinyGo; it requires inspect and export parity, final asset
+delivery, applied CSS, interactive state updates, unchanged authored sentinels,
+and zero browser runtime errors. Its Chrome semantic oracle records namespace,
+parenting, resource requests, execution, template/Shadow DOM behavior, bogus
+comments, malformed DOCTYPE termination, foreign content, runtime/bootstrap
+requests and execution order, and misnested closing tags for the managed-first
+classification matrix. It also characterizes the complete ECMAScript
+whitespace and line-terminator sets, bounded comments, and decoded static string
+escapes used by historical bootstrap recognition. Negative package fixtures
+preserve their source and previous complete package while rejecting foreign
+markers, cross-parent pairs, ordinary-container blocks, browser-unstable
+heading/form/formatting/list/ruby placements, and unproven owned execution
+order. A Chrome attribute oracle covers leading-`=` recovery and verifies that
+following HTML-owned runtime elements remain structurally visible. The
+base-resolution oracle characterizes active href
+values, target-only base elements, body placement, inert and foreign contexts,
+and first-base behavior. It also requires an active-base managed package to
+fail atomically, a target-only managed package to boot with all asset requests
+under `/assets`, and an authored-only active-base document to remain unchanged.
+A focused dev control serves the canonical rewritten package through the
+generation manager and verifies that reload-client injection changes only the
+response.
 
 Focused `goxc inspect` tests cover CLI resolution, deterministic text and
 schema-v1 JSON, copy-root byte identity, read-only filesystem behavior, writer

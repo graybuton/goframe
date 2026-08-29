@@ -656,7 +656,7 @@ func TestRewriteIndexHTMLPlaceholders(t *testing.T) {
 <script>WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject)</script>
 <!-- /goframe:bootstrap -->
 </body>`
-	got := rewriteIndexHTML(source, htmlRewriteOptions{
+	got, err := rewriteIndexHTML(source, htmlRewriteOptions{
 		preload:     true,
 		wasmPath:    "assets/bundle.a83f19c4.wasm",
 		runtimePath: "assets/wasm_exec.91b2cc10.js",
@@ -665,6 +665,9 @@ func TestRewriteIndexHTMLPlaceholders(t *testing.T) {
 			"styles.css": "assets/styles.77a1de20.css",
 		},
 	})
+	if err != nil {
+		t.Fatalf("rewriteIndexHTML() error: %v", err)
+	}
 	for _, want := range []string{
 		`href="assets/bundle.a83f19c4.wasm" as="fetch" type="application/wasm" crossorigin`,
 		`<script src="assets/wasm_exec.91b2cc10.js"></script>`,

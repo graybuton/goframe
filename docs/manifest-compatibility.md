@@ -62,6 +62,48 @@ Current input behavior:
   paths;
 - custom `index.html` templates must exist before compilation and must be
   regular non-symlink files;
+- custom templates give GoFrame explicit ownership of preload, runtime, and
+  bootstrap sections through complete, exact managed comment pairs. These are
+  the universal ownership mechanism. The delimiters remain in package and
+  development HTML. Preload markers must be direct children of one concrete
+  `head`; runtime and bootstrap markers must be direct children of one concrete
+  `head` or `body`. Arbitrary ordinary-container, document-level,
+  direct-`html`, cross-parent, structurally uncertain, and
+  SVG/MathML-ancestor placements fail before package publication because the
+  rewriter does not infer arbitrary browser tree-builder recovery. Malformed,
+  duplicate, nested, and interleaved marker shapes also fail;
+- when GoFrame owns both runtime and bootstrap integrations, an executable
+  parser-blocking owned runtime must precede the owned bootstrap. Reversed,
+  async, deferred, module, and `nomodule` arrangements cannot prove that order.
+  A paired legacy `event`/`for` form is eligible only for `window` `onload`
+  execution after character-reference decoding and HTML ASCII trimming;
+- managed ownership does not change browser URL resolution. Runtime, WASM,
+  stylesheet, and enabled-preload references emitted by the current packager
+  are package-relative, so a potentially active HTML `base[href]` rejects any
+  managed or markerless operation that would emit one. A target-only `base`, a
+  disabled preload block, and active-base documents with no package-owned
+  relative URL output remain valid. Configurable deployment-base output is not
+  part of the current schema or preview contract;
+- without a managed section, compatibility rewriting is limited to a balanced
+  simple historical profile: structural runtime script URLs, complete
+  historical GoFrame bootstrap scripts, declared stylesheet links, and
+  structural preload insertion. GoFrame does not infer markerless ownership
+  through select/table/frameset/noscript insertion modes, declarative Shadow
+  DOM, or ownership-affecting misnesting. A required rewrite in those contexts
+  fails before publication rather than publishing a stale path;
+- arbitrary direct fetch calls and scripts with additional authored statements
+  remain unchanged. The recognizer does not validate arbitrary JavaScript;
+  its closed historical grammar accepts ECMAScript whitespace, line
+  terminators, and bounded comments as trivia and decodes static quoted WASM
+  URLs with bounded ECMAScript string escapes while preserving their raw source
+  span. Dynamic expressions, templates, concatenation, escaped identifiers,
+  malformed or legacy octal and decimal escapes, and unsupported custom loaders
+  remain byte-preserved and use an explicit managed block when rewriting is
+  required. Asset-managed stylesheet rewriting inside declarative Shadow DOM
+  is not part of the current preview contract;
+- custom-index DOCTYPE source spans end at the first literal `>` even when a
+  malformed public or system identifier contains an unmatched quote. A DOCTYPE
+  through EOF remains opaque authored source;
 - entry paths must point to directories, not files;
 - symlinked entry directories and symlinked assets are rejected.
 

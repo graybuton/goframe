@@ -931,12 +931,15 @@ func TestPackageAssetPlanRejectsSymlinkedDirectoryAsset(t *testing.T) {
 }
 
 func TestGeneratedIndexHTMLIncludesRuntimeWASMStylesAndPreload(t *testing.T) {
-	html := generateIndexHTML(htmlRewriteOptions{
+	html, err := generateIndexHTML(htmlRewriteOptions{
 		preload:     true,
 		wasmPath:    "assets/bundle.12345678.wasm",
 		runtimePath: "assets/wasm_exec.87654321.js",
 		stylePaths:  []string{"assets/app.11111111.css", "assets/theme.22222222.css"},
 	})
+	if err != nil {
+		t.Fatalf("generateIndexHTML() error: %v", err)
+	}
 	for _, want := range []string{
 		`<div id="root">Loading...</div>`,
 		`<link rel="preload" href="assets/bundle.12345678.wasm" as="fetch" type="application/wasm" crossorigin>`,

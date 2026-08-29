@@ -19,6 +19,29 @@
   graph, including ordinary assets, styles, compressed sidecars, content
   hashes, physical identity, and the completion-marker generation. Damaged
   tool-owned output remains recognizable for safe cleanup.
+- Custom `index.html` packaging now treats complete GoFrame-managed blocks as
+  the authoritative ownership mechanism and limits markerless compatibility to
+  a balanced historical profile. Tree-builder-sensitive runtime, WASM,
+  stylesheet, and preload rewrites fail before publication instead of being
+  inferred. Authored comments, text, data, and unrelated JavaScript remain
+  byte-preserved outside recognized spans. Legacy WASM compatibility recognizes
+  complete historical GoFrame bootstrap scripts; arbitrary direct fetch calls
+  and unsupported custom loaders remain unchanged. Package-owned generated URLs
+  remain relative, so an active HTML `base[href]` now fails before publication
+  whenever a managed or markerless operation would emit one. A target-only
+  `base` and active-base documents with no package-owned URL output remain
+  accepted. Managed preload markers must be direct children of one concrete
+  `head`; runtime and bootstrap markers must be direct children of one concrete
+  `head` or `body`. Arbitrary ordinary-container, document-level, cross-parent,
+  and SVG/MathML-ancestor placements fail before publication. An executable
+  parser-blocking GoFrame-owned runtime must precede an owned bootstrap;
+  `nomodule` and other nonblocking or suppressed forms cannot establish that
+  order. Historical bootstrap matching now follows ECMAScript whitespace,
+  comment, and bounded static-string escape semantics while preserving exact
+  authored source spans. Malformed DOCTYPE spans end at their first `>` so
+  later structural references are not hidden by quoted source text. Leading
+  `=` bytes in the before-attribute-name state now follow browser recovery and
+  no longer hide a following owned reference from the source scanner.
 - `VirtualList` and `VirtualTable` now track the pixel viewport separately from
   the rendered overscan window. Collection shrink and empty transitions clamp
   the persisted viewport, while height, item or row height, and overscan
