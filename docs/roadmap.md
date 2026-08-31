@@ -127,7 +127,8 @@ Future features do not become delivery promises by appearing in this document.
 | `v0.2.0-preview.6` | Diagnostics & Editor DX checkpoint | Published the CLI/editor diagnostic boundary as a bounded preview checkpoint. | **Current / shipped** |
 | `v0.3.0-preview.1` | Application workflow & dev loop checkpoint | Watched full-build development loop and integrated application evidence without selected new application-model APIs. | **Current / shipped** |
 | Later `v0.3.0-preview.*` slots | Application Model II | Route-driven data, transitions, loaders, mutations, and document state remain unselected directions. | **Research** |
-| `v0.4.0-preview.*` | Modular Delivery & Bundle Splitting | Explicit asset, multi-entry WASM, and route-lazy delivery boundaries. | **Candidate** |
+| `v0.4.0-preview.1` | Package Integrity & Delivery Contracts | Package inspection and integrity, publication/export and custom-index ownership, manifest/path semantics, supported toolchains, and release-critical security and CI gates. | **Next checkpoint** |
+| Later `v0.4.0-preview.*` slots | Modular Delivery & Bundle Splitting | Explicit asset, multi-entry WASM, and route-lazy delivery boundaries. | **Candidate** |
 | `v0.5.0-preview.*` | Server Rendering & Prerender | A DOM-independent HTML-rendering subset, static prerender, and evaluated SSR adapters. | **Research** |
 | `v0.6.0-preview.*` | Hydration & Islands | Deterministic attachment, state handoff, recovery, and partial activation. | **Research** |
 | `v0.7.0-preview.*` | Dev Loop & Language Services | Incremental development, source mapping, formatting, language services, and distribution. | **Candidate** |
@@ -171,11 +172,10 @@ represented by the `v0.3.0-preview.1` capability scope below.
 
 ## `v0.3.0-preview.1` - Application Workflow And Dev Loop Checkpoint
 
-Status: **Current / shipped** capability scope. The application workflow and
-development-loop behavior exists on current `main`; this status does not assert
-that the versioned tag is published. Git tags and GitHub Releases are
-authoritative for publication state. No Application Model II public API is
-selected.
+Status: **Current / shipped** capability scope. `v0.3.0-preview.1` is published
+as a pre-release. Its durable scope and evidence are recorded in the
+[dedicated release document](release-notes-v0.3.0-preview.1.md). No Application
+Model II public API is selected.
 
 Purpose:
 
@@ -223,26 +223,66 @@ development loop keeps serving the last successful interactive generation,
 shows the latest failed package attempt in connected pages, retains terminal
 diagnostics, and clears the presentation on successful recovery.
 
-## `v0.4.0-preview.*` - Modular Delivery & Bundle Splitting
+## `v0.4.0-preview.1` - Package Integrity & Delivery Contracts
 
-Status: **Current / shipped** for read-only standalone package graph inspection;
-**Candidate** for asset splitting, multi-entry WASM, and route-lazy bundles.
-These delivery concepts remain separate.
+Status: **Next checkpoint**.
 
-### Package Graph Inspection
+This bounded checkpoint consolidates package-integrity and delivery contracts
+already established on `main` and closes the selected release blockers needed
+to publish them coherently. It does not select bundle splitting or another
+application-model capability.
 
-Current scope:
+### Current / Already Merged Behavior
 
-- deterministic text and schema-v1 JSON for one existing current standalone
-  package;
-- package metadata, declared assets, entrypoints, compression sidecars, full
-  content hashes, and metadata-declared edges;
-- read-only validation with package-relative output and copied-root identity.
+The current foundation includes:
 
-The current graph is the declared graph of one standalone package. It does not
-infer source dependencies, split assets or WASM, or define lazy loading.
+- read-only `goxc inspect` reporting for the declared graph of one standalone
+  package, with deterministic text and schema-v1 JSON output;
+- complete validation of declared package assets, entrypoints, compression
+  sidecars, content hashes, metadata edges, and completion metadata;
+- fail-closed package publication, cleanup, and export ownership, including
+  physical file and directory identity boundaries;
+- source-preserving custom `index.html` rewriting with explicit managed and
+  bounded historical markerless ownership;
+- generated browser URL, active-base, and managed-placement boundaries that
+  preserve unrelated authored custom-index content;
+- a Go `1.26.6` module and generated-workspace minimum, with Go `1.26.6` and
+  stable Go `1.27.0` as the current Core validation lanes.
 
-### Asset Splitting
+These are current implementation facts, not stable API or production-support
+claims. Package graph inspection reports the declared graph of one current
+standalone package; it does not infer source dependencies, split assets or
+WASM, or define lazy loading.
+
+### Selected Completion Work
+
+The selected release blockers for this checkpoint are:
+
+- authored manifest path semantics;
+- release security-analysis gates;
+- release-critical GitHub Action and downloaded-tool pinning;
+- a bounded fast-fail CI preflight;
+- final release-readiness and release-blocker verification.
+
+This is planned checkpoint work, not **Current / shipped** behavior. The
+detailed release checklist remains in release tracker
+[#143](https://github.com/graybuton/goframe/issues/143).
+
+### Explicit Non-Goals
+
+`v0.4.0-preview.1` does not claim bundle splitting, multi-entry WASM,
+route-lazy bundles, SSR, prerender, hydration, semantic language services, or
+fullstack APIs.
+
+### Later `v0.4.0-preview.*` Candidates - Modular Delivery
+
+Status: **Candidate**, except where a topic is explicitly marked **Research**.
+
+Package graph inspection is current foundation for this planning area, not a
+future bundle-splitting feature. Later modular-delivery candidates remain
+separate from the selected `preview.1` checkpoint.
+
+#### Asset Splitting
 
 Candidate scope:
 
@@ -253,7 +293,7 @@ Candidate scope:
 
 Asset splitting does not by itself split the Go/WASM program.
 
-### Multi-Entry WASM
+#### Multi-Entry WASM
 
 Candidate scope:
 
@@ -265,7 +305,7 @@ Candidate scope:
 Independent WASM entrypoints must not be described as shared-runtime code
 splitting.
 
-### Route-Lazy Bundles
+#### Route-Lazy Bundles
 
 Candidate scope:
 
@@ -274,23 +314,23 @@ Candidate scope:
 - stale-load cancellation;
 - an observable prefetch policy.
 
-### Research
+#### Research
 
 Status: **Research** for shared-runtime designs, dynamic linking, shared
 heap/state, and WebAssembly component-model implications. These require
 feasibility, size, lifecycle, and compatibility evidence before an
 implementation commitment.
 
-Candidate preview slots:
+Planning slots:
 
-| Planning slot | Candidate capability |
-|---|---|
-| `preview.1` | Unselected checkpoint; standalone package graph inspection is current behavior. |
-| `preview.2` | Lazy static chunks. |
-| `preview.3` | Multi-entry WASM packaging. |
-| `preview.4` | Route-lazy bundles. |
-| `preview.5` | Independent roots/islands prototype. |
-| `preview.6` | Delivery checkpoint. |
+| Planning slot | Capability | Status |
+|---|---|---|
+| `preview.1` | Package Integrity & Delivery Contracts checkpoint. | **Next checkpoint** |
+| `preview.2` | Lazy static chunks. | **Candidate** |
+| `preview.3` | Multi-entry WASM packaging. | **Candidate** |
+| `preview.4` | Route-lazy bundles. | **Candidate** |
+| `preview.5` | Independent roots/islands prototype. | **Candidate** |
+| `preview.6` | Delivery checkpoint. | **Candidate** |
 
 ## `v0.5.0-preview.*` - Server Rendering & Prerender
 
@@ -466,10 +506,13 @@ The preferred dependency shape is:
 ```text
 v0.2 diagnostics/editor boundary
         ↓
-v0.3 routes/data/actions
+v0.3 application workflow/dev loop
+        ↓
+v0.4.0-preview.1 package integrity/delivery contracts
         ├───────────────┐
         ↓               ↓
-v0.4 modular delivery   v0.5 render-to-HTML / SSR
+later v0.4 modular      v0.5 render-to-HTML / SSR
+delivery candidates
         └───────┬───────┘
                 ↓
         v0.6 hydration / islands
@@ -554,13 +597,17 @@ that defines behavior boundaries, evidence, cost, and non-goals.
 
 ## Immediate Sequence
 
-1. Retain the bounded watched `goxc dev`, completed-generation serving,
-   post-start browser build-error presentation, and successful-build reload
-   contracts as current behavior.
-2. Keep route loaders, transitions, mutations, document metadata, and history
-   routing unselected until separate evidence justifies a public API.
-3. Keep issue #117 independent and non-blocking.
+1. Finish `v0.4.0-preview.1` as a bounded Package Integrity & Delivery
+   Contracts checkpoint.
+2. Close authored manifest path semantics.
+3. Close release-critical security-analysis, supply-chain, and bounded
+   fast-fail CI gates, then complete final release-blocker verification.
+4. Keep issue #117 independent and non-blocking.
+5. Keep Modular Delivery & Bundle Splitting as later `v0.4.0-preview.*`
+   candidate work.
+6. Keep semantic language services and `goxpls` outside the
+   `v0.4.0-preview.1` release gate.
 
-The application-model evidence does not justify adding a loader, Action, or
-Mutation API. The selected development-loop slice does not imply incremental
-compilation, HMR, source maps, or a broader language-service commitment.
+The release tracker remains the detailed checkpoint checklist. This sequence
+does not select bundle splitting, a language-service API, SSR, hydration, or a
+fullstack contract.
