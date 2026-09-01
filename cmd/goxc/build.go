@@ -143,7 +143,7 @@ func buildOutputPath(options buildOptions, manifest projectManifest, layout Buil
 	if directory == "" {
 		directory = layout.BuildDir
 	}
-	return filepath.Join(directory, manifest.WASM)
+	return filepath.Join(directory, filepath.FromSlash(manifest.WASM))
 }
 
 func compileWASM(compiler, entryPath, outputPath string) error {

@@ -519,7 +519,7 @@ func (collector *devSnapshotCollector) collect() (devSnapshot, error) {
 	if err != nil {
 		return snapshot, collector.collectRetainedAssets(&snapshot, errors.Join(err, embedErr))
 	}
-	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
+	wasmLogicalName := path.Base(manifest.WASM)
 	_, planErr := planPackageAssets(collector.appDir, manifest, wasmLogicalName, packageOptions{compress: map[string]bool{}})
 	if planErr != nil {
 		return snapshot, collector.collectRetainedAssets(&snapshot, errors.Join(planErr, embedErr))

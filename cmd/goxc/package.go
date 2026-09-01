@@ -187,8 +187,8 @@ func packageApp(options packageOptions) error {
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return err
 	}
-	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
-	if classifyBrowserAsset(filepath.ToSlash(manifest.WASM)) != browserAssetWASM || classifyBrowserAsset(wasmLogicalName) != browserAssetWASM {
+	wasmLogicalName := path.Base(manifest.WASM)
+	if classifyBrowserAsset(manifest.WASM) != browserAssetWASM || classifyBrowserAsset(wasmLogicalName) != browserAssetWASM {
 		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
 	}
 	if wasmLogicalName == runtimeAssetName {
@@ -356,7 +356,7 @@ func packageApp(options packageOptions) error {
 	} else if err := mkdirAllBelowRoot(layout.WorkspaceRoot, options.outDir, "package output directory"); err != nil {
 		return err
 	}
-	if err := cleanPackageArtifacts(options.outDir, manifest.WASM); err != nil {
+	if err := cleanPackageArtifacts(options.outDir, wasmLogicalName); err != nil {
 		return err
 	}
 	if err := publishPackageArtifacts(stageDir, options.outDir); err != nil {
