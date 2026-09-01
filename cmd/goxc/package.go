@@ -1085,7 +1085,6 @@ func gzipFile(sourcePath, destinationPath string) error {
 		return fmt.Errorf("create gzip writer: %w", err)
 	}
 	writer.Header.ModTime = time.Unix(0, 0)
-	writer.Header.Name = filepath.Base(sourcePath)
 
 	_, copyErr := io.Copy(writer, source)
 	writerErr := writer.Close()

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -249,6 +251,48 @@ func TestBrowserAssetProducerIntegration(t *testing.T) {
 	}
 	if output.Len() == 0 {
 		t.Error("successful producer-to-inspector path emitted no JSON")
+	}
+}
+
+func TestGzipSidecarsArePathNeutral(t *testing.T) {
+	content := []byte("same package bytes\n")
+	var compressed [][]byte
+	for _, name := range []string{"bundle.wasm", "renamed.wasm"} {
+		directory := t.TempDir()
+		source := filepath.Join(directory, name)
+		destination := source + ".gz"
+		if err := os.WriteFile(source, content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := gzipFile(source, destination); err != nil {
+			t.Fatalf("gzipFile(%q) error: %v", name, err)
+		}
+		encoded, err := os.ReadFile(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compressed = append(compressed, encoded)
+
+		reader, err := gzip.NewReader(bytes.NewReader(encoded))
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := reader.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if reader.Header.Name != "" {
+			t.Fatalf("gzip header name = %q, want path-neutral empty value", reader.Header.Name)
+		}
+		if !bytes.Equal(decoded, content) {
+			t.Fatalf("decoded content = %q, want %q", decoded, content)
+		}
+	}
+	if !bytes.Equal(compressed[0], compressed[1]) {
+		t.Fatal("gzip sidecar bytes changed with the source filename")
 	}
 }
 
