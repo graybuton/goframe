@@ -25,6 +25,22 @@ The user-action notes for `v0.3.0-preview.1` are in
 generated-workspace compiler environment isolation and the narrowed repeated
 Mount descendant-target contract.
 
+## `v0.4.0-preview.1`: portable authored manifest paths
+
+All path-like `goframe.json` values now become canonical slash-relative paths
+during manifest loading. `/` remains the recommended authored separator, and
+`\` remains accepted for compatibility but always means a separator on every
+host. Absolute, rooted, drive-like, and raw `..` component spellings remain
+rejected.
+
+Canonical slash manifests need no changes. Manifests that used backslashes as
+separators now resolve consistently on Unix and Windows, including `output` and
+`wasm`, which previously retained their raw authored spelling after validation.
+A manifest can no longer use `\` to address a literal backslash-containing Unix
+filename; rename that file or select it with portable path components. This
+changes only authored input interpretation. Generated package metadata and
+package/inspection schemas remain version 1.
+
 ## Template
 
 ```md
