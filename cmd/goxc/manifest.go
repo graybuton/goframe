@@ -232,16 +232,19 @@ func cleanManifestChildPath(value string) (string, error) {
 }
 
 func cleanAuthoredManifestPath(value string, allowApplicationRoot bool) (string, error) {
-	if value == "" || manifestPathIsAbs(value) {
+	logical := manifestPath(value)
+	if value == "" || authoredManifestPathIsRootedOrDriveLike(logical) {
 		return "", errors.New("manifest path must be relative")
 	}
-	logical := manifestPath(value)
 	for _, part := range strings.Split(logical, "/") {
 		if part == ".." {
 			return "", errors.New("manifest path must not contain a parent component")
 		}
 	}
 	cleaned := path.Clean(logical)
+	if authoredManifestPathIsRootedOrDriveLike(cleaned) {
+		return "", errors.New("manifest path must be relative")
+	}
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", errors.New("manifest path must stay inside the application")
 	}
@@ -272,14 +275,21 @@ func manifestPath(value string) string {
 	return strings.ReplaceAll(filepath.ToSlash(value), "\\", "/")
 }
 
-func manifestPathIsAbs(value string) bool {
-	logical := manifestPath(value)
-	if strings.HasPrefix(logical, "/") || filepath.IsAbs(value) {
+func authoredManifestPathIsRootedOrDriveLike(logical string) bool {
+	if strings.HasPrefix(logical, "/") {
 		return true
 	}
-	if len(logical) >= 2 && logical[1] == ':' {
-		drive := logical[0]
-		return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+	if len(logical) < 2 || logical[1] != ':' {
+		return false
+	}
+	drive := logical[0]
+	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+}
+
+func manifestPathIsAbs(value string) bool {
+	logical := manifestPath(value)
+	if authoredManifestPathIsRootedOrDriveLike(logical) || filepath.IsAbs(value) {
+		return true
 	}
 	return false
 }

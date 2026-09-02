@@ -176,6 +176,145 @@ func TestLoadManifestRejectsPortableUnsafeAuthoredPaths(t *testing.T) {
 	}
 }
 
+func TestLoadManifestRejectsCanonicalizedDriveLikeAuthoredPaths(t *testing.T) {
+	forms := []struct {
+		name   string
+		prefix string
+	}{
+		{name: "uppercase slash drive root", prefix: "./C:/"},
+		{name: "uppercase slash drive relative", prefix: "./C:"},
+		{name: "uppercase backslash drive root", prefix: ".\\C:\\"},
+		{name: "uppercase backslash drive relative", prefix: ".\\C:"},
+		{name: "lowercase slash drive root", prefix: "./c:/"},
+		{name: "lowercase slash drive relative", prefix: "./c:"},
+		{name: "lowercase backslash drive root", prefix: ".\\c:\\"},
+		{name: "lowercase backslash drive relative", prefix: ".\\c:"},
+	}
+	fields := []struct {
+		name  string
+		value func(string) map[string]any
+	}{
+		{name: "entry", value: func(prefix string) map[string]any { return map[string]any{"entry": prefix + "child"} }},
+		{name: "output", value: func(prefix string) map[string]any { return map[string]any{"output": prefix + "child"} }},
+		{name: "wasm", value: func(prefix string) map[string]any { return map[string]any{"wasm": prefix + "bundle.wasm"} }},
+		{name: "assets directory", value: func(prefix string) map[string]any { return map[string]any{"assets": prefix + "assets"} }},
+		{name: "assets list", value: func(prefix string) map[string]any { return map[string]any{"assets": []string{prefix + "style.css"}} }},
+	}
+
+	for _, field := range fields {
+		for _, form := range forms {
+			t.Run(field.name+"/"+form.name, func(t *testing.T) {
+				appDir := t.TempDir()
+				writeManifestPathFixture(t, appDir, field.value(form.prefix))
+				if _, err := loadManifest(appDir); err == nil {
+					t.Fatalf("loadManifest() accepted canonicalized drive-like %s path with prefix %q", field.name, form.prefix)
+				}
+			})
+		}
+	}
+}
+
+func TestLoadManifestCanonicalPathValuesAreFixedPoints(t *testing.T) {
+	fields := []struct {
+		name       string
+		input      string
+		want       string
+		value      func(string) map[string]any
+		storedPath func(projectManifest) string
+	}{
+		{
+			name:       "entry",
+			input:      "./nested/file",
+			want:       "nested/file",
+			value:      func(value string) map[string]any { return map[string]any{"entry": value} },
+			storedPath: func(manifest projectManifest) string { return manifest.Entry },
+		},
+		{
+			name:       "output",
+			input:      "nested\\file",
+			want:       "nested/file",
+			value:      func(value string) map[string]any { return map[string]any{"output": value} },
+			storedPath: func(manifest projectManifest) string { return manifest.Output },
+		},
+		{
+			name:       "wasm",
+			input:      "nested//./bundle.wasm",
+			want:       "nested/bundle.wasm",
+			value:      func(value string) map[string]any { return map[string]any{"wasm": value} },
+			storedPath: func(manifest projectManifest) string { return manifest.WASM },
+		},
+		{
+			name:       "assets directory",
+			input:      "nested/mixed\\file",
+			want:       "nested/mixed/file",
+			value:      func(value string) map[string]any { return map[string]any{"assets": value} },
+			storedPath: func(manifest projectManifest) string { return manifest.Assets.Directory },
+		},
+		{
+			name:       "assets list",
+			input:      "./nested/style.css",
+			want:       "nested/style.css",
+			value:      func(value string) map[string]any { return map[string]any{"assets": []string{value}} },
+			storedPath: func(manifest projectManifest) string { return manifest.Assets.List[0] },
+		},
+	}
+
+	for _, field := range fields {
+		t.Run(field.name, func(t *testing.T) {
+			appDir := t.TempDir()
+			writeManifestPathFixture(t, appDir, field.value(field.input))
+			first, err := loadManifest(appDir)
+			if err != nil {
+				t.Fatalf("first loadManifest() error: %v", err)
+			}
+			stored := field.storedPath(first)
+			if stored != field.want {
+				t.Fatalf("first canonical value = %q, want %q", stored, field.want)
+			}
+
+			writeManifestPathFixture(t, appDir, field.value(stored))
+			second, err := loadManifest(appDir)
+			if err != nil {
+				t.Fatalf("second loadManifest() error: %v", err)
+			}
+			if got := field.storedPath(second); got != stored {
+				t.Fatalf("canonical value after revalidation = %q, want %q", got, stored)
+			}
+		})
+	}
+}
+
+func TestCleanAuthoredManifestPathClassifiesOnlyDrivePrefixes(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		value     string
+		want      string
+		wantError bool
+	}{
+		{name: "colon in relative name", value: "name:asset.css", want: "name:asset.css"},
+		{name: "colon data in relative name", value: "foo:bar", want: "foo:bar"},
+		{name: "uppercase drive relative", value: "C:asset.css", wantError: true},
+		{name: "lowercase drive relative", value: "c:asset.css", wantError: true},
+		{name: "rooted", value: "/asset.css", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := cleanAuthoredManifestPath(test.value, false)
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("cleanAuthoredManifestPath(%q) = %q, want error", test.value, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("cleanAuthoredManifestPath(%q) error: %v", test.value, err)
+			}
+			if got != test.want {
+				t.Fatalf("cleanAuthoredManifestPath(%q) = %q, want %q", test.value, got, test.want)
+			}
+		})
+	}
+}
+
 func writeManifestPathFixture(t *testing.T, appDir string, values map[string]any) {
 	t.Helper()
 	content, err := json.Marshal(values)
