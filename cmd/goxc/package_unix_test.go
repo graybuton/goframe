@@ -191,3 +191,39 @@ func TestPackageRejectsUnixLiteralBackslashAssetNames(t *testing.T) {
 		})
 	}
 }
+
+func TestPackageUnicodeManifestAssetWithGzip(t *testing.T) {
+	const (
+		logicalName = "данные.css"
+		content     = "body { color: rebeccapurple; }\n"
+	)
+	appDir := t.TempDir()
+	writeMinimalPackageApp(t, appDir)
+	writeTestFile(t, appDir, manifestName, `{"name":"unicode-asset","compiler":"go","assets":"assets"}`)
+	writeTestFile(t, appDir, "assets/"+logicalName, content)
+
+	plainDir := filepath.Join(t.TempDir(), "plain")
+	if err := packageApp(packageOptions{
+		appDir: appDir, compiler: "go", outDir: plainDir, compress: map[string]bool{},
+	}); err != nil {
+		t.Fatalf("packageApp(plain Unicode asset) error: %v", err)
+	}
+	if _, err := inspectPackageGraph(plainDir); err != nil {
+		t.Fatalf("inspectPackageGraph(plain Unicode asset) error: %v", err)
+	}
+	assertFileContent(t, filepath.Join(plainDir, "assets", logicalName), content)
+
+	gzipDir := filepath.Join(t.TempDir(), "gzip")
+	if err := packageApp(packageOptions{
+		appDir: appDir, compiler: "go", outDir: gzipDir,
+		compress: map[string]bool{"gzip": true},
+	}); err != nil {
+		t.Fatalf("packageApp(gzip Unicode asset) error: %v", err)
+	}
+	if _, err := inspectPackageGraph(gzipDir); err != nil {
+		t.Fatalf("inspectPackageGraph(gzip Unicode asset) error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(gzipDir, "assets", logicalName+".gz")); err != nil {
+		t.Fatalf("Unicode gzip sidecar missing: %v", err)
+	}
+}

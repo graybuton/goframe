@@ -118,15 +118,18 @@ func loadManifest(appDir string) (projectManifest, error) {
 		return projectManifest{}, fmt.Errorf("entry %q in %s %s", manifest.Entry, manifestName, err)
 	}
 	manifest.Entry = entry
-	for name, value := range map[string]string{
-		"output": manifest.Output,
-		"wasm":   manifest.WASM,
+	for name, destination := range map[string]*string{
+		"output": &manifest.Output,
+		"wasm":   &manifest.WASM,
 	} {
-		if !safeChildPath(value) {
-			return projectManifest{}, fmt.Errorf("%s %q in %s must be a child path inside the application", name, value, manifestName)
+		value := *destination
+		cleaned, err := cleanManifestChildPath(value)
+		if err != nil {
+			return projectManifest{}, fmt.Errorf("%s %q in %s %s", name, value, manifestName, err)
 		}
+		*destination = cleaned
 	}
-	if classifyBrowserAsset(manifestPath(manifest.WASM)) != browserAssetWASM {
+	if classifyBrowserAsset(manifest.WASM) != browserAssetWASM {
 		return projectManifest{}, fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
 	}
 	if manifest.Compiler != "go" && manifest.Compiler != "tinygo" {
@@ -174,32 +177,14 @@ func rejectExplicitEmptyEntry(content []byte) error {
 }
 
 func cleanManifestEntry(entry string) (string, error) {
-	logicalEntry := manifestPath(entry)
-	if logicalEntry == "." {
-		return ".", nil
-	}
-	if entry == "" || manifestPathIsAbs(entry) {
+	entry, err := cleanAuthoredManifestPath(entry, true)
+	if err != nil {
 		return "", fmt.Errorf("must be a relative child package inside the application")
 	}
-	rawParts := strings.Split(logicalEntry, "/")
-	for _, part := range rawParts {
-		if part == ".." {
-			return "", fmt.Errorf("must be a relative child package inside the application")
-		}
-	}
-	entry = path.Clean(logicalEntry)
 	if entry == "." {
 		return ".", nil
 	}
 	parts := strings.Split(entry, "/")
-	for _, part := range parts {
-		if part == ".." {
-			return "", fmt.Errorf("must be a relative child package inside the application")
-		}
-	}
-	if strings.HasPrefix(entry, "../") || entry == ".." {
-		return "", fmt.Errorf("must be a relative child package inside the application")
-	}
 	if isToolOwnedEntryRoot(parts[0]) {
 		return "", fmt.Errorf("points to a GoFrame-owned or tool-owned directory")
 	}
@@ -227,13 +212,44 @@ func cleanManifestAssetDirectory(directory string) (string, error) {
 }
 
 func cleanManifestAssetPath(value string) (string, error) {
-	if !safeChildPath(value) {
+	cleaned, err := cleanManifestChildPath(value)
+	if err != nil {
 		return "", fmt.Errorf("must be a child path inside the application")
 	}
-	cleaned := path.Clean(manifestPath(value))
 	parts := strings.Split(cleaned, "/")
 	if len(parts) > 0 && isToolOwnedEntryRoot(parts[0]) {
 		return "", fmt.Errorf("points to a GoFrame-owned or tool-owned directory")
+	}
+	return cleaned, nil
+}
+
+func cleanManifestChildPath(value string) (string, error) {
+	cleaned, err := cleanAuthoredManifestPath(value, false)
+	if err != nil {
+		return "", fmt.Errorf("must be a child path inside the application")
+	}
+	return cleaned, nil
+}
+
+func cleanAuthoredManifestPath(value string, allowApplicationRoot bool) (string, error) {
+	logical := manifestPath(value)
+	if value == "" || authoredManifestPathIsRootedOrDriveLike(logical) {
+		return "", errors.New("manifest path must be relative")
+	}
+	for _, part := range strings.Split(logical, "/") {
+		if part == ".." {
+			return "", errors.New("manifest path must not contain a parent component")
+		}
+	}
+	cleaned := path.Clean(logical)
+	if authoredManifestPathIsRootedOrDriveLike(cleaned) {
+		return "", errors.New("manifest path must be relative")
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", errors.New("manifest path must stay inside the application")
+	}
+	if cleaned == "." && !allowApplicationRoot {
+		return "", errors.New("manifest path must name a child")
 	}
 	return cleaned, nil
 }
@@ -259,14 +275,21 @@ func manifestPath(value string) string {
 	return strings.ReplaceAll(filepath.ToSlash(value), "\\", "/")
 }
 
-func manifestPathIsAbs(value string) bool {
-	logical := manifestPath(value)
-	if strings.HasPrefix(logical, "/") || filepath.IsAbs(value) {
+func authoredManifestPathIsRootedOrDriveLike(logical string) bool {
+	if strings.HasPrefix(logical, "/") {
 		return true
 	}
-	if len(logical) >= 2 && logical[1] == ':' {
-		drive := logical[0]
-		return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+	if len(logical) < 2 || logical[1] != ':' {
+		return false
+	}
+	drive := logical[0]
+	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+}
+
+func manifestPathIsAbs(value string) bool {
+	logical := manifestPath(value)
+	if authoredManifestPathIsRootedOrDriveLike(logical) || filepath.IsAbs(value) {
+		return true
 	}
 	return false
 }

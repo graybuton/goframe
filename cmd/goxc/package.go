@@ -187,8 +187,8 @@ func packageApp(options packageOptions) error {
 	if err := ensureAppDirectory(options.appDir); err != nil {
 		return err
 	}
-	wasmLogicalName := path.Base(filepath.ToSlash(filepath.Clean(manifest.WASM)))
-	if classifyBrowserAsset(filepath.ToSlash(manifest.WASM)) != browserAssetWASM || classifyBrowserAsset(wasmLogicalName) != browserAssetWASM {
+	wasmLogicalName := path.Base(manifest.WASM)
+	if classifyBrowserAsset(manifest.WASM) != browserAssetWASM || classifyBrowserAsset(wasmLogicalName) != browserAssetWASM {
 		return fmt.Errorf("wasm %q in %s must end with .wasm", manifest.WASM, manifestName)
 	}
 	if wasmLogicalName == runtimeAssetName {
@@ -356,7 +356,7 @@ func packageApp(options packageOptions) error {
 	} else if err := mkdirAllBelowRoot(layout.WorkspaceRoot, options.outDir, "package output directory"); err != nil {
 		return err
 	}
-	if err := cleanPackageArtifacts(options.outDir, manifest.WASM); err != nil {
+	if err := cleanPackageArtifacts(options.outDir, manifest.WASM, wasmLogicalName); err != nil {
 		return err
 	}
 	if err := publishPackageArtifacts(stageDir, options.outDir); err != nil {
@@ -636,14 +636,25 @@ func packageOutputDirectory(options packageOptions, layout BuildLayout) string {
 	return layout.PackageDir
 }
 
-func cleanPackageArtifacts(directory, wasmName string) error {
+func cleanPackageArtifacts(directory string, wasmNames ...string) error {
 	if err := os.Remove(filepath.Join(directory, packageMetadataName)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale package artifact %s: %w", packageMetadataName, err)
 	}
-	names := []string{
-		wasmName,
-		wasmName + ".gz",
-		wasmName + ".br",
+	seen := make(map[string]struct{})
+	names := make([]string, 0, len(wasmNames)*3+20)
+	addName := func(name string) {
+		if _, exists := seen[name]; exists {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	for _, wasmName := range wasmNames {
+		addName(wasmName)
+		addName(wasmName + ".gz")
+		addName(wasmName + ".br")
+	}
+	for _, name := range []string{
 		"bundle.wasm",
 		"bundle.wasm.gz",
 		"bundle.wasm.br",
@@ -662,9 +673,18 @@ func cleanPackageArtifacts(directory, wasmName string) error {
 		"styles.css",
 		legacyPackageManifest,
 		assetManifestName,
+	} {
+		addName(name)
 	}
 	for _, name := range names {
-		if err := os.Remove(filepath.Join(directory, name)); errors.Is(err, os.ErrNotExist) {
+		if manifestPath(name) != name || path.Clean(name) != name || !safeChildPath(name) {
+			return fmt.Errorf("remove stale package artifact %s: cleanup path must be canonical and package-relative", name)
+		}
+		target := filepath.Join(directory, filepath.FromSlash(name))
+		if err := validatePathBelowRoot(directory, filepath.Dir(target), "stale package artifact parent", true); err != nil {
+			return fmt.Errorf("remove stale package artifact %s: %w", name, err)
+		}
+		if err := os.Remove(target); errors.Is(err, os.ErrNotExist) {
 			continue
 		} else if err != nil {
 			return fmt.Errorf("remove stale package artifact %s: %w", name, err)
@@ -1085,7 +1105,6 @@ func gzipFile(sourcePath, destinationPath string) error {
 		return fmt.Errorf("create gzip writer: %w", err)
 	}
 	writer.Header.ModTime = time.Unix(0, 0)
-	writer.Header.Name = filepath.Base(sourcePath)
 
 	_, copyErr := io.Copy(writer, source)
 	writerErr := writer.Close()

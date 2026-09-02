@@ -114,6 +114,16 @@ The recommended preview manifest uses an asset directory:
 }
 ```
 
+All user-authored `goframe.json` path fields use portable relative syntax.
+`/` is the canonical separator. A backslash is accepted as alternate separator
+syntax and canonicalized during manifest loading, so `"assets\\styles.css"`
+means `assets/styles.css` on every host and cannot address a literal
+backslash-containing Unix filename. Absolute, rooted, drive-like, and raw
+parent-component paths remain rejected. Canonical manifest paths become native
+paths only at contained filesystem boundaries; package logical names,
+generated package paths, and browser URLs retain their separate slash-oriented
+contracts.
+
 Files inside that directory are packaged relative to the directory root:
 `assets/styles.css` becomes package `assets/styles.css`, and
 `assets/data/issues.txt` becomes package `assets/data/issues.txt`. If
@@ -384,13 +394,14 @@ not an independent package path.
 Generated package paths are a separate entity. They use `/` exclusively, must
 be canonical and package-relative, and reject absolute or drive-prefixed forms.
 An asset with logical name `C:logo.svg` therefore has the contained package path
-`assets/C:logo.svg`. Authored `goframe.json` entries remain filesystem paths and
-retain their existing absolute and drive-prefix checks; the drive-looking name
-is produced when such a filename is discovered below an asset directory on a
-filesystem that permits it. A package containing that filename is not promised
-to be portable to Windows or another filesystem that reserves the character.
-Inspection schema-version-1 path fields and edge endpoints use the same
-slash-only package-path representation.
+`assets/C:logo.svg`. Authored `goframe.json` paths are canonical portable input,
+not generated logical names: rooted and drive-like authored forms are rejected,
+and host filesystem conversion happens only after manifest ingestion. The
+drive-looking generated name can still be discovered below an asset directory
+on a filesystem that permits it. A package containing that filename is not
+promised to be portable to Windows or another filesystem that reserves the
+character. Inspection schema-version-1 path fields and edge endpoints use the
+same slash-only package-path representation.
 
 Schema-version-1 string ordering is ascending lexical order of the raw UTF-8
 bytes. This applies to style entrypoints, artifact paths and roles, and each

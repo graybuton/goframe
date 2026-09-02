@@ -26,11 +26,11 @@ Supported fields:
 | Field | Default | Contract |
 |---|---|---|
 | `name` | app directory base name | Human-readable package name. Empty means default. |
-| `entry` | `.` | Go package entry. Supports `.` and relative child package directories such as `./cmd/app`, `cmd/app`, `./src/app`, and `app`. |
-| `output` | `dist` | Legacy/export-oriented output hint. Current package output defaults to `.goframe/package/standalone`; explicit package/export flags are preferred. |
+| `entry` | `.` | Go package entry. Supports `.` and canonical relative child package directories such as `cmd/app`, with authored `./cmd/app` and `cmd\app` spellings normalized at load time. |
+| `output` | `dist` | Canonical relative legacy/export-oriented output hint. Current package output defaults to `.goframe/package/standalone`; explicit package/export flags are preferred. |
 | `compiler` | `go` | Must be `go` or `tinygo`. CLI `--compiler` overrides it. |
-| `wasm` | `bundle.wasm` | Logical WASM filename. Must be a relative `.wasm` child path. `main.wasm` remains accepted for legacy apps. |
-| `assets` | auto | Static assets contract. Recommended form is a relative directory string such as `"./assets"`. Legacy explicit lists such as `["index.html", "styles.css"]` remain supported. Omitted or `null` auto-detects `./assets`, then root `index.html`, then generated default HTML. Empty `[]` means no user static assets and still generates runnable default HTML. |
+| `wasm` | `bundle.wasm` | Canonical relative WASM child path. The final package still uses its basename. `main.wasm` remains accepted for legacy apps. |
+| `assets` | auto | Static assets contract. Recommended form is a relative directory string such as `"./assets"`. Legacy explicit lists such as `["index.html", "styles.css"]` remain supported. Authored separators are canonicalized before either mode is consumed. Omitted or `null` auto-detects `./assets`, then root `index.html`, then generated default HTML. Empty `[]` means no user static assets and still generates runnable default HTML. |
 
 Validation evidence:
 
@@ -44,10 +44,20 @@ Current input behavior:
 - unknown fields are rejected with `DisallowUnknownFields`;
 - malformed JSON and trailing JSON are rejected;
 - empty explicit `entry` is rejected;
-- path fields must be relative child paths;
+- authored path fields use portable relative syntax. `/` is the canonical
+  separator; `\` is accepted as alternate separator syntax and canonicalized
+  to `/` exactly once during manifest loading. A successful load stores `entry`,
+  `output`, `wasm`, the asset directory, and every listed asset in canonical
+  slash form;
+- a backslash in a manifest path is never a literal Unix filename byte. For
+  example, `"assets\\styles.css"` selects `assets/styles.css`, not one file
+  named `assets\styles.css`;
 - absolute paths, raw `..` components, parent traversal, and tool-owned entry
   roots such as `.goframe`, `build`, `dist`, `node_modules`, and `.git` are
   rejected;
+- canonical manifest paths cross into host filesystem operations through
+  platform-native conversion below the application root. Logical package
+  names, generated package paths, and browser URLs remain separate contracts;
 - `wasm` must end in `.wasm`; names such as `main.go`, `go.mod`,
   `bundle.wasm.gz`, and `wasm_exec.js` are rejected;
 - `assets` accepts omitted/`null`, a directory string, or an explicit path
@@ -265,7 +275,9 @@ publication, while a remaining literal backslash is rejected. This does not
 promise that every generated logical name is portable to filesystems that
 reserve its characters. The inspection schema remains version 1, and its
 fields and both generated metadata schemas remain unchanged. Authored
-`goframe.json` path normalization is unchanged.
+`goframe.json` paths have their own portable ingestion contract: backslashes
+are separator syntax and successful loads store canonical slash paths before
+filesystem or package consumers run.
 
 For graph inspection, every asset logical key must use the exact canonical
 relative-name representation returned by the current package producer helper

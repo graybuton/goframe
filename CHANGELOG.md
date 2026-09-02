@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- User-authored `goframe.json` paths now canonicalize `/`, `\`, and mixed
+  separator spellings to one portable slash representation at ingestion,
+  including `output` and `wasm`. Filesystem conversion is explicit at host
+  boundaries, raw parent/root/drive rejection is preserved, and gzip sidecars
+  no longer encode source filenames that reject valid Unicode asset paths.
 - Added read-only `goxc inspect` package graph reports with deterministic text
   output and a versioned schema-v1 JSON process contract.
 - `goxc dev` now presents post-start package and build failures in connected
