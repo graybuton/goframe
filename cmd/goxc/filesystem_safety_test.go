@@ -1285,6 +1285,27 @@ func TestCleanPackageArtifactsRemovesManagedIndex(t *testing.T) {
 	assertFileContent(t, filepath.Join(destination, "user.txt"), "keep")
 }
 
+func TestCleanPackageArtifactsRejectsIntermediateSymlink(t *testing.T) {
+	requireSymlinkSupport(t)
+
+	destination := t.TempDir()
+	external := t.TempDir()
+	for _, name := range []string{"bundle.wasm", "bundle.wasm.gz", "bundle.wasm.br"} {
+		writeTestFile(t, external, name, "preserve external "+name+"\n")
+	}
+	if err := os.Symlink(external, filepath.Join(destination, "nested")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cleanPackageArtifacts(destination, "nested/bundle.wasm")
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("cleanPackageArtifacts() error = %v, want intermediate symlink rejection", err)
+	}
+	for _, name := range []string{"bundle.wasm", "bundle.wasm.gz", "bundle.wasm.br"} {
+		assertFileContent(t, filepath.Join(external, name), "preserve external "+name+"\n")
+	}
+}
+
 func TestVerifyPublishedPackageInvalidatesIncompleteMarker(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(directory, assetDirectoryName), 0o755); err != nil {

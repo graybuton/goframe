@@ -185,6 +185,125 @@ func TestPackageGeneratedBrowserURLsResolveToExactUnixAssets(t *testing.T) {
 	}
 }
 
+func TestPackageCleansAuthoredNestedWASMArtifacts(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		authoredWASM   string
+		standaloneWASM string
+	}{
+		{name: "default basename", authoredWASM: "nested/bundle.wasm", standaloneWASM: "bundle.wasm"},
+		{name: "custom basename", authoredWASM: "nested/custom.wasm", standaloneWASM: "custom.wasm"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			appDir := t.TempDir()
+			writeMinimalPackageApp(t, appDir)
+			manifestContent, err := json.Marshal(map[string]any{
+				"name": "nested-wasm", "compiler": "go", "wasm": test.authoredWASM, "assets": []string{},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, appDir, manifestName, string(manifestContent))
+
+			outDir := filepath.Join(t.TempDir(), "package")
+			options := packageOptions{
+				appDir: appDir, compiler: "go", outDir: outDir, compress: map[string]bool{},
+			}
+			if err := packageApp(options); err != nil {
+				t.Fatalf("packageApp(initial) error: %v", err)
+			}
+			staleNames := []string{
+				test.authoredWASM,
+				test.authoredWASM + ".gz",
+				test.authoredWASM + ".br",
+				test.standaloneWASM,
+				test.standaloneWASM + ".gz",
+				test.standaloneWASM + ".br",
+			}
+			for _, name := range staleNames {
+				writeTestFile(t, outDir, name, "stale "+name+"\n")
+			}
+			writeTestFile(t, outDir, "nested/notes.txt", "preserve unrelated content\n")
+			if _, err := inspectPackageGraph(outDir); err != nil {
+				t.Fatalf("inspectPackageGraph(package with undeclared stale WASM) error: %v", err)
+			}
+
+			staleBefore := httptest.NewRecorder()
+			staticHandler(outDir).ServeHTTP(staleBefore, httptest.NewRequest(http.MethodGet, "/"+test.authoredWASM, nil))
+			if staleBefore.Code != http.StatusOK {
+				t.Fatalf("stale nested WASM status before repackaging = %d, want 200", staleBefore.Code)
+			}
+
+			if err := packageApp(options); err != nil {
+				t.Fatalf("packageApp(repackage) error: %v", err)
+			}
+			if _, err := inspectPackageGraph(outDir); err != nil {
+				t.Fatalf("inspectPackageGraph(repackaged) error: %v", err)
+			}
+			for _, name := range staleNames {
+				if _, err := os.Lstat(filepath.Join(outDir, filepath.FromSlash(name))); !os.IsNotExist(err) {
+					t.Fatalf("stale package artifact %s still exists after repackaging: %v", name, err)
+				}
+			}
+			assertFileContent(t, filepath.Join(outDir, "nested", "notes.txt"), "preserve unrelated content\n")
+
+			staleAfter := httptest.NewRecorder()
+			staticHandler(outDir).ServeHTTP(staleAfter, httptest.NewRequest(http.MethodGet, "/"+test.authoredWASM, nil))
+			if staleAfter.Code != http.StatusNotFound {
+				t.Fatalf("stale nested WASM status after repackaging = %d, want 404", staleAfter.Code)
+			}
+
+			var manifest assetManifest
+			readInspectJSONFixture(t, outDir, assetManifestName, &manifest)
+			if _, exists := manifest.Assets[test.standaloneWASM]; !exists {
+				t.Fatalf("standalone WASM logical name %q missing from manifest", test.standaloneWASM)
+			}
+			current := httptest.NewRecorder()
+			staticHandler(outDir).ServeHTTP(current, httptest.NewRequest(http.MethodGet, "/"+manifest.Entrypoints.WASM, nil))
+			if current.Code != http.StatusOK {
+				t.Fatalf("current declared WASM status = %d, want 200", current.Code)
+			}
+		})
+	}
+}
+
+func TestCleanPackageArtifactsCleansWASMIdentities(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		wasmNames  []string
+		staleNames []string
+	}{
+		{
+			name:       "nested custom basename",
+			wasmNames:  []string{"nested/custom.wasm", "custom.wasm"},
+			staleNames: []string{"nested/custom.wasm", "nested/custom.wasm.gz", "nested/custom.wasm.br", "custom.wasm", "custom.wasm.gz", "custom.wasm.br"},
+		},
+		{
+			name:       "non-nested duplicate identity",
+			wasmNames:  []string{"bundle.wasm", "bundle.wasm"},
+			staleNames: []string{"bundle.wasm", "bundle.wasm.gz", "bundle.wasm.br"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			for _, name := range test.staleNames {
+				writeTestFile(t, directory, name, "stale "+name+"\n")
+			}
+			writeTestFile(t, directory, "nested/notes.txt", "preserve unrelated content\n")
+
+			if err := cleanPackageArtifacts(directory, test.wasmNames...); err != nil {
+				t.Fatalf("cleanPackageArtifacts() error: %v", err)
+			}
+			for _, name := range test.staleNames {
+				if _, err := os.Lstat(filepath.Join(directory, filepath.FromSlash(name))); !os.IsNotExist(err) {
+					t.Fatalf("stale package artifact %s still exists: %v", name, err)
+				}
+			}
+			assertFileContent(t, filepath.Join(directory, "nested", "notes.txt"), "preserve unrelated content\n")
+		})
+	}
+}
+
 func TestBrowserAssetProducerIntegration(t *testing.T) {
 	appDir := t.TempDir()
 	writeMinimalPackageApp(t, appDir)
