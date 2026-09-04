@@ -264,7 +264,7 @@ func packageApp(options packageOptions) error {
 	assets[wasmLogicalName] = wasmAsset
 	entrypoints.WASM = wasmAsset.Path
 
-	runtimeSource, err := wasmExecPath(options.compiler)
+	runtimeSource, err := wasmExecPathForWorkingDirectory(options.compiler, workspaceResult.EntryPath)
 	if err != nil {
 		return err
 	}

@@ -8,11 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
 func wasmExecPath(compiler string) (string, error) {
+	return wasmExecPathForWorkingDirectory(compiler, "")
+}
+
+func wasmExecPathForWorkingDirectory(compiler, workingDirectory string) (string, error) {
 	if compiler == "tinygo" {
 		command := exec.Command("tinygo", "env", "TINYGOROOT")
 		output, err := command.Output()
@@ -26,15 +29,53 @@ func wasmExecPath(compiler string) (string, error) {
 		return path, nil
 	}
 
+	goRoot, err := selectedGoToolchainRoot(workingDirectory)
+	if err != nil {
+		return "", err
+	}
 	for _, path := range []string{
-		filepath.Join(runtime.GOROOT(), "lib", "wasm", "wasm_exec.js"),
-		filepath.Join(runtime.GOROOT(), "misc", "wasm", "wasm_exec.js"),
+		filepath.Join(goRoot, "lib", "wasm", "wasm_exec.js"),
+		filepath.Join(goRoot, "misc", "wasm", "wasm_exec.js"),
 	} {
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("locate Go wasm_exec.js below %s", runtime.GOROOT())
+	return "", fmt.Errorf("locate Go wasm_exec.js below selected GOROOT %s", goRoot)
+}
+
+func selectedGoToolchainRoot(workingDirectory string) (string, error) {
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		return "", fmt.Errorf("locate Go compiler in PATH for wasm_exec.js discovery: %w", err)
+	}
+	command := exec.Command(goPath, "env", "GOROOT")
+	if workingDirectory != "" {
+		if err := configureWorkspaceCompilerCommand(command, compilerEnvironmentOptions{
+			Compiler:         "go",
+			Invocation:       compilerInvocationBuild,
+			WorkingDirectory: workingDirectory,
+			GoFlags:          workspaceCompilerBaseGoFlags,
+			StandardGoTarget: true,
+		}); err != nil {
+			return "", err
+		}
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	output, err := command.Output()
+	if err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf("query selected Go toolchain GOROOT with %s: %s", goPath, detail)
+	}
+	goRoot := strings.TrimSpace(string(output))
+	if goRoot == "" {
+		return "", fmt.Errorf("query selected Go toolchain GOROOT with %s: empty output", goPath)
+	}
+	return goRoot, nil
 }
 
 func copyFile(sourcePath, destinationPath string) error {
