@@ -27,8 +27,13 @@ enumerate_gosec_packages() {
 	local module_path="$2"
 	local output_path="$3"
 	local go_command="$4"
+	local package_pattern="$5"
 
-	if ! GOWORK=off "$go_command" list -buildvcs=false -f '{{.ImportPath}}{{"\t"}}{{.Dir}}' ./... >"$output_path"; then
+	if [[ -z "$package_pattern" ]]; then
+		security_error "Go package enumeration requires an explicit package pattern"
+		return 1
+	fi
+	if ! GOWORK=off "$go_command" list -buildvcs=false -f '{{.ImportPath}}{{"\t"}}{{.Dir}}' "$package_pattern" >"$output_path"; then
 		security_error "Go package enumeration failed"
 		return 1
 	fi
@@ -82,6 +87,35 @@ enumerate_gosec_packages() {
 	printf '  %s\n' "${GOSEC_PACKAGE_IMPORTS[@]}"
 }
 
+run_gosec_analysis() {
+	local report_path="$1"
+	local gosec_command="$2"
+	shift 2
+
+	if (($# == 0)); then
+		security_error "gosec package coverage is empty"
+		return 1
+	fi
+	local log_path="$report_path.log"
+	rm -f -- "$report_path" "$log_path"
+	# gosec v2.29.0 suppresses a clean JSON report under -quiet. Keep the
+	# structured report mandatory while sending progress logs to a temporary file.
+	if ! "$gosec_command" -no-fail -fmt=json -log="$log_path" -out="$report_path" "$@"; then
+		if [[ -s "$log_path" ]]; then
+			cat "$log_path" >&2
+		fi
+		security_error "gosec execution failed"
+		return 1
+	fi
+	if [[ ! -s "$report_path" ]]; then
+		if [[ -s "$log_path" ]]; then
+			cat "$log_path" >&2
+		fi
+		security_error "gosec did not produce a non-empty JSON report"
+		return 1
+	fi
+}
+
 verify_root_module_surface() {
 	local output_path="$1"
 	local -a modules=()
@@ -126,8 +160,10 @@ main() {
 	trap cleanup_security_analysis EXIT
 	local tool_dir="$SECURITY_WORK_DIR/bin"
 	local module_report="$SECURITY_WORK_DIR/modules.txt"
-	local package_report="$SECURITY_WORK_DIR/packages.txt"
-	local gosec_report="$SECURITY_WORK_DIR/gosec.json"
+	local host_package_report="$SECURITY_WORK_DIR/packages-host.txt"
+	local browser_package_report="$SECURITY_WORK_DIR/packages-wasm-runtime.txt"
+	local host_gosec_report="$SECURITY_WORK_DIR/gosec-host.json"
+	local browser_gosec_report="$SECURITY_WORK_DIR/gosec-wasm-runtime.json"
 	mkdir -p "$tool_dir"
 
 	echo '== Install pinned analyzers =='
@@ -145,25 +181,45 @@ main() {
 	echo '== Root Go module dependency surface =='
 	verify_root_module_surface "$module_report"
 
-	echo '== Staticcheck SA correctness =='
+	echo '== Host Staticcheck SA correctness =='
 	staticcheck -checks='SA*' ./...
 	staticcheck -checks='SA*' -tags='goframe_debug' ./...
-	GOOS=js GOARCH=wasm staticcheck -checks='SA*' -tests=false ./pkg/goframe
-	GOOS=js GOARCH=wasm staticcheck -checks='SA*' -tests=false -tags='goframe_debug' ./pkg/goframe
 
-	echo '== Reachable vulnerability analysis =='
+	echo '== Browser runtime Staticcheck SA correctness =='
+	GOOS=js GOARCH=wasm CGO_ENABLED=0 staticcheck -checks='SA*' -tests=false ./pkg/goframe
+	GOOS=js GOARCH=wasm CGO_ENABLED=0 staticcheck -checks='SA*' -tests=false -tags='goframe_debug' ./pkg/goframe
+
+	echo '== Host reachable vulnerability analysis =='
 	govulncheck -scan=symbol ./...
 
-	echo '== Gosec advisory analysis =='
-	enumerate_gosec_packages "$ROOT_DIR" "$MAIN_MODULE" "$package_report" go
-	if ! gosec -quiet -no-fail -fmt=json -out="$gosec_report" "${GOSEC_PACKAGE_DIRS[@]}"; then
-		security_error "gosec execution failed"
-		return 1
-	fi
+	echo '== Browser runtime reachable vulnerability analysis =='
+	GOOS=js GOARCH=wasm CGO_ENABLED=0 govulncheck -scan=symbol ./pkg/goframe
+
+	echo '== Host gosec advisory analysis =='
+	enumerate_gosec_packages "$ROOT_DIR" "$MAIN_MODULE" "$host_package_report" go ./...
+	local -a host_gosec_package_dirs=("${GOSEC_PACKAGE_DIRS[@]}")
+	run_gosec_analysis "$host_gosec_report" gosec "${host_gosec_package_dirs[@]}"
 	go run ./.github/scripts/gosec-report.go \
-		-report "$gosec_report" \
+		-report "$host_gosec_report" \
 		-root "$ROOT_DIR" \
-		-packages "${#GOSEC_PACKAGE_DIRS[@]}"
+		-packages "${#host_gosec_package_dirs[@]}"
+
+	echo '== Browser runtime gosec advisory analysis =='
+	GOOS=js GOARCH=wasm CGO_ENABLED=0 enumerate_gosec_packages \
+		"$ROOT_DIR" \
+		"$MAIN_MODULE" \
+		"$browser_package_report" \
+		go \
+		./pkg/goframe
+	local -a browser_gosec_package_dirs=("${GOSEC_PACKAGE_DIRS[@]}")
+	GOOS=js GOARCH=wasm CGO_ENABLED=0 run_gosec_analysis \
+		"$browser_gosec_report" \
+		gosec \
+		"${browser_gosec_package_dirs[@]}"
+	go run ./.github/scripts/gosec-report.go \
+		-report "$browser_gosec_report" \
+		-root "$ROOT_DIR" \
+		-packages "${#browser_gosec_package_dirs[@]}"
 
 	echo 'security analysis: ok'
 }
