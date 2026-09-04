@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 )
 
@@ -53,7 +52,7 @@ func doctorCommand(args []string) error {
 	if path, err := wasmExecPath("go"); err == nil {
 		fmt.Printf("wasm_exec.js: found, %s\n", path)
 	} else {
-		fmt.Printf("wasm_exec.js: not found below %s\n", runtime.GOROOT())
+		fmt.Printf("wasm_exec.js: error, %v\n", err)
 		failures++
 	}
 	if tinyGoFound {
