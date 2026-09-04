@@ -355,6 +355,47 @@ prefixes, specific unsupported-syntax messages, and source snippets. They are
 part of the compiler/toolchain contract even though the broader GOX syntax
 surface remains experimental.
 
+### Security Analysis
+
+`.github/workflows/ci-security.yml` runs on pull requests, pushes to `main`,
+and manual dispatch. One focused Linux job uses Go `1.26.6` and invokes the
+canonical local policy runner:
+
+```bash
+scripts/security-analysis.sh
+```
+
+The runner installs Staticcheck `v0.8.1`, govulncheck `v1.7.0`, and gosec
+`v2.29.0` into a temporary `GOBIN`. It rejects a different active Go version
+instead of allowing analyzer toolchain drift. The release-blocking checks are:
+
+- Staticcheck's `SA*` correctness class across ordinary and `goframe_debug`
+  host builds;
+- the same `SA*` class for ordinary and `goframe_debug` `js/wasm`
+  `pkg/goframe` builds, with tests disabled for that target;
+- `govulncheck -scan=symbol ./...`, where reachable vulnerabilities and
+  scanner, database, network, or package-loading failures all fail the job;
+- `GOWORK=off go list -m all`, which must enumerate exactly the main
+  `github.com/graybuton/goframe` module and no additional root-module
+  dependencies.
+
+Full Staticcheck is not a release gate because its style and simplification
+classes are separate from the selected correctness contract.
+
+Gosec runs its complete default rule set over the package directories derived
+from `go list ./...`; filesystem recursion and nested `testdata` trees are not
+package authorities. Ordinary findings are visible and advisory, while package
+enumeration failure, analyzer execution failure, package-processing errors,
+missing or malformed JSON, invalid report structure, and empty or unproven
+coverage fail the job. The accepted-base characterization contains 90
+findings: 29 `G703`, 23 `G304`, 13 `G301`, 11 `G204`, 3 each of `G104` and
+`G115`, and 2 each of `G112`, `G114`, `G306`, and `G705`. That count is not a
+suppression baseline; every run reports the current findings and deterministic
+per-rule totals.
+
+No source suppressions implement this policy. GitHub-managed CodeQL remains a
+separate repository control, and Core continues to own vet and race coverage.
+
 ### VS Code Extension
 
 `.github/workflows/ci-vscode.yml` runs on pull requests and pushes to `main`.
@@ -393,11 +434,12 @@ Current supply-chain evidence is lightweight:
   dependencies;
 - the VS Code extension workflow installs from `package-lock.json` with
   `npm ci`;
-- the root Go module currently has no third-party module requirements beyond
-  the standard library.
+- the Security Analysis workflow enforces the root Go module's current
+  standard-library-only dependency surface and runs pinned correctness,
+  vulnerability, and advisory security analyzers.
 
-No SBOM, package signing, or heavyweight dependency scanner is part of the
-current preview CI contract.
+No SBOM, package signing, license scanner, or Action/artifact pinning policy is
+part of this security-analysis stage.
 
 ## Local Checks
 
