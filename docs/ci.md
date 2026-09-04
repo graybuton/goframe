@@ -373,25 +373,43 @@ instead of allowing analyzer toolchain drift. The release-blocking checks are:
   host builds;
 - the same `SA*` class for ordinary and `goframe_debug` `js/wasm`
   `pkg/goframe` builds, with tests disabled for that target;
-- `govulncheck -scan=symbol ./...`, where reachable vulnerabilities and
-  scanner, database, network, or package-loading failures all fail the job;
+- `govulncheck -scan=symbol ./...` for the host package graph;
+- `govulncheck -scan=symbol ./pkg/goframe` under `GOOS=js`, `GOARCH=wasm`,
+  and `CGO_ENABLED=0` for the browser runtime;
 - `GOWORK=off go list -m all`, which must enumerate exactly the main
   `github.com/graybuton/goframe` module and no additional root-module
   dependencies.
 
+Reachable vulnerabilities and scanner, database, network, or package-loading
+failures in either govulncheck target fail the job.
+
 Full Staticcheck is not a release gate because its style and simplification
 classes are separate from the selected correctness contract.
 
-Gosec runs its complete default rule set over the package directories derived
-from `go list ./...`; filesystem recursion and nested `testdata` trees are not
-package authorities. Ordinary findings are visible and advisory, while package
-enumeration failure, analyzer execution failure, package-processing errors,
-missing or malformed JSON, invalid report structure, and empty or unproven
-coverage fail the job. The accepted-base characterization contains 90
-findings: 29 `G703`, 23 `G304`, 13 `G301`, 11 `G204`, 3 each of `G104` and
-`G115`, and 2 each of `G112`, `G114`, `G306`, and `G705`. That count is not a
-suppression baseline; every run reports the current findings and deterministic
-per-rule totals.
+Gosec runs its complete default rule set separately over package directories
+derived from the host `go list ./...` graph and from the browser-runtime
+`go list ./pkg/goframe` graph under `GOOS=js`, `GOARCH=wasm`, and
+`CGO_ENABLED=0`.
+Filesystem recursion and nested `testdata` trees are not package authorities.
+Ordinary findings are visible and advisory, while package enumeration failure,
+analyzer execution failure, package-processing errors, missing or malformed
+JSON, invalid report structure, and empty or unproven coverage fail either
+target independently. At this revision the host characterization is 40
+packages, 119 files, 27,722 lines, and 90 findings; the browser-runtime
+characterization is one package, 24 files, 4,789 lines, and no findings. The
+host findings comprise 29 `G703`, 23 `G304`, 13 `G301`, 11 `G204`, 3 each of
+`G104` and `G115`, and 2 each of `G112`, `G114`, `G306`, and `G705`. These
+numbers are characterization, not suppression baselines or acceptance
+thresholds; every run reports target-specific totals and deterministic
+per-rule counts.
+
+The clean-checkout browser analyzer surface is the production
+`pkg/goframe` runtime. Generated GOX applications are not claimed as
+whole-program static-security analyzer roots in this gate: their generated Go
+declarations exist only after `goxc` materializes a compiler workspace. Browser
+Smoke and build/package checks provide separate application evidence; they do
+not substitute for govulncheck or gosec, and this gate does not claim static
+analysis of every generated application executable.
 
 No source suppressions implement this policy. GitHub-managed CodeQL remains a
 separate repository control, and Core continues to own vet and race coverage.
