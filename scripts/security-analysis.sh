@@ -161,8 +161,10 @@ main() {
 	local tool_dir="$SECURITY_WORK_DIR/bin"
 	local module_report="$SECURITY_WORK_DIR/modules.txt"
 	local host_package_report="$SECURITY_WORK_DIR/packages-host.txt"
+	local windows_package_report="$SECURITY_WORK_DIR/packages-windows.txt"
 	local browser_package_report="$SECURITY_WORK_DIR/packages-wasm-runtime.txt"
 	local host_gosec_report="$SECURITY_WORK_DIR/gosec-host.json"
+	local windows_gosec_report="$SECURITY_WORK_DIR/gosec-windows.json"
 	local browser_gosec_report="$SECURITY_WORK_DIR/gosec-wasm-runtime.json"
 	mkdir -p "$tool_dir"
 
@@ -185,12 +187,19 @@ main() {
 	staticcheck -checks='SA*' ./...
 	staticcheck -checks='SA*' -tags='goframe_debug' ./...
 
+	echo '== Windows target Staticcheck SA correctness =='
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 staticcheck -checks='SA*' ./...
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 staticcheck -checks='SA*' -tags='goframe_debug' ./...
+
 	echo '== Browser runtime Staticcheck SA correctness =='
 	GOOS=js GOARCH=wasm CGO_ENABLED=0 staticcheck -checks='SA*' -tests=false ./pkg/goframe
 	GOOS=js GOARCH=wasm CGO_ENABLED=0 staticcheck -checks='SA*' -tests=false -tags='goframe_debug' ./pkg/goframe
 
 	echo '== Host reachable vulnerability analysis =='
 	govulncheck -scan=symbol ./...
+
+	echo '== Windows target reachable vulnerability analysis =='
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 govulncheck -scan=symbol ./...
 
 	echo '== Browser runtime reachable vulnerability analysis =='
 	GOOS=js GOARCH=wasm CGO_ENABLED=0 govulncheck -scan=symbol ./pkg/goframe
@@ -203,6 +212,23 @@ main() {
 		-report "$host_gosec_report" \
 		-root "$ROOT_DIR" \
 		-packages "${#host_gosec_package_dirs[@]}"
+
+	echo '== Windows target gosec advisory analysis =='
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 enumerate_gosec_packages \
+		"$ROOT_DIR" \
+		"$MAIN_MODULE" \
+		"$windows_package_report" \
+		go \
+		./...
+	local -a windows_gosec_package_dirs=("${GOSEC_PACKAGE_DIRS[@]}")
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 run_gosec_analysis \
+		"$windows_gosec_report" \
+		gosec \
+		"${windows_gosec_package_dirs[@]}"
+	go run ./.github/scripts/gosec-report.go \
+		-report "$windows_gosec_report" \
+		-root "$ROOT_DIR" \
+		-packages "${#windows_gosec_package_dirs[@]}"
 
 	echo '== Browser runtime gosec advisory analysis =='
 	GOOS=js GOARCH=wasm CGO_ENABLED=0 enumerate_gosec_packages \
