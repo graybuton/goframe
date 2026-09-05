@@ -355,6 +355,80 @@ prefixes, specific unsupported-syntax messages, and source snippets. They are
 part of the compiler/toolchain contract even though the broader GOX syntax
 surface remains experimental.
 
+### Security Analysis
+
+`.github/workflows/ci-security.yml` runs on pull requests, pushes to `main`,
+and manual dispatch. One focused Linux job uses Go `1.26.6` and invokes the
+canonical local policy runner:
+
+```bash
+scripts/security-analysis.sh
+```
+
+The canonical job executes on Linux and additionally analyzes the supported
+Windows amd64 package configuration. Windows package loading and analyzers use
+command-local `GOOS=windows GOARCH=amd64 CGO_ENABLED=0`; no supported Windows
+production source currently depends on cgo. This is cross-target static
+analysis, not native Windows execution. Core CI retains the native Windows
+runtime and platform evidence.
+
+The runner installs Staticcheck `v0.8.1`, govulncheck `v1.7.0`, and gosec
+`v2.29.0` into a temporary `GOBIN`. It rejects a different active Go version
+instead of allowing analyzer toolchain drift. The release-blocking checks are:
+
+- Staticcheck's `SA*` correctness class across ordinary and `goframe_debug`
+  host builds;
+- the same `SA*` class across ordinary and `goframe_debug` Windows-target
+  `./...` builds, retaining normal test participation;
+- the same `SA*` class for ordinary and `goframe_debug` `js/wasm`
+  `pkg/goframe` builds, with tests disabled for that target;
+- `govulncheck -scan=symbol ./...` for the host package graph;
+- `govulncheck -scan=symbol ./...` under the Windows target;
+- `govulncheck -scan=symbol ./pkg/goframe` under `GOOS=js`, `GOARCH=wasm`,
+  and `CGO_ENABLED=0` for the browser runtime;
+- `GOWORK=off go list -m all`, which must enumerate exactly the main
+  `github.com/graybuton/goframe` module and no additional root-module
+  dependencies.
+
+Reachable vulnerabilities and scanner, database, network, or package-loading
+failures in any govulncheck target fail the job.
+
+Full Staticcheck is not a release gate because its style and simplification
+classes are separate from the selected correctness contract.
+
+Gosec runs its complete default rule set separately over package directories
+derived from each target's package graph:
+
+| Configuration | Package enumeration | Analyzer environment |
+| --- | --- | --- |
+| Native host | `go list ./...` | native host, Linux in the canonical job |
+| Windows target | `go list ./...` | `GOOS=windows GOARCH=amd64 CGO_ENABLED=0` |
+| Browser runtime | `go list ./pkg/goframe` | `GOOS=js GOARCH=wasm CGO_ENABLED=0` |
+
+Enumeration and gosec execution use the same target environment. Each target
+has its own package list and JSON report; the report classifier runs on the
+native host. Analyzer installation and root-module verification also remain
+host-native.
+Filesystem recursion and nested `testdata` trees are not package authorities.
+Ordinary findings are visible and advisory, while package enumeration failure,
+analyzer execution failure, package-processing errors, missing or malformed
+JSON, invalid report structure, source suppressions, and empty or unproven
+coverage fail each target independently. Every run reports separate
+target-specific totals and deterministic per-rule counts. These are
+characterization, not suppression baselines or acceptance thresholds; findings
+shared by targets are not combined into a cross-target total.
+
+The clean-checkout browser analyzer surface is the production
+`pkg/goframe` runtime. Generated GOX applications are not claimed as
+whole-program static-security analyzer roots in this gate: their generated Go
+declarations exist only after `goxc` materializes a compiler workspace. Browser
+Smoke and build/package checks provide separate application evidence; they do
+not substitute for govulncheck or gosec, and this gate does not claim static
+analysis of every generated application executable.
+
+No source suppressions implement this policy. GitHub-managed CodeQL remains a
+separate repository control, and Core continues to own vet and race coverage.
+
 ### VS Code Extension
 
 `.github/workflows/ci-vscode.yml` runs on pull requests and pushes to `main`.
@@ -393,11 +467,12 @@ Current supply-chain evidence is lightweight:
   dependencies;
 - the VS Code extension workflow installs from `package-lock.json` with
   `npm ci`;
-- the root Go module currently has no third-party module requirements beyond
-  the standard library.
+- the Security Analysis workflow enforces the root Go module's current
+  standard-library-only dependency surface and runs pinned correctness,
+  vulnerability, and advisory security analyzers.
 
-No SBOM, package signing, or heavyweight dependency scanner is part of the
-current preview CI contract.
+No SBOM, package signing, license scanner, or Action/artifact pinning policy is
+part of this security-analysis stage.
 
 ## Local Checks
 
