@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-EXPECTED_GO_VERSION="go1.26.6"
+SUPPORTED_GO_VERSIONS=(go1.26.6 go1.27.0)
 MAIN_MODULE="github.com/graybuton/goframe"
 STATICCHECK_VERSION="v0.8.1"
 GOVULNCHECK_VERSION="v1.7.0"
@@ -142,6 +142,8 @@ main() {
 	export GOFLAGS=-buildvcs=false
 
 	local actual_go_version
+	local supported_go_version
+	local go_version_supported=false
 	local host_goos
 	local host_goarch
 	actual_go_version="$(go env GOVERSION)"
@@ -150,8 +152,14 @@ main() {
 	export GOOS="$host_goos"
 	export GOARCH="$host_goarch"
 	go version
-	if [[ "$actual_go_version" != "$EXPECTED_GO_VERSION" ]]; then
-		security_error "requires $EXPECTED_GO_VERSION, found $actual_go_version"
+	for supported_go_version in "${SUPPORTED_GO_VERSIONS[@]}"; do
+		if [[ "$actual_go_version" == "$supported_go_version" ]]; then
+			go_version_supported=true
+			break
+		fi
+	done
+	if [[ "$go_version_supported" != true ]]; then
+		security_error "unsupported active Go version $actual_go_version; supported: ${SUPPORTED_GO_VERSIONS[*]}"
 		return 1
 	fi
 	if [[ "$(go env GOMOD)" != "$ROOT_DIR/go.mod" ]]; then
