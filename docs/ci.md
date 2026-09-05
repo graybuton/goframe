@@ -358,12 +358,22 @@ surface remains experimental.
 ### Security Analysis
 
 `.github/workflows/ci-security.yml` runs on pull requests, pushes to `main`,
-and manual dispatch. One focused Linux job uses Go `1.26.6` and invokes the
-canonical local policy runner:
+and manual dispatch. One focused Linux job sequentially selects and verifies
+Go `1.26.6` and `1.27.0`, invoking the same canonical local policy runner under
+each toolchain:
 
 ```bash
 scripts/security-analysis.sh
 ```
+
+Each invocation evaluates the complete native-host, Windows amd64 cross-target,
+and `js/wasm` browser-runtime analyzer policy. The required job/context remains
+`Security analysis`.
+
+The local runner is compatible with the stock Bash 3.2 baseline of the
+supported macOS host. The existing macOS Core lane checks its syntax and runs
+the hermetic policy controls through `/bin/bash`; it does not install or run
+the full analyzer suite there.
 
 The canonical job executes on Linux and additionally analyzes the supported
 Windows amd64 package configuration. Windows package loading and analyzers use
@@ -372,9 +382,12 @@ production source currently depends on cgo. This is cross-target static
 analysis, not native Windows execution. Core CI retains the native Windows
 runtime and platform evidence.
 
-The runner installs Staticcheck `v0.8.1`, govulncheck `v1.7.0`, and gosec
-`v2.29.0` into a temporary `GOBIN`. It rejects a different active Go version
-instead of allowing analyzer toolchain drift. The release-blocking checks are:
+Each runner invocation installs Staticcheck `v0.8.1`, govulncheck `v1.7.0`, and
+gosec `v2.29.0` into its own temporary `GOBIN`, using the active Go toolchain.
+It accepts only the explicitly supported Go versions `1.26.6` and `1.27.0`
+and rejects any other active version, retaining `GOTOOLCHAIN=local` to prevent
+automatic toolchain switching. The release-blocking checks under each
+supported toolchain are:
 
 - Staticcheck's `SA*` correctness class across ordinary and `goframe_debug`
   host builds;
