@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestGosecReportFindingsAreAdvisory(t *testing.T) {
   "Issues": [
     {"rule_id":"G304","details":"file path provided as input","file":"/repo/z.go","line":"9","column":"3"},
     {"rule_id":"G204","details":"subprocess launched with variable","file":"/repo/a.go","line":"4","column":"2"},
-    {"rule_id":"G204","details":"subprocess launched with variable","file":"/repo/b.go","line":"5","column":"2"}
+    {"rule_id":"G204","details":"subprocess launched with variable","file":"/repo/b.go","line":"5-7","column":"02"}
   ],
   "Stats": {"files":2,"lines":20,"nosec":0,"found":3},
   "GosecVersion":"dev"
@@ -23,11 +24,18 @@ func TestGosecReportFindingsAreAdvisory(t *testing.T) {
 	if err := writeGosecSummary(&output, report, "/repo", 2); err != nil {
 		t.Fatalf("writeGosecSummary() error = %v", err)
 	}
+	if diagnostic := regexp.MustCompile(`(?m)^gosec: advisory .*\.go:[0-9-]+:[0-9-]+:`).FindString(output.String()); diagnostic != "" {
+		t.Fatalf("advisory output contains compiler-diagnostic location syntax %q:\n%s", diagnostic, output.String())
+	}
 	want := []string{
 		"packages=2 files=2 lines=20 findings=3",
 		"gosec: G204=2",
 		"gosec: G304=1",
-		"gosec: advisory G204 a.go:4:2",
+		strings.Join([]string{
+			"gosec: advisory G204 a.go (line 4, column 2): subprocess launched with variable",
+			"gosec: advisory G204 b.go (line 5-7, column 02): subprocess launched with variable",
+			"gosec: advisory G304 z.go (line 9, column 3): file path provided as input",
+		}, "\n"),
 		"gosec: findings are advisory; analyzer health and package coverage passed",
 	}
 	for _, fragment := range want {
@@ -35,6 +43,7 @@ func TestGosecReportFindingsAreAdvisory(t *testing.T) {
 			t.Fatalf("summary missing %q:\n%s", fragment, output.String())
 		}
 	}
+	t.Log(output.String())
 }
 
 func TestGosecReportCleanScanPasses(t *testing.T) {

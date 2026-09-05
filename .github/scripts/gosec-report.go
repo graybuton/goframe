@@ -179,7 +179,7 @@ func writeGosecSummary(writer io.Writer, report gosecReport, repositoryRoot stri
 		fmt.Fprintf(writer, "gosec: %s=%d\n", rule, counts[rule])
 	}
 	for _, issue := range issues {
-		fmt.Fprintf(writer, "gosec: advisory %s %s:%s:%s: %s\n",
+		fmt.Fprintf(writer, "gosec: advisory %s %s (line %s, column %s): %s\n",
 			issue.RuleID, issue.File, issue.Line, issue.Column, issue.Details)
 	}
 	if len(issues) == 0 {
