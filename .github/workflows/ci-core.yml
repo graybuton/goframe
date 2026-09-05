@@ -57,6 +57,14 @@ jobs:
         shell: pwsh
         run: ./.github/scripts/ensure-go-toolchain.tests.ps1
 
+      - name: Test security runner with system Bash
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version
+          /bin/bash -n scripts/security-analysis.sh
+          /bin/bash -n .github/scripts/security-analysis-runner.tests.sh
+          /bin/bash .github/scripts/security-analysis-runner.tests.sh
+
       - name: Setup Node.js
         if: matrix.full
         uses: actions/setup-node@v6

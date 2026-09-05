@@ -40,9 +40,7 @@ enumerate_gosec_packages() {
 
 	GOSEC_PACKAGE_DIRS=()
 	GOSEC_PACKAGE_IMPORTS=()
-	local row import_path directory
-	local -A seen_imports=()
-	local -A seen_directories=()
+	local row import_path directory index
 	while IFS= read -r row; do
 		if [[ "$row" != *$'\t'* ]]; then
 			security_error "invalid Go package row: $row"
@@ -69,12 +67,12 @@ enumerate_gosec_packages() {
 				return 1
 				;;
 		esac
-		if [[ -n "${seen_imports[$import_path]:-}" || -n "${seen_directories[$directory]:-}" ]]; then
-			security_error "duplicate Go package coverage row: $row"
-			return 1
-		fi
-		seen_imports["$import_path"]=1
-		seen_directories["$directory"]=1
+		for ((index = 0; index < ${#GOSEC_PACKAGE_IMPORTS[@]}; index++)); do
+			if [[ "$import_path" == "${GOSEC_PACKAGE_IMPORTS[index]}" || "$directory" == "${GOSEC_PACKAGE_DIRS[index]}" ]]; then
+				security_error "duplicate Go package coverage row: $row"
+				return 1
+			fi
+		done
 		GOSEC_PACKAGE_IMPORTS+=("$import_path")
 		GOSEC_PACKAGE_DIRS+=("$directory")
 	done <"$output_path"
@@ -119,13 +117,18 @@ run_gosec_analysis() {
 verify_root_module_surface() {
 	local output_path="$1"
 	local -a modules=()
+	local module
 	if ! GOWORK=off go list -m all >"$output_path"; then
 		security_error "root Go module enumeration failed"
 		return 1
 	fi
-	mapfile -t modules <"$output_path"
+	while IFS= read -r module || [[ -n "$module" ]]; do
+		modules+=("$module")
+	done <"$output_path"
 	printf 'root Go module graph:\n'
-	printf '  %s\n' "${modules[@]}"
+	if ((${#modules[@]} != 0)); then
+		printf '  %s\n' "${modules[@]}"
+	fi
 	if ((${#modules[@]} != 1)) || [[ "${modules[0]:-}" != "$MAIN_MODULE" ]]; then
 		security_error "root Go module graph must contain only $MAIN_MODULE"
 		return 1

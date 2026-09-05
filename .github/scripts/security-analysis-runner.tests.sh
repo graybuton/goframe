@@ -4,8 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source "$ROOT_DIR/scripts/security-analysis.sh"
 
+# Catch known unsupported commands at command position, not in comments.
+if grep -nE '^[[:space:]]*((local|declare)[[:space:]]+-[^[:space:]]*A|mapfile|readarray)([[:space:]]|$)' "$ROOT_DIR/scripts/security-analysis.sh"; then
+	echo 'runner test: canonical runner requires Bash newer than 3.2' >&2
+	exit 1
+fi
+
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/goframe-security-runner-tests.XXXXXX")"
 trap 'rm -rf "$TEST_DIR"' EXIT
+
+# Keep fake-tool shebangs and child shells on the interpreter under test.
+mkdir -p "$TEST_DIR/shell-bin"
+ln -s "$BASH" "$TEST_DIR/shell-bin/bash"
+export PATH="$TEST_DIR/shell-bin:$PATH"
 
 write_fake_go() {
 	local path="$1"
@@ -36,6 +47,14 @@ case '$mode' in
     ;;
   browser)
     printf 'example.test/project/browser\\t%s\\n' '$TEST_DIR/repository/browser'
+    ;;
+  duplicate-import)
+    printf 'example.test/project/one\\t%s\\n' '$TEST_DIR/repository/one'
+    printf 'example.test/project/one\\t%s\\n' '$TEST_DIR/repository/two'
+    ;;
+  duplicate-directory)
+    printf 'example.test/project/one\\t%s\\n' '$TEST_DIR/repository/one'
+    printf 'example.test/project/two\\t%s\\n' '$TEST_DIR/repository/one'
     ;;
 esac
 EOF
@@ -91,6 +110,42 @@ if ((${#GOSEC_PACKAGE_DIRS[@]} != 2)); then
 	exit 1
 fi
 host_package_dirs=("${GOSEC_PACKAGE_DIRS[@]}")
+
+for mode in duplicate-import duplicate-directory; do
+	write_fake_go "$TEST_DIR/go-$mode" "$mode" ./... linux amd64 1
+	if GOOS=linux GOARCH=amd64 CGO_ENABLED=1 enumerate_gosec_packages \
+		"$TEST_DIR/repository" example.test/project "$TEST_DIR/$mode.txt" "$TEST_DIR/go-$mode" ./... >"$TEST_DIR/$mode.output" 2>&1; then
+		echo "runner test: $mode was accepted" >&2
+		exit 1
+	fi
+	grep -Fq 'duplicate Go package coverage row:' "$TEST_DIR/$mode.output"
+done
+
+check_module_control() (
+	mode="$1"
+	go() {
+		[[ "$*" == 'list -m all' ]] || return 97
+		case "$mode" in
+			failure) return 1 ;;
+			empty) ;;
+			extra) printf '%s\n' "$MAIN_MODULE" example.test/dependency ;;
+			wrong) printf '%s\n' example.test/project ;;
+			whitespace) printf ' %s\n' "$MAIN_MODULE" ;;
+			blank-line) printf '%s\n\n' "$MAIN_MODULE" ;;
+			unterminated) printf '%s' "$MAIN_MODULE" ;;
+			success) printf '%s\n' "$MAIN_MODULE" ;;
+		esac
+	}
+	if [[ "$mode" == success || "$mode" == unterminated ]]; then
+		verify_root_module_surface "$TEST_DIR/modules.txt"
+	elif verify_root_module_surface "$TEST_DIR/modules.txt"; then
+		echo "runner test: $mode module graph was accepted" >&2
+		exit 1
+	fi
+)
+for mode in success unterminated failure empty extra wrong whitespace blank-line; do
+	check_module_control "$mode"
+done
 
 write_fake_go "$TEST_DIR/go-browser" browser ./pkg/goframe js wasm 0
 GOOS=js GOARCH=wasm CGO_ENABLED=0 enumerate_gosec_packages \
@@ -276,9 +331,9 @@ case "$tool" in
     report="${4#-out=}"
     shift 4
     case "$target" in
-      host) [[ "$*" == "$FAKE_ROOT/one $FAKE_ROOT/two" && "$report" == */gosec-host.json ]] ;;
-      windows) [[ "$*" == "$FAKE_ROOT/windows $FAKE_ROOT/two $FAKE_ROOT/three" && "$report" == */gosec-windows.json ]] ;;
-      browser) [[ "$*" == "$FAKE_ROOT/browser" && "$report" == */gosec-wasm-runtime.json ]] ;;
+      host) [[ "$#" == 2 && "$1" == "$FAKE_ROOT/one" && "$2" == "$FAKE_ROOT/two" && "$report" == */gosec-host.json ]] ;;
+      windows) [[ "$#" == 3 && "$1" == "$FAKE_ROOT/windows" && "$2" == "$FAKE_ROOT/two" && "$3" == "$FAKE_ROOT/three" && "$report" == */gosec-windows.json ]] ;;
+      browser) [[ "$#" == 1 && "$1" == "$FAKE_ROOT/browser" && "$report" == */gosec-wasm-runtime.json ]] ;;
     esac
     if [[ "$target" == windows ]]; then
       case "$FAIL_MODE" in
@@ -305,7 +360,7 @@ run_policy_control() {
 		RUNNER_SOURCE="$ROOT_DIR/scripts/security-analysis.sh" \
 		FAKE_ROOT="$TEST_DIR/repository" FAIL_MODE="$mode" \
 		CALL_LOG="$TEST_DIR/$mode.calls" \
-		bash -c 'source "$RUNNER_SOURCE"; ROOT_DIR="$FAKE_ROOT"; main' >"$TEST_DIR/$mode.output" 2>&1; then
+		"$BASH" -c 'source "$RUNNER_SOURCE"; ROOT_DIR="$FAKE_ROOT"; main' >"$TEST_DIR/$mode.output" 2>&1; then
 		status=0
 	else
 		status=$?
