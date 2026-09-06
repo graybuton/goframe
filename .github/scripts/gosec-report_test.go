@@ -2,12 +2,172 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+var workflowLogPayloads = []struct {
+	name string
+	raw  string
+	want string
+}{
+	{"V2 warning LF", "\n::warning file=fake.go,line=1::forged", `\n::warning file=fake.go,line=1::forged`},
+	{"V2 error CR", "\r::error::forged", `\r::error::forged`},
+	{"V2 mask CRLF", "\r\n::add-mask::secret", `\r\n::add-mask::secret`},
+	{"V2 stop LF", "\n::stop-commands::TOKEN", `\n::stop-commands::TOKEN`},
+	{"legacy warning", "##[warning]forged", `##\[warning]forged`},
+	{"legacy error", "prefix ##[error]forged", `prefix ##\[error]forged`},
+	{"legacy mask", "##[add-mask]secret", `##\[add-mask]secret`},
+	{"legacy stop", "##[stop-commands]TOKEN", `##\[stop-commands]TOKEN`},
+	{"bare prefix", "##[", `##\[`},
+	{"three hashes", "###[", `###\[`},
+	{"four hashes", "####[", `####\[`},
+	{"repeated prefix", "##[\n##[", `##\[\n##\[`},
+	{"CR prefix", "\r##[", `\r##\[`},
+	{"LF prefix", "\n##[warning]", `\n##\[warning]`},
+}
+
+func TestSanitizeWorkflowLogField(t *testing.T) {
+	for _, payload := range workflowLogPayloads {
+		t.Run(payload.name, func(t *testing.T) {
+			got := sanitizeWorkflowLogField(payload.raw)
+			if got != payload.want {
+				t.Errorf("sanitized field = %q, want %q", got, payload.want)
+			}
+			if strings.ContainsAny(got, "\r\n") || strings.Contains(got, "##[") {
+				t.Errorf("unsafe sanitized field %q", got)
+			}
+			if sanitizeWorkflowLogField(got) != got {
+				t.Errorf("sanitizing already-encoded field changed %q", got)
+			}
+		})
+	}
+	for _, safe := range []string{"", "G204 a.go (line 4, column 2): message", "data ::warning::text", `C:\repo\file.go`, `literal \r\n ##\[ text`} {
+		if got := sanitizeWorkflowLogField(safe); got != safe {
+			t.Errorf("safe text changed: %q became %q", safe, got)
+		}
+	}
+}
+
+func TestGosecReportWorkflowLogFields(t *testing.T) {
+	for _, field := range []string{"GosecVersion", "rule_id", "file", "line", "column", "details"} {
+		for _, payload := range workflowLogPayloads {
+			t.Run(field+"/"+payload.name, func(t *testing.T) {
+				issue := map[string]string{
+					"rule_id": "G204", "file": "/repo/a.go", "line": "4", "column": "2", "details": "message",
+				}
+				version := "dev"
+				if field == "GosecVersion" {
+					version += payload.raw
+				} else {
+					issue[field] += payload.raw
+				}
+				report := readWorkflowLogTestReport(t, version, issue, map[string][]gosecProcessingError{})
+				before, err := json.Marshal(report)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var output bytes.Buffer
+				if err := writeGosecSummary(&output, report, "/repo", 1); err != nil {
+					t.Fatalf("advisory report rejected: %v", err)
+				}
+				assertWorkflowLogSafe(t, output.String(), 4)
+				if !strings.Contains(output.String(), payload.want) {
+					t.Errorf("escaped payload %q missing from %q", payload.want, output.String())
+				}
+				if !strings.Contains(output.String(), "gosec: findings are advisory; analyzer health and package coverage passed\n") {
+					t.Errorf("advisory conclusion missing: %q", output.String())
+				}
+				after, err := json.Marshal(report)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatal("logging mutated raw report data")
+				}
+			})
+		}
+	}
+}
+
+func TestGosecReportWorkflowLogProcessingErrors(t *testing.T) {
+	for _, field := range []string{"path", "message", "path without details"} {
+		for _, payload := range workflowLogPayloads {
+			t.Run(field+"/"+payload.name, func(t *testing.T) {
+				path, message := "pkg/broken", "mixed packages"
+				if field == "message" {
+					message += payload.raw
+				} else {
+					path += payload.raw
+				}
+				processingErrors := map[string][]gosecProcessingError{
+					path: {{Line: 4, Column: 2, Error: message}},
+				}
+				if field == "path without details" {
+					processingErrors[path] = nil
+					message = "unspecified processing error"
+				}
+				report := readWorkflowLogTestReport(t, "dev", nil, processingErrors)
+				var output bytes.Buffer
+				err := writeGosecSummary(&output, report, "/repo", 1)
+				if err == nil {
+					t.Fatal("processing error did not block report")
+				}
+				if output.Len() != 0 {
+					t.Errorf("processing failure emitted a success summary: %q", output.String())
+				}
+				logged := "gosec report: " + err.Error() + "\n"
+				assertWorkflowLogSafe(t, logged, 1)
+				for _, want := range []string{"Go/package processing errors", "pkg/broken", payload.want} {
+					if !strings.Contains(logged, want) {
+						t.Errorf("processing diagnostic missing %q: %q", want, logged)
+					}
+				}
+				if field == "path without details" && !strings.Contains(logged, message) {
+					t.Errorf("unspecified processing diagnostic missing: %q", logged)
+				}
+				if field != "path without details" && !strings.Contains(logged, ":4:2: mixed packages") {
+					t.Errorf("blocking location/message changed: %q", logged)
+				}
+			})
+		}
+	}
+}
+
+func assertWorkflowLogSafe(t *testing.T, output string, records int) {
+	t.Helper()
+	if strings.Contains(output, "\r") || strings.Contains(output, "##[") {
+		t.Errorf("unsafe workflow log token in %q", output)
+	}
+	if strings.Count(output, "\n") != records || !strings.HasSuffix(output, "\n") {
+		t.Errorf("expected %d formatter-owned lines, got %q", records, output)
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "::") {
+			t.Errorf("workflow command at start of physical line: %q", line)
+		}
+	}
+}
+
+func readWorkflowLogTestReport(t *testing.T, version string, issue map[string]string, processingErrors map[string][]gosecProcessingError) gosecReport {
+	t.Helper()
+	issues := []map[string]string{}
+	if issue != nil {
+		issues = append(issues, issue)
+	}
+	content, err := json.Marshal(map[string]any{
+		"GosecVersion": version, "Golang errors": processingErrors, "Issues": issues,
+		"Stats": map[string]int{"files": 1, "lines": 8, "nosec": 0, "found": len(issues)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return readTestGosecReport(t, string(content))
+}
 
 func TestGosecReportFindingsAreAdvisory(t *testing.T) {
 	report := readTestGosecReport(t, `{
@@ -28,7 +188,7 @@ func TestGosecReportFindingsAreAdvisory(t *testing.T) {
 		t.Fatalf("advisory output contains compiler-diagnostic location syntax %q:\n%s", diagnostic, output.String())
 	}
 	want := []string{
-		"packages=2 files=2 lines=20 findings=3",
+		"gosec: version=dev packages=2 files=2 lines=20 findings=3",
 		"gosec: G204=2",
 		"gosec: G304=1",
 		strings.Join([]string{
@@ -38,10 +198,8 @@ func TestGosecReportFindingsAreAdvisory(t *testing.T) {
 		}, "\n"),
 		"gosec: findings are advisory; analyzer health and package coverage passed",
 	}
-	for _, fragment := range want {
-		if !strings.Contains(output.String(), fragment) {
-			t.Fatalf("summary missing %q:\n%s", fragment, output.String())
-		}
+	if expected := strings.Join(want, "\n") + "\n"; output.String() != expected {
+		t.Fatalf("summary = %q, want unchanged ordinary output %q", output.String(), expected)
 	}
 	t.Log(output.String())
 }

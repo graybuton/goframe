@@ -13,6 +13,13 @@ import (
 	"strings"
 )
 
+var workflowLogFieldReplacer = strings.NewReplacer("\r", `\r`, "\n", `\n`, "##[", `##\[`)
+
+// Keep analyzer data inside formatter-owned lines and out of both Actions command syntaxes.
+func sanitizeWorkflowLogField(value string) string {
+	return workflowLogFieldReplacer.Replace(value)
+}
+
 type gosecIssue struct {
 	RuleID  string `json:"rule_id"`
 	Details string `json:"details"`
@@ -53,11 +60,11 @@ func main() {
 	}
 	report, err := readGosecReport(*reportPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "gosec report: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gosec report: %s\n", sanitizeWorkflowLogField(err.Error()))
 		os.Exit(1)
 	}
 	if err := writeGosecSummary(os.Stdout, report, *repositoryRoot, *packageCount); err != nil {
-		fmt.Fprintf(os.Stderr, "gosec report: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gosec report: %s\n", sanitizeWorkflowLogField(err.Error()))
 		os.Exit(1)
 	}
 }
@@ -174,13 +181,14 @@ func writeGosecSummary(writer io.Writer, report gosecReport, repositoryRoot stri
 	sort.Strings(rules)
 
 	fmt.Fprintf(writer, "gosec: version=%s packages=%d files=%d lines=%d findings=%d\n",
-		report.Version, packageCount, *report.Stats.Files, *report.Stats.Lines, len(issues))
+		sanitizeWorkflowLogField(report.Version), packageCount, *report.Stats.Files, *report.Stats.Lines, len(issues))
 	for _, rule := range rules {
-		fmt.Fprintf(writer, "gosec: %s=%d\n", rule, counts[rule])
+		fmt.Fprintf(writer, "gosec: %s=%d\n", sanitizeWorkflowLogField(rule), counts[rule])
 	}
 	for _, issue := range issues {
 		fmt.Fprintf(writer, "gosec: advisory %s %s (line %s, column %s): %s\n",
-			issue.RuleID, issue.File, issue.Line, issue.Column, issue.Details)
+			sanitizeWorkflowLogField(issue.RuleID), sanitizeWorkflowLogField(issue.File),
+			sanitizeWorkflowLogField(issue.Line), sanitizeWorkflowLogField(issue.Column), sanitizeWorkflowLogField(issue.Details))
 	}
 	if len(issues) == 0 {
 		fmt.Fprintln(writer, "gosec: no findings")
@@ -231,7 +239,7 @@ func formatGosecProcessingErrors(processingErrors map[string][]gosecProcessingEr
 			messages = append(messages, fmt.Sprintf("%s:%d:%d: %s", path, processingError.Line, processingError.Column, message))
 		}
 	}
-	return fmt.Errorf("Go/package processing errors: %s", strings.Join(messages, "; "))
+	return fmt.Errorf("Go/package processing errors: %s", sanitizeWorkflowLogField(strings.Join(messages, "; ")))
 }
 
 func displayGosecPath(repositoryRoot, path string) string {
