@@ -49,6 +49,9 @@ Before creating a tag:
 - `actionlint` passes at the workflow baseline;
 - `scripts/artifact-check.sh` passes;
 - `scripts/module-path-check.sh` passes;
+- the `Security Analysis` workflow passes on the exact release HEAD, including
+  its blocking Staticcheck `SA*`, govulncheck, root Go module, and analyzer-
+  health checks;
 - release package layout is checked with `goxc package --asset-hash --preload`
   for affected examples;
 - filesystem/package safety spot checks pass for symlink rejection, ownership
@@ -205,6 +208,7 @@ announcement.
 - dashboard DOM pressure;
 - artifact and module path gates;
 - docs consistency;
+- `Security Analysis` on the exact reviewed release HEAD;
 - package matrix for all examples with TinyGo and selected Go compiler paths.
 
 ### Docs
@@ -250,8 +254,9 @@ announcement.
 - reusable/multi-module component identity scope stated explicitly;
 - experimental surfaces named rather than hidden;
 - compatibility/deprecation notes included;
-- supply-chain/tooling evidence stated as lightweight CI/Dependabot/lockfile
-  coverage, with no SBOM or scanner claim in the current preview contract;
+- security-analysis and supply-chain evidence stated explicitly, including the
+  blocking/advisory analyzer split and root Go module dependency check, with no
+  SBOM, signing, attestation, or complete supply-chain claim;
 - migration notes linked;
 - rollback/revert plan noted for preview users.
 

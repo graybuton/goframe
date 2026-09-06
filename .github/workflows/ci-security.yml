@@ -1,0 +1,52 @@
+name: Security Analysis
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-analysis:
+    name: Security analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go 1.26.6
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache: true
+
+      - name: Verify selected Go 1.26.6
+        run: '[[ "$(GOTOOLCHAIN=local go env GOVERSION)" == "go1.26.6" ]]'
+
+      - name: Test security policy helpers (Go 1.26.6)
+        run: |
+          go test ./.github/scripts
+          .github/scripts/security-analysis-runner.tests.sh
+
+      - name: Run security analysis (Go 1.26.6)
+        run: scripts/security-analysis.sh
+
+      - name: Setup Go 1.27.0
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.0'
+          cache: true
+
+      - name: Verify selected Go 1.27.0
+        run: '[[ "$(GOTOOLCHAIN=local go env GOVERSION)" == "go1.27.0" ]]'
+
+      - name: Test security policy helpers (Go 1.27.0)
+        run: go test ./.github/scripts
+
+      - name: Run security analysis (Go 1.27.0)
+        run: scripts/security-analysis.sh
