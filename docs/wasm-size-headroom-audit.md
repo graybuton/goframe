@@ -5,9 +5,15 @@
 This document began with a toolchain-sensitive dashboard size investigation.
 The historical Go `1.24.4` and Go `1.22.12` results remain below for context.
 
-The current supported release-size source of truth is Go `1.26.5` plus TinyGo
-`0.41.1` on Linux amd64. The 2026-07-30 migration reproduced the frozen base
-twice with isolated workspaces and caches. Both runs produced identical raw,
+The current supported release-size source of truth is Go `1.26.6` plus TinyGo
+`0.42.0` / LLVM `22.1.4` on Linux amd64. The 2026-09-07 adjudication below
+attributes the modest, deterministic growth principally to the shared TinyGo
+runtime/JavaScript bridge. Only fifteen failing absolute ceilings move to the
+smallest enclosing KiB boundary; all ratios and production code stay unchanged.
+
+The historical 2026-07-30 migration used Go `1.26.5` and TinyGo `0.41.1` and
+reproduced its frozen base twice with isolated workspaces and caches. Both
+runs produced identical raw,
 gzip, Brotli, and Zstandard outputs for all eleven applications. Three measured
 cells exceeded their previous limits, so only those cells were aligned to the
 new baseline.
@@ -41,8 +47,10 @@ ceiling, compression command, workflow, or application changes.
 
 - Workflow: `.github/workflows/ci-wasm-size.yml`
 - Budget script: `scripts/size-budget.sh`
-- CI Go version: `1.26.5`
-- CI TinyGo version: `0.41.1`
+- CI Go version: `1.26.6`
+- CI TinyGo version: `0.42.0` / LLVM `22.1.4`
+- Measurement host: Linux amd64
+- Measured compressors: gzip `1.14`, Brotli `1.2.0`, Zstandard `1.5.7`
 
 The workflow installs `goxc`, generates and packages every listed example with
 TinyGo, then repeats packaging with `--asset-hash --preload
@@ -64,15 +72,95 @@ If no match exists, it reports the default missing path
 | --- | ---: | ---: | ---: | ---: |
 | counter | 97280 B | 40960 B | 56320 B | 49152 B |
 | components | 107520 B | 43008 B | 56320 B | 49152 B |
-| todo | 123904 B | 40960 B | 56320 B | 49152 B |
-| dashboard | 175104 B | 53248 B | 71680 B | 61440 B |
-| context | 120832 B | 37888 B | 46080 B | 40960 B |
-| virtualized | 128000 B | 40960 B | 50176 B | 44032 B |
+| todo | 126976 B | 40960 B | 56320 B | 49152 B |
+| dashboard | 181248 B | 55296 B | 71680 B | 61440 B |
+| context | 123904 B | 38912 B | 47104 B | 41984 B |
+| virtualized | 133120 B | 43008 B | 52224 B | 46080 B |
 | multipackage | 110592 B | 43008 B | 56320 B | 49152 B |
 | cmdapp | 110592 B | 43008 B | 56320 B | 49152 B |
-| router | 119808 B | 45056 B | 58368 B | 51200 B |
-| router-dashboard | 240640 B | 79872 B | 96256 B | 84992 B |
-| resource | 162816 B | 59392 B | 70656 B | 63488 B |
+| router | 122880 B | 45056 B | 58368 B | 51200 B |
+| router-dashboard | 241664 B | 79872 B | 96256 B | 84992 B |
+| resource | 163840 B | 60416 B | 70656 B | 63488 B |
+
+## TinyGo 0.42.0 Baseline Adjudication - 2026-09-07
+
+The frozen GoFrame base is `621b4344450259e6ffabe1edf64364e1682f7a36`.
+Both official Linux amd64 compilers used physical Go `1.26.6`: TinyGo
+`0.41.1` / LLVM `20.1.1` versus TinyGo `0.42.0` / LLVM `22.1.4`.
+Both installations bundle wasm-opt `116`. Production compilation remained
+`tinygo build -target=wasm -no-debug -panic=trap` through `goxc`; no diagnostic
+compiler flags or post-build optimization were substituted for release output.
+
+Two independent runs per compiler used separate workspaces, Go/module caches,
+TinyGo/XDG caches, and package outputs. Each run generated and packaged all
+eleven applications, then repeated the complete hashed/preloaded/gzip/Brotli
+package sequence from CI. Raw SHA-256 values and all 44 size measurements were
+identical within each compiler pair. Ordinary and release-style packages were
+equivalent after normalizing only `goframe-package.json`'s `generatedAt`.
+Compression used the unchanged script commands: gzip `-c -9`, Brotli quality
+11, and Zstandard level 19, with the versions listed above.
+
+WABT `1.0.36` and V8 validated all eleven candidate production modules.
+Their 13 function imports, 17 exports, and imported/exported function signatures
+are unchanged. Initial memory remains two 64 KiB pages. Each private function
+table adds the same three finalizer-related entries. No debug/DWARF section is
+introduced; the production name sections remain available for attribution.
+
+The net TinyGo runtime, internal-task, and JavaScript bridge function-body cost
+is `2619 B` to `2704 B` across all eleven apps. This includes the newly active
+finalizer runner and pressure-GC paths: `syscall/js.makeValue` grows from
+`121 B` to `760 B`, while `runtime.alloc` shrinks by `674 B` as GC code is
+factored into separate bodies. This matches upstream's
+[finalizer implementation](https://github.com/tinygo-org/tinygo/commit/7994d2e9122c5ffef3f69ab09c2f93dea73b744e)
+and [WASM finalizer scheduling](https://github.com/tinygo-org/tinygo/pull/5545).
+[Type-specific hash/equality generation](https://github.com/tinygo-org/tinygo/pull/5359)
+and LLVM changes also affect the code. GoFrame runtime body totals decrease
+`128 B` to `316 B` across every app, counting changed generic symbol spellings
+on both sides rather than treating them as new reachability.
+
+Code-section growth ranges from `1382 B` to `3002 B`; data changes range from
+`-400 B` to `+56 B`. Dashboard's upper residual includes `206 B` of reflection
+bodies and `218 B` of other application/stdlib bodies. Resource and
+router-dashboard grow less because their existing resource-panel bodies
+shrink `838 B` and `899 B`, with data reductions of `400 B` and `385 B`.
+No unexplained application-specific growth outlier remains. Attribution is
+strong for the shared finalizer cost, but the complete delta is an official
+TinyGo/LLVM toolchain shift, not a claim that one source commit or LLVM alone
+caused every byte.
+
+Source-selection and feature-tagged build tests pass with Go `1.26.6` and
+`1.27.0`. The unchanged complete Chrome `149.0.7827.196` browser smoke passes
+under Go `1.26.6` with TinyGo `0.42.0`. Go `1.27.0` remains compatibility
+characterization, not an added TinyGo CI row. No matching upstream blocker was
+identified in the measured corpus; this is not a claim of general compiler
+correctness or WASM panic recovery support.
+
+Exactly fifteen absolute cells fail the old ceilings; the other 29 pass.
+Each moved ceiling is `ceil(measured_bytes / 1024) * 1024`:
+
+| app/format | 0.41.1 B | 0.42.0 B | delta % | old ceiling B | overage B | new ceiling B | headroom B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| todo raw | 123568 | 126313 | 2.221 | 123904 | 2409 | 126976 | 663 |
+| dashboard raw | 177629 | 181166 | 1.991 | 178176 | 2990 | 181248 | 82 |
+| dashboard br | 54061 | 55108 | 1.937 | 54272 | 836 | 55296 | 188 |
+| context raw | 120314 | 123063 | 2.285 | 120832 | 2231 | 123904 | 841 |
+| context gzip | 45473 | 46593 | 2.463 | 46080 | 513 | 47104 | 511 |
+| context br | 37258 | 38166 | 2.437 | 37888 | 278 | 38912 | 746 |
+| context zstd | 40141 | 41191 | 2.616 | 40960 | 231 | 41984 | 793 |
+| virtualized raw | 130149 | 133081 | 2.253 | 131072 | 2009 | 133120 | 39 |
+| virtualized gzip | 50373 | 51529 | 2.295 | 51200 | 329 | 52224 | 695 |
+| virtualized br | 41208 | 42158 | 2.305 | 41984 | 174 | 43008 | 850 |
+| virtualized zstd | 44493 | 45504 | 2.272 | 45056 | 448 | 46080 | 576 |
+| router raw | 119984 | 122803 | 2.349 | 120832 | 1971 | 122880 | 77 |
+| router-dashboard raw | 240238 | 241449 | 0.504 | 240640 | 809 | 241664 | 215 |
+| resource raw | 162454 | 163408 | 0.587 | 162816 | 592 | 163840 | 432 |
+| resource br | 59218 | 59467 | 0.420 | 59392 | 75 | 60416 | 949 |
+
+Only these failing absolute ceilings move. Ratio limits remain gzip `52.00%`,
+Brotli `38.00%`, and Zstandard `46.00%`; all 33 compressed ratio cells pass.
+Compression commands, application coverage, production code, and compiler
+flags are unchanged. Earlier measurements below retain their original compiler
+identities and values.
 
 ## Supported Toolchain Baseline Migration - 2026-07-30
 

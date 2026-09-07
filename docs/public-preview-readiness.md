@@ -271,7 +271,7 @@ Evidence:
 - `docs/platform-support.md`;
 - CI and local validation on Linux/Chrome and macOS/Windows for core Go/toolchain
   checks;
-- TinyGo `0.41.1` size and smoke gates;
+- TinyGo `0.42.0` size and smoke gates;
 - Go/WASM recover-capable smoke fixtures.
 
 Limitation:

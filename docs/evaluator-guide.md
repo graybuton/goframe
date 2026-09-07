@@ -6,11 +6,12 @@ is not a production deployment guide.
 
 ## Prerequisites
 
-The release validation baseline is:
+For the current repository checkout, use the following baseline. The published
+preview's historical validation remains recorded in its dedicated
+[release notes](release-notes-v0.3.0-preview.1.md).
 
-- Go `1.22.12`, `1.25.12`, and `1.26.5`, with Go `1.26.5` recommended for the
-  guided path;
-- TinyGo 0.41.1 for size-oriented WASM packages;
+- Go `1.26.6` and `1.27.0`, with Go `1.26.6` for the guided browser/size path;
+- TinyGo `0.42.0` for size-oriented WASM packages;
 - Node.js `24.18.1` for docs, extension, and browser smoke scripts;
 - Chrome `149` or the repository's current documented Chrome/Chromium
   equivalent for local browser smoke;

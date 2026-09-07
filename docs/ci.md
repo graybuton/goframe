@@ -47,11 +47,12 @@ It checks:
 - GOX golden tests, including source-oriented error diagnostics.
 - GOX fuzz seed targets through the normal `go test ./...` seed pass.
 
-A separate focused Linux job installs TinyGo `0.41.1` under Go `1.26.6`. It
+A separate focused Linux job installs TinyGo `0.42.0` under Go `1.26.6`. It
 checks browser source-selection parity and feature-tagged TinyGo builds without
-duplicating the full package, browser, or size workflows. TinyGo `0.41.1`
-supports Go through `1.26`, so the stable Go `1.27.0` Core row does not claim
-TinyGo parity.
+duplicating the full package, browser, or size workflows. TinyGo `0.42.0`
+supports Go through `1.27`; local source-selection and build characterization
+also passes with Go `1.27.0`. The stable Go `1.27.0` Core row remains standard-Go
+evidence, without a second TinyGo matrix.
 
 The `cmd/goxc` test suite includes manifest/path/package/export/workspace
 regression tests, including root-aware symlink checks for app roots, entry
@@ -160,7 +161,7 @@ pass.
 `.github/workflows/ci-wasm-size.yml` runs on pull requests, pushes to `main`,
 and manually through `workflow_dispatch`.
 
-It installs Go `1.26.6`, TinyGo `0.41.1`, brotli, and zstd. Then it packages
+It installs Go `1.26.6`, TinyGo `0.42.0`, brotli, and zstd. Then it packages
 the counter, components, todo, dashboard, context, virtualized, multipackage,
 cmdapp, router, router-dashboard, and resource examples with TinyGo. It also
 runs a release-style package pass with `--asset-hash --preload
@@ -205,7 +206,7 @@ older `main.wasm` packages.
 `.github/workflows/ci-browser-smoke.yml` runs on pull requests, pushes to
 `main`, and manually through `workflow_dispatch` on `ubuntu-latest` only.
 
-It installs Go `1.26.6`, TinyGo `0.41.1`, Node.js `24.18.1`, Chrome, and
+It installs Go `1.26.6`, TinyGo `0.42.0`, Node.js `24.18.1`, Chrome, and
 compression tools, then runs:
 
 ```bash
@@ -294,7 +295,7 @@ The private Error Boundary fixture also covers state render transactions. Its
 standard-Go/WASM lane verifies failed initial state rollback, retry without a
 ghost slot, inert discarded setters and dispatchers, preservation and later
 replacement of a committed reducer, resource ordering, stable scenario DOM
-identity, and balanced listener cleanup. A TinyGo `0.41.1` lane verifies the
+identity, and balanced listener cleanup. A TinyGo `0.42.0` lane verifies the
 successful state, reducer, resource, and cleanup path. It does not intentionally
 panic or claim recover-based rollback under TinyGo's trap-style panic mode.
 
@@ -568,7 +569,7 @@ Local checks use:
   `1.26.6` minimum patch level;
 - Go `1.26.6` and stable Go `1.27.0` for supported full Core evidence;
 - Go `1.26.6` for the browser-smoke, TinyGo parity, and WASM-size baselines;
-- TinyGo `0.41.1` for focused source-selection parity, WASM size, and browser
+- TinyGo `0.42.0` for focused source-selection parity, WASM size, and browser
   smoke gates;
 - gzip;
 - brotli;
