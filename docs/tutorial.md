@@ -20,8 +20,8 @@ existing runtime primitives directly:
 ## Prerequisites
 
 Install Go, TinyGo, Node.js, Chrome or Chromium, gzip, brotli, and optionally
-zstd. The repository CI currently uses Go `1.24.x`, TinyGo `0.41.1`, and
-Node.js 20.
+zstd. The repository CI uses Go `1.26.6` and `1.27.0`, with Go `1.26.6` plus
+TinyGo `0.42.0` for browser and size gates, and Node.js `24.18.1`.
 
 ## Install goxc
 

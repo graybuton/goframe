@@ -35,13 +35,13 @@ Symlink safety tests skip when `os.Symlink` is unavailable or restricted.
 | Compiler target | Status | Notes |
 |---|---|---|
 | Go/WASM | CI-tested for selected smoke fixtures | Current heavy browser baseline uses Go `1.26.6`. It covers recover-capable runtime error and Error Boundary scenarios. Larger bundle size is expected. |
-| TinyGo/WASM | CI-tested for packaging, size, and most browser smoke | Current heavy baseline and focused source-selection parity use Go `1.26.6` with TinyGo `0.41.1`. TinyGo `0.41.1` supports Go through `1.26`; the stable Go `1.27.0` Core lane does not claim TinyGo parity. Default package path uses `-panic=trap`. |
+| TinyGo/WASM | CI-tested for packaging, size, and most browser smoke | Current heavy baseline and focused source-selection parity use Go `1.26.6` with TinyGo `0.42.0`. TinyGo supports Go through `1.27`; local Go `1.27.0` compatibility characterization passes, but the stable Core lane remains standard-Go evidence. Default package path uses `-panic=trap`. |
 | Native Go runtime | CI-tested for pure tests | Pure runtime/compiler/tooling tests run with normal Go. Browser runtime requires `js/wasm`. |
 
 The module requires Go `1.26.6` or newer. Go `1.26.6` and stable Go `1.27.0`
 are the supported full Core toolchains. Older Go versions are outside the
 GoFrame preview support contract. The browser and size workflows use Go
-`1.26.6`, TinyGo `0.41.1`, and Node.js `24.18.1`; the Go `1.27.0` lane is
+`1.26.6`, TinyGo `0.42.0`, and Node.js `24.18.1`; the Go `1.27.0` lane is
 standard-Go Core evidence and does not duplicate the heavy browser or size
 workflows.
 

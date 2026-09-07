@@ -130,14 +130,14 @@ bundle_path() {
 status=0
 check_app "counter" "$(bundle_path counter)" 97280 40960 56320 49152 || status=1
 check_app "components" "$(bundle_path components)" 107520 43008 56320 49152 || status=1
-check_app "todo" "$(bundle_path todo)" 123904 40960 56320 49152 || status=1
-check_app "dashboard" "$(bundle_path dashboard)" 178176 54272 71680 61440 || status=1
-check_app "context" "$(bundle_path context)" 120832 37888 46080 40960 || status=1
-check_app "virtualized" "$(bundle_path virtualized)" 131072 41984 51200 45056 || status=1
+check_app "todo" "$(bundle_path todo)" 126976 40960 56320 49152 || status=1
+check_app "dashboard" "$(bundle_path dashboard)" 181248 55296 71680 61440 || status=1
+check_app "context" "$(bundle_path context)" 123904 38912 47104 41984 || status=1
+check_app "virtualized" "$(bundle_path virtualized)" 133120 43008 52224 46080 || status=1
 check_app "multipackage" "$(bundle_path multipackage)" 110592 43008 56320 49152 || status=1
 check_app "cmdapp" "$(bundle_path cmdapp)" 110592 43008 56320 49152 || status=1
-check_app "router" "$(bundle_path router)" 120832 45056 58368 51200 || status=1
-check_app "routerdash" "$(bundle_path router-dashboard)" 240640 79872 96256 84992 || status=1
-check_app "resource" "$(bundle_path resource)" 162816 59392 70656 63488 || status=1
+check_app "router" "$(bundle_path router)" 122880 45056 58368 51200 || status=1
+check_app "routerdash" "$(bundle_path router-dashboard)" 241664 79872 96256 84992 || status=1
+check_app "resource" "$(bundle_path resource)" 163840 60416 70656 63488 || status=1
 
 exit "$status"

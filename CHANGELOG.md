@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Adopted TinyGo `0.42.0` for the release compiler baseline, with a measured,
+  deterministic WASM size rebaseline limited to failing absolute ceilings;
+  compression ratios and production compiler flags are unchanged.
 - User-authored `goframe.json` paths now canonicalize `/`, `\`, and mixed
   separator spellings to one portable slash representation at ingestion,
   including `output` and `wasm`. Filesystem conversion is explicit at host
