@@ -46,13 +46,6 @@ active_fixed_lines() {
 		grep -Ev '^[0-9]+:[[:space:]]*#' || true
 }
 
-active_regex_lines() {
-	local pattern="$1"
-	local file="$2"
-	grep -nE "$pattern" "$file" 2>/dev/null |
-		grep -Ev '^[0-9]+:[[:space:]]*#' || true
-}
-
 scan_roots=()
 for candidate in "$ROOT_DIR/.github/workflows" "$ROOT_DIR/.github/actions"; do
 	if [[ -d "$candidate" ]]; then
@@ -130,8 +123,50 @@ for relative in "${direct_tinygo_workflows[@]}"; do
 	fi
 done
 
-download_url='https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb'
-verify_pattern='printf[[:space:]]+'"'"'%s  %s\\n'"'"'[[:space:]]+"\$TINYGO_SHA256"[[:space:]]+/tmp/tinygo\.deb[[:space:]]*\|[[:space:]]*sha256sum[[:space:]]+--check[[:space:]]+--strict[[:space:]]+-'
+tinygo_download_command='curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"'
+tinygo_verify_command="printf '%s  %s\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict -"
+tinygo_install_command='sudo apt-get install -y /tmp/tinygo.deb'
+tinygo_version_command='tinygo version'
+
+count_tinygo_install_sequences() {
+	local file="$1"
+	local lines=()
+	local index run_header run_indent command_indent
+	local download_line verify_line install_line version_line
+	local count=0
+
+	mapfile -t lines < "$file"
+	for ((index = 0; index + 4 < ${#lines[@]}; index++)); do
+		run_header="$(trim_whitespace "${lines[index]}")"
+		if [[ "$run_header" != "run: |" && "$run_header" != "- run: |" ]]; then
+			continue
+		fi
+
+		run_indent="${lines[index]%%[![:space:]]*}"
+		download_line="${lines[index + 1]}"
+		verify_line="${lines[index + 2]}"
+		install_line="${lines[index + 3]}"
+		version_line="${lines[index + 4]}"
+		command_indent="${download_line%%[![:space:]]*}"
+
+		if (( ${#command_indent} <= ${#run_indent} )) || [[ "$command_indent" != "$run_indent"* ]]; then
+			continue
+		fi
+		if [[ "${verify_line%%[![:space:]]*}" != "$command_indent" ||
+			"${install_line%%[![:space:]]*}" != "$command_indent" ||
+			"${version_line%%[![:space:]]*}" != "$command_indent" ]]; then
+			continue
+		fi
+		if [[ "$(trim_whitespace "$download_line")" == "$tinygo_download_command" &&
+			"$(trim_whitespace "$verify_line")" == "$tinygo_verify_command" &&
+			"$(trim_whitespace "$install_line")" == "$tinygo_install_command" &&
+			"$(trim_whitespace "$version_line")" == "$tinygo_version_command" ]]; then
+			count=$((count + 1))
+		fi
+	done
+
+	printf '%d' "$count"
+}
 
 for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 	file="$ROOT_DIR/$relative"
@@ -151,34 +186,27 @@ for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 		fail "$relative must declare exactly one accepted TinyGo SHA-256: $EXPECTED_TINYGO_SHA256"
 	fi
 
-	mapfile -t download_lines < <(active_fixed_lines "$download_url" "$file")
-	mapfile -t verify_lines < <(active_regex_lines "$verify_pattern" "$file")
-	mapfile -t install_lines < <(active_fixed_lines 'sudo apt-get install -y /tmp/tinygo.deb' "$file")
-	mapfile -t version_lines < <(active_fixed_lines 'tinygo version' "$file")
+	mapfile -t download_lines < <(active_fixed_lines "$tinygo_download_command" "$file")
+	mapfile -t verify_lines < <(active_fixed_lines "$tinygo_verify_command" "$file")
+	mapfile -t install_lines < <(active_fixed_lines "$tinygo_install_command" "$file")
+	mapfile -t version_lines < <(active_fixed_lines "$tinygo_version_command" "$file")
 
 	if (( ${#download_lines[@]} != 1 )); then
-		fail "$relative must contain exactly one accepted TinyGo download"
-		continue
+		fail "$relative must contain exactly one accepted TinyGo download command"
 	fi
 	if (( ${#verify_lines[@]} != 1 )); then
-		fail "$relative must verify /tmp/tinygo.deb with sha256sum --check --strict exactly once"
-		continue
+		fail "$relative must contain exactly one accepted TinyGo verification command"
 	fi
 	if (( ${#install_lines[@]} != 1 )); then
-		fail "$relative must install /tmp/tinygo.deb exactly once"
-		continue
+		fail "$relative must contain exactly one accepted TinyGo installation command"
 	fi
 	if (( ${#version_lines[@]} != 1 )); then
-		fail "$relative must report the selected TinyGo version exactly once"
-		continue
+		fail "$relative must contain exactly one accepted TinyGo version-report command"
 	fi
 
-	download_line="${download_lines[0]%%:*}"
-	verify_line="${verify_lines[0]%%:*}"
-	install_line="${install_lines[0]%%:*}"
-	version_line="${version_lines[0]%%:*}"
-	if ! (( download_line < verify_line && verify_line < install_line && install_line < version_line )); then
-		fail "$relative must download, verify, install, then report TinyGo in that order"
+	sequence_count="$(count_tinygo_install_sequences "$file")"
+	if [[ "$sequence_count" != "1" ]]; then
+		fail "$relative must contain exactly one contiguous TinyGo download, verification, installation, and version-report sequence"
 	fi
 done
 

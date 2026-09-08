@@ -39,8 +39,15 @@ write_tinygo_workflow() {
 		fi
 		if [[ "$verification_order" == "commented" ]]; then
 			printf "          # printf '%%s  %%s\\\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict -\n"
+		elif [[ "$verification_order" == "ignored" ]]; then
+			printf "          printf '%%s  %%s\\\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict - || true\n"
+		elif [[ "$verification_order" == "skipped" ]]; then
+			printf "          false && printf '%%s  %%s\\\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict -\n"
 		else
 			printf "          printf '%%s  %%s\\\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict -\n"
+		fi
+		if [[ "$verification_order" == "replaced" ]]; then
+			printf '          cp /tmp/replacement.deb /tmp/tinygo.deb\n'
 		fi
 		if [[ "$verification_order" != "after-install" ]]; then
 			printf '          sudo apt-get install -y /tmp/tinygo.deb\n'
@@ -108,6 +115,12 @@ expect_fail "TinyGo install before verification" \
 	"$(make_fixture install-first "actions/checkout@$FULL_ACTION_SHA" "$EXPECTED_SHA" after-install)"
 expect_fail "commented TinyGo verification" \
 	"$(make_fixture commented-verification "actions/checkout@$FULL_ACTION_SHA" "$EXPECTED_SHA" commented)"
+expect_fail "TinyGo verification with ignored failure" \
+	"$(make_fixture ignored-verification "actions/checkout@$FULL_ACTION_SHA" "$EXPECTED_SHA" ignored)"
+expect_fail "TinyGo verification behind false condition" \
+	"$(make_fixture skipped-verification "actions/checkout@$FULL_ACTION_SHA" "$EXPECTED_SHA" skipped)"
+expect_fail "TinyGo artifact replaced after verification" \
+	"$(make_fixture replaced-artifact "actions/checkout@$FULL_ACTION_SHA" "$EXPECTED_SHA" replaced)"
 
 synthetic_artifact="$TMP_ROOT/synthetic-tinygo.deb"
 printf 'synthetic TinyGo archive\n' > "$synthetic_artifact"
