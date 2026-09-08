@@ -16,15 +16,15 @@ It uses an explicit Go and host matrix:
 
 | host | Go | tier | full-only gates |
 | --- | --- | --- | --- |
-| `ubuntu-latest` | `1.26.6` | supported minimum | artifact/module/docs/race |
-| `ubuntu-latest` | `1.27.0` | supported stable | artifact/module/docs/race |
+| `ubuntu-latest` | `1.26.6` | supported minimum | supply-chain/artifact/module/docs/race |
+| `ubuntu-latest` | `1.27.0` | supported stable | supply-chain/artifact/module/docs/race |
 | `macos-15-intel` | `1.26.6` | host evidence | none |
 | `windows-latest` | `1.26.6` | host evidence | none |
 
 Every matrix entry runs formatting, ordinary tests, vet, debug-tag tests, and
 selected GOX golden tests. The two supported Linux entries additionally run
-the artifact, module-path, docs, and race gates. Every entry is required; no
-matrix lane is advisory.
+the supply-chain, artifact, module-path, docs, and race gates. Every entry is
+required; no matrix lane is advisory.
 
 Before those commands, the Windows entry verifies that the exact selected Go
 version exposes its executable, compiler tools, standard-library source tree,
@@ -36,6 +36,7 @@ full integrity probe before continuing.
 
 It checks:
 
+- authored CI Action and direct-download integrity;
 - tracked artifact gate;
 - canonical module path gate;
 - docs/example consistency check;
@@ -53,6 +54,10 @@ duplicating the full package, browser, or size workflows. TinyGo `0.42.0`
 supports Go through `1.27`; local source-selection and build characterization
 also passes with Go `1.27.0`. The stable Go `1.27.0` Core row remains standard-Go
 evidence, without a second TinyGo matrix.
+
+The repository-authored TinyGo install downloads the accepted `0.42.0` amd64
+Debian package and verifies its pinned SHA-256 before installation. The Browser
+Smoke and WASM Size workflows apply the same check to their TinyGo installs.
 
 The `cmd/goxc` test suite includes manifest/path/package/export/workspace
 regression tests, including root-aware symlink checks for app roots, entry
@@ -473,10 +478,20 @@ Security alerts and security updates should be enabled from the GitHub
 repository security settings. Recommended labels are `dependencies`,
 `github-actions`, `go`, `vscode`, and `npm`.
 
-Current supply-chain evidence is lightweight:
+Current authored CI supply-chain controls are bounded:
 
 - GitHub Actions workflows use read-only repository contents permissions by
   default;
+- every remote `uses:` reference in authored workflows and Actions is pinned to
+  a full Git commit SHA, with an adjacent comment recording the corresponding
+  upstream release version;
+- repository-authored TinyGo `0.42.0` amd64 package downloads verify the
+  accepted SHA-256 before installation;
+- the Windows Go fallback verifies its versioned archive SHA-256 before
+  extraction;
+- `scripts/ci-supply-chain-check.sh`, run by the full Linux Core lanes and
+  `scripts/check.sh`, rejects mutable remote Action refs and missing, changed,
+  or misplaced TinyGo verification;
 - Dependabot checks GitHub Actions, Go modules, and VS Code extension npm
   dependencies;
 - the VS Code extension workflow installs from `package-lock.json` with
@@ -485,8 +500,10 @@ Current supply-chain evidence is lightweight:
   standard-library-only dependency surface and runs pinned correctness,
   vulnerability, and advisory security analyzers.
 
-No SBOM, package signing, license scanner, or Action/artifact pinning policy is
-part of this security-analysis stage.
+This does not claim that all transitive CI downloads are independently pinned.
+Downloads performed internally by pinned Actions and ordinary package-manager
+operations retain their existing integrity mechanisms. No SBOM, package
+signing, attestation, or license scanner is part of this stage.
 
 ## Local Checks
 

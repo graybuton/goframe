@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Release-critical authored GitHub Actions are pinned to immutable commits, and
+  repository-authored TinyGo `0.42.0` package downloads verify the accepted
+  SHA-256 before installation. A fail-closed repository gate preserves those
+  boundaries without changing workflow topology or toolchain versions.
 - Adopted TinyGo `0.42.0` for the release compiler baseline, with a measured,
   deterministic WASM size rebaseline limited to failing absolute ceilings;
   compression ratios and production compiler flags are unchanged.

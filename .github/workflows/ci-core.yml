@@ -36,10 +36,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -67,9 +67,15 @@ jobs:
 
       - name: Setup Node.js
         if: matrix.full
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24.18.1'
+
+      - name: CI supply-chain gate
+        if: matrix.full
+        run: |
+          scripts/ci-supply-chain-check.sh
+          .github/scripts/ci-supply-chain-check.tests.sh
 
       - name: Artifact gate
         if: matrix.full
@@ -115,13 +121,14 @@ jobs:
 
     env:
       TINYGO_VERSION: 0.42.0
+      TINYGO_SHA256: 2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -129,6 +136,7 @@ jobs:
       - name: Install TinyGo
         run: |
           curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"
+          printf '%s  %s\n' "$TINYGO_SHA256" /tmp/tinygo.deb | sha256sum --check --strict -
           sudo apt-get install -y /tmp/tinygo.deb
           tinygo version
 
