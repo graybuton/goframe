@@ -39,11 +39,22 @@ trim_whitespace() {
 	printf '%s' "$value"
 }
 
-active_fixed_lines() {
+count_active_occurrences() {
 	local needle="$1"
 	local file="$2"
-	grep -nF "$needle" "$file" 2>/dev/null |
-		grep -Ev '^[0-9]+:[[:space:]]*#' || true
+	local line remainder count=0
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		if [[ "$line" =~ ^[[:space:]]*# ]]; then
+			continue
+		fi
+		# A # inside a shell string is data, not necessarily a comment.
+		remainder="$line"
+		while [[ "$remainder" == *"$needle"* ]]; do
+			count=$((count + 1))
+			remainder="${remainder#*"$needle"}"
+		done
+	done < "$file"
+	printf '%d' "$count"
 }
 
 scan_roots=()
@@ -56,28 +67,50 @@ if (( ${#scan_roots[@]} == 0 )); then
 	fail "no authored GitHub workflow or Action directories found under $ROOT_DIR/.github"
 fi
 
-workflow_files=()
-if (( ${#scan_roots[@]} > 0 )); then
-	mapfile -d '' workflow_files < <(
-		find "${scan_roots[@]}" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 |
-			sort -z
-	)
-fi
-
-for file in "${workflow_files[@]}"; do
-	line_number=0
+scan_action_refs() {
+	local file="$1"
+	local line line_number=0 indent syntax key value sequence_prefix
+	local scalar_indent=-1
+	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
+	local scalar_re='^[|>][+-]?$'
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line_number=$((line_number + 1))
-		if [[ "$line" =~ ^[[:space:]]*# ]]; then
+		syntax="$(trim_whitespace "${line%%#*}")"
+		if [[ -z "$syntax" ]]; then
 			continue
 		fi
-		if [[ ! "$line" =~ ^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*(.*)$ ]]; then
+		indent="${line%%[![:space:]]*}"
+		if (( scalar_indent >= 0 && ${#indent} > scalar_indent )); then
+			continue
+		fi
+		scalar_indent=-1
+
+		# Only canonical block mapping keys are authored here. Reject YAML
+		# indirection and flow forms instead of letting them hide a uses key.
+		if [[ ! "$syntax" =~ $mapping_re ]]; then
+			case "${syntax#- }" in
+				*:*|\{*|\[*|\?*|\&*|\**|\!*)
+					fail "${file#"$ROOT_DIR/"}:$line_number unsupported workflow mapping syntax; use canonical block keys"
+					;;
+			esac
+			continue
+		fi
+		sequence_prefix="${BASH_REMATCH[1]}"
+		key="${BASH_REMATCH[2]}"
+		value="${BASH_REMATCH[4]}"
+		case "$value" in
+			\{*|\[*|\&*|\**|\!*)
+				fail "${file#"$ROOT_DIR/"}:$line_number unsupported workflow mapping value; use canonical block mappings"
+				continue
+				;;
+		esac
+		if [[ "$key" != uses ]]; then
+			if [[ "$value" =~ $scalar_re ]]; then
+				scalar_indent=$((${#indent} + ${#sequence_prefix}))
+			fi
 			continue
 		fi
 
-		value="${BASH_REMATCH[2]}"
-		value="${value%%#*}"
-		value="$(trim_whitespace "$value")"
 		if (( ${#value} >= 2 )); then
 			if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
 				value="${value:1:${#value}-2}"
@@ -99,71 +132,71 @@ for file in "${workflow_files[@]}"; do
 			fail "${file#"$ROOT_DIR/"}:$line_number remote uses reference is not pinned to a lowercase 40-character commit SHA: $value"
 		fi
 	done < "$file"
-done
+}
 
-declare -A expected_tinygo_workflows=()
-for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
-	expected_tinygo_workflows["$relative"]=1
-done
-
-direct_tinygo_workflows=()
-for file in "${workflow_files[@]}"; do
-	if [[ -n "$(active_fixed_lines 'tinygo-org/tinygo/releases/download/' "$file")" ]]; then
-		direct_tinygo_workflows+=("${file#"$ROOT_DIR/"}")
-	fi
-done
-
-if (( ${#direct_tinygo_workflows[@]} != ${#EXPECTED_TINYGO_WORKFLOWS[@]} )); then
-	fail "expected ${#EXPECTED_TINYGO_WORKFLOWS[@]} direct TinyGo workflow downloads, found ${#direct_tinygo_workflows[@]}"
+direct_tinygo_downloads=0
+if (( ${#scan_roots[@]} > 0 )); then
+	# Traversal order affects diagnostics only; keep filenames NUL-delimited.
+	while IFS= read -r -d '' file; do
+		scan_action_refs "$file"
+		download_count="$(count_active_occurrences 'tinygo-org/tinygo/releases/download/' "$file")"
+		direct_tinygo_downloads=$((direct_tinygo_downloads + download_count))
+		if (( download_count > 0 )); then
+			relative="${file#"$ROOT_DIR/"}"
+			expected=false
+			for candidate in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
+				if [[ "$relative" == "$candidate" ]]; then
+					expected=true
+				fi
+			done
+			if [[ "$expected" == false ]]; then
+				fail "unexpected direct TinyGo download in $relative"
+			elif (( download_count != 1 )); then
+				fail "$relative must contain exactly one direct TinyGo release download, found $download_count"
+			fi
+		fi
+	done < <(find "${scan_roots[@]}" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0)
 fi
 
-for relative in "${direct_tinygo_workflows[@]}"; do
-	if [[ -z "${expected_tinygo_workflows[$relative]+present}" ]]; then
-		fail "unexpected direct TinyGo download in $relative"
-	fi
-done
+if (( direct_tinygo_downloads != ${#EXPECTED_TINYGO_WORKFLOWS[@]} )); then
+	fail "expected ${#EXPECTED_TINYGO_WORKFLOWS[@]} direct TinyGo release downloads, found $direct_tinygo_downloads"
+fi
 
 tinygo_download_command='curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"'
-tinygo_verify_command="printf '%s  %s\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict -"
+tinygo_verify_command="printf '%s  %s\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict - || exit 1"
 tinygo_install_command='sudo apt-get install -y /tmp/tinygo.deb'
 tinygo_version_command='tinygo version'
 
 count_tinygo_install_sequences() {
 	local file="$1"
-	local lines=()
-	local index run_header run_indent command_indent
-	local download_line verify_line install_line version_line
-	local count=0
-
-	mapfile -t lines < "$file"
-	for ((index = 0; index + 4 < ${#lines[@]}; index++)); do
-		run_header="$(trim_whitespace "${lines[index]}")"
-		if [[ "$run_header" != "run: |" && "$run_header" != "- run: |" ]]; then
-			continue
+	local line command indent run_indent command_indent expected_command
+	local state=0 count=0
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		command="$(trim_whitespace "$line")"
+		indent="${line%%[![:space:]]*}"
+		if (( state > 0 )); then
+			case "$state" in
+				1) expected_command="$tinygo_download_command"; command_indent="$indent" ;;
+				2) expected_command="$tinygo_verify_command" ;;
+				3) expected_command="$tinygo_install_command" ;;
+				4) expected_command="$tinygo_version_command" ;;
+			esac
+			if [[ "$command" == "$expected_command" && "$indent" == "$command_indent" &&
+				"$indent" == "$run_indent"* ]] && (( ${#indent} > ${#run_indent} )); then
+				state=$((state + 1))
+				if (( state == 5 )); then
+					count=$((count + 1))
+					state=0
+				fi
+			else
+				state=0
+			fi
 		fi
-
-		run_indent="${lines[index]%%[![:space:]]*}"
-		download_line="${lines[index + 1]}"
-		verify_line="${lines[index + 2]}"
-		install_line="${lines[index + 3]}"
-		version_line="${lines[index + 4]}"
-		command_indent="${download_line%%[![:space:]]*}"
-
-		if (( ${#command_indent} <= ${#run_indent} )) || [[ "$command_indent" != "$run_indent"* ]]; then
-			continue
+		if [[ "$command" == 'run: |' || "$command" == '- run: |' ]]; then
+			run_indent="$indent"
+			state=1
 		fi
-		if [[ "${verify_line%%[![:space:]]*}" != "$command_indent" ||
-			"${install_line%%[![:space:]]*}" != "$command_indent" ||
-			"${version_line%%[![:space:]]*}" != "$command_indent" ]]; then
-			continue
-		fi
-		if [[ "$(trim_whitespace "$download_line")" == "$tinygo_download_command" &&
-			"$(trim_whitespace "$verify_line")" == "$tinygo_verify_command" &&
-			"$(trim_whitespace "$install_line")" == "$tinygo_install_command" &&
-			"$(trim_whitespace "$version_line")" == "$tinygo_version_command" ]]; then
-			count=$((count + 1))
-		fi
-	done
+	done < "$file"
 
 	printf '%d' "$count"
 }
@@ -186,21 +219,16 @@ for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 		fail "$relative must declare exactly one accepted TinyGo SHA-256: $EXPECTED_TINYGO_SHA256"
 	fi
 
-	mapfile -t download_lines < <(active_fixed_lines "$tinygo_download_command" "$file")
-	mapfile -t verify_lines < <(active_fixed_lines "$tinygo_verify_command" "$file")
-	mapfile -t install_lines < <(active_fixed_lines "$tinygo_install_command" "$file")
-	mapfile -t version_lines < <(active_fixed_lines "$tinygo_version_command" "$file")
-
-	if (( ${#download_lines[@]} != 1 )); then
+	if [[ "$(count_active_occurrences "$tinygo_download_command" "$file")" != 1 ]]; then
 		fail "$relative must contain exactly one accepted TinyGo download command"
 	fi
-	if (( ${#verify_lines[@]} != 1 )); then
+	if [[ "$(count_active_occurrences "$tinygo_verify_command" "$file")" != 1 ]]; then
 		fail "$relative must contain exactly one accepted TinyGo verification command"
 	fi
-	if (( ${#install_lines[@]} != 1 )); then
+	if [[ "$(count_active_occurrences "$tinygo_install_command" "$file")" != 1 ]]; then
 		fail "$relative must contain exactly one accepted TinyGo installation command"
 	fi
-	if (( ${#version_lines[@]} != 1 )); then
+	if [[ "$(count_active_occurrences "$tinygo_version_command" "$file")" != 1 ]]; then
 		fail "$relative must contain exactly one accepted TinyGo version-report command"
 	fi
 
@@ -215,4 +243,4 @@ if (( failures != 0 )); then
 fi
 
 printf 'ci supply-chain check: ok (%d remote Action refs, %d verified TinyGo downloads)\n' \
-	"$remote_action_count" "${#direct_tinygo_workflows[@]}"
+	"$remote_action_count" "$direct_tinygo_downloads"
