@@ -7,6 +7,8 @@ TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 EXPECTED_SHA="2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563"
+TINYGO_RELEASE_REPOSITORY="tinygo-org/tinygo"
+TINYGO_RELEASE_NAMESPACE="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
 FULL_ACTION_SHA="3d3c42e5aac5ba805825da76410c181273ba90b1"
 FULL_ACTION_REF="actions/checkout@$FULL_ACTION_SHA # v7.0.1"
 FULL_REUSABLE_REF="owner/repo/.github/workflows/build.yml@$FULL_ACTION_SHA # v1.2.3"
@@ -24,10 +26,10 @@ write_tinygo_workflow() {
 	mkdir -p "$(dirname "$path")"
 	case "$trust_root_mode" in
 		literal|variable-digest)
-			download_command='curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"'
+			download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
 			;;
 		variable-url|variable-both)
-			download_command='curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"'
+			download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v\${TINYGO_VERSION}/tinygo_\${TINYGO_VERSION}_amd64.deb\""
 			;;
 		*)
 			printf 'unsupported trust-root mode: %s\n' "$trust_root_mode" >&2
@@ -315,7 +317,7 @@ expect_fail "local Action path traversal" \
 expect_fail "backslash local Action path" \
 	"$(make_fixture local-action-backslash '.\.github\actions\local')"
 
-extra_download='curl -fsSL -o /tmp/extra.deb "https://github.com/tinygo-org/tinygo/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"'
+extra_download="curl -fsSL -o /tmp/extra.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
 for placement in before after same-line canonical hash-prefix unexpected; do
 	fixture="$(make_fixture extra-download "$FULL_ACTION_REF")"
 	file="$fixture/.github/workflows/ci-core.yml"
@@ -362,11 +364,34 @@ add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	'scripts/helper.sh'
 expect_pass "invoked benign repository helper" "$fixture"
 
-fixture="$(make_fixture allowlisted-policy-sources "$FULL_ACTION_REF")"
+fixture="$(make_fixture executable-checker-direct-download "$FULL_ACTION_REF")"
 write_repository_file "$fixture" scripts/ci-supply-chain-check.sh "$extra_download"
+expect_fail "executable checker script with direct TinyGo download" "$fixture"
+
+fixture="$(make_fixture executable-test-harness-direct-download "$FULL_ACTION_REF")"
 write_repository_file "$fixture" .github/scripts/ci-supply-chain-check.tests.sh \
 	"$extra_download"
-expect_pass "allowlisted checker and test policy literals" "$fixture"
+expect_fail "executable test harness with direct TinyGo download" "$fixture"
+
+if grep -Fq -- "$TINYGO_RELEASE_NAMESPACE" "$CHECKER"; then
+	printf 'not ok - checker source contains raw TinyGo release namespace\n' >&2
+	exit 1
+fi
+printf 'ok - checker source contains no raw TinyGo release namespace\n'
+
+if grep -Fq -- "$TINYGO_RELEASE_NAMESPACE" "$BASH_SOURCE"; then
+	printf 'not ok - test harness source contains raw TinyGo release namespace\n' >&2
+	exit 1
+fi
+printf 'ok - test harness source contains no raw TinyGo release namespace\n'
+
+runtime_namespace="$TINYGO_RELEASE_NAMESPACE"
+expected_runtime_namespace="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
+if [[ "$runtime_namespace" != "$expected_runtime_namespace" ]]; then
+	printf 'not ok - runtime TinyGo release namespace construction\n' >&2
+	exit 1
+fi
+printf 'ok - runtime TinyGo release namespace construction\n'
 
 expect_fail "missing TinyGo checksum" \
 	"$(make_fixture missing-checksum "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install no)"

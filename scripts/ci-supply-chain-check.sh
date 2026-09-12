@@ -3,7 +3,8 @@ set -euo pipefail
 
 EXPECTED_TINYGO_VERSION="0.42.0"
 EXPECTED_TINYGO_SHA256="2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563"
-TINYGO_RELEASE_NAMESPACE="tinygo-org/tinygo/releases/download/"
+TINYGO_RELEASE_REPOSITORY="tinygo-org/tinygo"
+TINYGO_RELEASE_NAMESPACE="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
 EXPECTED_TINYGO_WORKFLOWS=(
 	".github/workflows/ci-browser-smoke.yml"
 	".github/workflows/ci-core.yml"
@@ -148,11 +149,6 @@ tinygo_release_url_owner_allowed() {
 			return 0
 		fi
 	done
-	case "$path" in
-		scripts/ci-supply-chain-check.sh | .github/scripts/ci-supply-chain-check.tests.sh)
-			return 0
-			;;
-	esac
 	return 1
 }
 
@@ -332,7 +328,7 @@ if (( direct_tinygo_downloads != ${#EXPECTED_TINYGO_WORKFLOWS[@]} )); then
 	fail "expected ${#EXPECTED_TINYGO_WORKFLOWS[@]} direct TinyGo release downloads, found $direct_tinygo_downloads"
 fi
 
-tinygo_download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/tinygo-org/tinygo/releases/download/v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
+tinygo_download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
 tinygo_verify_command="printf '%s  %s\\n' '$EXPECTED_TINYGO_SHA256' /tmp/tinygo.deb | sha256sum --check --strict - || exit 1"
 tinygo_install_command='sudo apt-get install -y /tmp/tinygo.deb'
 tinygo_version_command='tinygo version'
