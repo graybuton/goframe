@@ -39,6 +39,87 @@ trim_whitespace() {
 	printf '%s' "$value"
 }
 
+path_has_symlink_component() {
+	local current="$1"
+	local remainder="$2"
+	local component
+
+	while [[ -n "$remainder" ]]; do
+		component="${remainder%%/*}"
+		current="$current/$component"
+		if [[ -L "$current" ]]; then
+			return 0
+		fi
+		if [[ "$remainder" == */* ]]; then
+			remainder="${remainder#*/}"
+		else
+			remainder=""
+		fi
+	done
+	return 1
+}
+
+validate_local_uses_ref() {
+	local file="$1"
+	local line_number="$2"
+	local value="$3"
+	local kind tail padded target scan_root metadata_count=0
+
+	case "$value" in
+		./.github/actions/*)
+			kind=action
+			scan_root="$ROOT_DIR/.github/actions"
+			tail="${value#./.github/actions/}"
+			;;
+		./.github/workflows/*)
+			kind=workflow
+			scan_root="$ROOT_DIR/.github/workflows"
+			tail="${value#./.github/workflows/}"
+			;;
+		*)
+			fail "${file#"$ROOT_DIR/"}:$line_number local uses reference is outside the scanned .github/actions and .github/workflows roots: $value"
+			return
+			;;
+	esac
+
+	padded="/$tail/"
+	if [[ -z "$tail" || "$tail" == *\\* || "$padded" == *'//'* ||
+		"$padded" == *'/./'* || "$padded" == *'/../'* ]]; then
+		fail "${file#"$ROOT_DIR/"}:$line_number local uses reference is not a canonical in-root path: $value"
+		return
+	fi
+	if [[ -L "$scan_root" ]] || path_has_symlink_component "$scan_root" "$tail"; then
+		fail "${file#"$ROOT_DIR/"}:$line_number local uses reference traverses a symbolic link outside the file scan: $value"
+		return
+	fi
+
+	target="$ROOT_DIR/${value#./}"
+	if [[ "$kind" == action ]]; then
+		if [[ ! -d "$target" ]]; then
+			fail "${file#"$ROOT_DIR/"}:$line_number local Action directory does not exist: $value"
+			return
+		fi
+		if [[ -L "$target/action.yml" || -L "$target/action.yaml" ]]; then
+			fail "${file#"$ROOT_DIR/"}:$line_number local Action metadata must be a regular file inside the scanned tree: $value"
+			return
+		fi
+		if [[ -f "$target/action.yml" ]]; then
+			metadata_count=$((metadata_count + 1))
+		fi
+		if [[ -f "$target/action.yaml" ]]; then
+			metadata_count=$((metadata_count + 1))
+		fi
+		if (( metadata_count != 1 )); then
+			fail "${file#"$ROOT_DIR/"}:$line_number local Action must contain exactly one action.yml or action.yaml: $value"
+		fi
+		return
+	fi
+
+	if [[ ! "$tail" =~ \.ya?ml$ || ! -f "$target" ]]; then
+		fail "${file#"$ROOT_DIR/"}:$line_number local reusable workflow must name an existing .yml or .yaml file: $value"
+	fi
+}
+
 count_active_occurrences() {
 	local needle="$1"
 	local file="$2"
@@ -60,7 +141,11 @@ count_active_occurrences() {
 scan_roots=()
 for candidate in "$ROOT_DIR/.github/workflows" "$ROOT_DIR/.github/actions"; do
 	if [[ -d "$candidate" ]]; then
-		scan_roots+=("$candidate")
+		if [[ -L "$candidate" ]]; then
+			fail "authored GitHub workflow and Action scan root must not be a symbolic link: ${candidate#"$ROOT_DIR/"}"
+		else
+			scan_roots+=("$candidate")
+		fi
 	fi
 done
 if (( ${#scan_roots[@]} == 0 )); then
@@ -69,13 +154,28 @@ fi
 
 scan_action_refs() {
 	local file="$1"
-	local line line_number=0 indent syntax key value sequence_prefix
+	local line line_number=0 indent syntax key value sequence_prefix content
+	local comment comment_is_yaml
 	local scalar_indent=-1
 	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
 	local scalar_re='^[|>][+-]?$'
+	local inline_comment_re='^(.*[^[:space:]])[[:space:]]+#(.*)$'
+	local full_comment_re='^[[:space:]]*#(.*)$'
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line_number=$((line_number + 1))
-		syntax="$(trim_whitespace "${line%%#*}")"
+		content="$line"
+		comment=""
+		comment_is_yaml=false
+		if [[ "$line" =~ $inline_comment_re ]]; then
+			content="${BASH_REMATCH[1]}"
+			comment="${BASH_REMATCH[2]}"
+			comment_is_yaml=true
+		elif [[ "$line" =~ $full_comment_re ]]; then
+			content=""
+			comment="${BASH_REMATCH[1]}"
+			comment_is_yaml=true
+		fi
+		syntax="$(trim_whitespace "$content")"
 		if [[ -z "$syntax" ]]; then
 			continue
 		fi
@@ -124,12 +224,17 @@ scan_action_refs() {
 			continue
 		fi
 		if [[ "$value" == ./* ]]; then
+			validate_local_uses_ref "$file" "$line_number" "$value"
 			continue
 		fi
 
 		remote_action_count=$((remote_action_count + 1))
 		if [[ ! "$value" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[^@[:space:]]+)?@[0-9a-f]{40}$ ]]; then
 			fail "${file#"$ROOT_DIR/"}:$line_number remote uses reference is not pinned to a lowercase 40-character commit SHA: $value"
+		fi
+		comment="$(trim_whitespace "$comment")"
+		if [[ "$comment_is_yaml" != true || ! "$comment" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+			fail "${file#"$ROOT_DIR/"}:$line_number remote uses reference must have a trailing # vMAJOR.MINOR.PATCH annotation: $value"
 		fi
 	done < "$file"
 }
@@ -162,8 +267,8 @@ if (( direct_tinygo_downloads != ${#EXPECTED_TINYGO_WORKFLOWS[@]} )); then
 	fail "expected ${#EXPECTED_TINYGO_WORKFLOWS[@]} direct TinyGo release downloads, found $direct_tinygo_downloads"
 fi
 
-tinygo_download_command='curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"'
-tinygo_verify_command="printf '%s  %s\\n' \"\$TINYGO_SHA256\" /tmp/tinygo.deb | sha256sum --check --strict - || exit 1"
+tinygo_download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/tinygo-org/tinygo/releases/download/v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
+tinygo_verify_command="printf '%s  %s\\n' '$EXPECTED_TINYGO_SHA256' /tmp/tinygo.deb | sha256sum --check --strict - || exit 1"
 tinygo_install_command='sudo apt-get install -y /tmp/tinygo.deb'
 tinygo_version_command='tinygo version'
 
@@ -206,17 +311,6 @@ for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 	if [[ ! -f "$file" ]]; then
 		fail "required TinyGo workflow is missing: $relative"
 		continue
-	fi
-
-	version_count="$(grep -Ec "^[[:space:]]*TINYGO_VERSION:[[:space:]]*${EXPECTED_TINYGO_VERSION//./\\.}([[:space:]]*(#.*)?)?$" "$file" || true)"
-	if [[ "$version_count" != "1" ]]; then
-		fail "$relative must declare TINYGO_VERSION exactly once as $EXPECTED_TINYGO_VERSION"
-	fi
-
-	sha_declaration_count="$(grep -Ec '^[[:space:]]*TINYGO_SHA256:' "$file" || true)"
-	sha_match_count="$(grep -Ec "^[[:space:]]*TINYGO_SHA256:[[:space:]]*$EXPECTED_TINYGO_SHA256([[:space:]]*(#.*)?)?$" "$file" || true)"
-	if [[ "$sha_declaration_count" != "1" || "$sha_match_count" != "1" ]]; then
-		fail "$relative must declare exactly one accepted TinyGo SHA-256: $EXPECTED_TINYGO_SHA256"
 	fi
 
 	if [[ "$(count_active_occurrences "$tinygo_download_command" "$file")" != 1 ]]; then

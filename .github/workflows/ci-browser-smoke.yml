@@ -10,10 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  TINYGO_VERSION: 0.42.0
-  TINYGO_SHA256: 2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563
-
 jobs:
   browser-smoke:
     name: Browser smoke
@@ -45,8 +41,8 @@ jobs:
 
       - name: Install TinyGo
         run: |
-          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"
-          printf '%s  %s\n' "$TINYGO_SHA256" /tmp/tinygo.deb | sha256sum --check --strict - || exit 1
+          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"
+          printf '%s  %s\n' '2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563' /tmp/tinygo.deb | sha256sum --check --strict - || exit 1
           sudo apt-get install -y /tmp/tinygo.deb
           tinygo version
 
