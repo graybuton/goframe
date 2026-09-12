@@ -10,9 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  TINYGO_VERSION: 0.42.0
-
 jobs:
   browser-smoke:
     name: Browser smoke
@@ -20,22 +17,22 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: '1.26.6'
           cache: true
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24.18.1'
 
       - name: Setup Chrome
         id: setup-chrome
-        uses: browser-actions/setup-chrome@v2
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
 
       - name: Install smoke dependencies
         run: |
@@ -44,7 +41,8 @@ jobs:
 
       - name: Install TinyGo
         run: |
-          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"
+          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"
+          printf '%s  %s\n' '2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563' /tmp/tinygo.deb | sha256sum --check --strict - || exit 1
           sudo apt-get install -y /tmp/tinygo.deb
           tinygo version
 

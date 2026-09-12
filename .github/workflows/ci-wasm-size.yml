@@ -10,9 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  TINYGO_VERSION: 0.42.0
-
 jobs:
   tinygo-size:
     name: TinyGo packages and size budgets
@@ -20,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: '1.26.6'
           cache: true
@@ -35,7 +32,8 @@ jobs:
 
       - name: Install TinyGo
         run: |
-          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo_${TINYGO_VERSION}_amd64.deb"
+          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"
+          printf '%s  %s\n' '2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563' /tmp/tinygo.deb | sha256sum --check --strict - || exit 1
           sudo apt-get install -y /tmp/tinygo.deb
           tinygo version
 
@@ -82,7 +80,7 @@ jobs:
         run: scripts/size-budget.sh | tee size-report.txt
 
       - name: Upload size report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: wasm-size-report
