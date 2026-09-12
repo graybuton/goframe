@@ -3,6 +3,7 @@ set -euo pipefail
 
 EXPECTED_TINYGO_VERSION="0.42.0"
 EXPECTED_TINYGO_SHA256="2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563"
+TINYGO_RELEASE_NAMESPACE="tinygo-org/tinygo/releases/download/"
 EXPECTED_TINYGO_WORKFLOWS=(
 	".github/workflows/ci-browser-smoke.yml"
 	".github/workflows/ci-core.yml"
@@ -138,6 +139,70 @@ count_active_occurrences() {
 	printf '%d' "$count"
 }
 
+tinygo_release_url_owner_allowed() {
+	local path="$1"
+	local candidate
+
+	for candidate in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
+		if [[ "$path" == "$candidate" ]]; then
+			return 0
+		fi
+	done
+	case "$path" in
+		scripts/ci-supply-chain-check.sh | .github/scripts/ci-supply-chain-check.tests.sh)
+			return 0
+			;;
+	esac
+	return 1
+}
+
+enumerate_repository_files() {
+	if [[ "$repository_uses_git_inventory" == true ]]; then
+		git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard || return
+	else
+		find "$ROOT_DIR" -path "$ROOT_DIR/.git" -prune -o -type f -print0 || return
+	fi
+	# An empty record proves that the producer completed successfully.
+	printf '\0'
+}
+
+repository_uses_git_inventory=false
+if command -v git >/dev/null 2>&1 &&
+	[[ "$(git -C "$ROOT_DIR" rev-parse --is-inside-work-tree 2>/dev/null || true)" == true ]]; then
+	repository_uses_git_inventory=true
+fi
+
+repository_inventory_complete=false
+while IFS= read -r -d '' repository_path; do
+	if [[ -z "$repository_path" ]]; then
+		repository_inventory_complete=true
+		continue
+	fi
+	if [[ "$repository_path" == "$ROOT_DIR/"* ]]; then
+		relative="${repository_path#"$ROOT_DIR/"}"
+		file="$repository_path"
+	else
+		relative="$repository_path"
+		file="$ROOT_DIR/$repository_path"
+	fi
+	if [[ ! -f "$file" ]]; then
+		continue
+	fi
+	if grep -Fq -- "$TINYGO_RELEASE_NAMESPACE" "$file"; then
+		if ! tinygo_release_url_owner_allowed "$relative"; then
+			fail "TinyGo release-download namespace is not owned by $relative"
+		fi
+	else
+		grep_status=$?
+		if (( grep_status > 1 )); then
+			fail "could not inspect repository file for TinyGo release downloads: $relative"
+		fi
+	fi
+done < <(enumerate_repository_files)
+if [[ "$repository_inventory_complete" != true ]]; then
+	fail "could not enumerate repository-owned files for TinyGo release downloads"
+fi
+
 scan_roots=()
 for candidate in "$ROOT_DIR/.github/workflows" "$ROOT_DIR/.github/actions"; do
 	if [[ -d "$candidate" ]]; then
@@ -244,7 +309,7 @@ if (( ${#scan_roots[@]} > 0 )); then
 	# Traversal order affects diagnostics only; keep filenames NUL-delimited.
 	while IFS= read -r -d '' file; do
 		scan_action_refs "$file"
-		download_count="$(count_active_occurrences 'tinygo-org/tinygo/releases/download/' "$file")"
+		download_count="$(count_active_occurrences "$TINYGO_RELEASE_NAMESPACE" "$file")"
 		direct_tinygo_downloads=$((direct_tinygo_downloads + download_count))
 		if (( download_count > 0 )); then
 			relative="${file#"$ROOT_DIR/"}"

@@ -159,6 +159,23 @@ add_runtime_override() {
 	mv "$TMP_ROOT/runtime-override.yml" "$file"
 }
 
+write_repository_file() {
+	local fixture="$1"
+	local path="$2"
+	local content="$3"
+	local target="$fixture/$path"
+
+	mkdir -p "$(dirname "$target")"
+	printf '%s\n' "$content" > "$target"
+}
+
+add_workflow_script_invocation() {
+	local file="$1"
+	local command="$2"
+
+	printf '\n  delegated-script:\n    steps:\n      - run: %s\n' "$command" >> "$file"
+}
+
 expect_pass() {
 	local name="$1"
 	local fixture="$2"
@@ -324,6 +341,32 @@ for placement in before after same-line canonical hash-prefix unexpected; do
 	esac
 	expect_fail "additional TinyGo download: $placement" "$fixture"
 done
+
+fixture="$(make_fixture delegated-tinygo-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo.sh "$extra_download"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'scripts/install-tinygo.sh'
+expect_fail "invoked repository helper with direct TinyGo download" "$fixture"
+
+fixture="$(make_fixture uninvoked-tinygo-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo.sh "$extra_download"
+expect_fail "uninvoked repository helper with direct TinyGo download" "$fixture"
+
+fixture="$(make_fixture non-shell-tinygo-source "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/install.py "$extra_download"
+expect_fail "non-shell repository source with direct TinyGo download" "$fixture"
+
+fixture="$(make_fixture benign-invoked-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/helper.sh 'printf "benign helper\\n"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'scripts/helper.sh'
+expect_pass "invoked benign repository helper" "$fixture"
+
+fixture="$(make_fixture allowlisted-policy-sources "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/ci-supply-chain-check.sh "$extra_download"
+write_repository_file "$fixture" .github/scripts/ci-supply-chain-check.tests.sh \
+	"$extra_download"
+expect_pass "allowlisted checker and test policy literals" "$fixture"
 
 expect_fail "missing TinyGo checksum" \
 	"$(make_fixture missing-checksum "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install no)"
