@@ -561,7 +561,7 @@ if verify_synthetic_checksum "$(printf '%064d' 0)" "$synthetic_artifact" >/dev/n
 fi
 printf 'ok %d - incorrect synthetic artifact checksum\n' "$tests_run"
 
-if command -v sha256sum >/dev/null 2>&1; then
+if [[ -x /usr/bin/env && -x /usr/bin/sha256sum ]]; then
 	# Execute the fixture's actual verification line without inherited errexit.
 	for digest in "$(printf '%064d' 0)" "$synthetic_sha"; do
 		if [[ "$digest" == "$synthetic_sha" ]]; then
@@ -677,7 +677,7 @@ if command -v sha256sum >/dev/null 2>&1; then
 		printf 'ok %d - %s\n' "$tests_run" "$case_name"
 	done
 else
-	printf 'skip - GNU workflow checksum execution; portable SHA-256 controls passed\n'
+	printf 'skip - exact production verifier (/usr/bin/env -i /usr/bin/sha256sum) unavailable; portable SHA-256 controls passed\n'
 fi
 
 printf 'ci supply-chain check tests: ok (%d cases)\n' "$tests_run"
