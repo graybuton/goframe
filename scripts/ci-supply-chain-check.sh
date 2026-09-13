@@ -219,7 +219,7 @@ scan_action_refs() {
 	local comment comment_is_yaml
 	local scalar_indent=-1
 	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
-	local scalar_re='^[|>][+-]?$'
+	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?|)$'
 	local inline_comment_re='^(.*[^[:space:]])[[:space:]]+#(.*)$'
 	local full_comment_re='^[[:space:]]*#(.*)$'
 	while IFS= read -r line || [[ -n "$line" ]]; do
@@ -329,7 +329,7 @@ if (( direct_tinygo_downloads != ${#EXPECTED_TINYGO_WORKFLOWS[@]} )); then
 fi
 
 tinygo_download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
-tinygo_verify_command="printf '%s  %s\\n' '$EXPECTED_TINYGO_SHA256' /tmp/tinygo.deb | sha256sum --check --strict - || exit 1"
+tinygo_verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '$EXPECTED_TINYGO_SHA256  /tmp/tinygo.deb' || exit 1"
 tinygo_install_command='sudo apt-get install -y /tmp/tinygo.deb'
 tinygo_version_command='tinygo version'
 

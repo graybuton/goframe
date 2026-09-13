@@ -21,7 +21,8 @@ write_tinygo_workflow() {
 	local verification_order="$4"
 	local include_checksum="$5"
 	local trust_root_mode="${6:-literal}"
-	local download_command verify_input
+	local verifier_mode="${7:-trusted}"
+	local download_command verify_command verify_digest verify_input
 
 	mkdir -p "$(dirname "$path")"
 	case "$trust_root_mode" in
@@ -37,8 +38,26 @@ write_tinygo_workflow() {
 			;;
 	esac
 	case "$trust_root_mode" in
-		literal|variable-url) verify_input="'$checksum'" ;;
-		variable-digest|variable-both) verify_input='"$TINYGO_SHA256"' ;;
+		literal|variable-url)
+			verify_digest="'$checksum'"
+			verify_input="'$checksum  /tmp/tinygo.deb'"
+			;;
+		variable-digest|variable-both)
+			verify_digest='"$TINYGO_SHA256"'
+			verify_input='"$TINYGO_SHA256  /tmp/tinygo.deb"'
+			;;
+	esac
+	case "$verifier_mode" in
+		unqualified)
+			verify_command="printf '%s  %s\\n' $verify_digest /tmp/tinygo.deb | sha256sum --check --strict -"
+			;;
+		trusted)
+			verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< $verify_input"
+			;;
+		*)
+			printf 'unsupported verifier mode: %s\n' "$verifier_mode" >&2
+			exit 1
+			;;
 	esac
 	{
 		printf 'name: fixture\n'
@@ -61,17 +80,17 @@ write_tinygo_workflow() {
 		fi
 		if [[ "$include_checksum" == "yes" ]]; then
 			if [[ "$verification_order" == "commented" ]]; then
-				printf "          # printf '%%s  %%s\\\\n' %s /tmp/tinygo.deb | sha256sum --check --strict - || exit 1\n" "$verify_input"
+				printf '          # %s || exit 1\n' "$verify_command"
 			elif [[ "$verification_order" == "ignored" ]]; then
-				printf "          printf '%%s  %%s\\\\n' %s /tmp/tinygo.deb | sha256sum --check --strict - || true\n" "$verify_input"
+				printf '          %s || true\n' "$verify_command"
 			elif [[ "$verification_order" == "warned" ]]; then
-				printf "          printf '%%s  %%s\\\\n' %s /tmp/tinygo.deb | sha256sum --check --strict - || echo warning\n" "$verify_input"
+				printf '          %s || echo warning\n' "$verify_command"
 			elif [[ "$verification_order" == "skipped" ]]; then
-				printf "          false && printf '%%s  %%s\\\\n' %s /tmp/tinygo.deb | sha256sum --check --strict - || exit 1\n" "$verify_input"
+				printf '          false && %s || exit 1\n' "$verify_command"
 			elif [[ "$verification_order" == "implicit" ]]; then
-				printf "          printf '%%s  %%s\\\\n' %s /tmp/tinygo.deb | sha256sum --check --strict -\n" "$verify_input"
+				printf '          %s\n' "$verify_command"
 			else
-				printf "          printf '%%s  %%s\\\\n' %s /tmp/tinygo.deb | sha256sum --check --strict - || exit 1\n" "$verify_input"
+				printf '          %s || exit 1\n' "$verify_command"
 			fi
 		fi
 		if [[ "$verification_order" == "replaced" ]]; then
@@ -91,14 +110,15 @@ make_fixture() {
 	local verification_order="${4:-before-install}"
 	local include_checksum="${5:-yes}"
 	local trust_root_mode="${6:-literal}"
+	local verifier_mode="${7:-trusted}"
 	local fixture="$TMP_ROOT/$name"
 
 	write_tinygo_workflow "$fixture/.github/workflows/ci-core.yml" \
-		"$action_ref" "$checksum" "$verification_order" "$include_checksum" "$trust_root_mode"
+		"$action_ref" "$checksum" "$verification_order" "$include_checksum" "$trust_root_mode" "$verifier_mode"
 	write_tinygo_workflow "$fixture/.github/workflows/ci-browser-smoke.yml" \
-		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode"
+		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode"
 	write_tinygo_workflow "$fixture/.github/workflows/ci-wasm-size.yml" \
-		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode"
+		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode"
 	printf '%s' "$fixture"
 }
 
@@ -161,6 +181,50 @@ add_runtime_override() {
 	mv "$TMP_ROOT/runtime-override.yml" "$file"
 }
 
+add_path_poisoning() {
+	local file="$1"
+	awk '
+		/      - run: \|/ && !inserted {
+			print "      - run: |"
+			print "          mkdir -p \"$RUNNER_TEMP/fake-bin\""
+			print "          cp /bin/true \"$RUNNER_TEMP/fake-bin/sha256sum\""
+			print "          echo \"$RUNNER_TEMP/fake-bin\" >> \"$GITHUB_PATH\""
+			inserted = 1
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/path-poison.yml"
+	mv "$TMP_ROOT/path-poison.yml" "$file"
+}
+
+add_bash_env_shadowing() {
+	local file="$1"
+	awk '
+		/      - run: \|/ && !inserted {
+			print "      - run: |"
+			print "          printf '\''%s\\n'\'' '\''sha256sum() { return 0; }'\'' '\''printf() { return 0; }'\'' > \"$RUNNER_TEMP/bash-env\""
+			print "          echo \"BASH_ENV=$RUNNER_TEMP/bash-env\" >> \"$GITHUB_ENV\""
+			inserted = 1
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/bash-env-shadow.yml"
+	mv "$TMP_ROOT/bash-env-shadow.yml" "$file"
+}
+
+write_block_scalar_workflow() {
+	local path="$1"
+	local scalar="$2"
+
+	mkdir -p "$(dirname "$path")"
+	{
+		printf 'jobs:\n'
+		printf '  scalar:\n'
+		printf '    steps:\n'
+		printf '      - run: %s\n' "$scalar"
+		printf '          echo "https://example.invalid"\n'
+		printf '          echo "uses: actions/example@v1"\n'
+	} > "$path"
+}
+
 write_repository_file() {
 	local fixture="$1"
 	local path="$2"
@@ -219,6 +283,21 @@ expect_fail "remote Action SHA with major-only annotation" \
 expect_fail "remote Action SHA with two-component annotation" \
 	"$(make_fixture minor-version-annotation "actions/checkout@$FULL_ACTION_SHA # v1.2")"
 
+expect_fail "old unqualified TinyGo checksum verifier" \
+	"$(make_fixture old-unqualified-verifier "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal unqualified)"
+
+fixture="$(make_fixture path-poisoned-unqualified-verifier "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal unqualified)"
+add_path_poisoning "$fixture/.github/workflows/ci-core.yml"
+expect_fail "PATH-poisoned workflow with unqualified checksum verifier" "$fixture"
+
+fixture="$(make_fixture path-poisoned-trusted-verifier "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted)"
+add_path_poisoning "$fixture/.github/workflows/ci-core.yml"
+expect_pass "PATH-poisoned workflow with trusted checksum verifier" "$fixture"
+
+fixture="$(make_fixture bash-env-trusted-verifier "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted)"
+add_bash_env_shadowing "$fixture/.github/workflows/ci-core.yml"
+expect_pass "BASH_ENV-shadowed workflow with trusted checksum verifier" "$fixture"
+
 for action_form in \
 	'"uses": actions/checkout@v7' \
 	"'uses': actions/checkout@v7" \
@@ -244,9 +323,29 @@ printf '%s\n' 'env:' '  VERSION: value' 'jobs:' '  quoted:' '    strategy:' '   
 	> "$fixture/.github/workflows/scalars.yml"
 expect_pass "quoted scalar list and literal script content" "$fixture"
 
+for scalar in '|' '|-' '|+' '>' '>-' '>+' '|2' '|2-' '|-2' '>2+' '>+2'; do
+	fixture="$(make_fixture "block-scalar-$tests_run" "$FULL_ACTION_REF")"
+	write_block_scalar_workflow "$fixture/.github/workflows/scalars.yml" "$scalar"
+	expect_pass "block scalar $scalar with mapping-like body content" "$fixture"
+done
+
+for scalar in '|0' '|22' '|+-' '>-+'; do
+	fixture="$(make_fixture "invalid-block-scalar-$tests_run" "$FULL_ACTION_REF")"
+	write_block_scalar_workflow "$fixture/.github/workflows/scalars.yml" "$scalar"
+	expect_fail "invalid block scalar indicator $scalar" "$fixture"
+done
+
 printf '%s\n' 'jobs:' '  named:' '    steps:' '      - name: |' '          multiline name' \
 	'        uses: actions/checkout@v7' > "$fixture/.github/workflows/scalars.yml"
 expect_fail "Action following a block-scalar step name" "$fixture"
+
+printf '%s\n' 'jobs:' '  named:' '    steps:' '      - name: |2' '          multiline name' \
+	'        uses: actions/checkout@v7' > "$fixture/.github/workflows/scalars.yml"
+expect_fail "Action following an explicit-indent block-scalar step name" "$fixture"
+
+printf '%s\n' 'jobs:' '  scalar:' '    steps:' '      - run: >+2' '          scalar body' \
+	'        uses: actions/checkout@v7' > "$fixture/.github/workflows/scalars.yml"
+expect_fail "Action following a folded explicit-indent block scalar" "$fixture"
 
 printf '%s\n' 'jobs:' '  named:' '    steps:' '      -   name: |' '            multiline name' \
 	'          uses: actions/checkout@v7' > "$fixture/.github/workflows/scalars.yml"
@@ -465,9 +564,14 @@ printf 'ok %d - incorrect synthetic artifact checksum\n' "$tests_run"
 if command -v sha256sum >/dev/null 2>&1; then
 	# Execute the fixture's actual verification line without inherited errexit.
 	for digest in "$(printf '%064d' 0)" "$synthetic_sha"; do
+		if [[ "$digest" == "$synthetic_sha" ]]; then
+			case_name="correct checksum continues without inherited errexit"
+		else
+			case_name="wrong checksum stops without inherited errexit"
+		fi
 		fixture="$(make_fixture plain-bash "$FULL_ACTION_REF" "$digest")"
 		verification="$(sed -n '/sha256sum --check --strict/p' "$fixture/.github/workflows/ci-core.yml")"
-		verification="${verification/\/tmp\/tinygo.deb/\"\$synthetic_artifact\"}"
+		verification="${verification//\/tmp\/tinygo.deb/$synthetic_artifact}"
 		printf 'set +e\n%s\nprintf continued > "$continuation"\n' "$verification" > "$TMP_ROOT/verify.sh"
 		rm -f "$TMP_ROOT/continued"
 		tests_run=$((tests_run + 1))
@@ -483,7 +587,94 @@ if command -v sha256sum >/dev/null 2>&1; then
 				exit 1
 			fi
 		fi
-		printf 'ok %d - explicit checksum status and continuation without errexit\n' "$tests_run"
+		printf 'ok %d - %s\n' "$tests_run" "$case_name"
+	done
+
+	fake_bin="$TMP_ROOT/fake-bin"
+	fake_marker="$TMP_ROOT/fake-sha256sum-ran"
+	mkdir -p "$fake_bin"
+	{
+		printf '#!/usr/bin/env bash\n'
+		printf ': > "$FAKE_SHA256SUM_MARKER"\n'
+		printf 'exit 0\n'
+	} > "$fake_bin/sha256sum"
+	chmod +x "$fake_bin/sha256sum"
+
+	for digest in "$(printf '%064d' 0)" "$synthetic_sha"; do
+		if [[ "$digest" == "$synthetic_sha" ]]; then
+			case_name="correct checksum passes under poisoned PATH"
+		else
+			case_name="wrong checksum fails under poisoned PATH"
+		fi
+		fixture="$(make_fixture poisoned-path-execution "$FULL_ACTION_REF" "$digest")"
+		verification="$(sed -n '/sha256sum --check --strict/p' "$fixture/.github/workflows/ci-core.yml")"
+		verification="${verification//\/tmp\/tinygo.deb/$synthetic_artifact}"
+		printf 'set +e\n%s\n' "$verification" > "$TMP_ROOT/path-verify.sh"
+		rm -f "$fake_marker"
+		tests_run=$((tests_run + 1))
+		if FAKE_SHA256SUM_MARKER="$fake_marker" PATH="$fake_bin:$PATH" \
+			"$BASH" --noprofile --norc "$TMP_ROOT/path-verify.sh" > "$TMP_ROOT/path-checksum.log" 2>&1; then
+			if [[ "$digest" != "$synthetic_sha" ]]; then
+				printf 'not ok %d - wrong checksum passed under poisoned PATH\n' "$tests_run" >&2
+				exit 1
+			fi
+		else
+			if [[ "$digest" == "$synthetic_sha" ]]; then
+				printf 'not ok %d - correct checksum failed under poisoned PATH\n' "$tests_run" >&2
+				exit 1
+			fi
+		fi
+		if [[ -e "$fake_marker" ]]; then
+			printf 'not ok %d - fake PATH checksum verifier executed\n' "$tests_run" >&2
+			exit 1
+		fi
+		printf 'ok %d - %s\n' "$tests_run" "$case_name"
+	done
+
+	checksum_function_marker="$TMP_ROOT/checksum-function-ran"
+	printf_function_marker="$TMP_ROOT/printf-function-ran"
+	{
+		printf 'sha256sum() {\n'
+		printf '  : > "$FAKE_SHA256SUM_FUNCTION_MARKER"\n'
+		printf '  return 0\n'
+		printf '}\n'
+		printf 'printf() {\n'
+		printf '  : > "$FAKE_PRINTF_FUNCTION_MARKER"\n'
+		printf '  builtin printf "attacker\\n"\n'
+		printf '}\n'
+	} > "$TMP_ROOT/bash-env"
+
+	for digest in "$(printf '%064d' 0)" "$synthetic_sha"; do
+		if [[ "$digest" == "$synthetic_sha" ]]; then
+			case_name="correct checksum passes with BASH_ENV function overrides"
+		else
+			case_name="wrong checksum fails with BASH_ENV function overrides"
+		fi
+		fixture="$(make_fixture bash-env-execution "$FULL_ACTION_REF" "$digest")"
+		verification="$(sed -n '/sha256sum --check --strict/p' "$fixture/.github/workflows/ci-core.yml")"
+		verification="${verification//\/tmp\/tinygo.deb/$synthetic_artifact}"
+		printf 'set +e\n%s\n' "$verification" > "$TMP_ROOT/bash-env-verify.sh"
+		rm -f "$checksum_function_marker" "$printf_function_marker"
+		tests_run=$((tests_run + 1))
+		if BASH_ENV="$TMP_ROOT/bash-env" \
+			FAKE_SHA256SUM_FUNCTION_MARKER="$checksum_function_marker" \
+			FAKE_PRINTF_FUNCTION_MARKER="$printf_function_marker" \
+			"$BASH" --noprofile --norc "$TMP_ROOT/bash-env-verify.sh" > "$TMP_ROOT/bash-env-checksum.log" 2>&1; then
+			if [[ "$digest" != "$synthetic_sha" ]]; then
+				printf 'not ok %d - wrong checksum passed with BASH_ENV function overrides\n' "$tests_run" >&2
+				exit 1
+			fi
+		else
+			if [[ "$digest" == "$synthetic_sha" ]]; then
+				printf 'not ok %d - correct checksum failed with BASH_ENV function overrides\n' "$tests_run" >&2
+				exit 1
+			fi
+		fi
+		if [[ -e "$checksum_function_marker" || -e "$printf_function_marker" ]]; then
+			printf 'not ok %d - BASH_ENV checksum or printf override executed\n' "$tests_run" >&2
+			exit 1
+		fi
+		printf 'ok %d - %s\n' "$tests_run" "$case_name"
 	done
 else
 	printf 'skip - GNU workflow checksum execution; portable SHA-256 controls passed\n'
