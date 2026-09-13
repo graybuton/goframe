@@ -29,6 +29,7 @@ write_tinygo_workflow() {
 	local trust_root_mode="${6:-literal}"
 	local verifier_mode="${7:-trusted}"
 	local boundary_mode="${8:-protected}"
+	local smoke_mode="${9:-separate}"
 	local download_command verify_command verify_digest verify_input verify_target
 	local shell_template="$CLEAN_SHELL"
 	local cleanup_command="$CLEANUP_COMMAND"
@@ -115,6 +116,10 @@ write_tinygo_workflow() {
 			printf '      - uses: %s\n' "$action_ref"
 		fi
 		printf '      # uses: actions/commented-out@v1\n'
+		if [[ "$smoke_mode" == "before-install" ]]; then
+			printf '      - name: Verify TinyGo\n'
+			printf '        run: tinygo version\n'
+		fi
 		if [[ -n "$shell_template" ]]; then
 			printf '      - name: Install TinyGo\n'
 			printf '        shell: %s\n' "$shell_template"
@@ -153,7 +158,29 @@ write_tinygo_workflow() {
 		if [[ "$verification_order" != "after-install" ]]; then
 			printf '          /usr/bin/sudo /usr/bin/apt-get install -y %s\n' "$install_target"
 		fi
-		printf '          tinygo version\n'
+		case "$smoke_mode" in
+			inside)
+				printf '          tinygo version\n'
+				;;
+			separate)
+				printf '      - name: Verify TinyGo\n'
+				printf '        run: tinygo version\n'
+				;;
+			missing|before-install) ;;
+			malformed)
+				printf '      - name: Verify TinyGo\n'
+				printf '        run: echo wrong command\n'
+				;;
+			custom-shell)
+				printf '      - name: Verify TinyGo\n'
+				printf '        shell: %s\n' "$CLEAN_SHELL"
+				printf '        run: tinygo version\n'
+				;;
+			*)
+				printf 'unsupported TinyGo smoke mode: %s\n' "$smoke_mode" >&2
+				exit 1
+				;;
+		esac
 	} > "$path"
 }
 
@@ -166,14 +193,15 @@ make_fixture() {
 	local trust_root_mode="${6:-literal}"
 	local verifier_mode="${7:-trusted}"
 	local boundary_mode="${8:-protected}"
+	local smoke_mode="${9:-separate}"
 	local fixture="$TMP_ROOT/$name"
 
 	write_tinygo_workflow "$fixture/.github/workflows/ci-core.yml" \
-		"$action_ref" "$checksum" "$verification_order" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode"
+		"$action_ref" "$checksum" "$verification_order" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode" "$smoke_mode"
 	write_tinygo_workflow "$fixture/.github/workflows/ci-browser-smoke.yml" \
-		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode"
+		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode" "$smoke_mode"
 	write_tinygo_workflow "$fixture/.github/workflows/ci-wasm-size.yml" \
-		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode"
+		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode" "$smoke_mode"
 	printf '%s' "$fixture"
 }
 
@@ -412,7 +440,13 @@ test_ambient_sudo_interposition() {
 	local marker="$TMP_ROOT/ambient-sudo-ran"
 	local bash_env="$TMP_ROOT/ambient-bash-env"
 	local script="$TMP_ROOT/ambient-interposition.sh"
-	local digest verify_command
+	local cp_bin digest verify_command
+
+	cp_bin="$(command -v cp || true)"
+	if [[ "$cp_bin" != /* || ! -x "$cp_bin" ]]; then
+		printf 'not ok - ambient sudo interposition oracle requires an absolute executable cp\n' >&2
+		exit 1
+	fi
 
 	printf 'verified artifact\n' > "$artifact"
 	printf 'replacement artifact\n' > "$replacement"
@@ -429,12 +463,12 @@ test_ambient_sudo_interposition() {
 	printf '%s\n' \
 		'sudo() {' \
 		'  : > "$P1_MARKER"' \
-		'  /usr/bin/cp "$P1_REPLACEMENT" "$P1_ARTIFACT"' \
+		"  \"$cp_bin\" \"\$P1_REPLACEMENT\" \"\$P1_ARTIFACT\"" \
 		'  "$@"' \
 		'}' \
 		> "$bash_env"
 	printf '%s\n' "$verify_command" \
-		'sudo /usr/bin/cp "$P1_ARTIFACT" "$P1_CONSUMED"' \
+		"sudo \"$cp_bin\" \"\$P1_ARTIFACT\" \"\$P1_CONSUMED\"" \
 		> "$script"
 
 	tests_run=$((tests_run + 1))
@@ -450,6 +484,19 @@ test_ambient_sudo_interposition() {
 	fi
 	printf 'ok %d - ambient sudo can replace bytes after verification\n' "$tests_run"
 }
+
+expect_pass "protected install followed by separate TinyGo version smoke" \
+	"$(make_fixture split-version-smoke "$FULL_ACTION_REF")"
+expect_fail "TinyGo version smoke inside sanitized install" \
+	"$(make_fixture in-boundary-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected inside)"
+expect_fail "protected install without TinyGo version smoke" \
+	"$(make_fixture missing-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected missing)"
+expect_fail "TinyGo version smoke before protected install" \
+	"$(make_fixture early-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected before-install)"
+expect_fail "malformed TinyGo version smoke" \
+	"$(make_fixture malformed-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected malformed)"
+expect_fail "sanitized TinyGo version smoke" \
+	"$(make_fixture sanitized-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected custom-shell)"
 
 expect_pass "full remote Action SHA with version annotation" \
 	"$(make_fixture full-sha "$FULL_ACTION_REF")"

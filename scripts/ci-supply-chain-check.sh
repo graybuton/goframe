@@ -520,36 +520,52 @@ fi
 
 count_tinygo_install_sequences() {
 	local file="$1"
-	local line command indent shell_indent command_indent expected_command valid_indent
+	local line command indent step_indent property_indent command_indent expected_command valid_indent
 	local state=0 count=0
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		command="$(trim_whitespace "$line")"
 		indent="${line%%[![:space:]]*}"
 		if (( state > 0 )); then
+			if (( state == 8 )) && [[ -z "$command" ]]; then
+				continue
+			fi
 			case "$state" in
-				1) expected_command='run: |' ;;
-				2) expected_command="$tinygo_cleanup_command"; command_indent="$indent" ;;
-				3) expected_command="$tinygo_download_command" ;;
-				4) expected_command="$tinygo_stage_command" ;;
-				5) expected_command="$tinygo_verify_command" ;;
-				6) expected_command="$tinygo_install_command" ;;
-				7) expected_command="$tinygo_version_command" ;;
+				1) expected_command="shell: $tinygo_shell_template"; property_indent="$indent" ;;
+				2) expected_command='run: |' ;;
+				3) expected_command="$tinygo_cleanup_command"; command_indent="$indent" ;;
+				4) expected_command="$tinygo_download_command" ;;
+				5) expected_command="$tinygo_stage_command" ;;
+				6) expected_command="$tinygo_verify_command" ;;
+				7) expected_command="$tinygo_install_command" ;;
+				8) expected_command='- name: Verify TinyGo' ;;
+				9) expected_command="run: $tinygo_version_command" ;;
 			esac
 			if (( state == 1 )); then
 				valid_indent=false
-				if [[ "$indent" == "$shell_indent" ]]; then
+				if [[ "$indent" == "$step_indent"* ]] &&
+					(( ${#indent} > ${#step_indent} )); then
+					valid_indent=true
+				fi
+			elif (( state == 2 || state == 9 )); then
+				valid_indent=false
+				if [[ "$indent" == "$property_indent" ]]; then
+					valid_indent=true
+				fi
+			elif (( state == 8 )); then
+				valid_indent=false
+				if [[ "$indent" == "$step_indent" ]]; then
 					valid_indent=true
 				fi
 			else
 				valid_indent=false
-				if [[ "$indent" == "$command_indent" && "$indent" == "$shell_indent"* ]] &&
-					(( ${#indent} > ${#shell_indent} )); then
+				if [[ "$indent" == "$command_indent" && "$indent" == "$property_indent"* ]] &&
+					(( ${#indent} > ${#property_indent} )); then
 					valid_indent=true
 				fi
 			fi
 			if [[ "$command" == "$expected_command" && "$valid_indent" == true ]]; then
 				state=$((state + 1))
-				if (( state == 8 )); then
+				if (( state == 10 )); then
 					count=$((count + 1))
 					state=0
 				fi
@@ -557,8 +573,8 @@ count_tinygo_install_sequences() {
 				state=0
 			fi
 		fi
-		if [[ "$command" == "shell: $tinygo_shell_template" ]]; then
-			shell_indent="$indent"
+		if [[ "$command" == '- name: Install TinyGo' ]]; then
+			step_indent="$indent"
 			state=1
 		fi
 	done < "$file"
@@ -595,7 +611,7 @@ for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 
 	sequence_count="$(count_tinygo_install_sequences "$file")"
 	if [[ "$sequence_count" != "1" ]]; then
-		fail "$relative must contain exactly one sanitized TinyGo staging, verification, installation, cleanup, and version-report sequence"
+		fail "$relative must contain exactly one sanitized TinyGo staging, verification, installation, and cleanup sequence immediately followed by an ordinary TinyGo version smoke"
 	else
 		accepted_tinygo_install_sequences=$((accepted_tinygo_install_sequences + 1))
 	fi
