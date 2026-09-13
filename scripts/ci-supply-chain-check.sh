@@ -219,7 +219,7 @@ scan_action_refs() {
 	local comment comment_is_yaml
 	local scalar_indent=-1
 	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
-	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?|)$'
+	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
 	local inline_comment_re='^(.*[^[:space:]])[[:space:]]+#(.*)$'
 	local full_comment_re='^[[:space:]]*#(.*)$'
 	while IFS= read -r line || [[ -n "$line" ]]; do
