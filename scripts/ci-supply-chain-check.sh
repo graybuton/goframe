@@ -10,6 +10,14 @@ EXPECTED_TINYGO_WORKFLOWS=(
 	".github/workflows/ci-core.yml"
 	".github/workflows/ci-wasm-size.yml"
 )
+TINYGO_VERIFIED_DEB="/tmp/goframe-tinygo-${EXPECTED_TINYGO_VERSION}-verified.deb"
+tinygo_shell_template='/usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash --noprofile --norc -e -u -o pipefail {0}'
+tinygo_cleanup_command="trap '/usr/bin/sudo /usr/bin/rm -f $TINYGO_VERIFIED_DEB' EXIT"
+tinygo_download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
+tinygo_stage_command="/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb $TINYGO_VERIFIED_DEB"
+tinygo_verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '$EXPECTED_TINYGO_SHA256  $TINYGO_VERIFIED_DEB' || exit 1"
+tinygo_install_command="/usr/bin/sudo /usr/bin/apt-get install -y $TINYGO_VERIFIED_DEB"
+tinygo_version_command='tinygo version'
 
 usage() {
 	printf 'usage: %s [repository-root]\n' "${0##*/}" >&2
@@ -28,6 +36,7 @@ fi
 
 failures=0
 remote_action_count=0
+loopback_download_count=0
 
 fail() {
 	printf 'ci supply-chain check: %s\n' "$*" >&2
@@ -152,6 +161,183 @@ tinygo_release_url_owner_allowed() {
 	return 1
 }
 
+shell_downloader_re='(^|;|&&|\|\||\||\(|\{|\$\(|`)[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*((if|elif|while|until|then|do|!)[[:space:]]+)*(command[[:space:]]+)?(/usr/bin/)?(curl|wget)([[:space:]]|$)'
+
+shell_command_has_active_downloader() {
+	local command="$1"
+	# This is an authored-shell boundary, not a shell interpreter. Match command
+	# positions used by repository CI and scripts, including substitutions.
+	[[ "$command" =~ $shell_downloader_re ]]
+}
+
+shell_command_has_multiple_active_downloaders() {
+	local remainder="$1"
+	local first_match
+
+	if [[ ! "$remainder" =~ $shell_downloader_re ]]; then
+		return 1
+	fi
+	first_match="${BASH_REMATCH[0]}"
+	remainder="${remainder#*"$first_match"}"
+	[[ "$remainder" =~ $shell_downloader_re ]]
+}
+
+shell_command_is_loopback_probe() {
+	local command="$1"
+	local direct_re='^(if[[:space:]]+)?(command[[:space:]]+)?(/usr/bin/)?curl([[:space:]]+-[A-Za-z]+)*[[:space:]]+"http://127[.]0[.]0[.]1:[^"]*"[[:space:]]*(>/dev/null[[:space:]]+2>&1)?[[:space:]]*(;[[:space:]]*then)?$'
+	local substitution_re='^[A-Za-z_][A-Za-z0-9_]*="\$\([[:space:]]*(command[[:space:]]+)?(/usr/bin/)?curl([[:space:]]+-[A-Za-z]+)*[[:space:]]+"http://127[.]0[.]0[.]1:[^"]*"[[:space:]]*(\|\|[[:space:]]+true)?[[:space:]]*\)"$'
+	if shell_command_has_multiple_active_downloaders "$command"; then
+		return 1
+	fi
+	[[ "$command" =~ $direct_re || "$command" =~ $substitution_re ]]
+}
+
+inspect_shell_logical_command() {
+	local relative="$1"
+	local line_number="$2"
+	local command="$3"
+
+	command="$(trim_whitespace "$command")"
+	if [[ -z "$command" ]] || ! shell_command_has_active_downloader "$command"; then
+		return
+	fi
+	if tinygo_release_url_owner_allowed "$relative" &&
+		[[ "$command" == "$tinygo_download_command" ]]; then
+		return
+	fi
+	if shell_command_is_loopback_probe "$command"; then
+		loopback_download_count=$((loopback_download_count + 1))
+		return
+	fi
+	fail "$relative:$line_number active curl/wget command is neither the accepted TinyGo fetch nor a literal-rooted loopback probe"
+}
+
+pending_shell_command=""
+pending_shell_line=0
+
+reset_shell_logical_command() {
+	pending_shell_command=""
+	pending_shell_line=0
+}
+
+consume_shell_physical_line() {
+	local relative="$1"
+	local line_number="$2"
+	local line="$3"
+	local command
+
+	command="$(trim_whitespace "$line")"
+	if [[ -z "$pending_shell_command" && ( -z "$command" || "$command" == \#* ) ]]; then
+		return
+	fi
+	if [[ -z "$pending_shell_command" ]]; then
+		pending_shell_line="$line_number"
+	fi
+	if [[ "$command" == *\\ ]]; then
+		command="${command%\\}"
+		pending_shell_command="${pending_shell_command}${pending_shell_command:+ }$command"
+		return
+	fi
+	pending_shell_command="${pending_shell_command}${pending_shell_command:+ }$command"
+	inspect_shell_logical_command "$relative" "$pending_shell_line" "$pending_shell_command"
+	reset_shell_logical_command
+}
+
+flush_shell_logical_command() {
+	local relative="$1"
+	if [[ -n "$pending_shell_command" ]]; then
+		inspect_shell_logical_command "$relative" "$pending_shell_line" "$pending_shell_command"
+	fi
+	reset_shell_logical_command
+}
+
+scan_shell_downloaders() {
+	local file="$1"
+	local relative="$2"
+	local line line_number=0
+
+	reset_shell_logical_command
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line_number=$((line_number + 1))
+		consume_shell_physical_line "$relative" "$line_number" "$line"
+	done < "$file"
+	flush_shell_logical_command "$relative"
+}
+
+scan_workflow_downloaders() {
+	local file="$1"
+	local relative="${file#"$ROOT_DIR/"}"
+	local line line_number=0 indent syntax key value sequence_prefix content
+	local scalar_indent=-1 run_scalar=false
+	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
+	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
+
+	reset_shell_logical_command
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line_number=$((line_number + 1))
+		indent="${line%%[![:space:]]*}"
+		syntax="$(trim_whitespace "$line")"
+		if (( scalar_indent >= 0 )) &&
+			[[ -z "$syntax" || ${#indent} -gt scalar_indent ]]; then
+			if [[ "$run_scalar" == true ]]; then
+				consume_shell_physical_line "$relative" "$line_number" "$line"
+			fi
+			continue
+		fi
+		if [[ "$run_scalar" == true ]]; then
+			flush_shell_logical_command "$relative"
+		fi
+		scalar_indent=-1
+		run_scalar=false
+		content="$syntax"
+		if [[ "$syntax" == \#* ]]; then
+			continue
+		fi
+		if [[ ! "$content" =~ $mapping_re ]]; then
+			continue
+		fi
+		sequence_prefix="${BASH_REMATCH[1]}"
+		key="${BASH_REMATCH[2]}"
+		value="${BASH_REMATCH[4]}"
+		if [[ "$value" =~ $scalar_re ]]; then
+			scalar_indent=$((${#indent} + ${#sequence_prefix}))
+			if [[ "$key" == run ]]; then
+				run_scalar=true
+			fi
+			continue
+		fi
+		if [[ "$key" != run || -z "$value" ]]; then
+			continue
+		fi
+		if (( ${#value} >= 2 )); then
+			if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+				value="${value:1:${#value}-2}"
+			elif [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+				value="${value:1:${#value}-2}"
+			fi
+		fi
+		consume_shell_physical_line "$relative" "$line_number" "$value"
+	done < "$file"
+	if [[ "$run_scalar" == true ]]; then
+		flush_shell_logical_command "$relative"
+	fi
+}
+
+repository_file_is_shell_source() {
+	local relative="$1"
+	local file="$2"
+	local first_line
+
+	case "$relative" in
+		*.sh|*.bash) return 0 ;;
+	esac
+	if [[ "${relative##*/}" == *.* ]]; then
+		return 1
+	fi
+	IFS= read -r first_line < "$file" || true
+	[[ "$first_line" =~ ^\#!.*(bash|/sh)([[:space:]]|$) ]]
+}
+
 enumerate_repository_files() {
 	if [[ "$repository_uses_git_inventory" == true ]]; then
 		git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard || return
@@ -193,6 +379,9 @@ while IFS= read -r -d '' repository_path; do
 		if (( grep_status > 1 )); then
 			fail "could not inspect repository file for TinyGo release downloads: $relative"
 		fi
+	fi
+	if repository_file_is_shell_source "$relative" "$file"; then
+		scan_shell_downloaders "$file" "$relative"
 	fi
 done < <(enumerate_repository_files)
 if [[ "$repository_inventory_complete" != true ]]; then
@@ -305,6 +494,7 @@ if (( ${#scan_roots[@]} > 0 )); then
 	# Traversal order affects diagnostics only; keep filenames NUL-delimited.
 	while IFS= read -r -d '' file; do
 		scan_action_refs "$file"
+		scan_workflow_downloaders "$file"
 		download_count="$(count_active_occurrences "$TINYGO_RELEASE_NAMESPACE" "$file")"
 		direct_tinygo_downloads=$((direct_tinygo_downloads + download_count))
 		if (( download_count > 0 )); then
@@ -328,29 +518,38 @@ if (( direct_tinygo_downloads != ${#EXPECTED_TINYGO_WORKFLOWS[@]} )); then
 	fail "expected ${#EXPECTED_TINYGO_WORKFLOWS[@]} direct TinyGo release downloads, found $direct_tinygo_downloads"
 fi
 
-tinygo_download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
-tinygo_verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '$EXPECTED_TINYGO_SHA256  /tmp/tinygo.deb' || exit 1"
-tinygo_install_command='sudo apt-get install -y /tmp/tinygo.deb'
-tinygo_version_command='tinygo version'
-
 count_tinygo_install_sequences() {
 	local file="$1"
-	local line command indent run_indent command_indent expected_command
+	local line command indent shell_indent command_indent expected_command valid_indent
 	local state=0 count=0
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		command="$(trim_whitespace "$line")"
 		indent="${line%%[![:space:]]*}"
 		if (( state > 0 )); then
 			case "$state" in
-				1) expected_command="$tinygo_download_command"; command_indent="$indent" ;;
-				2) expected_command="$tinygo_verify_command" ;;
-				3) expected_command="$tinygo_install_command" ;;
-				4) expected_command="$tinygo_version_command" ;;
+				1) expected_command='run: |' ;;
+				2) expected_command="$tinygo_cleanup_command"; command_indent="$indent" ;;
+				3) expected_command="$tinygo_download_command" ;;
+				4) expected_command="$tinygo_stage_command" ;;
+				5) expected_command="$tinygo_verify_command" ;;
+				6) expected_command="$tinygo_install_command" ;;
+				7) expected_command="$tinygo_version_command" ;;
 			esac
-			if [[ "$command" == "$expected_command" && "$indent" == "$command_indent" &&
-				"$indent" == "$run_indent"* ]] && (( ${#indent} > ${#run_indent} )); then
+			if (( state == 1 )); then
+				valid_indent=false
+				if [[ "$indent" == "$shell_indent" ]]; then
+					valid_indent=true
+				fi
+			else
+				valid_indent=false
+				if [[ "$indent" == "$command_indent" && "$indent" == "$shell_indent"* ]] &&
+					(( ${#indent} > ${#shell_indent} )); then
+					valid_indent=true
+				fi
+			fi
+			if [[ "$command" == "$expected_command" && "$valid_indent" == true ]]; then
 				state=$((state + 1))
-				if (( state == 5 )); then
+				if (( state == 8 )); then
 					count=$((count + 1))
 					state=0
 				fi
@@ -358,8 +557,8 @@ count_tinygo_install_sequences() {
 				state=0
 			fi
 		fi
-		if [[ "$command" == 'run: |' || "$command" == '- run: |' ]]; then
-			run_indent="$indent"
+		if [[ "$command" == "shell: $tinygo_shell_template" ]]; then
+			shell_indent="$indent"
 			state=1
 		fi
 	done < "$file"
@@ -367,6 +566,7 @@ count_tinygo_install_sequences() {
 	printf '%d' "$count"
 }
 
+accepted_tinygo_install_sequences=0
 for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 	file="$ROOT_DIR/$relative"
 	if [[ ! -f "$file" ]]; then
@@ -376,6 +576,12 @@ for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 
 	if [[ "$(count_active_occurrences "$tinygo_download_command" "$file")" != 1 ]]; then
 		fail "$relative must contain exactly one accepted TinyGo download command"
+	fi
+	if [[ "$(count_active_occurrences "$tinygo_cleanup_command" "$file")" != 1 ]]; then
+		fail "$relative must contain exactly one accepted TinyGo cleanup command"
+	fi
+	if [[ "$(count_active_occurrences "$tinygo_stage_command" "$file")" != 1 ]]; then
+		fail "$relative must contain exactly one accepted TinyGo staging command"
 	fi
 	if [[ "$(count_active_occurrences "$tinygo_verify_command" "$file")" != 1 ]]; then
 		fail "$relative must contain exactly one accepted TinyGo verification command"
@@ -389,7 +595,9 @@ for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 
 	sequence_count="$(count_tinygo_install_sequences "$file")"
 	if [[ "$sequence_count" != "1" ]]; then
-		fail "$relative must contain exactly one contiguous TinyGo download, verification, installation, and version-report sequence"
+		fail "$relative must contain exactly one sanitized TinyGo staging, verification, installation, cleanup, and version-report sequence"
+	else
+		accepted_tinygo_install_sequences=$((accepted_tinygo_install_sequences + 1))
 	fi
 done
 
@@ -397,5 +605,6 @@ if (( failures != 0 )); then
 	exit 1
 fi
 
-printf 'ci supply-chain check: ok (%d remote Action refs, %d verified TinyGo downloads)\n' \
-	"$remote_action_count" "$direct_tinygo_downloads"
+printf 'ci supply-chain check: ok (%d remote Action refs, %d verified TinyGo downloads, %d protected install sequences, %d loopback probes)\n' \
+	"$remote_action_count" "$direct_tinygo_downloads" \
+	"$accepted_tinygo_install_sequences" "$loopback_download_count"

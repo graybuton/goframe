@@ -31,10 +31,13 @@ jobs:
           sudo apt-get install -y brotli zstd
 
       - name: Install TinyGo
+        shell: /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash --noprofile --norc -e -u -o pipefail {0}
         run: |
-          curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"
-          /usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563  /tmp/tinygo.deb' || exit 1
-          sudo apt-get install -y /tmp/tinygo.deb
+          trap '/usr/bin/sudo /usr/bin/rm -f /tmp/goframe-tinygo-0.42.0-verified.deb' EXIT
+          /usr/bin/curl -fsSL -o /tmp/tinygo.deb "https://github.com/tinygo-org/tinygo/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"
+          /usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb /tmp/goframe-tinygo-0.42.0-verified.deb
+          /usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563  /tmp/goframe-tinygo-0.42.0-verified.deb' || exit 1
+          /usr/bin/sudo /usr/bin/apt-get install -y /tmp/goframe-tinygo-0.42.0-verified.deb
           tinygo version
 
       - name: Install goxc

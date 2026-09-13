@@ -9,6 +9,12 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 EXPECTED_SHA="2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563"
 TINYGO_RELEASE_REPOSITORY="tinygo-org/tinygo"
 TINYGO_RELEASE_NAMESPACE="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
+VERIFIED_DEB="/tmp/goframe-tinygo-0.42.0-verified.deb"
+CLEAN_PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+CLEAN_SHELL="/usr/bin/env -i PATH=$CLEAN_PATH /bin/bash --noprofile --norc -e -u -o pipefail {0}"
+CLEANUP_COMMAND="trap '/usr/bin/sudo /usr/bin/rm -f $VERIFIED_DEB' EXIT"
+STAGE_COMMAND="/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb $VERIFIED_DEB"
+CURL_COMMAND_NAME='cur''l'
 FULL_ACTION_SHA="3d3c42e5aac5ba805825da76410c181273ba90b1"
 FULL_ACTION_REF="actions/checkout@$FULL_ACTION_SHA # v7.0.1"
 FULL_REUSABLE_REF="owner/repo/.github/workflows/build.yml@$FULL_ACTION_SHA # v1.2.3"
@@ -22,34 +28,70 @@ write_tinygo_workflow() {
 	local include_checksum="$5"
 	local trust_root_mode="${6:-literal}"
 	local verifier_mode="${7:-trusted}"
-	local download_command verify_command verify_digest verify_input
+	local boundary_mode="${8:-protected}"
+	local download_command verify_command verify_digest verify_input verify_target
+	local shell_template="$CLEAN_SHELL"
+	local cleanup_command="$CLEANUP_COMMAND"
+	local stage_command="$STAGE_COMMAND"
+	local install_target="$VERIFIED_DEB"
 
 	mkdir -p "$(dirname "$path")"
 	case "$trust_root_mode" in
 		literal|variable-digest)
-			download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
+			download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
 			;;
 		variable-url|variable-both)
-			download_command="curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v\${TINYGO_VERSION}/tinygo_\${TINYGO_VERSION}_amd64.deb\""
+			download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v\${TINYGO_VERSION}/tinygo_\${TINYGO_VERSION}_amd64.deb\""
 			;;
 		*)
 			printf 'unsupported trust-root mode: %s\n' "$trust_root_mode" >&2
 			exit 1
 			;;
 	esac
+	case "$boundary_mode" in
+		protected) ;;
+		legacy)
+			shell_template=""
+			cleanup_command=""
+			stage_command=""
+			install_target=/tmp/tinygo.deb
+			;;
+		no-staging)
+			stage_command=""
+			install_target=/tmp/tinygo.deb
+			;;
+		checksum-original) ;;
+		install-original)
+			install_target=/tmp/tinygo.deb
+			;;
+		missing-cleanup)
+			cleanup_command=""
+			;;
+		mutable-shell)
+			shell_template='bash {0}'
+			;;
+		*)
+			printf 'unsupported boundary mode: %s\n' "$boundary_mode" >&2
+			exit 1
+			;;
+	esac
+	verify_target="$VERIFIED_DEB"
+	case "$boundary_mode" in
+		legacy|no-staging|checksum-original) verify_target=/tmp/tinygo.deb ;;
+	esac
 	case "$trust_root_mode" in
 		literal|variable-url)
 			verify_digest="'$checksum'"
-			verify_input="'$checksum  /tmp/tinygo.deb'"
+			verify_input="'$checksum  $verify_target'"
 			;;
 		variable-digest|variable-both)
 			verify_digest='"$TINYGO_SHA256"'
-			verify_input='"$TINYGO_SHA256  /tmp/tinygo.deb"'
+			verify_input="\"\$TINYGO_SHA256  $verify_target\""
 			;;
 	esac
 	case "$verifier_mode" in
 		unqualified)
-			verify_command="printf '%s  %s\\n' $verify_digest /tmp/tinygo.deb | sha256sum --check --strict -"
+			verify_command="printf '%s  %s\\n' $verify_digest $verify_target | sha256sum --check --strict -"
 			;;
 		trusted)
 			verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< $verify_input"
@@ -73,10 +115,22 @@ write_tinygo_workflow() {
 			printf '      - uses: %s\n' "$action_ref"
 		fi
 		printf '      # uses: actions/commented-out@v1\n'
-		printf '      - run: |\n'
+		if [[ -n "$shell_template" ]]; then
+			printf '      - name: Install TinyGo\n'
+			printf '        shell: %s\n' "$shell_template"
+			printf '        run: |\n'
+		else
+			printf '      - run: |\n'
+		fi
+		if [[ -n "$cleanup_command" ]]; then
+			printf '          %s\n' "$cleanup_command"
+		fi
 		printf '          %s\n' "$download_command"
+		if [[ -n "$stage_command" ]]; then
+			printf '          %s\n' "$stage_command"
+		fi
 		if [[ "$verification_order" == "after-install" ]]; then
-			printf '          sudo apt-get install -y /tmp/tinygo.deb\n'
+			printf '          /usr/bin/sudo /usr/bin/apt-get install -y %s\n' "$install_target"
 		fi
 		if [[ "$include_checksum" == "yes" ]]; then
 			if [[ "$verification_order" == "commented" ]]; then
@@ -94,10 +148,10 @@ write_tinygo_workflow() {
 			fi
 		fi
 		if [[ "$verification_order" == "replaced" ]]; then
-			printf '          cp /tmp/replacement.deb /tmp/tinygo.deb\n'
+			printf '          /usr/bin/cp /tmp/replacement.deb %s\n' "$install_target"
 		fi
 		if [[ "$verification_order" != "after-install" ]]; then
-			printf '          sudo apt-get install -y /tmp/tinygo.deb\n'
+			printf '          /usr/bin/sudo /usr/bin/apt-get install -y %s\n' "$install_target"
 		fi
 		printf '          tinygo version\n'
 	} > "$path"
@@ -111,14 +165,15 @@ make_fixture() {
 	local include_checksum="${5:-yes}"
 	local trust_root_mode="${6:-literal}"
 	local verifier_mode="${7:-trusted}"
+	local boundary_mode="${8:-protected}"
 	local fixture="$TMP_ROOT/$name"
 
 	write_tinygo_workflow "$fixture/.github/workflows/ci-core.yml" \
-		"$action_ref" "$checksum" "$verification_order" "$include_checksum" "$trust_root_mode" "$verifier_mode"
+		"$action_ref" "$checksum" "$verification_order" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode"
 	write_tinygo_workflow "$fixture/.github/workflows/ci-browser-smoke.yml" \
-		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode"
+		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode"
 	write_tinygo_workflow "$fixture/.github/workflows/ci-wasm-size.yml" \
-		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode"
+		"" "$checksum" "before-install" "$include_checksum" "$trust_root_mode" "$verifier_mode" "$boundary_mode"
 	printf '%s' "$fixture"
 }
 
@@ -170,7 +225,7 @@ write_local_workflow() {
 add_runtime_override() {
 	local file="$1"
 	awk '
-		/      - run: \|/ && !inserted {
+		/      - name: Install TinyGo/ && !inserted {
 			print "      - run: |"
 			print "          echo '\''TINYGO_VERSION=attacker-value'\'' >> \"$GITHUB_ENV\""
 			print "          echo '\''TINYGO_SHA256=attacker-digest'\'' >> \"$GITHUB_ENV\""
@@ -184,7 +239,7 @@ add_runtime_override() {
 add_path_poisoning() {
 	local file="$1"
 	awk '
-		/      - run: \|/ && !inserted {
+		/      - name: Install TinyGo/ && !inserted {
 			print "      - run: |"
 			print "          mkdir -p \"$RUNNER_TEMP/fake-bin\""
 			print "          cp /bin/true \"$RUNNER_TEMP/fake-bin/sha256sum\""
@@ -199,7 +254,7 @@ add_path_poisoning() {
 add_bash_env_shadowing() {
 	local file="$1"
 	awk '
-		/      - run: \|/ && !inserted {
+		/      - name: Install TinyGo/ && !inserted {
 			print "      - run: |"
 			print "          printf '\''%s\\n'\'' '\''sha256sum() { return 0; }'\'' '\''printf() { return 0; }'\'' > \"$RUNNER_TEMP/bash-env\""
 			print "          echo \"BASH_ENV=$RUNNER_TEMP/bash-env\" >> \"$GITHUB_ENV\""
@@ -208,6 +263,20 @@ add_bash_env_shadowing() {
 		{ print }
 	' "$file" > "$TMP_ROOT/bash-env-shadow.yml"
 	mv "$TMP_ROOT/bash-env-shadow.yml" "$file"
+}
+
+add_bash_env_sudo_shadowing() {
+	local file="$1"
+	awk '
+		/      - name: Install TinyGo/ && !inserted {
+			print "      - run: |"
+			print "          printf '\''%s\\n'\'' '\''sudo() { cp /tmp/replacement.deb /tmp/tinygo.deb; /usr/bin/sudo \"$@\"; }'\'' > \"$RUNNER_TEMP/bash-env\""
+			print "          echo \"BASH_ENV=$RUNNER_TEMP/bash-env\" >> \"$GITHUB_ENV\""
+			inserted = 1
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/bash-env-sudo-shadow.yml"
+	mv "$TMP_ROOT/bash-env-sudo-shadow.yml" "$file"
 }
 
 write_block_scalar_workflow() {
@@ -233,6 +302,19 @@ write_repository_file() {
 
 	mkdir -p "$(dirname "$target")"
 	printf '%s\n' "$content" > "$target"
+}
+
+write_shell_source() {
+	local fixture="$1"
+	local path="$2"
+	shift 2
+	local target="$fixture/$path"
+
+	mkdir -p "$(dirname "$target")"
+	{
+		printf '#!/usr/bin/env bash\n'
+		printf '%s\n' "$@"
+	} > "$target"
 }
 
 add_workflow_script_invocation() {
@@ -262,6 +344,111 @@ expect_fail() {
 		exit 1
 	fi
 	printf 'ok %d - %s\n' "$tests_run" "$name"
+}
+
+test_clean_shell_boundary() {
+	local marker_dir="$TMP_ROOT/clean-shell-markers"
+	local fake_bin="$TMP_ROOT/clean-shell-fake-bin"
+	local bash_env="$TMP_ROOT/clean-shell-bash-env"
+	local child_script="$TMP_ROOT/clean-shell-child.sh"
+	local driver_script="$TMP_ROOT/clean-shell-driver.sh"
+	local failing_script="$TMP_ROOT/clean-shell-failing.sh"
+	local command_name
+
+	mkdir -p "$marker_dir" "$fake_bin"
+	printf '%s\n' \
+		'mark_override() { : > "$P1_MARKER_DIR/$1"; }' \
+		'sudo() { mark_override sudo; return 99; }' \
+		'curl() { mark_override curl; return 99; }' \
+		'sha256sum() { mark_override sha256sum; return 99; }' \
+		'printf() { mark_override printf; return 99; }' \
+		'function /usr/bin/env() { mark_override env; return 99; }' \
+		> "$bash_env"
+	for command_name in sudo curl sha256sum printf; do
+		printf '%s\n' '#!/bin/sh' ": > \"$marker_dir/path-$command_name\"" 'exit 99' \
+			> "$fake_bin/$command_name"
+		chmod +x "$fake_bin/$command_name"
+	done
+	printf '%s\n' \
+		'[[ -z "${BASH_ENV+x}" ]]' \
+		"[[ \"\$PATH\" == '$CLEAN_PATH' ]]" \
+		'for function_name in sudo curl sha256sum printf /usr/bin/env; do' \
+		'  ! declare -F "$function_name" >/dev/null' \
+		'done' \
+		> "$child_script"
+	printf '%s\n' \
+		"command /usr/bin/env -i PATH=$CLEAN_PATH /bin/bash --noprofile --norc -e -u -o pipefail \"$child_script\"" \
+		> "$driver_script"
+
+	tests_run=$((tests_run + 1))
+	if ! BASH_ENV="$bash_env" P1_MARKER_DIR="$marker_dir" PATH="$fake_bin" \
+		/bin/bash --noprofile --norc "$driver_script"; then
+		printf 'not ok %d - sanitized custom-shell boundary\n' "$tests_run" >&2
+		exit 1
+	fi
+	if find "$marker_dir" -type f -print -quit | grep -q .; then
+		printf 'not ok %d - parent BASH_ENV or PATH override entered clean shell\n' "$tests_run" >&2
+		exit 1
+	fi
+	printf 'ok %d - sanitized custom-shell boundary excludes parent BASH_ENV and PATH\n' "$tests_run"
+
+	printf 'false\n' > "$failing_script"
+	printf '%s\n' \
+		"command /usr/bin/env -i PATH=$CLEAN_PATH /bin/bash --noprofile --norc -e -u -o pipefail \"$failing_script\"" \
+		> "$driver_script"
+	tests_run=$((tests_run + 1))
+	if BASH_ENV="$bash_env" P1_MARKER_DIR="$marker_dir" PATH="$fake_bin" \
+		/bin/bash --noprofile --norc "$driver_script"; then
+		printf 'not ok %d - sanitized custom-shell failure unexpectedly passed\n' "$tests_run" >&2
+		exit 1
+	fi
+	printf 'ok %d - sanitized custom-shell failure propagates\n' "$tests_run"
+}
+
+test_ambient_sudo_interposition() {
+	local artifact="$TMP_ROOT/ambient-tinygo.deb"
+	local replacement="$TMP_ROOT/ambient-replacement.deb"
+	local consumed="$TMP_ROOT/ambient-consumed.deb"
+	local marker="$TMP_ROOT/ambient-sudo-ran"
+	local bash_env="$TMP_ROOT/ambient-bash-env"
+	local script="$TMP_ROOT/ambient-interposition.sh"
+	local digest verify_command
+
+	printf 'verified artifact\n' > "$artifact"
+	printf 'replacement artifact\n' > "$replacement"
+	if [[ -x /usr/bin/sha256sum ]]; then
+		digest="$(/usr/bin/sha256sum "$artifact" | awk '{print $1}')"
+		verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '$digest  $artifact' || exit 1"
+	elif [[ -x /usr/bin/shasum ]]; then
+		digest="$(/usr/bin/shasum -a 256 "$artifact" | awk '{print $1}')"
+		verify_command="/usr/bin/printf '%s  %s\\n' '$digest' '$artifact' | /usr/bin/shasum -a 256 --check - || exit 1"
+	else
+		printf 'skip - ambient sudo interposition oracle requires sha256sum or shasum\n'
+		return
+	fi
+	printf '%s\n' \
+		'sudo() {' \
+		'  : > "$P1_MARKER"' \
+		'  /usr/bin/cp "$P1_REPLACEMENT" "$P1_ARTIFACT"' \
+		'  "$@"' \
+		'}' \
+		> "$bash_env"
+	printf '%s\n' "$verify_command" \
+		'sudo /usr/bin/cp "$P1_ARTIFACT" "$P1_CONSUMED"' \
+		> "$script"
+
+	tests_run=$((tests_run + 1))
+	if ! BASH_ENV="$bash_env" P1_MARKER="$marker" P1_REPLACEMENT="$replacement" \
+		P1_ARTIFACT="$artifact" P1_CONSUMED="$consumed" \
+		/bin/bash --noprofile --norc "$script"; then
+		printf 'not ok %d - ambient sudo interposition oracle execution\n' "$tests_run" >&2
+		exit 1
+	fi
+	if [[ ! -f "$marker" ]] || ! /usr/bin/cmp -s "$replacement" "$consumed"; then
+		printf 'not ok %d - ambient sudo did not replace verified bytes\n' "$tests_run" >&2
+		exit 1
+	fi
+	printf 'ok %d - ambient sudo can replace bytes after verification\n' "$tests_run"
 }
 
 expect_pass "full remote Action SHA with version annotation" \
@@ -297,6 +484,119 @@ expect_pass "PATH-poisoned workflow with trusted checksum verifier" "$fixture"
 fixture="$(make_fixture bash-env-trusted-verifier "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted)"
 add_bash_env_shadowing "$fixture/.github/workflows/ci-core.yml"
 expect_pass "BASH_ENV-shadowed workflow with trusted checksum verifier" "$fixture"
+
+dynamic_base="https://github.com/${TINYGO_RELEASE_REPOSITORY}"
+fixture="$(make_fixture dynamic-workflow-download "$FULL_ACTION_REF")"
+printf '%s\n' '' '  dynamic-download:' '    steps:' '      - run: |' \
+	"          base=$dynamic_base" \
+	'          curl -fsSL -o /tmp/extra.deb "$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"' \
+	>> "$fixture/.github/workflows/ci-core.yml"
+expect_fail "runtime-composed TinyGo download in workflow" "$fixture"
+
+fixture="$(make_fixture dynamic-helper-download "$FULL_ACTION_REF")"
+dynamic_helper="$(printf '%s\n' "base=$dynamic_base" \
+	'curl -fsSL -o /tmp/extra.deb "$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"')"
+write_repository_file "$fixture" scripts/install-tinygo.sh "$dynamic_helper"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'scripts/install-tinygo.sh'
+expect_fail "runtime-composed TinyGo download in invoked helper" "$fixture"
+
+fixture="$(make_fixture continued-dynamic-download "$FULL_ACTION_REF")"
+printf '%s\n' '' '  continued-download:' '    steps:' '      - run: |' \
+	"          base=$dynamic_base" \
+	'          url="$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"' \
+	'          curl \' '            "$url"' \
+	>> "$fixture/.github/workflows/ci-core.yml"
+expect_fail "continued runtime-composed TinyGo download" "$fixture"
+
+fixture="$(make_fixture dynamic-url-download "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/dynamic-download.sh \
+	'url=https://example.com/file' 'curl "$url"'
+expect_fail 'curl with runtime URL' "$fixture"
+
+fixture="$(make_fixture absolute-dynamic-url-download "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/dynamic-download.sh \
+	'url=https://example.com/file' '/usr/bin/curl "$url"'
+expect_fail 'absolute curl with runtime URL' "$fixture"
+
+fixture="$(make_fixture command-dynamic-url-download "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/dynamic-download.sh \
+	'url=https://example.com/file' 'command curl "$url"'
+expect_fail 'command curl with runtime URL' "$fixture"
+
+fixture="$(make_fixture conditional-dynamic-url-download "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/dynamic-download.sh \
+	'url=https://example.com/file' 'if curl "$url"; then printf success; fi'
+expect_fail 'conditional curl with runtime URL' "$fixture"
+
+fixture="$(make_fixture substitution-dynamic-url-download "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/dynamic-download.sh \
+	'url=https://example.com/file' "result=\"\$($CURL_COMMAND_NAME \"\$url\")\""
+expect_fail 'command-substitution curl with runtime URL' "$fixture"
+
+fixture="$(make_fixture literal-external-download "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/external-download.sh \
+	'curl https://example.com/file'
+expect_fail 'literal external curl' "$fixture"
+
+fixture="$(make_fixture external-wget "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/external-download.sh \
+	'wget https://example.com/file'
+expect_fail 'literal external wget' "$fixture"
+
+fixture="$(make_fixture simple-loopback-probe "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/loopback-probe.sh \
+	'curl -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1'
+expect_pass 'literal-rooted loopback port probe' "$fixture"
+
+fixture="$(make_fixture path-loopback-probe "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/loopback-probe.sh \
+	'curl -fsS "http://127.0.0.1:$port/$wasm_path" >/dev/null 2>&1'
+expect_pass 'literal-rooted loopback path probe' "$fixture"
+
+fixture="$(make_fixture substitution-loopback-probe "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/loopback-probe.sh \
+	"headers=\"\$($CURL_COMMAND_NAME -fsSI \"http://127.0.0.1:\$port/\$wasm_path?smoke=\$(date +%s%N)\" || true)\""
+expect_pass 'literal-rooted loopback command-substitution probe' "$fixture"
+
+fixture="$(make_fixture nested-external-loopback-download "$FULL_ACTION_REF")"
+nested_loopback_command="$CURL_COMMAND_NAME -fsS \"http://127.0.0.1:\$port/\$($CURL_COMMAND_NAME https://example.com/file)\" >/dev/null 2>&1"
+write_shell_source "$fixture" scripts/loopback-probe.sh "$nested_loopback_command"
+expect_fail 'external downloader nested in loopback probe' "$fixture"
+
+fixture="$(make_fixture benign-curl-string "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/benign.sh \
+	'message='"'"'curl "$url" is not executed'"'"'' 'printf "%s\\n" "$message"'
+expect_pass 'benign string containing curl' "$fixture"
+
+fixture="$(make_fixture benign-url-variable "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/benign.sh \
+	'url=https://example.com/file' 'printf "%s\\n" "$url"'
+expect_pass 'benign URL assignment without downloader' "$fixture"
+
+expect_fail "old TinyGo sequence without sanitized shell" \
+	"$(make_fixture old-install-boundary "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted legacy)"
+expect_fail "sanitized shell without protected staging" \
+	"$(make_fixture no-protected-staging "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted no-staging)"
+expect_fail "protected staging with checksum of original candidate" \
+	"$(make_fixture checksum-original-candidate "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted checksum-original)"
+expect_fail "protected checksum with install of original candidate" \
+	"$(make_fixture install-original-candidate "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted install-original)"
+expect_fail "protected boundary without cleanup" \
+	"$(make_fixture missing-protected-cleanup "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted missing-cleanup)"
+expect_fail "mutable TinyGo custom shell" \
+	"$(make_fixture mutable-install-shell "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted mutable-shell)"
+
+fixture="$(make_fixture bash-env-sudo-interposition-old "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted legacy)"
+add_bash_env_sudo_shadowing "$fixture/.github/workflows/ci-core.yml"
+expect_fail "BASH_ENV sudo override with old install boundary" "$fixture"
+
+fixture="$(make_fixture bash-env-sudo-interposition-protected "$FULL_ACTION_REF")"
+add_bash_env_sudo_shadowing "$fixture/.github/workflows/ci-core.yml"
+expect_pass "BASH_ENV sudo override cannot enter protected install boundary" "$fixture"
+
+test_ambient_sudo_interposition
+test_clean_shell_boundary
 
 for action_form in \
 	'"uses": actions/checkout@v7' \
@@ -423,7 +723,7 @@ for placement in before after same-line canonical hash-prefix unexpected; do
 	case "$placement" in
 		before)
 			awk -v command="$extra_download" '
-				/      - run: \|/ { print "      - run: " command }
+				/      - name: Install TinyGo/ { print "      - run: " command }
 				{ print }
 			' "$file" > "$TMP_ROOT/extra.yml"
 			mv "$TMP_ROOT/extra.yml" "$file"
@@ -431,7 +731,7 @@ for placement in before after same-line canonical hash-prefix unexpected; do
 		after) printf '      - run: %s\n' "$extra_download" >> "$file" ;;
 		same-line) printf '      - run: %s; %s\n' "$extra_download" "$extra_download" >> "$file" ;;
 		canonical)
-			command="$(sed -n '/          curl -fsSL/p' "$file")"
+			command="$(sed -n '/\/usr\/bin\/curl -fsSL/p' "$file")"
 			printf '%s\n' "$command" >> "$file"
 			;;
 		hash-prefix) printf '      - run: printf "# data"; %s\n' "$extra_download" >> "$file" ;;
@@ -571,7 +871,7 @@ if [[ -x /usr/bin/env && -x /usr/bin/sha256sum ]]; then
 		fi
 		fixture="$(make_fixture plain-bash "$FULL_ACTION_REF" "$digest")"
 		verification="$(sed -n '/sha256sum --check --strict/p' "$fixture/.github/workflows/ci-core.yml")"
-		verification="${verification//\/tmp\/tinygo.deb/$synthetic_artifact}"
+		verification="${verification//\/tmp\/goframe-tinygo-0.42.0-verified.deb/$synthetic_artifact}"
 		printf 'set +e\n%s\nprintf continued > "$continuation"\n' "$verification" > "$TMP_ROOT/verify.sh"
 		rm -f "$TMP_ROOT/continued"
 		tests_run=$((tests_run + 1))
@@ -608,7 +908,7 @@ if [[ -x /usr/bin/env && -x /usr/bin/sha256sum ]]; then
 		fi
 		fixture="$(make_fixture poisoned-path-execution "$FULL_ACTION_REF" "$digest")"
 		verification="$(sed -n '/sha256sum --check --strict/p' "$fixture/.github/workflows/ci-core.yml")"
-		verification="${verification//\/tmp\/tinygo.deb/$synthetic_artifact}"
+		verification="${verification//\/tmp\/goframe-tinygo-0.42.0-verified.deb/$synthetic_artifact}"
 		printf 'set +e\n%s\n' "$verification" > "$TMP_ROOT/path-verify.sh"
 		rm -f "$fake_marker"
 		tests_run=$((tests_run + 1))
@@ -652,7 +952,7 @@ if [[ -x /usr/bin/env && -x /usr/bin/sha256sum ]]; then
 		fi
 		fixture="$(make_fixture bash-env-execution "$FULL_ACTION_REF" "$digest")"
 		verification="$(sed -n '/sha256sum --check --strict/p' "$fixture/.github/workflows/ci-core.yml")"
-		verification="${verification//\/tmp\/tinygo.deb/$synthetic_artifact}"
+		verification="${verification//\/tmp\/goframe-tinygo-0.42.0-verified.deb/$synthetic_artifact}"
 		printf 'set +e\n%s\n' "$verification" > "$TMP_ROOT/bash-env-verify.sh"
 		rm -f "$checksum_function_marker" "$printf_function_marker"
 		tests_run=$((tests_run + 1))
