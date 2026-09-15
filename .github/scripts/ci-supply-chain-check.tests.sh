@@ -7,8 +7,11 @@ TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 EXPECTED_SHA="2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563"
-TINYGO_RELEASE_REPOSITORY="tinygo-org/tinygo"
+TINYGO_RELEASE_REPOSITORY="tinygo-org/"'tinygo'
+TINYGO_RELEASE_REPOSITORY_CASE_VARIANT="TinyGo-Org/"'TinyGo'
 TINYGO_RELEASE_NAMESPACE="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
+TINYGO_BINARY="/usr/local/bin/tinygo"
+TINYGO_VERSION_COMMAND="$TINYGO_BINARY version"
 VERIFIED_DEB="/tmp/goframe-tinygo-0.42.0-verified.deb"
 CLEAN_PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 CLEAN_SHELL="/usr/bin/env -i PATH=$CLEAN_PATH /bin/bash --noprofile --norc -e -u -o pipefail {0}"
@@ -118,7 +121,7 @@ write_tinygo_workflow() {
 		printf '      # uses: actions/commented-out@v1\n'
 		if [[ "$smoke_mode" == "before-install" ]]; then
 			printf '      - name: Verify TinyGo\n'
-			printf '        run: tinygo version\n'
+			printf '        run: %s\n' "$TINYGO_VERSION_COMMAND"
 		fi
 		if [[ -n "$shell_template" ]]; then
 			printf '      - name: Install TinyGo\n'
@@ -160,9 +163,13 @@ write_tinygo_workflow() {
 		fi
 		case "$smoke_mode" in
 			inside)
-				printf '          tinygo version\n'
+				printf '          %s\n' "$TINYGO_VERSION_COMMAND"
 				;;
 			separate)
+				printf '      - name: Verify TinyGo\n'
+				printf '        run: %s\n' "$TINYGO_VERSION_COMMAND"
+				;;
+			ambient)
 				printf '      - name: Verify TinyGo\n'
 				printf '        run: tinygo version\n'
 				;;
@@ -174,7 +181,7 @@ write_tinygo_workflow() {
 			custom-shell)
 				printf '      - name: Verify TinyGo\n'
 				printf '        shell: %s\n' "$CLEAN_SHELL"
-				printf '        run: tinygo version\n'
+				printf '        run: %s\n' "$TINYGO_VERSION_COMMAND"
 				;;
 			*)
 				printf 'unsupported TinyGo smoke mode: %s\n' "$smoke_mode" >&2
@@ -279,6 +286,22 @@ add_path_poisoning() {
 	mv "$TMP_ROOT/path-poison.yml" "$file"
 }
 
+add_tinygo_path_poisoning() {
+	local file="$1"
+
+	awk '
+		/      - name: Install TinyGo/ && !inserted {
+			print "      - run: |"
+			print "          mkdir -p \"$RUNNER_TEMP/fake-tinygo-bin\""
+			print "          cp /bin/true \"$RUNNER_TEMP/fake-tinygo-bin/tinygo\""
+			print "          echo \"$RUNNER_TEMP/fake-tinygo-bin\" >> \"$GITHUB_PATH\""
+			inserted = 1
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/tinygo-path-poison.yml"
+	mv "$TMP_ROOT/tinygo-path-poison.yml" "$file"
+}
+
 add_bash_env_shadowing() {
 	local file="$1"
 	awk '
@@ -325,11 +348,11 @@ write_block_scalar_workflow() {
 write_repository_file() {
 	local fixture="$1"
 	local path="$2"
-	local content="$3"
 	local target="$fixture/$path"
+	shift 2
 
 	mkdir -p "$(dirname "$target")"
-	printf '%s\n' "$content" > "$target"
+	printf '%s\n' "$@" > "$target"
 }
 
 write_shell_source() {
@@ -350,6 +373,97 @@ add_workflow_script_invocation() {
 	local command="$2"
 
 	printf '\n  delegated-script:\n    steps:\n      - run: %s\n' "$command" >> "$file"
+}
+
+add_verify_property() {
+	local file="$1"
+	local position="$2"
+	local property="$3"
+	local child="${4:-}"
+
+	awk -v position="$position" -v property="$property" -v child="$child" '
+		function emit_property() {
+			print "        " property
+			if (child != "") {
+				print "          " child
+			}
+		}
+		$0 == "      - name: Verify TinyGo" { in_verify = 1 }
+		in_verify && position == "before" && $0 ~ /^        run:/ {
+			emit_property()
+		}
+		{ print }
+		in_verify && position == "after" && $0 ~ /^        run:/ {
+			emit_property()
+			in_verify = 0
+		}
+	' "$file" > "$TMP_ROOT/verify-property.yml"
+	mv "$TMP_ROOT/verify-property.yml" "$file"
+}
+
+add_install_property() {
+	local file="$1"
+	local position="$2"
+	local property="$3"
+	local child="${4:-}"
+
+	awk -v position="$position" -v property="$property" -v child="$child" '
+		function emit_property() {
+			print "        " property
+			if (child != "") {
+				print "          " child
+			}
+		}
+		$0 == "      - name: Install TinyGo" { in_install = 1 }
+		in_install && position == "before" && $0 == "        run: |" {
+			emit_property()
+		}
+		in_install && $0 == "      - name: Verify TinyGo" {
+			if (position == "after") {
+				emit_property()
+			}
+			in_install = 0
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/install-property.yml"
+	mv "$TMP_ROOT/install-property.yml" "$file"
+}
+
+reorder_verify_properties() {
+	local file="$1"
+
+	awk '
+		$0 == "      - name: Verify TinyGo" {
+			name = "        name: Verify TinyGo"
+			if ((getline run_line) <= 0) {
+				exit 1
+			}
+			sub(/^        run:/, "      - run:", run_line)
+			print run_line
+			print name
+			next
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/reordered-verify.yml"
+	mv "$TMP_ROOT/reordered-verify.yml" "$file"
+}
+
+move_install_shell_after_run() {
+	local file="$1"
+
+	awk '
+		$0 == "      - name: Install TinyGo" { in_install = 1 }
+		in_install && $0 ~ /^        shell:/ {
+			shell_line = $0
+			next
+		}
+		in_install && $0 == "      - name: Verify TinyGo" {
+			print shell_line
+			in_install = 0
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/reordered-install.yml"
+	mv "$TMP_ROOT/reordered-install.yml" "$file"
 }
 
 expect_pass() {
@@ -485,8 +599,125 @@ test_ambient_sudo_interposition() {
 	printf 'ok %d - ambient sudo can replace bytes after verification\n' "$tests_run"
 }
 
+fixture="$(make_fixture python-helper-tinygo-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo.py \
+	'import subprocess' \
+	"base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY\"" \
+	'subprocess.run(["curl", base + "/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"], check=True)'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'python3 scripts/install-tinygo.py'
+expect_fail "invoked Python helper with TinyGo repository provenance" "$fixture"
+
+fixture="$(make_fixture python-helper-direct-tinygo-url "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo.py \
+	'import subprocess' \
+	"subprocess.run([\"curl\", \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\"], check=True)"
+expect_fail "Python helper with direct TinyGo release URL" "$fixture"
+
+fixture="$(make_fixture python-helper-case-variant-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo.py \
+	'import subprocess' \
+	"base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY_CASE_VARIANT\"" \
+	'subprocess.run(["curl", base + "/releases/download/artifact"], check=True)'
+expect_fail "Python helper with case-variant TinyGo repository provenance" "$fixture"
+
+fixture="$(make_fixture javascript-helper-tinygo-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo.mjs \
+	'import { spawnSync } from "node:child_process";' \
+	"const base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY\";" \
+	'spawnSync("curl", [base + "/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"]);'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'node scripts/install-tinygo.mjs'
+expect_fail "invoked JavaScript helper with TinyGo repository provenance" "$fixture"
+
+fixture="$(make_fixture workflow-provided-tinygo-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo.py \
+	'import os' \
+	'import subprocess' \
+	'subprocess.run(["curl", os.environ["TINYGO_BASE"] + "/releases/download/artifact"]);'
+printf '%s\n' '' '  delegated-python:' '    runs-on: ubuntu-latest' \
+	'    env:' \
+	"      TINYGO_BASE: https://github.com/$TINYGO_RELEASE_REPOSITORY" \
+	'    steps:' \
+	'      - run: python3 scripts/install-tinygo.py' \
+	>> "$fixture/.github/workflows/ci-core.yml"
+expect_fail "workflow cannot supply TinyGo provenance to a non-shell helper" "$fixture"
+
+fixture="$(make_fixture benign-python-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/benign.py \
+	'print("benign helper")'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'python3 scripts/benign.py'
+expect_pass "invoked Python helper without TinyGo provenance" "$fixture"
+
+fixture="$(make_fixture loopback-javascript-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/loopback.mjs \
+	'const target = "http://127.0.0.1:8080/";' \
+	'console.log(target);'
+expect_pass "JavaScript helper with loopback-only data" "$fixture"
+
+fixture="$(make_fixture documentation-tinygo-link "$FULL_ACTION_REF")"
+write_repository_file "$fixture" docs/tinygo-reference.md \
+	"Upstream: https://github.com/$TINYGO_RELEASE_REPOSITORY/releases/tag/v0.42.0"
+expect_pass "documentation may reference the TinyGo repository" "$fixture"
+
+fixture="$(make_fixture uninvoked-python-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/uninvoked.py \
+	"base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY\""
+expect_fail "uninvoked executable-source helper with TinyGo provenance" "$fixture"
+
+fixture="$(make_fixture outside-helper-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/install-tinygo.py \
+	"base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY\""
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'python3 tools/install-tinygo.py'
+expect_fail "invoked helper outside standard CI source roots" "$fixture"
+
+fixture="$(make_fixture outside-go-helper-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/install-tinygo.go \
+	'package main' \
+	'import "fmt"' \
+	"func main() { fmt.Println(\"https://github.com/$TINYGO_RELEASE_REPOSITORY\") }"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'go run tools/install-tinygo.go'
+expect_fail "directly referenced Go helper with TinyGo provenance" "$fixture"
+
+fixture="$(make_fixture traversed-go-helper-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" outside/install-tinygo.go \
+	'package main' \
+	'import "fmt"' \
+	"func main() { fmt.Println(\"https://github.com/$TINYGO_RELEASE_REPOSITORY\") }"
+parent_path_component=..
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"go run tools/$parent_path_component/outside/install-tinygo.go"
+expect_fail "traversed Go helper path cannot evade TinyGo provenance" "$fixture"
+
+fixture="$(make_fixture extensionless-helper-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/install-tinygo \
+	'#!/usr/bin/env python3' \
+	"base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY\""
+chmod +x "$fixture/scripts/install-tinygo"
+expect_fail "extensionless executable helper with TinyGo provenance" "$fixture"
+
+fixture="$(make_fixture checker-short-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/ci-supply-chain-check.sh \
+	'#!/usr/bin/env bash' \
+	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+expect_fail "checker source is not exempt from TinyGo provenance policy" "$fixture"
+
+fixture="$(make_fixture harness-short-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/scripts/ci-supply-chain-check.tests.sh \
+	'#!/usr/bin/env bash' \
+	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+expect_fail "test harness is not exempt from TinyGo provenance policy" "$fixture"
+
 expect_pass "protected install followed by separate TinyGo version smoke" \
 	"$(make_fixture split-version-smoke "$FULL_ACTION_REF")"
+expect_fail "ambient PATH TinyGo version smoke" \
+	"$(make_fixture ambient-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected ambient)"
+fixture="$(make_fixture path-poisoned-version-smoke "$FULL_ACTION_REF")"
+add_tinygo_path_poisoning "$fixture/.github/workflows/ci-core.yml"
+expect_pass "PATH poisoning cannot redirect package-owned TinyGo smoke" "$fixture"
 expect_fail "TinyGo version smoke inside sanitized install" \
 	"$(make_fixture in-boundary-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected inside)"
 expect_fail "protected install without TinyGo version smoke" \
@@ -497,6 +728,59 @@ expect_fail "malformed TinyGo version smoke" \
 	"$(make_fixture malformed-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected malformed)"
 expect_fail "sanitized TinyGo version smoke" \
 	"$(make_fixture sanitized-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected custom-shell)"
+
+for position in before after; do
+	fixture="$(make_fixture "verify-continue-on-error-$position" "$FULL_ACTION_REF")"
+	add_verify_property "$fixture/.github/workflows/ci-core.yml" "$position" \
+		'continue-on-error: true'
+	expect_fail "Verify TinyGo continue-on-error $position run" "$fixture"
+
+	fixture="$(make_fixture "verify-if-$position" "$FULL_ACTION_REF")"
+	add_verify_property "$fixture/.github/workflows/ci-core.yml" "$position" 'if: false'
+	expect_fail "Verify TinyGo if false $position run" "$fixture"
+
+	fixture="$(make_fixture "verify-env-$position" "$FULL_ACTION_REF")"
+	add_verify_property "$fixture/.github/workflows/ci-core.yml" "$position" \
+		'env:' 'TINYGO_FAKE: attacker'
+	expect_fail "Verify TinyGo step env $position run" "$fixture"
+
+	fixture="$(make_fixture "install-continue-on-error-$position" "$FULL_ACTION_REF")"
+	add_install_property "$fixture/.github/workflows/ci-core.yml" "$position" \
+		'continue-on-error: true'
+	expect_fail "Install TinyGo continue-on-error $position run" "$fixture"
+
+	fixture="$(make_fixture "install-if-$position" "$FULL_ACTION_REF")"
+	add_install_property "$fixture/.github/workflows/ci-core.yml" "$position" 'if: false'
+	expect_fail "Install TinyGo if false $position run" "$fixture"
+
+	fixture="$(make_fixture "install-env-$position" "$FULL_ACTION_REF")"
+	add_install_property "$fixture/.github/workflows/ci-core.yml" "$position" \
+		'env:' 'TINYGO_FAKE: attacker'
+	expect_fail "Install TinyGo step env $position run" "$fixture"
+done
+
+fixture="$(make_fixture install-unexpected-property "$FULL_ACTION_REF")"
+add_install_property "$fixture/.github/workflows/ci-core.yml" after \
+	'timeout-minutes: 1'
+expect_fail "Install TinyGo unexpected step property" "$fixture"
+
+fixture="$(make_fixture verify-duplicate-run "$FULL_ACTION_REF")"
+add_verify_property "$fixture/.github/workflows/ci-core.yml" after \
+	'run: /usr/local/bin/tinygo version'
+expect_fail "Verify TinyGo duplicate run property" "$fixture"
+
+fixture="$(make_fixture install-duplicate-shell "$FULL_ACTION_REF")"
+add_install_property "$fixture/.github/workflows/ci-core.yml" after \
+	"shell: $CLEAN_SHELL"
+expect_fail "Install TinyGo duplicate shell property" "$fixture"
+
+fixture="$(make_fixture reordered-verify-properties "$FULL_ACTION_REF")"
+reorder_verify_properties "$fixture/.github/workflows/ci-core.yml"
+expect_pass "Verify TinyGo valid properties in reordered mapping" "$fixture"
+
+fixture="$(make_fixture reordered-install-properties "$FULL_ACTION_REF")"
+move_install_shell_after_run "$fixture/.github/workflows/ci-core.yml"
+expect_pass "Install TinyGo valid properties in reordered mapping" "$fixture"
 
 expect_pass "full remote Action SHA with version annotation" \
 	"$(make_fixture full-sha "$FULL_ACTION_REF")"
@@ -516,6 +800,97 @@ expect_fail "remote Action SHA with major-only annotation" \
 	"$(make_fixture major-version-annotation "actions/checkout@$FULL_ACTION_SHA # v1")"
 expect_fail "remote Action SHA with two-component annotation" \
 	"$(make_fixture minor-version-annotation "actions/checkout@$FULL_ACTION_SHA # v1.2")"
+
+fixture="$(make_fixture job-env-uses-data "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/data.yml \
+	'jobs:' \
+	'  data:' \
+	'    runs-on: ubuntu-latest' \
+	'    env:' \
+	'      uses: harmless-data' \
+	'    steps:' \
+	'      - run: echo ok'
+expect_pass "job env key named uses is ordinary data" "$fixture"
+
+fixture="$(make_fixture step-env-uses-data "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/data.yml \
+	'jobs:' \
+	'  data:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - run: echo ok' \
+	'        env:' \
+	'          uses: harmless-data'
+expect_pass "step env key named uses is ordinary data" "$fixture"
+
+fixture="$(make_fixture with-uses-data "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/data.yml \
+	'jobs:' \
+	'  data:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	"      - uses: actions/checkout@$FULL_ACTION_SHA # v7.0.1" \
+	'        with:' \
+	'          uses: harmless-data'
+expect_pass "with key named uses is ordinary data" "$fixture"
+
+fixture="$(make_fixture flow-env-uses-data "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/data.yml \
+	'jobs:' \
+	'  data:' \
+	'    runs-on: ubuntu-latest' \
+	'    env: { uses: harmless-data }' \
+	'    steps:' \
+	'      - run: echo ok'
+expect_pass "flow env data named uses is not an Action reference" "$fixture"
+
+fixture="$(make_fixture action-input-output-uses-data "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/actions/data/action.yml \
+	'name: data' \
+	'inputs:' \
+	'  uses:' \
+	'    default: harmless-data' \
+	'outputs:' \
+	'  uses:' \
+	'    value: harmless-data' \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	'    - run: echo ok' \
+	'      shell: bash'
+expect_pass "Action input and output keys named uses are ordinary data" "$fixture"
+
+fixture="$(make_fixture job-reusable-pinned "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/reusable-job.yml \
+	'jobs:' \
+	'  call:' \
+	"    uses: $FULL_REUSABLE_REF"
+expect_pass "job-level reusable workflow uses is validated" "$fixture"
+
+fixture="$(make_fixture job-reusable-mutable "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/reusable-job.yml \
+	'jobs:' \
+	'  call:' \
+	'    uses: owner/repo/.github/workflows/build.yml@main'
+expect_fail "mutable job-level reusable workflow uses" "$fixture"
+
+fixture="$(make_fixture composite-action-pinned "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/actions/direct/action.yml \
+	'name: direct' \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	"    - uses: owner/remote@$FULL_ACTION_SHA # v1.2.3"
+expect_pass "composite Action step uses is validated" "$fixture"
+
+fixture="$(make_fixture composite-action-mutable "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/actions/direct/action.yml \
+	'name: direct' \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	'    - uses: owner/remote@main'
+expect_fail "mutable composite Action step uses" "$fixture"
 
 expect_fail "old unqualified TinyGo checksum verifier" \
 	"$(make_fixture old-unqualified-verifier "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal unqualified)"
@@ -700,7 +1075,9 @@ expect_fail "Action following a spaced block-scalar step name" "$fixture"
 
 fixture="$(make_fixture 'space in repository path' "$FULL_ACTION_REF")"
 expect_pass "repository path containing spaces" "$fixture"
-printf 'uses: actions/checkout@v7\n' > "$fixture/.github/workflows/"$'line\nbreak.yml'
+printf '%s\n' 'jobs:' '  newline:' '    steps:' \
+	'      - uses: actions/checkout@v7' \
+	> "$fixture/.github/workflows/"$'line\nbreak.yml'
 expect_fail "workflow filename containing a newline" "$fixture"
 
 fixture="$(make_fixture local-action-yml './.github/actions/local')"
@@ -830,6 +1207,18 @@ if grep -Fq -- "$TINYGO_RELEASE_NAMESPACE" "$BASH_SOURCE"; then
 	exit 1
 fi
 printf 'ok - test harness source contains no raw TinyGo release namespace\n'
+
+if grep -Fq -- "$TINYGO_RELEASE_REPOSITORY" "$CHECKER"; then
+	printf 'not ok - checker source contains raw TinyGo repository identity\n' >&2
+	exit 1
+fi
+printf 'ok - checker source contains no raw TinyGo repository identity\n'
+
+if grep -Fq -- "$TINYGO_RELEASE_REPOSITORY" "$BASH_SOURCE"; then
+	printf 'not ok - test harness source contains raw TinyGo repository identity\n' >&2
+	exit 1
+fi
+printf 'ok - test harness source contains no raw TinyGo repository identity\n'
 
 runtime_namespace="$TINYGO_RELEASE_NAMESPACE"
 expected_runtime_namespace="${TINYGO_RELEASE_REPOSITORY}/releases/download/"

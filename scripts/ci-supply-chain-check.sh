@@ -3,7 +3,7 @@ set -euo pipefail
 
 EXPECTED_TINYGO_VERSION="0.42.0"
 EXPECTED_TINYGO_SHA256="2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563"
-TINYGO_RELEASE_REPOSITORY="tinygo-org/tinygo"
+TINYGO_RELEASE_REPOSITORY="tinygo-org/"'tinygo'
 TINYGO_RELEASE_NAMESPACE="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
 EXPECTED_TINYGO_WORKFLOWS=(
 	".github/workflows/ci-browser-smoke.yml"
@@ -17,7 +17,7 @@ tinygo_download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github
 tinygo_stage_command="/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb $TINYGO_VERIFIED_DEB"
 tinygo_verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '$EXPECTED_TINYGO_SHA256  $TINYGO_VERIFIED_DEB' || exit 1"
 tinygo_install_command="/usr/bin/sudo /usr/bin/apt-get install -y $TINYGO_VERIFIED_DEB"
-tinygo_version_command='tinygo version'
+tinygo_version_command='/usr/local/bin/tinygo version'
 
 usage() {
 	printf 'usage: %s [repository-root]\n' "${0##*/}" >&2
@@ -198,6 +198,7 @@ inspect_shell_logical_command() {
 	local command="$3"
 
 	command="$(trim_whitespace "$command")"
+	inspect_referenced_ci_helpers "$relative" "$line_number" "$command"
 	if [[ -z "$command" ]] || ! shell_command_has_active_downloader "$command"; then
 		return
 	fi
@@ -338,6 +339,141 @@ repository_file_is_shell_source() {
 	[[ "$first_line" =~ ^\#!.*(bash|/sh)([[:space:]]|$) ]]
 }
 
+repository_file_is_helper_source() {
+	local relative="$1"
+	local file="$2"
+	local first_line
+
+	case "$relative" in
+		*.sh|*.bash|*.py|*.js|*.mjs|*.cjs|*.ps1|*.rb|*.go|*.ts|*.tsx)
+			return 0
+			;;
+	esac
+	if [[ -x "$file" ]]; then
+		return 0
+	fi
+	IFS= read -r first_line < "$file" || true
+	[[ "$first_line" == '#!'* ]]
+}
+
+repository_file_is_ci_executable_source() {
+	local relative="$1"
+	local file="$2"
+
+	# This is a bounded authored-CI provenance inventory, not language parsing.
+	# Common helper-language files and executable files are inspected regardless
+	# of invocation; additional source types are included under CI helper roots.
+	case "$relative" in
+		*.sh|*.bash|*.py|*.js|*.mjs|*.cjs|*.ps1|*.rb) return 0 ;;
+	esac
+	case "$relative" in
+		.github/scripts/*|.github/actions/*|scripts/*)
+			repository_file_is_helper_source "$relative" "$file"
+			return
+			;;
+	esac
+	[[ -x "$file" ]]
+}
+
+repository_file_is_authored_ci_yaml() {
+	local relative="$1"
+
+	case "$relative" in
+		.github/workflows/*.yml|.github/workflows/*.yaml|\
+		.github/actions/*.yml|.github/actions/*.yaml|\
+		.github/actions/*/*.yml|.github/actions/*/*.yaml)
+			return 0
+			;;
+	esac
+	return 1
+}
+
+scan_ci_executable_tinygo_provenance() {
+	local relative="$1"
+	local file="$2"
+	local forced="${3:-false}"
+	local grep_status line syntax
+
+	# A literal repository identity is the bounded, language-agnostic marker.
+	# Deliberately encoded or character-by-character construction is outside this
+	# authored-CI policy; arbitrary source-language data flow is not interpreted.
+	if [[ "$forced" != true ]] &&
+		! repository_file_is_ci_executable_source "$relative" "$file" &&
+		! repository_file_is_authored_ci_yaml "$relative"; then
+		return
+	fi
+	if grep -Fiq -- "$TINYGO_RELEASE_REPOSITORY" "$file"; then
+		if tinygo_release_url_owner_allowed "$relative"; then
+			while IFS= read -r line || [[ -n "$line" ]]; do
+				if ! grep -Fiq -- "$TINYGO_RELEASE_REPOSITORY" <<< "$line"; then
+					continue
+				fi
+				syntax="$(trim_whitespace "$line")"
+				if [[ "$syntax" != "$tinygo_download_command" ]]; then
+					fail "TinyGo repository provenance in $relative is outside the accepted fetch command"
+				fi
+			done < "$file"
+		else
+			fail "TinyGo repository provenance is not allowed in executable CI source: $relative"
+		fi
+	else
+		grep_status=$?
+		if (( grep_status > 1 )); then
+			fail "could not inspect executable CI source for TinyGo provenance: $relative"
+		fi
+	fi
+}
+
+inspect_referenced_ci_helpers() {
+	local source_relative="$1"
+	local line_number="$2"
+	local command="$3"
+	local token relative file
+	local words=()
+
+	read -r -a words <<< "$command"
+	for token in "${words[@]}"; do
+		token="${token#\"}"
+		token="${token%\"}"
+		token="${token#\'}"
+		token="${token%\'}"
+		token="${token#(}"
+		token="${token%)}"
+		token="${token%;}"
+		token="${token%|}"
+		token="${token%&}"
+		case "$token" in
+			http://*|https://*|/*|*'$'*|*'`'*) continue ;;
+		esac
+		relative="${token#./}"
+		case "/$relative/" in
+			*'/../'*|*'/./'*|*'//'*)
+				file="$ROOT_DIR/$relative"
+				case "$relative" in
+					*.sh|*.bash|*.py|*.js|*.mjs|*.cjs|*.ps1|*.rb|*.go|*.ts|*.tsx)
+						fail "$source_relative:$line_number referenced CI helper path is not canonical: $token"
+						;;
+					*)
+						if [[ -f "$file" && -x "$file" ]]; then
+							fail "$source_relative:$line_number referenced executable CI helper path is not canonical: $token"
+						fi
+						;;
+				esac
+				continue
+				;;
+		esac
+		file="$ROOT_DIR/$relative"
+		if [[ ! -f "$file" ]] ||
+			! repository_file_is_helper_source "$relative" "$file"; then
+			continue
+		fi
+		if repository_file_is_ci_executable_source "$relative" "$file"; then
+			continue
+		fi
+		scan_ci_executable_tinygo_provenance "$relative" "$file" true
+	done
+}
+
 enumerate_repository_files() {
 	if [[ "$repository_uses_git_inventory" == true ]]; then
 		git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard || return
@@ -383,6 +519,7 @@ while IFS= read -r -d '' repository_path; do
 	if repository_file_is_shell_source "$relative" "$file"; then
 		scan_shell_downloaders "$file" "$relative"
 	fi
+	scan_ci_executable_tinygo_provenance "$relative" "$file"
 done < <(enumerate_repository_files)
 if [[ "$repository_inventory_complete" != true ]]; then
 	fail "could not enumerate repository-owned files for TinyGo release downloads"
@@ -402,15 +539,55 @@ if (( ${#scan_roots[@]} == 0 )); then
 	fail "no authored GitHub workflow or Action directories found under $ROOT_DIR/.github"
 fi
 
+validate_action_uses_ref() {
+	local file="$1"
+	local line_number="$2"
+	local value="$3"
+	local comment="$4"
+	local comment_is_yaml="$5"
+
+	if (( ${#value} >= 2 )); then
+		if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+			value="${value:1:${#value}-2}"
+		elif [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+			value="${value:1:${#value}-2}"
+		fi
+	fi
+
+	if [[ -z "$value" ]]; then
+		fail "${file#"$ROOT_DIR/"}:$line_number has an empty uses reference"
+		return
+	fi
+	if [[ "$value" == ./* ]]; then
+		validate_local_uses_ref "$file" "$line_number" "$value"
+		return
+	fi
+
+	remote_action_count=$((remote_action_count + 1))
+	if [[ ! "$value" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[^@[:space:]]+)?@[0-9a-f]{40}$ ]]; then
+		fail "${file#"$ROOT_DIR/"}:$line_number remote uses reference is not pinned to a lowercase 40-character commit SHA: $value"
+	fi
+	comment="$(trim_whitespace "$comment")"
+	if [[ "$comment_is_yaml" != true || ! "$comment" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		fail "${file#"$ROOT_DIR/"}:$line_number remote uses reference must have a trailing # vMAJOR.MINOR.PATCH annotation: $value"
+	fi
+}
+
 scan_action_refs() {
 	local file="$1"
+	local relative="${file#"$ROOT_DIR/"}"
 	local line line_number=0 indent syntax key value sequence_prefix content
-	local comment comment_is_yaml
+	local comment comment_is_yaml key_indent stack_count stack_index parent_kind
+	local is_action_uses=false
+	local action_step_active=false action_step_indent=-1 action_step_kind=""
 	local scalar_indent=-1
 	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
 	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
 	local inline_comment_re='^(.*[^[:space:]])[[:space:]]+#(.*)$'
 	local full_comment_re='^[[:space:]]*#(.*)$'
+	local path_keys=()
+	local path_indents=()
+
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line_number=$((line_number + 1))
 		content="$line"
@@ -435,56 +612,101 @@ scan_action_refs() {
 		fi
 		scalar_indent=-1
 
-		# Only canonical block mapping keys are authored here. Reject YAML
-		# indirection and flow forms instead of letting them hide a uses key.
+		if [[ "$syntax" =~ $mapping_re ]]; then
+			sequence_prefix="${BASH_REMATCH[1]}"
+			key="${BASH_REMATCH[2]}"
+			value="${BASH_REMATCH[4]}"
+			key_indent=$((${#indent} + ${#sequence_prefix}))
+		else
+			sequence_prefix=""
+			key_indent=${#indent}
+			if [[ "$syntax" == '- '* ]]; then
+				key_indent=$((key_indent + 2))
+			fi
+		fi
+
+		while (( ${#path_indents[@]} > 0 )); do
+			stack_index=$((${#path_indents[@]} - 1))
+			if (( path_indents[stack_index] < key_indent )); then
+				break
+			fi
+			unset 'path_indents[stack_index]' 'path_keys[stack_index]'
+		done
+		stack_count=${#path_keys[@]}
+		parent_kind=""
+		if [[ "$relative" == .github/workflows/* ]] &&
+			(( stack_count == 3 )) &&
+			[[ "${path_keys[0]}" == jobs && "${path_keys[2]}" == steps ]]; then
+			parent_kind=workflow-step
+		elif [[ "$relative" == .github/actions/* ]] &&
+			(( stack_count == 2 )) &&
+			[[ "${path_keys[0]}" == runs && "${path_keys[1]}" == steps ]]; then
+			parent_kind=composite-step
+		fi
+
+		if [[ "$action_step_active" == true ]] &&
+			(( key_indent < action_step_indent )); then
+			action_step_active=false
+			action_step_kind=""
+		fi
+
+		# Only canonical block mapping keys are authored for security-relevant
+		# structure. Ordinary scalar/list data remains outside Action semantics.
 		if [[ ! "$syntax" =~ $mapping_re ]]; then
 			case "${syntax#- }" in
 				*:*|\{*|\[*|\?*|\&*|\**|\!*)
-					fail "${file#"$ROOT_DIR/"}:$line_number unsupported workflow mapping syntax; use canonical block keys"
+					fail "$relative:$line_number unsupported workflow mapping syntax; use canonical block keys"
 					;;
 			esac
 			continue
 		fi
-		sequence_prefix="${BASH_REMATCH[1]}"
-		key="${BASH_REMATCH[2]}"
-		value="${BASH_REMATCH[4]}"
+
+		if [[ -n "$sequence_prefix" && -n "$parent_kind" ]]; then
+			action_step_active=true
+			action_step_indent=$key_indent
+			action_step_kind="$parent_kind"
+		elif [[ -n "$sequence_prefix" && "$action_step_active" == true ]] &&
+			(( key_indent <= action_step_indent )); then
+			action_step_active=false
+			action_step_kind=""
+		fi
+
 		case "$value" in
 			\{*|\[*|\&*|\**|\!*)
-				fail "${file#"$ROOT_DIR/"}:$line_number unsupported workflow mapping value; use canonical block mappings"
-				continue
-				;;
+				case "$key" in
+					env|with|inputs|outputs) ;;
+					*)
+						fail "$relative:$line_number unsupported workflow mapping value; use canonical block mappings"
+						;;
+				esac
+			continue
+			;;
 		esac
-		if [[ "$key" != uses ]]; then
-			if [[ "$value" =~ $scalar_re ]]; then
-				scalar_indent=$((${#indent} + ${#sequence_prefix}))
+
+		is_action_uses=false
+		if [[ "$key" == uses ]]; then
+			if [[ "$relative" == .github/workflows/* ]] &&
+				(( stack_count == 2 )) &&
+				[[ "${path_keys[0]}" == jobs ]]; then
+				is_action_uses=true
+			elif [[ "$action_step_active" == true &&
+				"$action_step_kind" == "$parent_kind" ]] &&
+				(( key_indent == action_step_indent )); then
+				is_action_uses=true
 			fi
+		fi
+		if [[ "$is_action_uses" == true ]]; then
+			validate_action_uses_ref "$file" "$line_number" "$value" \
+				"$comment" "$comment_is_yaml"
+		fi
+
+		if [[ "$value" =~ $scalar_re ]]; then
+			scalar_indent=$key_indent
 			continue
 		fi
-
-		if (( ${#value} >= 2 )); then
-			if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
-				value="${value:1:${#value}-2}"
-			elif [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
-				value="${value:1:${#value}-2}"
-			fi
-		fi
-
 		if [[ -z "$value" ]]; then
-			fail "${file#"$ROOT_DIR/"}:$line_number has an empty uses reference"
-			continue
-		fi
-		if [[ "$value" == ./* ]]; then
-			validate_local_uses_ref "$file" "$line_number" "$value"
-			continue
-		fi
-
-		remote_action_count=$((remote_action_count + 1))
-		if [[ ! "$value" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[^@[:space:]]+)?@[0-9a-f]{40}$ ]]; then
-			fail "${file#"$ROOT_DIR/"}:$line_number remote uses reference is not pinned to a lowercase 40-character commit SHA: $value"
-		fi
-		comment="$(trim_whitespace "$comment")"
-		if [[ "$comment_is_yaml" != true || ! "$comment" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-			fail "${file#"$ROOT_DIR/"}:$line_number remote uses reference must have a trailing # vMAJOR.MINOR.PATCH annotation: $value"
+			path_indents[stack_count]=$key_indent
+			path_keys[stack_count]="$key"
 		fi
 	done < "$file"
 }
@@ -518,68 +740,209 @@ if (( direct_tinygo_downloads != ${#EXPECTED_TINYGO_WORKFLOWS[@]} )); then
 	fail "expected ${#EXPECTED_TINYGO_WORKFLOWS[@]} direct TinyGo release downloads, found $direct_tinygo_downloads"
 fi
 
-count_tinygo_install_sequences() {
-	local file="$1"
-	local line command indent step_indent property_indent command_indent expected_command valid_indent
-	local state=0 count=0
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		command="$(trim_whitespace "$line")"
-		indent="${line%%[![:space:]]*}"
-		if (( state > 0 )); then
-			if (( state == 8 )) && [[ -z "$command" ]]; then
-				continue
+reset_tinygo_step() {
+	tinygo_step_active=false
+	tinygo_step_indent=-1
+	tinygo_step_line=0
+	tinygo_step_property_count=0
+	tinygo_step_name_count=0
+	tinygo_step_shell_count=0
+	tinygo_step_run_count=0
+	tinygo_step_install_name=false
+	tinygo_step_verify_name=false
+	tinygo_step_shell_value=""
+	tinygo_step_run_value=""
+	tinygo_step_run_lines=()
+}
+
+record_tinygo_step_property() {
+	local key="$1"
+	local value="$2"
+
+	tinygo_step_property_count=$((tinygo_step_property_count + 1))
+	case "$key" in
+		name)
+			tinygo_step_name_count=$((tinygo_step_name_count + 1))
+			if [[ "$value" == 'Install TinyGo' ]]; then
+				tinygo_step_install_name=true
+			elif [[ "$value" == 'Verify TinyGo' ]]; then
+				tinygo_step_verify_name=true
 			fi
-			case "$state" in
-				1) expected_command="shell: $tinygo_shell_template"; property_indent="$indent" ;;
-				2) expected_command='run: |' ;;
-				3) expected_command="$tinygo_cleanup_command"; command_indent="$indent" ;;
-				4) expected_command="$tinygo_download_command" ;;
-				5) expected_command="$tinygo_stage_command" ;;
-				6) expected_command="$tinygo_verify_command" ;;
-				7) expected_command="$tinygo_install_command" ;;
-				8) expected_command='- name: Verify TinyGo' ;;
-				9) expected_command="run: $tinygo_version_command" ;;
-			esac
-			if (( state == 1 )); then
-				valid_indent=false
-				if [[ "$indent" == "$step_indent"* ]] &&
-					(( ${#indent} > ${#step_indent} )); then
-					valid_indent=true
-				fi
-			elif (( state == 2 || state == 9 )); then
-				valid_indent=false
-				if [[ "$indent" == "$property_indent" ]]; then
-					valid_indent=true
-				fi
-			elif (( state == 8 )); then
-				valid_indent=false
-				if [[ "$indent" == "$step_indent" ]]; then
-					valid_indent=true
-				fi
-			else
-				valid_indent=false
-				if [[ "$indent" == "$command_indent" && "$indent" == "$property_indent"* ]] &&
-					(( ${#indent} > ${#property_indent} )); then
-					valid_indent=true
-				fi
-			fi
-			if [[ "$command" == "$expected_command" && "$valid_indent" == true ]]; then
-				state=$((state + 1))
-				if (( state == 10 )); then
-					count=$((count + 1))
-					state=0
-				fi
-			else
-				state=0
-			fi
+			;;
+		shell)
+			tinygo_step_shell_count=$((tinygo_step_shell_count + 1))
+			tinygo_step_shell_value="$value"
+			;;
+		run)
+			tinygo_step_run_count=$((tinygo_step_run_count + 1))
+			tinygo_step_run_value="$value"
+			;;
+	esac
+}
+
+tinygo_install_body_is_exact() {
+	(( ${#tinygo_step_run_lines[@]} == 5 )) || return 1
+	[[ "${tinygo_step_run_lines[0]}" == "$tinygo_cleanup_command" ]] || return 1
+	[[ "${tinygo_step_run_lines[1]}" == "$tinygo_download_command" ]] || return 1
+	[[ "${tinygo_step_run_lines[2]}" == "$tinygo_stage_command" ]] || return 1
+	[[ "${tinygo_step_run_lines[3]}" == "$tinygo_verify_command" ]] || return 1
+	[[ "${tinygo_step_run_lines[4]}" == "$tinygo_install_command" ]]
+}
+
+finalize_tinygo_step() {
+	local relative="$1"
+	local valid=true
+
+	if [[ "$tinygo_step_active" != true ]]; then
+		return
+	fi
+	if [[ "$tinygo_step_install_name" == true &&
+		"$tinygo_step_verify_name" == true ]]; then
+		fail "$relative:$tinygo_step_line TinyGo step has conflicting duplicate names"
+		tinygo_pending_install=false
+		reset_tinygo_step
+		return
+	fi
+
+	if [[ "$tinygo_step_install_name" == true ]]; then
+		if [[ "$tinygo_pending_install" == true ]]; then
+			fail "$relative:$tinygo_step_line Verify TinyGo must immediately follow Install TinyGo"
 		fi
-		if [[ "$command" == '- name: Install TinyGo' ]]; then
-			step_indent="$indent"
-			state=1
+		if (( tinygo_step_property_count != 3 ||
+			tinygo_step_name_count != 1 ||
+			tinygo_step_shell_count != 1 ||
+			tinygo_step_run_count != 1 )); then
+			valid=false
+		fi
+		if [[ "$tinygo_step_shell_value" != "$tinygo_shell_template" ||
+			"$tinygo_step_run_value" != '|' ]] ||
+			! tinygo_install_body_is_exact; then
+			valid=false
+		fi
+		if [[ "$valid" != true ]]; then
+			fail "$relative:$tinygo_step_line Install TinyGo must contain only the exact sanitized shell and protected run transaction"
+			tinygo_pending_install=false
+		else
+			tinygo_pending_install=true
+		fi
+	elif [[ "$tinygo_step_verify_name" == true ]]; then
+		if (( tinygo_step_property_count != 2 ||
+			tinygo_step_name_count != 1 ||
+			tinygo_step_shell_count != 0 ||
+			tinygo_step_run_count != 1 )) ||
+			[[ "$tinygo_step_run_value" != "$tinygo_version_command" ]]; then
+			valid=false
+		fi
+		if [[ "$valid" != true ]]; then
+			fail "$relative:$tinygo_step_line Verify TinyGo must contain only the package-owned version command"
+			tinygo_pending_install=false
+		elif [[ "$tinygo_pending_install" != true ]]; then
+			fail "$relative:$tinygo_step_line Verify TinyGo must immediately follow Install TinyGo"
+		else
+			tinygo_sequence_count=$((tinygo_sequence_count + 1))
+			tinygo_pending_install=false
+		fi
+	elif [[ "$tinygo_pending_install" == true ]]; then
+		fail "$relative:$tinygo_step_line Verify TinyGo must immediately follow Install TinyGo"
+		tinygo_pending_install=false
+	fi
+	reset_tinygo_step
+}
+
+scan_tinygo_install_steps() {
+	local file="$1"
+	local relative="${file#"$ROOT_DIR/"}"
+	local line line_number=0 content syntax indent key value sequence_prefix
+	local key_indent stack_count stack_index parent_is_steps=false
+	local scalar_indent=-1 scalar_is_step_run=false
+	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
+	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
+	local inline_comment_re='^(.*[^[:space:]])[[:space:]]+#(.*)$'
+	local full_comment_re='^[[:space:]]*#(.*)$'
+	local path_keys=()
+	local path_indents=()
+
+	tinygo_sequence_count=0
+	tinygo_pending_install=false
+	reset_tinygo_step
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line_number=$((line_number + 1))
+		indent="${line%%[![:space:]]*}"
+		syntax="$(trim_whitespace "$line")"
+		if (( scalar_indent >= 0 )) &&
+			[[ -z "$syntax" || ${#indent} -gt scalar_indent ]]; then
+			if [[ "$scalar_is_step_run" == true &&
+				-n "$syntax" && "$syntax" != \#* ]]; then
+				tinygo_step_run_lines[${#tinygo_step_run_lines[@]}]="$syntax"
+			fi
+			continue
+		fi
+		scalar_indent=-1
+		scalar_is_step_run=false
+
+		content="$line"
+		if [[ "$line" =~ $inline_comment_re ]]; then
+			content="${BASH_REMATCH[1]}"
+		elif [[ "$line" =~ $full_comment_re ]]; then
+			content=""
+		fi
+		syntax="$(trim_whitespace "$content")"
+		if [[ -z "$syntax" || ! "$syntax" =~ $mapping_re ]]; then
+			continue
+		fi
+		sequence_prefix="${BASH_REMATCH[1]}"
+		key="${BASH_REMATCH[2]}"
+		value="${BASH_REMATCH[4]}"
+		key_indent=$((${#indent} + ${#sequence_prefix}))
+
+		while (( ${#path_indents[@]} > 0 )); do
+			stack_index=$((${#path_indents[@]} - 1))
+			if (( path_indents[stack_index] < key_indent )); then
+				break
+			fi
+			unset 'path_indents[stack_index]' 'path_keys[stack_index]'
+		done
+		stack_count=${#path_keys[@]}
+		parent_is_steps=false
+		if (( stack_count == 3 )) &&
+			[[ "${path_keys[0]}" == jobs && "${path_keys[2]}" == steps ]]; then
+			parent_is_steps=true
+		fi
+
+		if [[ "$tinygo_step_active" == true ]] &&
+			(( key_indent < tinygo_step_indent )); then
+			finalize_tinygo_step "$relative"
+		fi
+		if [[ -n "$sequence_prefix" && "$parent_is_steps" == true ]]; then
+			finalize_tinygo_step "$relative"
+			tinygo_step_active=true
+			tinygo_step_indent=$key_indent
+			tinygo_step_line=$line_number
+		fi
+
+		if [[ "$tinygo_step_active" == true ]] &&
+			(( key_indent == tinygo_step_indent )); then
+			record_tinygo_step_property "$key" "$value"
+		fi
+		if [[ "$value" =~ $scalar_re ]]; then
+			scalar_indent=$key_indent
+			if [[ "$tinygo_step_active" == true &&
+				"$key" == run ]] &&
+				(( key_indent == tinygo_step_indent )); then
+				scalar_is_step_run=true
+			fi
+			continue
+		fi
+		if [[ -z "$value" ]]; then
+			path_indents[stack_count]=$key_indent
+			path_keys[stack_count]="$key"
 		fi
 	done < "$file"
-
-	printf '%d' "$count"
+	finalize_tinygo_step "$relative"
+	if [[ "$tinygo_pending_install" == true ]]; then
+		fail "$relative Verify TinyGo must immediately follow Install TinyGo"
+		tinygo_pending_install=false
+	fi
 }
 
 accepted_tinygo_install_sequences=0
@@ -609,7 +972,8 @@ for relative in "${EXPECTED_TINYGO_WORKFLOWS[@]}"; do
 		fail "$relative must contain exactly one accepted TinyGo version-report command"
 	fi
 
-	sequence_count="$(count_tinygo_install_sequences "$file")"
+	scan_tinygo_install_steps "$file"
+	sequence_count="$tinygo_sequence_count"
 	if [[ "$sequence_count" != "1" ]]; then
 		fail "$relative must contain exactly one sanitized TinyGo staging, verification, installation, and cleanup sequence immediately followed by an ordinary TinyGo version smoke"
 	else
