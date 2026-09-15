@@ -15,6 +15,7 @@ TINYGO_VERSION_COMMAND="$TINYGO_BINARY version"
 VERIFIED_DEB="/tmp/goframe-tinygo-0.42.0-verified.deb"
 CLEAN_PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 CLEAN_SHELL="/usr/bin/env -i PATH=$CLEAN_PATH /bin/bash --noprofile --norc -e -u -o pipefail {0}"
+VERIFY_SHELL='/bin/bash --noprofile --norc -p -e -o pipefail {0}'
 CLEANUP_COMMAND="trap '/usr/bin/sudo /usr/bin/rm -f $VERIFIED_DEB' EXIT"
 STAGE_COMMAND="/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb $VERIFIED_DEB"
 CURL_COMMAND_NAME='cur''l'
@@ -121,6 +122,7 @@ write_tinygo_workflow() {
 		printf '      # uses: actions/commented-out@v1\n'
 		if [[ "$smoke_mode" == "before-install" ]]; then
 			printf '      - name: Verify TinyGo\n'
+			printf '        shell: %s\n' "$VERIFY_SHELL"
 			printf '        run: %s\n' "$TINYGO_VERSION_COMMAND"
 		fi
 		if [[ -n "$shell_template" ]]; then
@@ -167,15 +169,18 @@ write_tinygo_workflow() {
 				;;
 			separate)
 				printf '      - name: Verify TinyGo\n'
+				printf '        shell: %s\n' "$VERIFY_SHELL"
 				printf '        run: %s\n' "$TINYGO_VERSION_COMMAND"
 				;;
 			ambient)
 				printf '      - name: Verify TinyGo\n'
+				printf '        shell: %s\n' "$VERIFY_SHELL"
 				printf '        run: tinygo version\n'
 				;;
 			missing|before-install) ;;
 			malformed)
 				printf '      - name: Verify TinyGo\n'
+				printf '        shell: %s\n' "$VERIFY_SHELL"
 				printf '        run: echo wrong command\n'
 				;;
 			custom-shell)
@@ -429,18 +434,151 @@ add_install_property() {
 	mv "$TMP_ROOT/install-property.yml" "$file"
 }
 
+replace_verify_shell() {
+	local file="$1"
+	local shell="$2"
+
+	awk -v shell="$shell" '
+		$0 == "      - name: Verify TinyGo" { in_verify = 1 }
+		in_verify && $0 ~ /^        shell:/ {
+			print "        shell: " shell
+			in_verify = 0
+			next
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/verify-shell.yml"
+	mv "$TMP_ROOT/verify-shell.yml" "$file"
+}
+
+remove_verify_shell() {
+	local file="$1"
+
+	awk '
+		$0 == "      - name: Verify TinyGo" { in_verify = 1 }
+		in_verify && $0 ~ /^        shell:/ {
+			in_verify = 0
+			next
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/verify-shell.yml"
+	mv "$TMP_ROOT/verify-shell.yml" "$file"
+}
+
+add_job_property() {
+	local file="$1"
+	local position="$2"
+	local property="$3"
+	local child="${4:-}"
+
+	if [[ "$position" == before ]]; then
+		awk -v property="$property" -v child="$child" '
+			{ print }
+			$0 == "  fixture:" {
+				print "    " property
+				if (child != "") {
+					print "      " child
+				}
+			}
+		' "$file" > "$TMP_ROOT/job-property.yml"
+		mv "$TMP_ROOT/job-property.yml" "$file"
+		return
+	fi
+
+	printf '    %s\n' "$property" >> "$file"
+	if [[ -n "$child" ]]; then
+		printf '      %s\n' "$child" >> "$file"
+	fi
+}
+
+add_workflow_run_default() {
+	local file="$1"
+
+	awk '
+		$0 == "jobs:" {
+			print "defaults:"
+			print "  run:"
+			print "    shell: sh"
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/workflow-default.yml"
+	mv "$TMP_ROOT/workflow-default.yml" "$file"
+}
+
+add_job_run_default() {
+	local file="$1"
+
+	awk '
+		{ print }
+		$0 == "  fixture:" {
+			print "    defaults:"
+			print "      run:"
+			print "        shell: sh"
+		}
+	' "$file" > "$TMP_ROOT/job-default.yml"
+	mv "$TMP_ROOT/job-default.yml" "$file"
+}
+
+add_job_strategy_matrix() {
+	local file="$1"
+
+	awk '
+		{ print }
+		$0 == "  fixture:" {
+			print "    strategy:"
+			print "      fail-fast: false"
+			print "      matrix:"
+			print "        go:"
+			print "          - 1.26.6"
+		}
+	' "$file" > "$TMP_ROOT/job-strategy.yml"
+	mv "$TMP_ROOT/job-strategy.yml" "$file"
+}
+
+add_unrelated_control_jobs() {
+	local file="$1"
+
+	printf '%s\n' \
+		'  prerequisite:' \
+		'    runs-on: ubuntu-latest' \
+		'    steps:' \
+		'      - run: echo prerequisite' \
+		'  unrelated:' \
+		'    if: true' \
+		'    continue-on-error: false' \
+		'    needs: prerequisite' \
+		'    runs-on: ubuntu-latest' \
+		'    steps:' \
+		'      - run: echo unrelated' \
+		>> "$file"
+}
+
+split_verify_into_new_job() {
+	local file="$1"
+
+	awk '
+		$0 == "      - name: Verify TinyGo" {
+			print "  verify-tinygo:"
+			print "    runs-on: ubuntu-latest"
+			print "    steps:"
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/cross-job-verify.yml"
+	mv "$TMP_ROOT/cross-job-verify.yml" "$file"
+}
+
 reorder_verify_properties() {
 	local file="$1"
 
 	awk '
 		$0 == "      - name: Verify TinyGo" {
 			name = "        name: Verify TinyGo"
-			if ((getline run_line) <= 0) {
+			if ((getline shell_line) <= 0 || (getline run_line) <= 0) {
 				exit 1
 			}
 			sub(/^        run:/, "      - run:", run_line)
 			print run_line
 			print name
+			print shell_line
 			next
 		}
 		{ print }
@@ -599,6 +737,144 @@ test_ambient_sudo_interposition() {
 	printf 'ok %d - ambient sudo can replace bytes after verification\n' "$tests_run"
 }
 
+test_verify_shell_boundary() {
+	local oracle_dir="$TMP_ROOT/verify-shell-oracle"
+	local target="$oracle_dir/tinygo"
+	local marker="$oracle_dir/interposed"
+	local bash_env="$oracle_dir/bash-env"
+	local target_script="$oracle_dir/run-target.sh"
+	local environment_script="$oracle_dir/check-environment.sh"
+	local output
+
+	mkdir -p "$oracle_dir"
+	printf '%s\n' '#!/bin/sh' 'printf "real tinygo\\n"' > "$target"
+	chmod +x "$target"
+	printf 'function %s {\n' "$target" > "$bash_env"
+	printf '%s\n' \
+		'  printf "fake tinygo\n"' \
+		'  : > "$VERIFY_MARKER"' \
+		'  return 0' \
+		'}' \
+		>> "$bash_env"
+	printf '%s\n' '"$VERIFY_TARGET" version' > "$target_script"
+	printf '%s\n' \
+		'[[ "$VERIFY_ENV_SENTINEL" == "setup-go-visible" ]]' \
+		'printf "%s\n" "$VERIFY_ENV_SENTINEL"' \
+		> "$environment_script"
+
+	rm -f "$marker"
+	tests_run=$((tests_run + 1))
+	if ! output="$(BASH_ENV="$bash_env" VERIFY_MARKER="$marker" \
+		VERIFY_TARGET="$target" /bin/bash --noprofile --norc -e -o pipefail \
+		"$target_script")"; then
+		printf 'not ok %d - ordinary Bash BASH_ENV interposition oracle execution\n' \
+			"$tests_run" >&2
+		exit 1
+	fi
+	if [[ ! -f "$marker" || "$output" != 'fake tinygo' ]]; then
+		printf 'not ok %d - ordinary Bash did not load slash-named BASH_ENV function\n' \
+			"$tests_run" >&2
+		exit 1
+	fi
+	printf 'ok %d - ordinary Bash loads slash-named BASH_ENV function\n' "$tests_run"
+
+	rm -f "$marker"
+	tests_run=$((tests_run + 1))
+	if ! output="$(BASH_ENV="$bash_env" VERIFY_MARKER="$marker" \
+		VERIFY_TARGET="$target" /bin/bash --noprofile --norc -p -e -o pipefail \
+		"$target_script")"; then
+		printf 'not ok %d - privileged Verify shell oracle execution\n' \
+			"$tests_run" >&2
+		exit 1
+	fi
+	if [[ -e "$marker" || "$output" != 'real tinygo' ]]; then
+		printf 'not ok %d - privileged Verify shell allowed BASH_ENV interposition\n' \
+			"$tests_run" >&2
+		exit 1
+	fi
+	printf 'ok %d - privileged Verify shell blocks BASH_ENV interposition\n' \
+		"$tests_run"
+
+	tests_run=$((tests_run + 1))
+	if ! output="$(BASH_ENV="$bash_env" VERIFY_ENV_SENTINEL=setup-go-visible \
+		/bin/bash --noprofile --norc -p -e -o pipefail "$environment_script")"; then
+		printf 'not ok %d - privileged Verify shell environment oracle execution\n' \
+			"$tests_run" >&2
+		exit 1
+	fi
+	if [[ "$output" != setup-go-visible ]]; then
+		printf 'not ok %d - privileged Verify shell lost normal environment\n' \
+			"$tests_run" >&2
+		exit 1
+	fi
+	printf 'ok %d - privileged Verify shell preserves normal environment\n' \
+		"$tests_run"
+}
+
+expect_pass "protected TinyGo job without conditional controls" \
+	"$(make_fixture protected-job-controls "$FULL_ACTION_REF")"
+
+fixture="$(make_fixture protected-job-if-before "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before 'if: false'
+expect_fail "protected TinyGo job if false before ordinary properties" "$fixture"
+
+fixture="$(make_fixture protected-job-if-after "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" after 'if: false'
+expect_fail "protected TinyGo job if false after steps" "$fixture"
+
+fixture="$(make_fixture protected-job-if-true "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before 'if: true'
+expect_fail "protected TinyGo job if true" "$fixture"
+
+fixture="$(make_fixture protected-job-if-expression "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before 'if: ${{ always() }}'
+expect_fail "protected TinyGo job if expression" "$fixture"
+
+fixture="$(make_fixture protected-job-continue-true "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before \
+	'continue-on-error: true'
+expect_fail "protected TinyGo job continue-on-error true" "$fixture"
+
+fixture="$(make_fixture protected-job-continue-false "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" after \
+	'continue-on-error: false'
+expect_fail "protected TinyGo job continue-on-error false" "$fixture"
+
+fixture="$(make_fixture protected-job-continue-expression "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before \
+	'continue-on-error: ${{ matrix.experimental }}'
+expect_fail "protected TinyGo job continue-on-error expression" "$fixture"
+
+fixture="$(make_fixture protected-job-needs-scalar "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before \
+	'needs: prerequisite'
+expect_fail "protected TinyGo job scalar needs" "$fixture"
+
+fixture="$(make_fixture protected-job-needs-list "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" after 'needs:' \
+	'- prerequisite'
+expect_fail "protected TinyGo job sequence needs" "$fixture"
+
+fixture="$(make_fixture cross-job-tinygo-sequence "$FULL_ACTION_REF")"
+split_verify_into_new_job "$fixture/.github/workflows/ci-core.yml"
+expect_fail "Install and Verify TinyGo must share one containing job" "$fixture"
+
+fixture="$(make_fixture unrelated-job-controls "$FULL_ACTION_REF")"
+add_unrelated_control_jobs "$fixture/.github/workflows/ci-core.yml"
+expect_pass "unrelated jobs may use if continue-on-error and needs" "$fixture"
+
+fixture="$(make_fixture protected-job-matrix "$FULL_ACTION_REF")"
+add_job_strategy_matrix "$fixture/.github/workflows/ci-core.yml"
+expect_pass "protected TinyGo job preserves strategy and matrix" "$fixture"
+
+fixture="$(make_fixture workflow-run-default "$FULL_ACTION_REF")"
+add_workflow_run_default "$fixture/.github/workflows/ci-core.yml"
+expect_pass "workflow run shell default does not invalidate protected steps" "$fixture"
+
+fixture="$(make_fixture job-run-default "$FULL_ACTION_REF")"
+add_job_run_default "$fixture/.github/workflows/ci-core.yml"
+expect_pass "job run shell default does not invalidate protected steps" "$fixture"
+
 fixture="$(make_fixture python-helper-tinygo-provenance "$FULL_ACTION_REF")"
 write_repository_file "$fixture" scripts/install-tinygo.py \
 	'import subprocess' \
@@ -713,11 +989,30 @@ expect_fail "test harness is not exempt from TinyGo provenance policy" "$fixture
 
 expect_pass "protected install followed by separate TinyGo version smoke" \
 	"$(make_fixture split-version-smoke "$FULL_ACTION_REF")"
+
+fixture="$(make_fixture missing-verify-shell "$FULL_ACTION_REF")"
+remove_verify_shell "$fixture/.github/workflows/ci-core.yml"
+expect_fail "Verify TinyGo without explicit shell" "$fixture"
+
+fixture="$(make_fixture ambient-verify-shell "$FULL_ACTION_REF")"
+replace_verify_shell "$fixture/.github/workflows/ci-core.yml" bash
+expect_fail "Verify TinyGo with PATH-resolved Bash shell" "$fixture"
+
+fixture="$(make_fixture incomplete-verify-shell "$FULL_ACTION_REF")"
+replace_verify_shell "$fixture/.github/workflows/ci-core.yml" \
+	'/bin/bash -e {0}'
+expect_fail "Verify TinyGo with incomplete Bash shell" "$fixture"
+
+fixture="$(make_fixture sanitized-verify-shell "$FULL_ACTION_REF")"
+replace_verify_shell "$fixture/.github/workflows/ci-core.yml" "$CLEAN_SHELL"
+expect_fail "Verify TinyGo with install boundary shell" "$fixture"
+
 expect_fail "ambient PATH TinyGo version smoke" \
 	"$(make_fixture ambient-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected ambient)"
 fixture="$(make_fixture path-poisoned-version-smoke "$FULL_ACTION_REF")"
 add_tinygo_path_poisoning "$fixture/.github/workflows/ci-core.yml"
 expect_pass "PATH poisoning cannot redirect package-owned TinyGo smoke" "$fixture"
+test_verify_shell_boundary
 expect_fail "TinyGo version smoke inside sanitized install" \
 	"$(make_fixture in-boundary-version-smoke "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted protected inside)"
 expect_fail "protected install without TinyGo version smoke" \

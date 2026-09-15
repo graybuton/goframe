@@ -17,6 +17,7 @@ tinygo_download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github
 tinygo_stage_command="/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb $TINYGO_VERIFIED_DEB"
 tinygo_verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '$EXPECTED_TINYGO_SHA256  $TINYGO_VERIFIED_DEB' || exit 1"
 tinygo_install_command="/usr/bin/sudo /usr/bin/apt-get install -y $TINYGO_VERIFIED_DEB"
+tinygo_verify_shell_template='/bin/bash --noprofile --norc -p -e -o pipefail {0}'
 tinygo_version_command='/usr/local/bin/tinygo version'
 
 usage() {
@@ -755,6 +756,64 @@ reset_tinygo_step() {
 	tinygo_step_run_lines=()
 }
 
+reset_tinygo_job() {
+	tinygo_job_active=false
+	tinygo_job_indent=-1
+	tinygo_job_line=0
+	tinygo_job_id=""
+	tinygo_job_sequence_count=0
+	tinygo_job_if_line=0
+	tinygo_job_continue_on_error_line=0
+	tinygo_job_needs_line=0
+}
+
+record_tinygo_job_property() {
+	local key="$1"
+	local line_number="$2"
+
+	case "$key" in
+		if)
+			if (( tinygo_job_if_line == 0 )); then
+				tinygo_job_if_line=$line_number
+			fi
+			;;
+		continue-on-error)
+			if (( tinygo_job_continue_on_error_line == 0 )); then
+				tinygo_job_continue_on_error_line=$line_number
+			fi
+			;;
+		needs)
+			if (( tinygo_job_needs_line == 0 )); then
+				tinygo_job_needs_line=$line_number
+			fi
+			;;
+	esac
+}
+
+finalize_tinygo_job() {
+	local relative="$1"
+
+	if [[ "$tinygo_job_active" != true ]]; then
+		return
+	fi
+	if [[ "$tinygo_pending_install" == true ]]; then
+		fail "$relative:$tinygo_job_line protected TinyGo job $tinygo_job_id must keep Verify TinyGo immediately after Install TinyGo"
+		tinygo_pending_install=false
+	fi
+	if (( tinygo_job_sequence_count > 0 )); then
+		if (( tinygo_job_if_line > 0 )); then
+			fail "$relative:$tinygo_job_if_line protected TinyGo job $tinygo_job_id must be unconditional and blocking: contains job-level if"
+		fi
+		if (( tinygo_job_continue_on_error_line > 0 )); then
+			fail "$relative:$tinygo_job_continue_on_error_line protected TinyGo job $tinygo_job_id must be unconditional and blocking: contains job-level continue-on-error"
+		fi
+		if (( tinygo_job_needs_line > 0 )); then
+			fail "$relative:$tinygo_job_needs_line protected TinyGo job $tinygo_job_id must be unconditional and blocking: contains job-level needs"
+		fi
+	fi
+	reset_tinygo_job
+}
+
 record_tinygo_step_property() {
 	local key="$1"
 	local value="$2"
@@ -826,20 +885,25 @@ finalize_tinygo_step() {
 			tinygo_pending_install=true
 		fi
 	elif [[ "$tinygo_step_verify_name" == true ]]; then
-		if (( tinygo_step_property_count != 2 ||
+		if (( tinygo_step_property_count != 3 ||
 			tinygo_step_name_count != 1 ||
-			tinygo_step_shell_count != 0 ||
+			tinygo_step_shell_count != 1 ||
 			tinygo_step_run_count != 1 )) ||
-			[[ "$tinygo_step_run_value" != "$tinygo_version_command" ]]; then
+			[[ "$tinygo_step_shell_value" != "$tinygo_verify_shell_template" ||
+				"$tinygo_step_run_value" != "$tinygo_version_command" ]]; then
 			valid=false
 		fi
 		if [[ "$valid" != true ]]; then
-			fail "$relative:$tinygo_step_line Verify TinyGo must contain only the package-owned version command"
+			fail "$relative:$tinygo_step_line Verify TinyGo must contain only the exact privileged shell and package-owned version command"
 			tinygo_pending_install=false
 		elif [[ "$tinygo_pending_install" != true ]]; then
 			fail "$relative:$tinygo_step_line Verify TinyGo must immediately follow Install TinyGo"
+		elif [[ "$tinygo_job_active" != true ]]; then
+			fail "$relative:$tinygo_step_line Verify TinyGo is outside a workflow job"
+			tinygo_pending_install=false
 		else
 			tinygo_sequence_count=$((tinygo_sequence_count + 1))
+			tinygo_job_sequence_count=$((tinygo_job_sequence_count + 1))
 			tinygo_pending_install=false
 		fi
 	elif [[ "$tinygo_pending_install" == true ]]; then
@@ -853,7 +917,7 @@ scan_tinygo_install_steps() {
 	local file="$1"
 	local relative="${file#"$ROOT_DIR/"}"
 	local line line_number=0 content syntax indent key value sequence_prefix
-	local key_indent stack_count stack_index parent_is_steps=false
+	local key_indent stack_count stack_index parent_is_steps=false new_job=false
 	local scalar_indent=-1 scalar_is_step_run=false
 	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
 	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
@@ -865,6 +929,7 @@ scan_tinygo_install_steps() {
 	tinygo_sequence_count=0
 	tinygo_pending_install=false
 	reset_tinygo_step
+	reset_tinygo_job
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line_number=$((line_number + 1))
 		indent="${line%%[![:space:]]*}"
@@ -908,10 +973,33 @@ scan_tinygo_install_steps() {
 			[[ "${path_keys[0]}" == jobs && "${path_keys[2]}" == steps ]]; then
 			parent_is_steps=true
 		fi
+		new_job=false
+		if [[ -z "$sequence_prefix" ]] &&
+			(( stack_count == 1 )) &&
+			[[ "${path_keys[0]}" == jobs ]]; then
+			new_job=true
+		fi
 
 		if [[ "$tinygo_step_active" == true ]] &&
 			(( key_indent < tinygo_step_indent )); then
 			finalize_tinygo_step "$relative"
+		fi
+		if [[ "$tinygo_job_active" == true ]] &&
+			(( key_indent <= tinygo_job_indent )); then
+			finalize_tinygo_job "$relative"
+		fi
+		if [[ "$new_job" == true ]]; then
+			tinygo_job_active=true
+			tinygo_job_indent=$key_indent
+			tinygo_job_line=$line_number
+			tinygo_job_id="$key"
+		fi
+		if [[ "$tinygo_job_active" == true ]] &&
+			(( stack_count == 2 )) &&
+			[[ "${path_keys[0]}" == jobs &&
+				"${path_keys[1]}" == "$tinygo_job_id" ]] &&
+			(( key_indent > tinygo_job_indent )); then
+			record_tinygo_job_property "$key" "$line_number"
 		fi
 		if [[ -n "$sequence_prefix" && "$parent_is_steps" == true ]]; then
 			finalize_tinygo_step "$relative"
@@ -939,6 +1027,7 @@ scan_tinygo_install_steps() {
 		fi
 	done < "$file"
 	finalize_tinygo_step "$relative"
+	finalize_tinygo_job "$relative"
 	if [[ "$tinygo_pending_install" == true ]]; then
 		fail "$relative Verify TinyGo must immediately follow Install TinyGo"
 		tinygo_pending_install=false
