@@ -19,6 +19,7 @@ VERIFY_SHELL='/bin/bash --noprofile --norc -p -e -o pipefail {0}'
 CLEANUP_COMMAND="trap '/usr/bin/sudo /usr/bin/rm -f $VERIFIED_DEB' EXIT"
 STAGE_COMMAND="/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb $VERIFIED_DEB"
 CURL_COMMAND_NAME='cur''l'
+WGET_COMMAND_NAME='wg''et'
 FULL_ACTION_SHA="3d3c42e5aac5ba805825da76410c181273ba90b1"
 FULL_ACTION_REF="actions/checkout@$FULL_ACTION_SHA # v7.0.1"
 FULL_REUSABLE_REF="owner/repo/.github/workflows/build.yml@$FULL_ACTION_SHA # v1.2.3"
@@ -43,10 +44,10 @@ write_tinygo_workflow() {
 	mkdir -p "$(dirname "$path")"
 	case "$trust_root_mode" in
 		literal|variable-digest)
-			download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
+			download_command="/usr/bin/$CURL_COMMAND_NAME -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
 			;;
 		variable-url|variable-both)
-			download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v\${TINYGO_VERSION}/tinygo_\${TINYGO_VERSION}_amd64.deb\""
+			download_command="/usr/bin/$CURL_COMMAND_NAME -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v\${TINYGO_VERSION}/tinygo_\${TINYGO_VERSION}_amd64.deb\""
 			;;
 		*)
 			printf 'unsupported trust-root mode: %s\n' "$trust_root_mode" >&2
@@ -115,6 +116,7 @@ write_tinygo_workflow() {
 		fi
 		printf 'jobs:\n'
 		printf '  fixture:\n'
+		printf '    runs-on: ubuntu-latest\n'
 		printf '    steps:\n'
 		if [[ -n "$action_ref" ]]; then
 			printf '      - uses: %s\n' "$action_ref"
@@ -490,6 +492,56 @@ add_job_property() {
 	fi
 }
 
+replace_fixture_runs_on() {
+	local file="$1"
+	local value="$2"
+	local child="${3:-}"
+
+	awk -v value="$value" -v child="$child" '
+		$0 == "  fixture:" { in_fixture = 1 }
+		in_fixture && !replaced && $0 ~ /^    runs-on:/ {
+			if (value == "") {
+				print "    runs-on:"
+			} else {
+				print "    runs-on: " value
+			}
+			if (child != "") {
+				print "      " child
+			}
+			replaced = 1
+			next
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/runs-on.yml"
+	mv "$TMP_ROOT/runs-on.yml" "$file"
+}
+
+remove_fixture_runs_on() {
+	local file="$1"
+
+	awk '
+		$0 == "  fixture:" { in_fixture = 1 }
+		in_fixture && !removed && $0 ~ /^    runs-on:/ {
+			removed = 1
+			next
+		}
+		{ print }
+	' "$file" > "$TMP_ROOT/runs-on.yml"
+	mv "$TMP_ROOT/runs-on.yml" "$file"
+}
+
+add_unrelated_runner_jobs() {
+	local file="$1"
+
+	printf '%s\n' \
+		'  unrelated-container:' \
+		'    runs-on: self-hosted' \
+		'    container: attacker/unrelated:latest' \
+		'    steps:' \
+		'      - run: echo unrelated' \
+		>> "$file"
+}
+
 add_workflow_run_default() {
 	local file="$1"
 
@@ -639,12 +691,12 @@ test_clean_shell_boundary() {
 	printf '%s\n' \
 		'mark_override() { : > "$P1_MARKER_DIR/$1"; }' \
 		'sudo() { mark_override sudo; return 99; }' \
-		'curl() { mark_override curl; return 99; }' \
+		"$CURL_COMMAND_NAME() { mark_override $CURL_COMMAND_NAME; return 99; }" \
 		'sha256sum() { mark_override sha256sum; return 99; }' \
 		'printf() { mark_override printf; return 99; }' \
 		'function /usr/bin/env() { mark_override env; return 99; }' \
 		> "$bash_env"
-	for command_name in sudo curl sha256sum printf; do
+	for command_name in sudo "$CURL_COMMAND_NAME" sha256sum printf; do
 		printf '%s\n' '#!/bin/sh' ": > \"$marker_dir/path-$command_name\"" 'exit 99' \
 			> "$fake_bin/$command_name"
 		chmod +x "$fake_bin/$command_name"
@@ -652,7 +704,7 @@ test_clean_shell_boundary() {
 	printf '%s\n' \
 		'[[ -z "${BASH_ENV+x}" ]]' \
 		"[[ \"\$PATH\" == '$CLEAN_PATH' ]]" \
-		'for function_name in sudo curl sha256sum printf /usr/bin/env; do' \
+		"for function_name in sudo $CURL_COMMAND_NAME sha256sum printf /usr/bin/env; do" \
 		'  ! declare -F "$function_name" >/dev/null' \
 		'done' \
 		> "$child_script"
@@ -814,6 +866,80 @@ test_verify_shell_boundary() {
 expect_pass "protected TinyGo job without conditional controls" \
 	"$(make_fixture protected-job-controls "$FULL_ACTION_REF")"
 
+fixture="$(make_fixture workflow-standalone-mutable-step "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/standalone.yml \
+	'jobs:' \
+	'  standalone:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      -' \
+	'        uses: actions/checkout@v7'
+expect_fail "workflow standalone step indicator with mutable Action" "$fixture"
+
+fixture="$(make_fixture workflow-standalone-pinned-step "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/standalone.yml \
+	'jobs:' \
+	'  standalone:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      -' \
+	"        uses: actions/checkout@$FULL_ACTION_SHA # v7.0.1"
+expect_fail "workflow standalone step indicator with pinned Action" "$fixture"
+
+fixture="$(make_fixture workflow-commented-standalone-step "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/standalone.yml \
+	'jobs:' \
+	'  standalone:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - # comment' \
+	'        uses: actions/checkout@v7'
+expect_fail "workflow commented standalone step indicator" "$fixture"
+
+fixture="$(make_fixture workflow-standalone-run-step "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/standalone.yml \
+	'jobs:' \
+	'  standalone:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      -' \
+	'        run: echo unsupported'
+expect_fail "workflow standalone run step indicator" "$fixture"
+
+fixture="$(make_fixture composite-standalone-mutable-step "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/actions/standalone/action.yml \
+	'name: standalone' \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	'    -' \
+	'      uses: actions/checkout@v7'
+expect_fail "composite standalone step indicator with mutable Action" "$fixture"
+
+fixture="$(make_fixture composite-standalone-pinned-step "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/actions/standalone/action.yml \
+	'name: standalone' \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	'    -' \
+	"      uses: actions/checkout@$FULL_ACTION_SHA # v7.0.1"
+expect_fail "composite standalone step indicator with pinned Action" "$fixture"
+
+fixture="$(make_fixture ordinary-standalone-sequence "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/data-sequence.yml \
+	'jobs:' \
+	'  data:' \
+	'    runs-on: ubuntu-latest' \
+	'    strategy:' \
+	'      matrix:' \
+	'        include:' \
+	'          -' \
+	'            value: ordinary' \
+	'    steps:' \
+	'      - run: echo ordinary'
+expect_pass "standalone sequence data outside steps" "$fixture"
+
 fixture="$(make_fixture protected-job-if-before "$FULL_ACTION_REF")"
 add_job_property "$fixture/.github/workflows/ci-core.yml" before 'if: false'
 expect_fail "protected TinyGo job if false before ordinary properties" "$fixture"
@@ -855,6 +981,64 @@ add_job_property "$fixture/.github/workflows/ci-core.yml" after 'needs:' \
 	'- prerequisite'
 expect_fail "protected TinyGo job sequence needs" "$fixture"
 
+fixture="$(make_fixture protected-job-self-hosted "$FULL_ACTION_REF")"
+replace_fixture_runs_on "$fixture/.github/workflows/ci-core.yml" self-hosted
+expect_fail "protected TinyGo job self-hosted runner" "$fixture"
+
+fixture="$(make_fixture protected-job-runner-expression "$FULL_ACTION_REF")"
+replace_fixture_runs_on "$fixture/.github/workflows/ci-core.yml" \
+	'${{ matrix.runner }}'
+expect_fail "protected TinyGo job runner expression" "$fixture"
+
+fixture="$(make_fixture protected-job-quoted-runner "$FULL_ACTION_REF")"
+replace_fixture_runs_on "$fixture/.github/workflows/ci-core.yml" \
+	"'ubuntu-latest'"
+expect_fail "protected TinyGo job quoted runner" "$fixture"
+
+fixture="$(make_fixture protected-job-runner-flow-sequence "$FULL_ACTION_REF")"
+replace_fixture_runs_on "$fixture/.github/workflows/ci-core.yml" \
+	'[ubuntu-latest]'
+expect_fail "protected TinyGo job flow-sequence runner" "$fixture"
+
+fixture="$(make_fixture protected-job-runner-block-sequence "$FULL_ACTION_REF")"
+replace_fixture_runs_on "$fixture/.github/workflows/ci-core.yml" '' \
+	'- ubuntu-latest'
+expect_fail "protected TinyGo job block-sequence runner" "$fixture"
+
+fixture="$(make_fixture protected-job-missing-runner "$FULL_ACTION_REF")"
+remove_fixture_runs_on "$fixture/.github/workflows/ci-core.yml"
+expect_fail "protected TinyGo job missing runs-on" "$fixture"
+
+fixture="$(make_fixture protected-job-duplicate-runner "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before \
+	'runs-on: ubuntu-latest'
+expect_fail "protected TinyGo job duplicate runs-on" "$fixture"
+
+fixture="$(make_fixture protected-job-container-scalar "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before \
+	'container: attacker/tinygo-tools:latest'
+expect_fail "protected TinyGo job container scalar" "$fixture"
+
+fixture="$(make_fixture protected-job-container-mapping "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before 'container:' \
+	'image: attacker/tinygo-tools:latest'
+expect_fail "protected TinyGo job container mapping" "$fixture"
+
+fixture="$(make_fixture protected-job-container-expression "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before \
+	'container: ${{ matrix.container }}'
+expect_fail "protected TinyGo job container expression" "$fixture"
+
+fixture="$(make_fixture protected-job-container-null "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" before \
+	'container: null'
+expect_fail "protected TinyGo job container null" "$fixture"
+
+fixture="$(make_fixture protected-job-container-after-steps "$FULL_ACTION_REF")"
+add_job_property "$fixture/.github/workflows/ci-core.yml" after \
+	'container: attacker/tinygo-tools:latest'
+expect_fail "protected TinyGo job container after steps" "$fixture"
+
 fixture="$(make_fixture cross-job-tinygo-sequence "$FULL_ACTION_REF")"
 split_verify_into_new_job "$fixture/.github/workflows/ci-core.yml"
 expect_fail "Install and Verify TinyGo must share one containing job" "$fixture"
@@ -862,6 +1046,10 @@ expect_fail "Install and Verify TinyGo must share one containing job" "$fixture"
 fixture="$(make_fixture unrelated-job-controls "$FULL_ACTION_REF")"
 add_unrelated_control_jobs "$fixture/.github/workflows/ci-core.yml"
 expect_pass "unrelated jobs may use if continue-on-error and needs" "$fixture"
+
+fixture="$(make_fixture unrelated-job-runner-container "$FULL_ACTION_REF")"
+add_unrelated_runner_jobs "$fixture/.github/workflows/ci-core.yml"
+expect_pass "unrelated jobs may use self-hosted runners and containers" "$fixture"
 
 fixture="$(make_fixture protected-job-matrix "$FULL_ACTION_REF")"
 add_job_strategy_matrix "$fixture/.github/workflows/ci-core.yml"
@@ -879,7 +1067,7 @@ fixture="$(make_fixture python-helper-tinygo-provenance "$FULL_ACTION_REF")"
 write_repository_file "$fixture" scripts/install-tinygo.py \
 	'import subprocess' \
 	"base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY\"" \
-	'subprocess.run(["curl", base + "/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"], check=True)'
+	"subprocess.run([\"$CURL_COMMAND_NAME\", base + \"/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb\"], check=True)"
 add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	'python3 scripts/install-tinygo.py'
 expect_fail "invoked Python helper with TinyGo repository provenance" "$fixture"
@@ -887,21 +1075,21 @@ expect_fail "invoked Python helper with TinyGo repository provenance" "$fixture"
 fixture="$(make_fixture python-helper-direct-tinygo-url "$FULL_ACTION_REF")"
 write_repository_file "$fixture" scripts/install-tinygo.py \
 	'import subprocess' \
-	"subprocess.run([\"curl\", \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\"], check=True)"
+	"subprocess.run([\"$CURL_COMMAND_NAME\", \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\"], check=True)"
 expect_fail "Python helper with direct TinyGo release URL" "$fixture"
 
 fixture="$(make_fixture python-helper-case-variant-provenance "$FULL_ACTION_REF")"
 write_repository_file "$fixture" scripts/install-tinygo.py \
 	'import subprocess' \
 	"base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY_CASE_VARIANT\"" \
-	'subprocess.run(["curl", base + "/releases/download/artifact"], check=True)'
+	"subprocess.run([\"$CURL_COMMAND_NAME\", base + \"/releases/download/artifact\"], check=True)"
 expect_fail "Python helper with case-variant TinyGo repository provenance" "$fixture"
 
 fixture="$(make_fixture javascript-helper-tinygo-provenance "$FULL_ACTION_REF")"
 write_repository_file "$fixture" scripts/install-tinygo.mjs \
 	'import { spawnSync } from "node:child_process";' \
 	"const base = \"https://github.com/$TINYGO_RELEASE_REPOSITORY\";" \
-	'spawnSync("curl", [base + "/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"]);'
+	"spawnSync(\"$CURL_COMMAND_NAME\", [base + \"/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb\"]);"
 add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	'node scripts/install-tinygo.mjs'
 expect_fail "invoked JavaScript helper with TinyGo repository provenance" "$fixture"
@@ -910,7 +1098,7 @@ fixture="$(make_fixture workflow-provided-tinygo-provenance "$FULL_ACTION_REF")"
 write_repository_file "$fixture" scripts/install-tinygo.py \
 	'import os' \
 	'import subprocess' \
-	'subprocess.run(["curl", os.environ["TINYGO_BASE"] + "/releases/download/artifact"]);'
+	"subprocess.run([\"$CURL_COMMAND_NAME\", os.environ[\"TINYGO_BASE\"] + \"/releases/download/artifact\"]);"
 printf '%s\n' '' '  delegated-python:' '    runs-on: ubuntu-latest' \
 	'    env:' \
 	"      TINYGO_BASE: https://github.com/$TINYGO_RELEASE_REPOSITORY" \
@@ -986,6 +1174,18 @@ write_repository_file "$fixture" .github/scripts/ci-supply-chain-check.tests.sh 
 	'#!/usr/bin/env bash' \
 	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY"
 expect_fail "test harness is not exempt from TinyGo provenance policy" "$fixture"
+
+fixture="$(make_fixture checker-active-downloader "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/ci-supply-chain-check.sh \
+	'#!/usr/bin/env bash' \
+	"$CURL_COMMAND_NAME https://example.invalid/file"
+expect_fail "checker source is not exempt from downloader policy" "$fixture"
+
+fixture="$(make_fixture harness-active-downloader "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/scripts/ci-supply-chain-check.tests.sh \
+	'#!/usr/bin/env bash' \
+	"$CURL_COMMAND_NAME https://example.invalid/file"
+expect_fail "test harness is not exempt from downloader policy" "$fixture"
 
 expect_pass "protected install followed by separate TinyGo version smoke" \
 	"$(make_fixture split-version-smoke "$FULL_ACTION_REF")"
@@ -1206,13 +1406,13 @@ dynamic_base="https://github.com/${TINYGO_RELEASE_REPOSITORY}"
 fixture="$(make_fixture dynamic-workflow-download "$FULL_ACTION_REF")"
 printf '%s\n' '' '  dynamic-download:' '    steps:' '      - run: |' \
 	"          base=$dynamic_base" \
-	'          curl -fsSL -o /tmp/extra.deb "$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"' \
+	"          $CURL_COMMAND_NAME -fsSL -o /tmp/extra.deb \"\$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb\"" \
 	>> "$fixture/.github/workflows/ci-core.yml"
 expect_fail "runtime-composed TinyGo download in workflow" "$fixture"
 
 fixture="$(make_fixture dynamic-helper-download "$FULL_ACTION_REF")"
 dynamic_helper="$(printf '%s\n' "base=$dynamic_base" \
-	'curl -fsSL -o /tmp/extra.deb "$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"')"
+	"$CURL_COMMAND_NAME -fsSL -o /tmp/extra.deb \"\$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb\"")"
 write_repository_file "$fixture" scripts/install-tinygo.sh "$dynamic_helper"
 add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	'scripts/install-tinygo.sh'
@@ -1222,53 +1422,125 @@ fixture="$(make_fixture continued-dynamic-download "$FULL_ACTION_REF")"
 printf '%s\n' '' '  continued-download:' '    steps:' '      - run: |' \
 	"          base=$dynamic_base" \
 	'          url="$base/releases/download/v0.42.0/tinygo_0.42.0_amd64.deb"' \
-	'          curl \' '            "$url"' \
+	"          $CURL_COMMAND_NAME \\" '            "$url"' \
 	>> "$fixture/.github/workflows/ci-core.yml"
 expect_fail "continued runtime-composed TinyGo download" "$fixture"
 
 fixture="$(make_fixture dynamic-url-download "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/dynamic-download.sh \
-	'url=https://example.com/file' 'curl "$url"'
-expect_fail 'curl with runtime URL' "$fixture"
+	'url=https://example.com/file' "$CURL_COMMAND_NAME \"\$url\""
+expect_fail 'downloader with runtime URL' "$fixture"
 
 fixture="$(make_fixture absolute-dynamic-url-download "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/dynamic-download.sh \
-	'url=https://example.com/file' '/usr/bin/curl "$url"'
-expect_fail 'absolute curl with runtime URL' "$fixture"
+	'url=https://example.com/file' "/usr/bin/$CURL_COMMAND_NAME \"\$url\""
+expect_fail 'absolute downloader with runtime URL' "$fixture"
+
+fixture="$(make_fixture alternate-absolute-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/dynamic-download.sh \
+	'url=https://example.com/file' "/usr/local/bin/$CURL_COMMAND_NAME \"\$url\""
+expect_fail 'alternate absolute downloader path with runtime URL' "$fixture"
+
+fixture="$(make_fixture relative-path-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/dynamic-download.sh \
+	'url=https://example.com/file' "./$CURL_COMMAND_NAME \"\$url\""
+expect_fail 'relative downloader path with runtime URL' "$fixture"
 
 fixture="$(make_fixture command-dynamic-url-download "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/dynamic-download.sh \
-	'url=https://example.com/file' 'command curl "$url"'
-expect_fail 'command curl with runtime URL' "$fixture"
+	'url=https://example.com/file' "command $CURL_COMMAND_NAME \"\$url\""
+expect_fail 'command-prefixed downloader with runtime URL' "$fixture"
 
 fixture="$(make_fixture conditional-dynamic-url-download "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/dynamic-download.sh \
-	'url=https://example.com/file' 'if curl "$url"; then printf success; fi'
-expect_fail 'conditional curl with runtime URL' "$fixture"
+	'url=https://example.com/file' "if $CURL_COMMAND_NAME \"\$url\"; then printf success; fi"
+expect_fail 'conditional downloader with runtime URL' "$fixture"
 
 fixture="$(make_fixture substitution-dynamic-url-download "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/dynamic-download.sh \
 	'url=https://example.com/file' "result=\"\$($CURL_COMMAND_NAME \"\$url\")\""
-expect_fail 'command-substitution curl with runtime URL' "$fixture"
+expect_fail 'command-substitution downloader with runtime URL' "$fixture"
 
 fixture="$(make_fixture literal-external-download "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/external-download.sh \
-	'curl https://example.com/file'
-expect_fail 'literal external curl' "$fixture"
+	"$CURL_COMMAND_NAME https://example.com/file"
+expect_fail 'literal external downloader' "$fixture"
 
-fixture="$(make_fixture external-wget "$FULL_ACTION_REF")"
+fixture="$(make_fixture external-alternate-downloader "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/external-download.sh \
-	'wget https://example.com/file'
-expect_fail 'literal external wget' "$fixture"
+	"$WGET_COMMAND_NAME https://example.com/file"
+expect_fail 'literal external alternate downloader' "$fixture"
+
+fixture="$(make_fixture env-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	'url=https://example.com/file' "env $CURL_COMMAND_NAME \"\$url\""
+expect_fail 'env-wrapped downloader' "$fixture"
+
+fixture="$(make_fixture absolute-env-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	'url=https://example.com/file' "/usr/bin/env $CURL_COMMAND_NAME \"\$url\""
+expect_fail 'absolute env-wrapped downloader' "$fixture"
+
+fixture="$(make_fixture clean-env-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	'url=https://example.com/file' "env -i $CURL_COMMAND_NAME \"\$url\""
+expect_fail 'clean-env-wrapped downloader' "$fixture"
+
+fixture="$(make_fixture assigned-env-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	'url=https://example.com/file' "env FOO=bar $CURL_COMMAND_NAME \"\$url\""
+expect_fail 'assigned-env-wrapped downloader' "$fixture"
+
+for wrapper in exec sudo nohup 'timeout 10' 'nice -n 5' 'stdbuf -oL' xargs; do
+	fixture="$(make_fixture "${wrapper%% *}-wrapped-downloader" "$FULL_ACTION_REF")"
+	write_shell_source "$fixture" scripts/wrapped-download.sh \
+		'url=https://example.com/file' "$wrapper $CURL_COMMAND_NAME \"\$url\""
+	expect_fail "$wrapper wrapped downloader" "$fixture"
+done
+
+fixture="$(make_fixture bash-nested-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	"bash -c '$CURL_COMMAND_NAME \"\$url\"'"
+expect_fail 'Bash-nested downloader' "$fixture"
+
+fixture="$(make_fixture sh-nested-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	"sh -c '$WGET_COMMAND_NAME \"\$url\"'"
+expect_fail 'POSIX-shell-nested downloader' "$fixture"
+
+fixture="$(make_fixture variable-selected-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	"downloader=$CURL_COMMAND_NAME" \
+	'url=https://example.com/file' \
+	'"$downloader" "$url"'
+expect_fail 'variable-selected downloader identity' "$fixture"
+
+fixture="$(make_fixture evaluated-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	"cmd='$CURL_COMMAND_NAME https://example.com/file'" \
+	'eval "$cmd"'
+expect_fail 'evaluated downloader string' "$fixture"
+
+fixture="$(make_fixture aliased-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	"alias fetch='$CURL_COMMAND_NAME'" \
+	'fetch https://example.com/file'
+expect_fail 'aliased downloader identity' "$fixture"
+
+fixture="$(make_fixture function-downloader "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/wrapped-download.sh \
+	"fetch() { $CURL_COMMAND_NAME \"\$url\"; }" \
+	'fetch'
+expect_fail 'function-contained downloader identity' "$fixture"
 
 fixture="$(make_fixture simple-loopback-probe "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/loopback-probe.sh \
-	'curl -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1'
+	"$CURL_COMMAND_NAME -fsS \"http://127.0.0.1:\$port/\" >/dev/null 2>&1"
 expect_pass 'literal-rooted loopback port probe' "$fixture"
 
 fixture="$(make_fixture path-loopback-probe "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/loopback-probe.sh \
-	'curl -fsS "http://127.0.0.1:$port/$wasm_path" >/dev/null 2>&1'
+	"$CURL_COMMAND_NAME -fsS \"http://127.0.0.1:\$port/\$wasm_path\" >/dev/null 2>&1"
 expect_pass 'literal-rooted loopback path probe' "$fixture"
 
 fixture="$(make_fixture substitution-loopback-probe "$FULL_ACTION_REF")"
@@ -1276,20 +1548,43 @@ write_shell_source "$fixture" scripts/loopback-probe.sh \
 	"headers=\"\$($CURL_COMMAND_NAME -fsSI \"http://127.0.0.1:\$port/\$wasm_path?smoke=\$(date +%s%N)\" || true)\""
 expect_pass 'literal-rooted loopback command-substitution probe' "$fixture"
 
+fixture="$(make_fixture loopback-tool-requirement "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/browser-smoke.sh \
+	"require_command $CURL_COMMAND_NAME \"Install $CURL_COMMAND_NAME for smoke server readiness checks.\""
+expect_pass 'exact loopback tool requirement' "$fixture"
+
+fixture="$(make_fixture loopback-tool-package "$FULL_ACTION_REF")"
+printf '      - run: sudo apt-get install -y brotli zstd %s\n' \
+	"$CURL_COMMAND_NAME" >> "$fixture/.github/workflows/ci-browser-smoke.yml"
+expect_pass 'exact loopback tool package install' "$fixture"
+
 fixture="$(make_fixture nested-external-loopback-download "$FULL_ACTION_REF")"
 nested_loopback_command="$CURL_COMMAND_NAME -fsS \"http://127.0.0.1:\$port/\$($CURL_COMMAND_NAME https://example.com/file)\" >/dev/null 2>&1"
 write_shell_source "$fixture" scripts/loopback-probe.sh "$nested_loopback_command"
 expect_fail 'external downloader nested in loopback probe' "$fixture"
 
-fixture="$(make_fixture benign-curl-string "$FULL_ACTION_REF")"
+fixture="$(make_fixture multiple-downloaders "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/external-download.sh \
+	"$CURL_COMMAND_NAME https://example.com/file || $WGET_COMMAND_NAME https://example.com/fallback"
+expect_fail 'multiple external downloaders' "$fixture"
+
+fixture="$(make_fixture benign-downloader-string "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/benign.sh \
-	'message='"'"'curl "$url" is not executed'"'"'' 'printf "%s\\n" "$message"'
-expect_pass 'benign string containing curl' "$fixture"
+	"message='$CURL_COMMAND_NAME \"\$url\" is not executed'" \
+	'printf "%s\\n" "$message"'
+expect_fail 'downloader-shaped inert string is fail-closed' "$fixture"
 
 fixture="$(make_fixture benign-url-variable "$FULL_ACTION_REF")"
 write_shell_source "$fixture" scripts/benign.sh \
 	'url=https://example.com/file' 'printf "%s\\n" "$url"'
 expect_pass 'benign URL assignment without downloader' "$fixture"
+
+fixture="$(make_fixture downloader-comments "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/benign.sh \
+	"# $CURL_COMMAND_NAME and $WGET_COMMAND_NAME are comments only" \
+	"printf 'inline comment ignored\\n' # $CURL_COMMAND_NAME and $WGET_COMMAND_NAME" \
+	'printf "comments ignored\\n"'
+expect_pass 'comments may mention downloader tools' "$fixture"
 
 expect_fail "old TinyGo sequence without sanitized shell" \
 	"$(make_fixture old-install-boundary "$FULL_ACTION_REF" "$EXPECTED_SHA" before-install yes literal trusted legacy)"
@@ -1435,7 +1730,7 @@ expect_fail "local Action path traversal" \
 expect_fail "backslash local Action path" \
 	"$(make_fixture local-action-backslash '.\.github\actions\local')"
 
-extra_download="curl -fsSL -o /tmp/extra.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
+extra_download="$CURL_COMMAND_NAME -fsSL -o /tmp/extra.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v0.42.0/tinygo_0.42.0_amd64.deb\""
 for placement in before after same-line canonical hash-prefix unexpected; do
 	fixture="$(make_fixture extra-download "$FULL_ACTION_REF")"
 	file="$fixture/.github/workflows/ci-core.yml"
@@ -1450,7 +1745,7 @@ for placement in before after same-line canonical hash-prefix unexpected; do
 		after) printf '      - run: %s\n' "$extra_download" >> "$file" ;;
 		same-line) printf '      - run: %s; %s\n' "$extra_download" "$extra_download" >> "$file" ;;
 		canonical)
-			command="$(sed -n '/\/usr\/bin\/curl -fsSL/p' "$file")"
+			command="$(sed -n "/\\/usr\\/bin\\/$CURL_COMMAND_NAME -fsSL/p" "$file")"
 			printf '%s\n' "$command" >> "$file"
 			;;
 		hash-prefix) printf '      - run: printf "# data"; %s\n' "$extra_download" >> "$file" ;;

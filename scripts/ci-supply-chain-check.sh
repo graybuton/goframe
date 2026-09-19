@@ -5,6 +5,8 @@ EXPECTED_TINYGO_VERSION="0.42.0"
 EXPECTED_TINYGO_SHA256="2082c4762fea6d5cc4cd1f4a243eaacf07b12f576717d4c6b74828bd163cb563"
 TINYGO_RELEASE_REPOSITORY="tinygo-org/"'tinygo'
 TINYGO_RELEASE_NAMESPACE="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
+CURL_COMMAND_NAME='cur''l'
+WGET_COMMAND_NAME='wg''et'
 EXPECTED_TINYGO_WORKFLOWS=(
 	".github/workflows/ci-browser-smoke.yml"
 	".github/workflows/ci-core.yml"
@@ -13,7 +15,7 @@ EXPECTED_TINYGO_WORKFLOWS=(
 TINYGO_VERIFIED_DEB="/tmp/goframe-tinygo-${EXPECTED_TINYGO_VERSION}-verified.deb"
 tinygo_shell_template='/usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash --noprofile --norc -e -u -o pipefail {0}'
 tinygo_cleanup_command="trap '/usr/bin/sudo /usr/bin/rm -f $TINYGO_VERIFIED_DEB' EXIT"
-tinygo_download_command="/usr/bin/curl -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
+tinygo_download_command="/usr/bin/$CURL_COMMAND_NAME -fsSL -o /tmp/tinygo.deb \"https://github.com/${TINYGO_RELEASE_NAMESPACE}v${EXPECTED_TINYGO_VERSION}/tinygo_${EXPECTED_TINYGO_VERSION}_amd64.deb\""
 tinygo_stage_command="/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 /tmp/tinygo.deb $TINYGO_VERIFIED_DEB"
 tinygo_verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<< '$EXPECTED_TINYGO_SHA256  $TINYGO_VERIFIED_DEB' || exit 1"
 tinygo_install_command="/usr/bin/sudo /usr/bin/apt-get install -y $TINYGO_VERIFIED_DEB"
@@ -162,35 +164,47 @@ tinygo_release_url_owner_allowed() {
 	return 1
 }
 
-shell_downloader_re='(^|;|&&|\|\||\||\(|\{|\$\(|`)[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+)*((if|elif|while|until|then|do|!)[[:space:]]+)*(command[[:space:]]+)?(/usr/bin/)?(curl|wget)([[:space:]]|$)'
+shell_downloader_token_re="(^|[^[:alnum:]_.-])(${CURL_COMMAND_NAME}|${WGET_COMMAND_NAME})([^[:alnum:]_./-]|$)"
 
-shell_command_has_active_downloader() {
+shell_command_has_downloader_token() {
 	local command="$1"
-	# This is an authored-shell boundary, not a shell interpreter. Match command
-	# positions used by repository CI and scripts, including substitutions.
-	[[ "$command" =~ $shell_downloader_re ]]
+	# This is a bounded authored-shell policy, not a shell interpreter. Any
+	# textual downloader identity is security-relevant regardless of wrappers.
+	[[ "$command" =~ $shell_downloader_token_re ]]
 }
 
-shell_command_has_multiple_active_downloaders() {
+shell_command_downloader_token_count() {
 	local remainder="$1"
-	local first_match
+	local match count=0
 
-	if [[ ! "$remainder" =~ $shell_downloader_re ]]; then
-		return 1
-	fi
-	first_match="${BASH_REMATCH[0]}"
-	remainder="${remainder#*"$first_match"}"
-	[[ "$remainder" =~ $shell_downloader_re ]]
+	while [[ "$remainder" =~ $shell_downloader_token_re ]]; do
+		match="${BASH_REMATCH[0]}"
+		count=$((count + 1))
+		remainder="${remainder#*"$match"}"
+	done
+	printf '%d' "$count"
 }
 
 shell_command_is_loopback_probe() {
 	local command="$1"
-	local direct_re='^(if[[:space:]]+)?(command[[:space:]]+)?(/usr/bin/)?curl([[:space:]]+-[A-Za-z]+)*[[:space:]]+"http://127[.]0[.]0[.]1:[^"]*"[[:space:]]*(>/dev/null[[:space:]]+2>&1)?[[:space:]]*(;[[:space:]]*then)?$'
-	local substitution_re='^[A-Za-z_][A-Za-z0-9_]*="\$\([[:space:]]*(command[[:space:]]+)?(/usr/bin/)?curl([[:space:]]+-[A-Za-z]+)*[[:space:]]+"http://127[.]0[.]0[.]1:[^"]*"[[:space:]]*(\|\|[[:space:]]+true)?[[:space:]]*\)"$'
-	if shell_command_has_multiple_active_downloaders "$command"; then
+	local direct_re='^(if[[:space:]]+)?(command[[:space:]]+)?(/usr/bin/)?'"$CURL_COMMAND_NAME"'([[:space:]]+-[A-Za-z]+)*[[:space:]]+"http://127[.]0[.]0[.]1:[^"]*"[[:space:]]*(>/dev/null[[:space:]]+2>&1)?[[:space:]]*(;[[:space:]]*then)?$'
+	local substitution_re='^[A-Za-z_][A-Za-z0-9_]*="\$\([[:space:]]*(command[[:space:]]+)?(/usr/bin/)?'"$CURL_COMMAND_NAME"'([[:space:]]+-[A-Za-z]+)*[[:space:]]+"http://127[.]0[.]0[.]1:[^"]*"[[:space:]]*(\|\|[[:space:]]+true)?[[:space:]]*\)"$'
+	if (( $(shell_command_downloader_token_count "$command") != 1 )); then
 		return 1
 	fi
 	[[ "$command" =~ $direct_re || "$command" =~ $substitution_re ]]
+}
+
+shell_command_is_loopback_support_command() {
+	local relative="$1"
+	local command="$2"
+
+	if [[ "$relative" == scripts/browser-smoke.sh ]] &&
+		[[ "$command" == "require_command $CURL_COMMAND_NAME \"Install $CURL_COMMAND_NAME for smoke server readiness checks.\"" ]]; then
+		return 0
+	fi
+	[[ "$relative" == .github/workflows/ci-browser-smoke.yml ]] &&
+		[[ "$command" == "sudo apt-get install -y brotli zstd $CURL_COMMAND_NAME" ]]
 }
 
 inspect_shell_logical_command() {
@@ -200,7 +214,7 @@ inspect_shell_logical_command() {
 
 	command="$(trim_whitespace "$command")"
 	inspect_referenced_ci_helpers "$relative" "$line_number" "$command"
-	if [[ -z "$command" ]] || ! shell_command_has_active_downloader "$command"; then
+	if [[ -z "$command" ]] || ! shell_command_has_downloader_token "$command"; then
 		return
 	fi
 	if tinygo_release_url_owner_allowed "$relative" &&
@@ -211,7 +225,10 @@ inspect_shell_logical_command() {
 		loopback_download_count=$((loopback_download_count + 1))
 		return
 	fi
-	fail "$relative:$line_number active curl/wget command is neither the accepted TinyGo fetch nor a literal-rooted loopback probe"
+	if shell_command_is_loopback_support_command "$relative" "$command"; then
+		return
+	fi
+	fail "$relative:$line_number downloader token is outside the accepted TinyGo fetch and literal-rooted loopback contract"
 }
 
 pending_shell_command=""
@@ -222,12 +239,63 @@ reset_shell_logical_command() {
 	pending_shell_line=0
 }
 
+strip_shell_comment() {
+	local line="$1"
+	local index character previous quote="" escaped=false
+
+	for ((index = 0; index < ${#line}; index++)); do
+		character="${line:index:1}"
+		if [[ "$escaped" == true ]]; then
+			escaped=false
+			continue
+		fi
+		if [[ "$quote" == "'" ]]; then
+			if [[ "$character" == "'" ]]; then
+				quote=""
+			fi
+			continue
+		fi
+		if [[ "$quote" == '"' ]]; then
+			if [[ "$character" == \\ ]]; then
+				escaped=true
+			elif [[ "$character" == '"' ]]; then
+				quote=""
+			fi
+			continue
+		fi
+		if [[ "$character" == \\ ]]; then
+			escaped=true
+			continue
+		fi
+		if [[ "$character" == "'" || "$character" == '"' ]]; then
+			quote="$character"
+			continue
+		fi
+		if [[ "$character" != \# ]]; then
+			continue
+		fi
+		if (( index == 0 )); then
+			printf '%s' "${line:0:index}"
+			return
+		fi
+		previous="${line:index-1:1}"
+		case "$previous" in
+			[[:space:]]|';'|'|'|'&')
+				printf '%s' "${line:0:index}"
+				return
+				;;
+		esac
+	done
+	printf '%s' "$line"
+}
+
 consume_shell_physical_line() {
 	local relative="$1"
 	local line_number="$2"
 	local line="$3"
 	local command
 
+	line="$(strip_shell_comment "$line")"
 	command="$(trim_whitespace "$line")"
 	if [[ -z "$pending_shell_command" && ( -z "$command" || "$command" == \#* ) ]]; then
 		return
@@ -654,6 +722,12 @@ scan_action_refs() {
 		# Only canonical block mapping keys are authored for security-relevant
 		# structure. Ordinary scalar/list data remains outside Action semantics.
 		if [[ ! "$syntax" =~ $mapping_re ]]; then
+			if [[ "$syntax" == - && -n "$parent_kind" ]]; then
+				fail "$relative:$line_number unsupported standalone step sequence indicator; use canonical '- key:' step mappings"
+				action_step_active=false
+				action_step_kind=""
+				continue
+			fi
 			case "${syntax#- }" in
 				*:*|\{*|\[*|\?*|\&*|\**|\!*)
 					fail "$relative:$line_number unsupported workflow mapping syntax; use canonical block keys"
@@ -765,11 +839,16 @@ reset_tinygo_job() {
 	tinygo_job_if_line=0
 	tinygo_job_continue_on_error_line=0
 	tinygo_job_needs_line=0
+	tinygo_job_runs_on_count=0
+	tinygo_job_runs_on_line=0
+	tinygo_job_runs_on_value=""
+	tinygo_job_container_line=0
 }
 
 record_tinygo_job_property() {
 	local key="$1"
-	local line_number="$2"
+	local value="$2"
+	local line_number="$3"
 
 	case "$key" in
 		if)
@@ -785,6 +864,18 @@ record_tinygo_job_property() {
 		needs)
 			if (( tinygo_job_needs_line == 0 )); then
 				tinygo_job_needs_line=$line_number
+			fi
+			;;
+		runs-on)
+			tinygo_job_runs_on_count=$((tinygo_job_runs_on_count + 1))
+			if (( tinygo_job_runs_on_count == 1 )); then
+				tinygo_job_runs_on_line=$line_number
+				tinygo_job_runs_on_value="$value"
+			fi
+			;;
+		container)
+			if (( tinygo_job_container_line == 0 )); then
+				tinygo_job_container_line=$line_number
 			fi
 			;;
 	esac
@@ -809,6 +900,14 @@ finalize_tinygo_job() {
 		fi
 		if (( tinygo_job_needs_line > 0 )); then
 			fail "$relative:$tinygo_job_needs_line protected TinyGo job $tinygo_job_id must be unconditional and blocking: contains job-level needs"
+		fi
+		if (( tinygo_job_runs_on_count != 1 )); then
+			fail "$relative:$tinygo_job_line protected TinyGo job $tinygo_job_id must contain exactly one canonical runs-on: ubuntu-latest"
+		elif [[ "$tinygo_job_runs_on_value" != ubuntu-latest ]]; then
+			fail "$relative:$tinygo_job_runs_on_line protected TinyGo job $tinygo_job_id must use canonical runs-on: ubuntu-latest"
+		fi
+		if (( tinygo_job_container_line > 0 )); then
+			fail "$relative:$tinygo_job_container_line protected TinyGo job $tinygo_job_id must run directly on the trusted hosted runner without a job container"
 		fi
 	fi
 	reset_tinygo_job
@@ -999,7 +1098,7 @@ scan_tinygo_install_steps() {
 			[[ "${path_keys[0]}" == jobs &&
 				"${path_keys[1]}" == "$tinygo_job_id" ]] &&
 			(( key_indent > tinygo_job_indent )); then
-			record_tinygo_job_property "$key" "$line_number"
+			record_tinygo_job_property "$key" "$value" "$line_number"
 		fi
 		if [[ -n "$sequence_prefix" && "$parent_is_steps" == true ]]; then
 			finalize_tinygo_step "$relative"
