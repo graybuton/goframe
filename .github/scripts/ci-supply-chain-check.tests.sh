@@ -866,6 +866,414 @@ test_verify_shell_boundary() {
 expect_pass "protected TinyGo job without conditional controls" \
 	"$(make_fixture protected-job-controls "$FULL_ACTION_REF")"
 
+fixture="$(make_fixture execution-data-contexts "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/execution-data.yml \
+	'name: execution data' \
+	'env:' \
+	"  run: $CURL_COMMAND_NAME" \
+	"  shell: $CURL_COMMAND_NAME" \
+	'jobs:' \
+	'  data:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	"      - uses: actions/checkout@$FULL_ACTION_SHA # v7.0.1" \
+	'        with:' \
+	"          run: $CURL_COMMAND_NAME" \
+	"          shell: $CURL_COMMAND_NAME"
+expect_pass "run and shell keys in env and with are ordinary data" "$fixture"
+
+fixture="$(make_fixture action-execution-data-contexts "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/actions/data/action.yml \
+	'name: data' \
+	'inputs:' \
+	'  run:' \
+	"    default: $CURL_COMMAND_NAME" \
+	'outputs:' \
+	'  shell:' \
+	"    value: $CURL_COMMAND_NAME" \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	'    - shell: bash' \
+	'      run: echo ok'
+expect_pass "run and shell keys in Action inputs and outputs are ordinary data" "$fixture"
+
+fixture="$(make_fixture workflow-step-run-downloader "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/execution.yml \
+	'name: execution' \
+	'jobs:' \
+	'  run:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	"      - run: $CURL_COMMAND_NAME https://example.invalid/file"
+expect_fail "workflow step run receives downloader policy" "$fixture"
+
+fixture="$(make_fixture workflow-step-shell-downloader "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/execution.yml \
+	'name: execution' \
+	'jobs:' \
+	'  shell:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	"      - shell: bash -c '$CURL_COMMAND_NAME https://example.invalid/file; bash \"\$1\"' -- {0}" \
+	'        run: echo harmless'
+expect_fail "workflow step shell receives downloader policy" "$fixture"
+
+fixture="$(make_fixture workflow-default-shell-downloader "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/execution.yml \
+	'name: execution' \
+	'jobs:' \
+	'  shell:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - run: echo harmless' \
+	'defaults:' \
+	'  run:' \
+	"    shell: bash -c '$CURL_COMMAND_NAME https://example.invalid/file; bash \"\$1\"' -- {0}"
+expect_fail "workflow defaults run shell receives downloader policy" "$fixture"
+
+fixture="$(make_fixture job-default-shell-downloader "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/execution.yml \
+	'name: execution' \
+	'jobs:' \
+	'  shell:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - run: echo harmless' \
+	'    defaults:' \
+	'      run:' \
+	"        shell: bash -c '$CURL_COMMAND_NAME https://example.invalid/file; bash \"\$1\"' -- {0}"
+expect_fail "job defaults run shell receives downloader policy" "$fixture"
+
+fixture="$(make_fixture composite-run-downloader './.github/actions/composite')"
+write_repository_file "$fixture" .github/actions/composite/action.yml \
+	'name: composite' \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	'    - shell: bash' \
+	"      run: $CURL_COMMAND_NAME https://example.invalid/file"
+expect_fail "composite step run receives downloader policy" "$fixture"
+
+fixture="$(make_fixture composite-shell-downloader './.github/actions/composite')"
+write_repository_file "$fixture" .github/actions/composite/action.yml \
+	'name: composite' \
+	'runs:' \
+	'  using: composite' \
+	'  steps:' \
+	"    - shell: bash -c '$CURL_COMMAND_NAME https://example.invalid/file; bash \"\$1\"' -- {0}" \
+	'      run: echo harmless'
+expect_fail "composite step shell receives downloader policy" "$fixture"
+
+fixture="$(make_fixture local-docker-action './.github/actions/docker')"
+write_repository_file "$fixture" .github/actions/docker/action.yml \
+	'name: docker' \
+	'runs:' \
+	'  using: docker' \
+	'  image: Dockerfile'
+write_repository_file "$fixture" .github/actions/docker/Dockerfile \
+	'FROM ubuntu:latest' \
+	"RUN base=https://github.com/$TINYGO_RELEASE_REPOSITORY; \\" \
+	"    $CURL_COMMAND_NAME \"\$base/releases/download/v0.42.0/file\""
+expect_fail "local Docker Action runtime is unsupported" "$fixture"
+
+fixture="$(make_fixture local-docker-image-action './.github/actions/docker-image')"
+write_repository_file "$fixture" .github/actions/docker-image/action.yml \
+	'name: docker image' \
+	'runs:' \
+	'  using: docker' \
+	'  image: docker://alpine:latest'
+expect_fail "local Docker image Action runtime is unsupported" "$fixture"
+
+for runtime in node20 node24; do
+	fixture="$(make_fixture "local-$runtime-action" './.github/actions/javascript')"
+	write_repository_file "$fixture" .github/actions/javascript/action.yml \
+		'name: javascript' \
+		'runs:' \
+		"  using: $runtime" \
+		'  main: dist/action'
+	write_repository_file "$fixture" .github/actions/javascript/dist/action \
+		"const base = 'https://github.com/$TINYGO_RELEASE_REPOSITORY';" \
+		"spawn('$CURL_COMMAND_NAME', [base + '/releases/download/v0.42.0/file']);"
+	expect_fail "local $runtime Action runtime is unsupported" "$fixture"
+done
+
+for mode in unknown expression quoted missing duplicate; do
+	fixture="$(make_fixture "local-action-runtime-$mode" './.github/actions/runtime')"
+	case "$mode" in
+		unknown)
+			lines=('name: runtime' 'runs:' '  using: custom-runtime')
+			;;
+		expression)
+			lines=('name: runtime' 'runs:' '  using: ${{ inputs.runtime }}')
+			;;
+		quoted)
+			lines=('name: runtime' 'runs:' '  using: "composite"' '  steps:' '    - shell: bash' '      run: echo local')
+			;;
+		missing)
+			lines=('name: runtime' 'runs:' '  steps:' '    - shell: bash' '      run: echo local')
+			;;
+		duplicate)
+			lines=('name: runtime' 'runs:' '  using: composite' '  using: composite' '  steps:' '    - shell: bash' '      run: echo local')
+			;;
+	esac
+	write_repository_file "$fixture" .github/actions/runtime/action.yml "${lines[@]}"
+	expect_fail "local Action $mode runs using contract" "$fixture"
+done
+
+fixture="$(make_fixture direct-docker-action "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/docker.yml \
+	'name: docker' \
+	'jobs:' \
+	'  docker:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - uses: docker://alpine:latest'
+expect_fail "direct docker Action runtime is unsupported" "$fixture"
+
+for primitive in source dot bash bash-option sh; do
+	fixture="$(make_fixture "unknown-extension-$primitive" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" scripts/bootstrap.inc \
+		"base=https://github.com/$TINYGO_RELEASE_REPOSITORY" \
+		"env $CURL_COMMAND_NAME \"\$base/releases/download/v0.42.0/file\""
+	case "$primitive" in
+		source) command='source scripts/bootstrap.inc' ;;
+		dot) command='. scripts/bootstrap.inc' ;;
+		bash) command='bash scripts/bootstrap.inc' ;;
+		bash-option) command='bash -e scripts/bootstrap.inc' ;;
+		sh) command='sh scripts/bootstrap.inc' ;;
+	esac
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$command"
+	expect_fail "$primitive force-scans an unknown-extension shell target" "$fixture"
+done
+
+for wrapper in command env env-assignment exec; do
+	fixture="$(make_fixture "wrapped-helper-$wrapper" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" scripts/bootstrap.inc \
+		"base=https://github.com/$TINYGO_RELEASE_REPOSITORY" \
+		"env $CURL_COMMAND_NAME \"\$base/releases/download/v0.42.0/file\""
+	case "$wrapper" in
+		command) command='command bash scripts/bootstrap.inc' ;;
+		env) command='env bash scripts/bootstrap.inc' ;;
+		env-assignment) command='env FOO=bar bash scripts/bootstrap.inc' ;;
+		exec) command='exec bash scripts/bootstrap.inc' ;;
+	esac
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$command"
+	expect_fail "$wrapper wrapper preserves helper discovery" "$fixture"
+done
+
+fixture="$(make_fixture env-chdir-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/bootstrap.inc \
+	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'env -C tools bash bootstrap.inc'
+expect_fail "env chdir option cannot hide a repository helper" "$fixture"
+
+fixture="$(make_fixture exec-argv0-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/bootstrap.inc \
+	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'exec -a bootstrap bash scripts/bootstrap.inc'
+expect_fail "exec argv0 option cannot hide a repository helper" "$fixture"
+
+fixture="$(make_fixture node-preload-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/preload.resource \
+	"provenance=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'node --require ./tools/preload.resource -e "console.log(1)"'
+expect_fail "Node preload force-scans a repository helper" "$fixture"
+
+for primitive in python python3 node pwsh powershell; do
+	fixture="$(make_fixture "interpreted-helper-$primitive" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" tools/bootstrap.resource \
+		"provenance=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+	case "$primitive" in
+		pwsh) command='pwsh -File tools/bootstrap.resource' ;;
+		powershell) command='powershell -File tools/bootstrap.resource' ;;
+		*) command="$primitive tools/bootstrap.resource" ;;
+	esac
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$command"
+	expect_fail "$primitive force-scans an unknown-extension target" "$fixture"
+done
+
+fixture="$(make_fixture direct-unknown-extension "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/runner.data \
+	"provenance=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'./tools/runner.data'
+expect_fail "direct repository path force-scans an unknown-extension target" "$fixture"
+
+fixture="$(make_fixture direct-unknown-extension-without-dot "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/runner.data \
+	"provenance=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'tools/runner.data'
+expect_fail "direct repository path without dot prefix is force-scanned" "$fixture"
+
+fixture="$(make_fixture quoted-helper-path "$FULL_ACTION_REF")"
+write_repository_file "$fixture" 'tools/path with spaces.inc' \
+	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY" \
+	"env $CURL_COMMAND_NAME \"\$base/releases/download/v0.42.0/file\""
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'bash "tools/path with spaces.inc"'
+expect_fail "quoted repository helper path with spaces is resolved" "$fixture"
+
+for scope in workflow job step; do
+	fixture="$(make_fixture "working-directory-$scope" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" tools/bootstrap.inc \
+		"base=https://github.com/$TINYGO_RELEASE_REPOSITORY" \
+		"env $CURL_COMMAND_NAME \"\$base/releases/download/v0.42.0/file\""
+	case "$scope" in
+		workflow)
+			write_repository_file "$fixture" .github/workflows/working-directory.yml \
+				'name: working directory' \
+				'jobs:' \
+				'  helper:' \
+				'    runs-on: ubuntu-latest' \
+				'    steps:' \
+				'      - run: bash bootstrap.inc' \
+				'defaults:' \
+				'  run:' \
+				'    working-directory: tools'
+			;;
+		job)
+			write_repository_file "$fixture" .github/workflows/working-directory.yml \
+				'name: working directory' \
+				'jobs:' \
+				'  helper:' \
+				'    runs-on: ubuntu-latest' \
+				'    steps:' \
+				'      - run: bash bootstrap.inc' \
+				'    defaults:' \
+				'      run:' \
+				'        working-directory: tools'
+			;;
+		step)
+			write_repository_file "$fixture" .github/workflows/working-directory.yml \
+				'name: working directory' \
+				'jobs:' \
+				'  helper:' \
+				'    runs-on: ubuntu-latest' \
+				'    steps:' \
+				'      - run: bash bootstrap.inc' \
+				'        working-directory: tools'
+			;;
+	esac
+	expect_fail "$scope working-directory resolves the executed helper" "$fixture"
+done
+
+fixture="$(make_fixture working-directory-precedence "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/malicious/bootstrap.inc \
+	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+write_repository_file "$fixture" tools/benign/bootstrap.inc 'printf "benign\\n"'
+write_repository_file "$fixture" .github/workflows/working-directory.yml \
+	'name: working directory precedence' \
+	'defaults:' \
+	'  run:' \
+	'    working-directory: tools/malicious' \
+	'jobs:' \
+	'  helper:' \
+	'    runs-on: ubuntu-latest' \
+	'    defaults:' \
+	'      run:' \
+	'        working-directory: tools/benign' \
+	'    steps:' \
+	'      - run: bash bootstrap.inc'
+expect_pass "job working-directory overrides workflow default" "$fixture"
+
+fixture="$(make_fixture step-working-directory-precedence "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/malicious/bootstrap.inc \
+	"base=https://github.com/$TINYGO_RELEASE_REPOSITORY"
+write_repository_file "$fixture" tools/benign/bootstrap.inc 'printf "benign\\n"'
+write_repository_file "$fixture" .github/workflows/working-directory.yml \
+	'name: working directory precedence' \
+	'defaults:' \
+	'  run:' \
+	'    working-directory: tools/malicious' \
+	'jobs:' \
+	'  helper:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - run: bash bootstrap.inc' \
+	'        working-directory: tools/benign'
+expect_pass "step working-directory overrides inherited defaults" "$fixture"
+
+fixture="$(make_fixture dynamic-working-directory-no-helper "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/working-directory.yml \
+	'name: dynamic working directory' \
+	'jobs:' \
+	'  harmless:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - working-directory: ${{ matrix.directory }}' \
+	'        run: echo harmless'
+expect_pass "dynamic working-directory without local helper remains supported" "$fixture"
+
+fixture="$(make_fixture dynamic-step-shell "$FULL_ACTION_REF")"
+write_repository_file "$fixture" .github/workflows/dynamic-shell.yml \
+	'name: dynamic shell' \
+	'jobs:' \
+	'  dynamic:' \
+	'    runs-on: ubuntu-latest' \
+	'    steps:' \
+	'      - shell: ${{ matrix.shell }}' \
+	'        run: echo harmless'
+expect_fail "dynamic executable step shell fails closed" "$fixture"
+
+for mode in traversal backslash expression; do
+	fixture="$(make_fixture "unsafe-working-directory-$mode" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" tools/bootstrap.inc 'printf "benign\\n"'
+	case "$mode" in
+		traversal) directory='tools/../tools' ;;
+		backslash) directory='tools\subdir' ;;
+		expression) directory='${{ matrix.directory }}' ;;
+	esac
+	write_repository_file "$fixture" .github/workflows/working-directory.yml \
+		'name: unsafe working directory' \
+		'jobs:' \
+		'  helper:' \
+		'    runs-on: ubuntu-latest' \
+		'    steps:' \
+		"      - working-directory: $directory" \
+		'        run: bash bootstrap.inc'
+	expect_fail "$mode working-directory fails closed for helper resolution" "$fixture"
+done
+
+fixture="$(make_fixture traversed-helper-target "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/bootstrap.inc 'printf "benign\\n"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'bash tools/../tools/bootstrap.inc'
+expect_fail "helper target traversal is rejected" "$fixture"
+
+fixture="$(make_fixture backslash-helper-target "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/bootstrap.inc 'printf "benign\\n"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'bash tools\bootstrap.inc'
+expect_fail "helper target backslash spelling is rejected" "$fixture"
+
+outside_helper="$TMP_ROOT/outside-execution-target"
+printf '%s\n' 'printf "outside\\n"' > "$outside_helper"
+for mode in direct bash; do
+	fixture="$(make_fixture "symlink-helper-$mode" "$FULL_ACTION_REF")"
+	mkdir -p "$fixture/scripts"
+	ln -s "$outside_helper" "$fixture/scripts/helper"
+	if [[ "$mode" == direct ]]; then
+		command='scripts/helper'
+	else
+		command='bash scripts/helper'
+	fi
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$command"
+	expect_fail "$mode helper symlink escape is rejected" "$fixture"
+done
+
+fixture="$(make_fixture symlink-helper-component "$FULL_ACTION_REF")"
+mkdir -p "$fixture/real-tools"
+write_repository_file "$fixture" real-tools/helper.inc 'printf "benign\\n"'
+ln -s real-tools "$fixture/tools"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'bash tools/helper.inc'
+expect_fail "helper target with a symlink path component is rejected" "$fixture"
+
 fixture="$(make_fixture workflow-standalone-mutable-step "$FULL_ACTION_REF")"
 write_repository_file "$fixture" .github/workflows/standalone.yml \
 	'jobs:' \
