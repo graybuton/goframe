@@ -21,6 +21,7 @@ tinygo_verify_command="/usr/bin/env -i /usr/bin/sha256sum --check --strict - <<<
 tinygo_install_command="/usr/bin/sudo /usr/bin/apt-get install -y $TINYGO_VERIFIED_DEB"
 tinygo_verify_shell_template='/bin/bash --noprofile --norc -p -e -o pipefail {0}'
 tinygo_version_command='/usr/local/bin/tinygo version'
+yaml_block_scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
 
 usage() {
 	printf 'usage: %s [repository-root]\n' "${0##*/}" >&2
@@ -587,19 +588,23 @@ scan_execution_target() {
 	local target="$4"
 	local language="$5"
 	local strict="$6"
+	local mode="${7:-scan}"
 	local relative padded file shell_source=false
 
 	if [[ -z "$target" || "$target" == '{0}' ]]; then
 		return
 	fi
 	if execution_target_is_dynamic "$target"; then
-		if [[ "$strict" == true ]]; then
+		if [[ "$strict" == true &&
+			"$mode" != reject-indirect-executable ]]; then
 			fail "$source_relative:$line_number cannot statically resolve repository execution target: $target"
 		fi
 		return
 	fi
 	if [[ "$target" == /* ]]; then
-		fail "$source_relative:$line_number repository execution target must be repository-relative: $target"
+		if [[ "$mode" == scan || "$strict" == true ]]; then
+			fail "$source_relative:$line_number repository execution target must be repository-relative: $target"
+		fi
 		return
 	fi
 	if ! resolve_execution_working_directory \
@@ -616,7 +621,9 @@ scan_execution_target() {
 	if [[ -z "$relative" || "$relative" == *\\* ||
 		"$padded" == *'//'* || "$padded" == *'/./'* ||
 		"$padded" == *'/../'* ]]; then
-		fail "$source_relative:$line_number repository execution target is not canonical: $target"
+		if [[ "$mode" == scan || "$strict" == true ]]; then
+			fail "$source_relative:$line_number repository execution target is not canonical: $target"
+		fi
 		return
 	fi
 	if path_has_symlink_component "$ROOT_DIR" "$relative"; then
@@ -625,9 +632,22 @@ scan_execution_target() {
 	fi
 	file="$ROOT_DIR/$relative"
 	if [[ ! -f "$file" ]]; then
-		if [[ "$strict" == true ]]; then
+		if [[ "$strict" == true &&
+			"$mode" != reject-indirect-executable ]]; then
 			fail "$source_relative:$line_number repository execution target does not name an existing regular file: $target"
 		fi
+		return
+	fi
+	if [[ "$mode" == reject-indirect-executable && ! -x "$file" ]]; then
+		return
+	fi
+	if [[ "$mode" == reject-indirect ||
+		"$mode" == reject-indirect-executable ]]; then
+		if [[ "$strict" != true ]] &&
+			repository_file_is_ci_executable_source "$relative" "$file"; then
+			return
+		fi
+		fail "$source_relative:$line_number repository execution target appears behind unsupported execution indirection: $target"
 		return
 	fi
 
@@ -652,6 +672,7 @@ inspect_interpreter_target() {
 	local interpreter="$5"
 	local start="$6"
 	local end="$7"
+	local mode="${8:-scan}"
 	local index=$start token target="" language=non-shell
 
 	case "$interpreter" in
@@ -700,13 +721,13 @@ inspect_interpreter_target() {
 						return
 					fi
 					scan_execution_target "$source_relative" "$line_number" \
-						"$working_directory" "${shell_tokens[index]}" non-shell "$strict"
+						"$working_directory" "${shell_tokens[index]}" non-shell "$strict" "$mode"
 					index=$((index + 1))
 					continue
 					;;
 				node:--require=*|node:--import=*|node:--loader=*|node:--experimental-loader=*)
 					scan_execution_target "$source_relative" "$line_number" \
-						"$working_directory" "${token#*=}" non-shell "$strict"
+						"$working_directory" "${token#*=}" non-shell "$strict" "$mode"
 					index=$((index + 1))
 					continue
 					;;
@@ -721,8 +742,50 @@ inspect_interpreter_target() {
 	fi
 	if [[ -n "$target" ]]; then
 		scan_execution_target "$source_relative" "$line_number" \
-			"$working_directory" "$target" "$language" "$strict"
+			"$working_directory" "$target" "$language" "$strict" "$mode"
 	fi
+}
+
+inspect_unsupported_execution_indirection() {
+	local source_relative="$1"
+	local line_number="$2"
+	local working_directory="$3"
+	local strict="$4"
+	local start="$5"
+	local end="$6"
+	local index=$((start + 1)) token command_name
+
+	# The command head is unsupported, so inspect later tokens only for the
+	# repository execution shapes that the canonical grammar already owns.
+	while (( index < end )); do
+		token="${shell_tokens[index]}"
+		command_name="${token##*/}"
+		case "$command_name" in
+			source|.)
+				index=$((index + 1))
+				if (( index < end )); then
+					scan_execution_target "$source_relative" "$line_number" \
+						"$working_directory" "${shell_tokens[index]}" shell "$strict" \
+						reject-indirect
+				fi
+				return
+				;;
+			bash|sh|python|python3|node|pwsh|powershell)
+				inspect_interpreter_target "$source_relative" "$line_number" \
+					"$working_directory" "$strict" "$command_name" \
+					"$((index + 1))" "$end" reject-indirect
+				return
+				;;
+		esac
+		if [[ "$token" != *://* && "$token" != *[[:space:]]* ]] &&
+			[[ "$token" == ./* ||
+			( "$token" != /* && "$token" == */* ) ]]; then
+			scan_execution_target "$source_relative" "$line_number" \
+				"$working_directory" "$token" direct "$strict" \
+				reject-indirect-executable
+		fi
+		index=$((index + 1))
+	done
 }
 
 inspect_shell_command_segment() {
@@ -872,8 +935,151 @@ inspect_shell_command_segment() {
 				scan_execution_target "$source_relative" "$line_number" \
 					"$working_directory" "$token" direct "$strict"
 			fi
+			inspect_unsupported_execution_indirection "$source_relative" \
+				"$line_number" "$working_directory" "$strict" "$index" "$end"
 			;;
 	esac
+}
+
+inspect_static_command_substitutions() {
+	local source_relative="$1"
+	local line_number="$2"
+	local command="$3"
+	local working_directory="$4"
+	local strict="$5"
+	local index=0 length=${#command} character next quote="" escaped=false
+	local inner_start inner_end depth inner_quote inner_escaped
+
+	# Substitutions are nested executable command segments hidden from the flat
+	# token stream. Inspect their static bodies through the same bounded grammar.
+	while (( index < length )); do
+		character="${command:index:1}"
+		if [[ "$escaped" == true ]]; then
+			escaped=false
+			index=$((index + 1))
+			continue
+		fi
+		if [[ "$quote" == "'" ]]; then
+			if [[ "$character" == "'" ]]; then
+				quote=""
+			fi
+			index=$((index + 1))
+			continue
+		fi
+		if [[ "$character" == \\ ]]; then
+			escaped=true
+			index=$((index + 1))
+			continue
+		fi
+		if [[ "$character" == "'" && "$quote" != '"' ]]; then
+			quote="'"
+			index=$((index + 1))
+			continue
+		fi
+		if [[ "$character" == '"' ]]; then
+			if [[ "$quote" == '"' ]]; then
+				quote=""
+			else
+				quote='"'
+			fi
+			index=$((index + 1))
+			continue
+		fi
+		next=""
+		if (( index + 1 < length )); then
+			next="${command:index+1:1}"
+		fi
+		if [[ "$character" == '$' && "$next" == '(' ]]; then
+			inner_start=$((index + 2))
+			inner_end=$inner_start
+			depth=1
+			inner_quote=""
+			inner_escaped=false
+			while (( inner_end < length )); do
+				character="${command:inner_end:1}"
+				if [[ "$inner_escaped" == true ]]; then
+					inner_escaped=false
+					inner_end=$((inner_end + 1))
+					continue
+				fi
+				if [[ "$inner_quote" == "'" ]]; then
+					if [[ "$character" == "'" ]]; then
+						inner_quote=""
+					fi
+					inner_end=$((inner_end + 1))
+					continue
+				fi
+				if [[ "$character" == \\ ]]; then
+					inner_escaped=true
+					inner_end=$((inner_end + 1))
+					continue
+				fi
+				if [[ "$character" == "'" && "$inner_quote" != '"' ]]; then
+					inner_quote="'"
+					inner_end=$((inner_end + 1))
+					continue
+				fi
+				if [[ "$character" == '"' ]]; then
+					if [[ "$inner_quote" == '"' ]]; then
+						inner_quote=""
+					else
+						inner_quote='"'
+					fi
+					inner_end=$((inner_end + 1))
+					continue
+				fi
+				if [[ "$inner_quote" != '"' && "$character" == '$' ]] &&
+					(( inner_end + 1 < length )) &&
+					[[ "${command:inner_end+1:1}" == '(' ]]; then
+					depth=$((depth + 1))
+					inner_end=$((inner_end + 2))
+					continue
+				fi
+				if [[ -z "$inner_quote" && "$character" == ')' ]]; then
+					depth=$((depth - 1))
+					if (( depth == 0 )); then
+						break
+					fi
+				fi
+				inner_end=$((inner_end + 1))
+			done
+			if (( depth != 0 )); then
+				if [[ "$strict" == true ]]; then
+					fail "$source_relative:$line_number cannot safely inspect command substitution for repository helper resolution"
+				fi
+				return
+			fi
+			inspect_referenced_ci_helpers "$source_relative" "$line_number" \
+				"${command:inner_start:inner_end-inner_start}" \
+				"$working_directory" "$strict"
+			index=$((inner_end + 1))
+			continue
+		fi
+		if [[ "$character" == '`' ]]; then
+			inner_start=$((index + 1))
+			inner_end=$inner_start
+			inner_escaped=false
+			while (( inner_end < length )); do
+				character="${command:inner_end:1}"
+				if [[ "$inner_escaped" == true ]]; then
+					inner_escaped=false
+				elif [[ "$character" == \\ ]]; then
+					inner_escaped=true
+				elif [[ "$character" == '`' ]]; then
+					break
+				fi
+				inner_end=$((inner_end + 1))
+			done
+			if (( inner_end < length )); then
+				inspect_referenced_ci_helpers "$source_relative" "$line_number" \
+					"${command:inner_start:inner_end-inner_start}" \
+					"$working_directory" "$strict"
+				index=$((inner_end + 1))
+				continue
+			fi
+		fi
+		index=$((index + 1))
+	done
 }
 
 inspect_referenced_ci_helpers() {
@@ -884,6 +1090,8 @@ inspect_referenced_ci_helpers() {
 	local strict="${5:-false}"
 	local start=0 index
 
+	inspect_static_command_substitutions "$source_relative" "$line_number" \
+		"$command" "$working_directory" "$strict"
 	if ! tokenize_shell_command "$command"; then
 		if [[ "$strict" == true ]]; then
 			fail "$source_relative:$line_number cannot safely tokenize executable command for repository helper resolution"
@@ -1212,7 +1420,6 @@ parse_authored_ci_file() {
 	local active_step=-1 active_step_indent=-1 job_index=-1
 	local scalar_indent=-1 scalar_step=-1 scalar_key=""
 	local mapping_re='^(-[[:space:]]+)?([A-Za-z_][A-Za-z0-9_-]*):([[:space:]]+(.*))?$'
-	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
 	local inline_comment_re='^(.*[^[:space:]])[[:space:]]+#(.*)$'
 	local full_comment_re='^[[:space:]]*#(.*)$'
 	local path_keys=()
@@ -1390,7 +1597,7 @@ parse_authored_ci_file() {
 				"$line_number" "$comment" "$comment_is_yaml"
 		fi
 
-		if [[ "$value" =~ $scalar_re ]]; then
+		if [[ "$value" =~ $yaml_block_scalar_re ]]; then
 			scalar_indent=$key_indent
 			if (( active_step >= 0 && key_indent == active_step_indent )); then
 				scalar_step=$active_step
@@ -1535,14 +1742,13 @@ scan_ci_step_run() {
 	local relative="${ci_files[${ci_step_file[step_index]}]}"
 	local directory="$2"
 	local value index
-	local scalar_re='^[|>]([1-9][+-]?|[+-][1-9]?)?$'
 
 	if (( ci_step_run_count[step_index] != 1 )); then
 		return
 	fi
 	value=${ci_step_run_value[step_index]}
 	reset_shell_logical_command
-	if [[ "$value" =~ $scalar_re ]]; then
+	if [[ "$value" =~ $yaml_block_scalar_re ]]; then
 		for ((index = 0; index < ${#ci_run_step[@]}; index++)); do
 			if [[ "${ci_run_step[index]}" != "$step_index" ]]; then
 				continue
@@ -1571,7 +1777,9 @@ apply_authored_execution_policy() {
 			if (( ci_file_default_directory_count[file_index] == 1 )); then
 				directory=${ci_file_default_directory_value[file_index]}
 			fi
-			if [[ "$shell" == *'${{'* ]]; then
+			if [[ "$shell" =~ $yaml_block_scalar_re ]]; then
+				fail "${ci_files[file_index]}:${ci_file_default_shell_line[file_index]} executable shell must use a canonical inline scalar; block/folded shell scalars are outside the bounded authored-CI execution contract"
+			elif [[ "$shell" == *'${{'* ]]; then
 				fail "${ci_files[file_index]}:${ci_file_default_shell_line[file_index]} dynamic workflow defaults.run.shell is outside the bounded execution contract"
 			else
 				inspect_shell_logical_command "${ci_files[file_index]}" \
@@ -1592,7 +1800,9 @@ apply_authored_execution_policy() {
 			if (( ci_job_default_directory_count[job_index] == 1 )); then
 				directory=${ci_job_default_directory_value[job_index]}
 			fi
-			if [[ "$shell" == *'${{'* ]]; then
+			if [[ "$shell" =~ $yaml_block_scalar_re ]]; then
+				fail "${ci_files[file_index]}:${ci_job_default_shell_line[job_index]} executable shell must use a canonical inline scalar; block/folded shell scalars are outside the bounded authored-CI execution contract"
+			elif [[ "$shell" == *'${{'* ]]; then
 				fail "${ci_files[file_index]}:${ci_job_default_shell_line[job_index]} dynamic job defaults.run.shell is outside the bounded execution contract"
 			else
 				inspect_shell_logical_command "${ci_files[file_index]}" \
@@ -1609,7 +1819,9 @@ apply_authored_execution_policy() {
 			fail "$relative:${ci_step_shell_line[index]} step contains duplicate shell properties"
 		elif (( ci_step_shell_count[index] == 1 )); then
 			shell=${ci_step_shell_value[index]}
-			if [[ "$shell" == *'${{'* ]]; then
+			if [[ "$shell" =~ $yaml_block_scalar_re ]]; then
+				fail "$relative:${ci_step_shell_line[index]} executable shell must use a canonical inline scalar; block/folded shell scalars are outside the bounded authored-CI execution contract"
+			elif [[ "$shell" == *'${{'* ]]; then
 				fail "$relative:${ci_step_shell_line[index]} dynamic step shell is outside the bounded execution contract"
 			else
 				inspect_shell_logical_command "$relative" \
