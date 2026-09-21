@@ -30,11 +30,13 @@ jobs:
           cache-dependency-path: extensions/vscode-gox/package-lock.json
 
       - name: Validate JSON
+        working-directory: .
         run: |
-          node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"
-          node -e "JSON.parse(require('fs').readFileSync('syntaxes/gox.tmLanguage.json','utf8'))"
-          node -e "JSON.parse(require('fs').readFileSync('snippets/gox.code-snippets','utf8'))"
-          node -e "JSON.parse(require('fs').readFileSync('language-configuration.json','utf8'))"
+          node scripts/ci-node-tools.mjs validate-json \
+            extensions/vscode-gox/package.json \
+            extensions/vscode-gox/syntaxes/gox.tmLanguage.json \
+            extensions/vscode-gox/snippets/gox.code-snippets \
+            extensions/vscode-gox/language-configuration.json
 
       - name: Install dependencies
         run: npm ci

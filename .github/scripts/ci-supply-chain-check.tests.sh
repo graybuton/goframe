@@ -23,6 +23,18 @@ WGET_COMMAND_NAME='wg''et'
 FULL_ACTION_SHA="3d3c42e5aac5ba805825da76410c181273ba90b1"
 FULL_ACTION_REF="actions/checkout@$FULL_ACTION_SHA # v7.0.1"
 FULL_REUSABLE_REF="owner/repo/.github/workflows/build.yml@$FULL_ACTION_SHA # v1.2.3"
+BASH_COMMAND_NAME='ba''sh'
+SH_COMMAND_NAME='s''h'
+PYTHON_COMMAND_NAME='python''3'
+NODE_COMMAND_NAME='no''de'
+PWSH_COMMAND_NAME='pw''sh'
+POWERSHELL_COMMAND_NAME='power''shell'
+EVAL_COMMAND_NAME='ev''al'
+SHELL_CODE_OPTION='-''c'
+SHELL_STDIN_OPTION='-''s'
+PYTHON_MODULE_OPTION='-''m'
+NODE_EVAL_OPTION='-''e'
+NODE_PRINT_OPTION='-''p'
 tests_run=0
 
 write_tinygo_workflow() {
@@ -1270,6 +1282,187 @@ write_repository_file "$fixture" tools/preload.resource \
 add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	'node --require ./tools/preload.resource -e "console.log(1)"'
 expect_fail "Node preload force-scans a repository helper" "$fixture"
+
+fixture="$(make_fixture benign-node-preload "$FULL_ACTION_REF")"
+write_repository_file "$fixture" tools/preload.resource \
+	'console.log("benign preload");'
+write_repository_file "$fixture" scripts/example.mjs \
+	'console.log("benign helper");'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'node --require ./tools/preload.resource scripts/example.mjs'
+expect_pass "Node preload and direct script targets remain statically resolved" "$fixture"
+
+for subcommand in validate-json pick-free-port manifest-wasm-path; do
+	fixture="$(make_fixture "direct-node-helper-$subcommand" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" scripts/ci-node-tools.mjs \
+		'console.log("benign helper");'
+	case "$subcommand" in
+		validate-json) arguments='package.json' ;;
+		pick-free-port) arguments='' ;;
+		manifest-wasm-path) arguments='examples/app' ;;
+	esac
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"$NODE_COMMAND_NAME scripts/ci-node-tools.mjs $subcommand${arguments:+ $arguments}"
+	expect_pass "direct tracked Node helper subcommand: $subcommand" "$fixture"
+done
+
+fixture="$(make_fixture node-transparent-runtime-option "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/example.mjs \
+	'console.log("benign helper");'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$NODE_COMMAND_NAME --experimental-websocket scripts/example.mjs"
+expect_pass "Node experimental WebSocket option preserves tracked target resolution" "$fixture"
+
+fixture="$(make_fixture node-helper-provenance "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/example.mjs \
+	"const provenance = 'https://github.com/$TINYGO_RELEASE_REPOSITORY';"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$NODE_COMMAND_NAME scripts/example.mjs"
+expect_fail "tracked Node helper remains under TinyGo provenance inspection" "$fixture"
+
+for shell_case in \
+	"$BASH_COMMAND_NAME $SHELL_CODE_OPTION 'bash scripts/bootstrap.inc'" \
+	"$SH_COMMAND_NAME $SHELL_CODE_OPTION 'source scripts/bootstrap.inc'" \
+	"$BASH_COMMAND_NAME -l${SHELL_CODE_OPTION#-} 'bash scripts/bootstrap.inc'" \
+	"$SH_COMMAND_NAME -x${SHELL_CODE_OPTION#-} 'source scripts/bootstrap.inc'" \
+	"$BASH_COMMAND_NAME --command 'bash scripts/bootstrap.inc'" \
+	"$BASH_COMMAND_NAME $SHELL_STDIN_OPTION" \
+	"$SH_COMMAND_NAME $SHELL_STDIN_OPTION" \
+	"$SH_COMMAND_NAME -x${SHELL_STDIN_OPTION#-}"; do
+	fixture="$(make_fixture "opaque-shell-$tests_run" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$shell_case"
+	expect_fail "opaque shell execution mode: $shell_case" "$fixture"
+done
+
+for shell_name in "$BASH_COMMAND_NAME" "$SH_COMMAND_NAME"; do
+	fixture="$(make_fixture "pipeline-shell-$shell_name" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"printf 'echo ok\\n' | $shell_name"
+	expect_fail "pipeline-fed $shell_name stdin execution" "$fixture"
+done
+
+fixture="$(make_fixture pipeline-stderr-shell "$FULL_ACTION_REF")"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"printf 'echo ok\\n' |& $BASH_COMMAND_NAME"
+expect_fail "stdout-and-stderr pipeline cannot feed opaque shell stdin" "$fixture"
+
+fixture="$(make_fixture opaque-eval "$FULL_ACTION_REF")"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$EVAL_COMMAND_NAME 'bash scripts/bootstrap.inc'"
+expect_fail "shell eval is opaque execution" "$fixture"
+
+for python_case in \
+	"python $SHELL_CODE_OPTION 'print(1)'" \
+	"python $PYTHON_MODULE_OPTION fixture_module" \
+	"$PYTHON_COMMAND_NAME $SHELL_CODE_OPTION 'print(1)'" \
+	"$PYTHON_COMMAND_NAME $PYTHON_MODULE_OPTION fixture_module" \
+	"$PYTHON_COMMAND_NAME -" \
+	"printf 'print(1)\\n' | $PYTHON_COMMAND_NAME"; do
+	fixture="$(make_fixture "opaque-python-$tests_run" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$python_case"
+	expect_fail "opaque Python execution mode: $python_case" "$fixture"
+done
+
+for node_case in \
+	"$NODE_COMMAND_NAME $NODE_EVAL_OPTION 'console.log(1)'" \
+	"$NODE_COMMAND_NAME --eval 'console.log(1)'" \
+	"$NODE_COMMAND_NAME --eval='console.log(1)'" \
+	"$NODE_COMMAND_NAME $NODE_PRINT_OPTION '1 + 1'" \
+	"$NODE_COMMAND_NAME --print '1 + 1'" \
+	"$NODE_COMMAND_NAME --print='1 + 1'" \
+	"$NODE_COMMAND_NAME -pe '1 + 1'" \
+	"$NODE_COMMAND_NAME --run fixture" \
+	"$NODE_COMMAND_NAME --run=fixture" \
+	"$NODE_COMMAND_NAME -" \
+	"printf 'console.log(1)\\n' | $NODE_COMMAND_NAME"; do
+	fixture="$(make_fixture "opaque-node-$tests_run" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$node_case"
+	expect_fail "opaque Node execution mode: $node_case" "$fixture"
+done
+
+for powershell_case in \
+	"$PWSH_COMMAND_NAME -Command 'Write-Output ok'" \
+	"$PWSH_COMMAND_NAME -CommandWithArgs 'Write-Output ok'" \
+	"$PWSH_COMMAND_NAME -EncodedCommand ZgBvAG8A" \
+	"$POWERSHELL_COMMAND_NAME -Command 'Write-Output ok'" \
+	"$POWERSHELL_COMMAND_NAME -EncodedCommand ZgBvAG8A"; do
+	fixture="$(make_fixture "opaque-powershell-$tests_run" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$powershell_case"
+	expect_fail "opaque PowerShell execution mode: $powershell_case" "$fixture"
+done
+
+for powershell_name in "$PWSH_COMMAND_NAME" "$POWERSHELL_COMMAND_NAME"; do
+	fixture="$(make_fixture "pipeline-powershell-$powershell_name" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"printf 'Write-Output ok\\n' | $powershell_name"
+	expect_fail "pipeline-fed $powershell_name stdin execution" "$fixture"
+done
+
+for wrapper in command env exec sudo 'timeout 30' arbitrary-wrapper; do
+	fixture="$(make_fixture "wrapped-opaque-shell-$tests_run" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"$wrapper $BASH_COMMAND_NAME $SHELL_CODE_OPTION 'bash scripts/bootstrap.inc'"
+	expect_fail "$wrapper cannot restore opaque shell execution" "$fixture"
+done
+
+fixture="$(make_fixture wrapped-opaque-sh "$FULL_ACTION_REF")"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"sudo $SH_COMMAND_NAME $SHELL_CODE_OPTION 'source scripts/bootstrap.inc'"
+expect_fail "sudo cannot restore opaque sh execution" "$fixture"
+
+for nesting in substitution backticks subshell; do
+	fixture="$(make_fixture "nested-opaque-shell-$nesting" "$FULL_ACTION_REF")"
+	case "$nesting" in
+		substitution)
+			command="result=\"\$($BASH_COMMAND_NAME $SHELL_CODE_OPTION 'printf ok')\""
+			;;
+		backticks)
+			command="result=\`$SH_COMMAND_NAME $SHELL_CODE_OPTION 'printf ok'\`"
+			;;
+		subshell)
+			command="( $BASH_COMMAND_NAME $SHELL_CODE_OPTION 'printf ok' )"
+			;;
+	esac
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" "$command"
+	expect_fail "$nesting cannot restore opaque shell execution" "$fixture"
+done
+
+fixture="$(make_fixture nested-helper-opaque-shell "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh \
+	"$BASH_COMMAND_NAME $SHELL_CODE_OPTION 'bash scripts/bootstrap.inc'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail "nested repository shell helper cannot restore opaque execution" "$fixture"
+
+fixture="$(make_fixture nested-helper-shell-stdin "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh \
+	"$BASH_COMMAND_NAME <<< 'printf ok'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail "nested repository shell helper cannot consume opaque stdin" "$fixture"
+
+fixture="$(make_fixture inert-opaque-text "$FULL_ACTION_REF")"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"echo '$BASH_COMMAND_NAME $SHELL_CODE_OPTION \"bash scripts/bootstrap.inc\"'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"printf '%s\\n' '$NODE_COMMAND_NAME $NODE_EVAL_OPTION \"console.log(1)\"'"
+expect_pass "single-quoted opaque-interpreter text remains ordinary data" "$fixture"
+
+fixture="$(make_fixture supported-interpreter-file-modes "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/example.sh 'printf "ok\\n"'
+write_repository_file "$fixture" tools/example.resource 'print("ok")'
+write_repository_file "$fixture" tools/example.ps1 'Write-Output ok'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'/bin/bash --version'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'/bin/bash -n scripts/example.sh'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME -e scripts/example.sh"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$PYTHON_COMMAND_NAME tools/example.resource"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$PWSH_COMMAND_NAME -fIlE tools/example.ps1"
+expect_pass "supported interpreter file and introspection modes remain accepted" "$fixture"
 
 for primitive in python python3 node pwsh powershell; do
 	fixture="$(make_fixture "interpreted-helper-$primitive" "$FULL_ACTION_REF")"

@@ -7,6 +7,7 @@ TINYGO_RELEASE_REPOSITORY="tinygo-org/"'tinygo'
 TINYGO_RELEASE_NAMESPACE="${TINYGO_RELEASE_REPOSITORY}/releases/download/"
 CURL_COMMAND_NAME='cur''l'
 WGET_COMMAND_NAME='wg''et'
+EVAL_COMMAND_NAME='ev''al'
 EXPECTED_TINYGO_WORKFLOWS=(
 	".github/workflows/ci-browser-smoke.yml"
 	".github/workflows/ci-core.yml"
@@ -368,7 +369,8 @@ repository_file_is_shell_source() {
 		return 1
 	fi
 	IFS= read -r first_line < "$file" || true
-	[[ "$first_line" =~ ^\#!.*(bash|/sh)([[:space:]]|$) ]]
+	[[ "$first_line" =~ ^\#!.*bash([[:space:]]|$) ||
+		"$first_line" =~ ^\#!.*/sh([[:space:]]|$) ]]
 }
 
 repository_file_is_helper_source() {
@@ -511,7 +513,8 @@ tokenize_shell_command() {
 				next="${command:index+1:1}"
 			fi
 			if [[ ( "$character" == '|' || "$character" == '&' ) &&
-				"$next" == "$character" ]]; then
+				"$next" == "$character" ]] ||
+				[[ "$character" == '|' && "$next" == '&' ]]; then
 				shell_tokens[${#shell_tokens[@]}]="$character$next"
 				index=$((index + 1))
 			else
@@ -533,7 +536,7 @@ tokenize_shell_command() {
 
 shell_token_is_operator() {
 	case "$1" in
-		';'|'|'|'||'|'&'|'&&'|'('|')') return 0 ;;
+		';'|'|'|'|&'|'||'|'&'|'&&'|'('|')') return 0 ;;
 	esac
 	return 1
 }
@@ -673,30 +676,17 @@ inspect_interpreter_target() {
 	local start="$6"
 	local end="$7"
 	local mode="${8:-scan}"
-	local index=$start token target="" language=non-shell
+	local stdin_from_pipe="${9:-false}"
+	local index=$start token target="" language=non-shell option_flags
 
-	case "$interpreter" in
-		bash|sh) language=shell ;;
-	esac
-	if [[ "$interpreter" == pwsh || "$interpreter" == powershell ]]; then
+	if [[ "$interpreter" == bash || "$interpreter" == sh ]]; then
+		language=shell
 		while (( index < end )); do
 			token="${shell_tokens[index]}"
-			case "$token" in
-				-[Ff]ile)
-					index=$((index + 1))
-					if (( index < end )); then
-						target="${shell_tokens[index]}"
-					fi
-					break
-					;;
-				-[Cc]ommand|-CommandWithArgs) return ;;
-				-*) index=$((index + 1)); continue ;;
-				*) target="$token"; break ;;
-			esac
-		done
-	else
-		while (( index < end )); do
-			token="${shell_tokens[index]}"
+			if [[ "$token" == \<* ]]; then
+				fail "$source_relative:$line_number $interpreter redirected stdin execution is outside the bounded authored-CI contract"
+				return
+			fi
 			if [[ "$token" == -- ]]; then
 				index=$((index + 1))
 				if (( index < end )); then
@@ -704,20 +694,115 @@ inspect_interpreter_target() {
 				fi
 				break
 			fi
-			case "$interpreter:$token" in
-				bash:-c|bash:--command|sh:-c|sh:--command|python:-c|python:-m|python3:-c|python3:-m|node:-e|node:--eval|node:-p|node:--print)
+			if [[ "$token" == - ]]; then
+				fail "$source_relative:$line_number $interpreter stdin execution is outside the bounded authored-CI contract"
+				return
+			fi
+			case "$token" in
+				--command)
+					fail "$source_relative:$line_number $interpreter command-string execution is outside the bounded authored-CI contract"
 					return
 					;;
-				bash:-o|bash:-O|sh:-o|sh:-O|python:-W|python:-X|python3:-W|python3:-X)
+				-o|-O)
+					if (( index + 1 >= end )); then
+						if [[ "$strict" == true ]]; then
+							fail "$source_relative:$line_number $interpreter option is missing its argument: $token"
+						fi
+						return
+					fi
 					index=$((index + 2))
 					continue
 					;;
-				node:-r|node:--require|node:--import|node:--loader|node:--experimental-loader)
+				-?*)
+					if [[ "$token" != --* ]]; then
+						option_flags="${token#-}"
+						if [[ "$option_flags" == *c* ]]; then
+							fail "$source_relative:$line_number $interpreter command-string execution is outside the bounded authored-CI contract: $token"
+							return
+						fi
+						if [[ "$option_flags" == *s* ]]; then
+							fail "$source_relative:$line_number $interpreter stdin execution is outside the bounded authored-CI contract: $token"
+							return
+						fi
+					fi
+					index=$((index + 1))
+					continue
+					;;
+				*) target="$token"; break ;;
+			esac
+		done
+	elif [[ "$interpreter" == python || "$interpreter" == python3 ]]; then
+		while (( index < end )); do
+			token="${shell_tokens[index]}"
+			if [[ "$token" == \<* ]]; then
+				fail "$source_relative:$line_number $interpreter redirected stdin execution is outside the bounded authored-CI contract"
+				return
+			fi
+			if [[ "$token" == -- ]]; then
+				index=$((index + 1))
+				if (( index < end )); then
+					target="${shell_tokens[index]}"
+				fi
+				break
+			fi
+			case "$token" in
+				-c|-m)
+					fail "$source_relative:$line_number $interpreter opaque code or module execution is outside the bounded authored-CI contract: $token"
+					return
+					;;
+				-)
+					fail "$source_relative:$line_number $interpreter stdin execution is outside the bounded authored-CI contract"
+					return
+					;;
+				-W|-X)
+					if (( index + 1 >= end )); then
+						fail "$source_relative:$line_number $interpreter option is missing its argument: $token"
+						return
+					fi
+					index=$((index + 2))
+					continue
+					;;
+				-W?*|-X?*|-B|-E|-I|-O|-OO|-q|-s|-S|-u|-v|-x)
+					index=$((index + 1))
+					continue
+					;;
+				-V|--version|-h|--help)
+					return
+					;;
+				-*)
+					fail "$source_relative:$line_number unsupported $interpreter option prevents bounded execution-target resolution: $token"
+					return
+					;;
+				*) target="$token"; break ;;
+			esac
+		done
+	elif [[ "$interpreter" == node ]]; then
+		while (( index < end )); do
+			token="${shell_tokens[index]}"
+			if [[ "$token" == \<* ]]; then
+				fail "$source_relative:$line_number Node redirected stdin execution is outside the bounded authored-CI contract"
+				return
+			fi
+			if [[ "$token" == -- ]]; then
+				index=$((index + 1))
+				if (( index < end )); then
+					target="${shell_tokens[index]}"
+				fi
+				break
+			fi
+			case "$token" in
+				-|--eval|--eval=*|--print|--print=*|--run|--run=*)
+					fail "$source_relative:$line_number Node opaque code, script-graph, or stdin execution is outside the bounded authored-CI contract: $token"
+					return
+					;;
+				-e|-p)
+					fail "$source_relative:$line_number Node inline code execution is outside the bounded authored-CI contract: $token"
+					return
+					;;
+				-r|--require|--import|--loader|--experimental-loader)
 					index=$((index + 1))
 					if (( index >= end )); then
-						if [[ "$strict" == true ]]; then
-							fail "$source_relative:$line_number Node preload option is missing its repository execution target"
-						fi
+						fail "$source_relative:$line_number Node preload option is missing its repository execution target"
 						return
 					fi
 					scan_execution_target "$source_relative" "$line_number" \
@@ -725,25 +810,80 @@ inspect_interpreter_target() {
 					index=$((index + 1))
 					continue
 					;;
-				node:--require=*|node:--import=*|node:--loader=*|node:--experimental-loader=*)
+				--require=*|--import=*|--loader=*|--experimental-loader=*)
 					scan_execution_target "$source_relative" "$line_number" \
 						"$working_directory" "${token#*=}" non-shell "$strict" "$mode"
 					index=$((index + 1))
 					continue
 					;;
+				--experimental-websocket)
+					index=$((index + 1))
+					continue
+					;;
+				-v|--version|-h|--help)
+					return
+					;;
+				-?*)
+					if [[ "$token" != --* ]]; then
+						option_flags="${token#-}"
+						if [[ "$option_flags" == *e* || "$option_flags" == *p* ]]; then
+							fail "$source_relative:$line_number Node inline code execution is outside the bounded authored-CI contract: $token"
+							return
+						fi
+					fi
+					fail "$source_relative:$line_number unsupported Node option prevents bounded execution-target resolution: $token"
+					return
+					;;
+				*) target="$token"; break ;;
 			esac
-			if [[ "$token" == -* ]]; then
-				index=$((index + 1))
-				continue
+		done
+	else
+		while (( index < end )); do
+			token="${shell_tokens[index]}"
+			if [[ "$token" == \<* ]]; then
+				fail "$source_relative:$line_number $interpreter redirected stdin execution is outside the bounded authored-CI contract"
+				return
 			fi
-			target="$token"
-			break
+			case "$token" in
+				-[Ff][Ii][Ll][Ee])
+					index=$((index + 1))
+					if (( index >= end )); then
+						fail "$source_relative:$line_number $interpreter -File is missing its repository execution target"
+						return
+					fi
+					target="${shell_tokens[index]}"
+					if [[ "$target" == - ]]; then
+						fail "$source_relative:$line_number $interpreter stdin execution is outside the bounded authored-CI contract"
+						return
+					fi
+					break
+					;;
+				-*)
+					fail "$source_relative:$line_number $interpreter command or encoded execution mode is outside the bounded authored-CI contract: $token"
+					return
+					;;
+				*) target="$token"; break ;;
+			esac
 		done
 	fi
 	if [[ -n "$target" ]]; then
 		scan_execution_target "$source_relative" "$line_number" \
 			"$working_directory" "$target" "$language" "$strict" "$mode"
+	elif [[ "$stdin_from_pipe" == true ]]; then
+		fail "$source_relative:$line_number $interpreter cannot consume executable stdin from a pipeline in the bounded authored-CI contract"
 	fi
+}
+
+supported_interpreter_name() {
+	local candidate="$1"
+
+	[[ "$candidate" == bash ]] ||
+		[[ "$candidate" == sh ]] ||
+		[[ "$candidate" == python ]] ||
+		[[ "$candidate" == python3 ]] ||
+		[[ "$candidate" == node ]] ||
+		[[ "$candidate" == pwsh ]] ||
+		[[ "$candidate" == powershell ]]
 }
 
 inspect_unsupported_execution_indirection() {
@@ -753,6 +893,7 @@ inspect_unsupported_execution_indirection() {
 	local strict="$4"
 	local start="$5"
 	local end="$6"
+	local stdin_from_pipe="${7:-false}"
 	local index=$((start + 1)) token command_name
 
 	# The command head is unsupported, so inspect later tokens only for the
@@ -760,6 +901,12 @@ inspect_unsupported_execution_indirection() {
 	while (( index < end )); do
 		token="${shell_tokens[index]}"
 		command_name="${token##*/}"
+		if supported_interpreter_name "$command_name"; then
+			inspect_interpreter_target "$source_relative" "$line_number" \
+				"$working_directory" "$strict" "$command_name" \
+				"$((index + 1))" "$end" reject-indirect "$stdin_from_pipe"
+			return
+		fi
 		case "$command_name" in
 			source|.)
 				index=$((index + 1))
@@ -770,10 +917,8 @@ inspect_unsupported_execution_indirection() {
 				fi
 				return
 				;;
-			bash|sh|python|python3|node|pwsh|powershell)
-				inspect_interpreter_target "$source_relative" "$line_number" \
-					"$working_directory" "$strict" "$command_name" \
-					"$((index + 1))" "$end" reject-indirect
+			$EVAL_COMMAND_NAME)
+				fail "$source_relative:$line_number shell eval is outside the bounded authored-CI execution contract"
 				return
 				;;
 		esac
@@ -795,6 +940,7 @@ inspect_shell_command_segment() {
 	local strict="$4"
 	local start="$5"
 	local end="$6"
+	local stdin_from_pipe="${7:-false}"
 	local index=$start token command_name
 
 	while (( index < end )) &&
@@ -896,6 +1042,12 @@ inspect_shell_command_segment() {
 	fi
 	token="${shell_tokens[index]}"
 	command_name="${token##*/}"
+	if supported_interpreter_name "$command_name"; then
+		inspect_interpreter_target "$source_relative" "$line_number" \
+			"$working_directory" "$strict" "$command_name" \
+			"$((index + 1))" "$end" scan "$stdin_from_pipe"
+		return
+	fi
 	case "$command_name" in
 		source|.)
 			index=$((index + 1))
@@ -904,10 +1056,8 @@ inspect_shell_command_segment() {
 					"$working_directory" "${shell_tokens[index]}" shell "$strict"
 			fi
 			;;
-		bash|sh|python|python3|node|pwsh|powershell)
-			inspect_interpreter_target "$source_relative" "$line_number" \
-				"$working_directory" "$strict" "$command_name" \
-				"$((index + 1))" "$end"
+		$EVAL_COMMAND_NAME)
+			fail "$source_relative:$line_number shell eval is outside the bounded authored-CI execution contract"
 			;;
 		go)
 			index=$((index + 1))
@@ -936,7 +1086,8 @@ inspect_shell_command_segment() {
 					"$working_directory" "$token" direct "$strict"
 			fi
 			inspect_unsupported_execution_indirection "$source_relative" \
-				"$line_number" "$working_directory" "$strict" "$index" "$end"
+				"$line_number" "$working_directory" "$strict" "$index" "$end" \
+				"$stdin_from_pipe"
 			;;
 	esac
 }
@@ -1088,7 +1239,7 @@ inspect_referenced_ci_helpers() {
 	local command="$3"
 	local working_directory="${4:-}"
 	local strict="${5:-false}"
-	local start=0 index
+	local start=0 index stdin_from_pipe=false
 
 	inspect_static_command_substitutions "$source_relative" "$line_number" \
 		"$command" "$working_directory" "$strict"
@@ -1103,7 +1254,14 @@ inspect_referenced_ci_helpers() {
 			shell_token_is_operator "${shell_tokens[index]}"; then
 			if (( start < index )); then
 				inspect_shell_command_segment "$source_relative" "$line_number" \
-					"$working_directory" "$strict" "$start" "$index"
+					"$working_directory" "$strict" "$start" "$index" \
+					"$stdin_from_pipe"
+			fi
+			stdin_from_pipe=false
+			if (( index < ${#shell_tokens[@]} )) &&
+				[[ "${shell_tokens[index]}" == '|' ||
+				"${shell_tokens[index]}" == '|&' ]]; then
+				stdin_from_pipe=true
 			fi
 			start=$((index + 1))
 		fi
