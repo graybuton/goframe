@@ -10,6 +10,10 @@ export GOCACHE="${GOCACHE:-/tmp/goframe-go-cache}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/goframe-tinygo-cache}"
 mkdir -p "$GOCACHE" "$XDG_CACHE_HOME"
 
+echo "== CI supply-chain gate =="
+scripts/ci-supply-chain-check.sh
+.github/scripts/ci-supply-chain-check.tests.sh
+
 echo "== Artifact gate =="
 scripts/artifact-check.sh
 
