@@ -387,6 +387,20 @@ write_shell_source() {
 	} > "$target"
 }
 
+write_extensionless_downloader_helper() {
+	local fixture="$1"
+	local shebang="$2"
+	local downloader="${3:-$CURL_COMMAND_NAME}"
+
+	write_repository_file "$fixture" scripts/helper \
+		"$shebang" \
+		'org=tinygo-org' \
+		'repo=tinygo' \
+		'url="https://github.com/$org/$repo/releases/download/v0.42.0/file"' \
+		"$downloader \"\$url\""
+	chmod +x "$fixture/scripts/helper"
+}
+
 add_workflow_script_invocation() {
 	local file="$1"
 	local command="$2"
@@ -685,6 +699,24 @@ expect_fail() {
 	tests_run=$((tests_run + 1))
 	if output="$("$BASH" "$CHECKER" "$fixture" 2>&1)"; then
 		printf 'not ok %d - %s unexpectedly passed\n%s\n' "$tests_run" "$name" "$output" >&2
+		exit 1
+	fi
+	printf 'ok %d - %s\n' "$tests_run" "$name"
+}
+
+expect_fail_in_helper() {
+	local name="$1"
+	local fixture="$2"
+	local output
+	tests_run=$((tests_run + 1))
+	if output="$("$BASH" "$CHECKER" "$fixture" 2>&1)"; then
+		printf 'not ok %d - %s unexpectedly passed\n%s\n' "$tests_run" "$name" "$output" >&2
+		exit 1
+	fi
+	if [[ "$output" != *'scripts/outer.sh:'* ||
+		"$output" != *'execution without a bounded script target'* ]]; then
+		printf 'not ok %d - %s failed outside the nested-shell boundary\n%s\n' \
+			"$tests_run" "$name" "$output" >&2
 		exit 1
 	fi
 	printf 'ok %d - %s\n' "$tests_run" "$name"
@@ -1441,6 +1473,164 @@ add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	"$BASH_COMMAND_NAME scripts/outer.sh"
 expect_fail "nested repository shell helper cannot consume opaque stdin" "$fixture"
 
+for context in simple sh conditional wrapper sudo timeout nice nohup stdbuf substitution backticks subshell pipeline heredoc; do
+	fixture="$(make_fixture "nested-targetless-$context" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" scripts/payload.txt 'printf "nested-stdin-executed\n"'
+	case "$context" in
+		simple) lines=("$BASH_COMMAND_NAME") ;;
+		sh) lines=("$SH_COMMAND_NAME") ;;
+		conditional) lines=("if $BASH_COMMAND_NAME; then" ':' 'fi') ;;
+		wrapper) lines=("env $BASH_COMMAND_NAME") ;;
+		sudo) lines=("sudo $BASH_COMMAND_NAME") ;;
+		timeout) lines=("timeout 30 $BASH_COMMAND_NAME") ;;
+		nice) lines=("nice $BASH_COMMAND_NAME") ;;
+		nohup) lines=("nohup $BASH_COMMAND_NAME") ;;
+		stdbuf) lines=("stdbuf -oL $BASH_COMMAND_NAME") ;;
+		substitution) lines=("result=\"\$($BASH_COMMAND_NAME)\"") ;;
+		backticks) lines=("result=\`$BASH_COMMAND_NAME\`") ;;
+		subshell) lines=("( $BASH_COMMAND_NAME )") ;;
+		pipeline) lines=('printf "printf ok\\n" |' "$BASH_COMMAND_NAME") ;;
+		heredoc) lines=('cat <<EOF' "\$($BASH_COMMAND_NAME)" 'EOF') ;;
+		esac
+	write_shell_source "$fixture" scripts/outer.sh "${lines[@]}"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"cat scripts/payload.txt | $BASH_COMMAND_NAME scripts/outer.sh"
+	expect_fail_in_helper "nested targetless shell in $context context rejects executable stdin" "$fixture"
+done
+
+fixture="$(make_fixture ansi-quoted-targetless-shell "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'printf "nested-stdin-executed\n"'
+write_shell_source "$fixture" scripts/outer.sh "\$'bash'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"cat scripts/payload.txt | $BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail_in_helper "ANSI-C quoted literal shell name cannot consume executable stdin" "$fixture"
+
+fixture="$(make_fixture ansi-quoted-concatenated-shell "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'printf "nested-stdin-executed\n"'
+write_shell_source "$fixture" scripts/outer.sh "ba\$'sh'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"cat scripts/payload.txt | $BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail_in_helper "concatenated ANSI-C quoted shell name cannot consume executable stdin" "$fixture"
+
+fixture="$(make_fixture continued-targetless-shell "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'printf "nested-stdin-executed\n"'
+write_shell_source "$fixture" scripts/outer.sh 'ba\' 'sh'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"cat scripts/payload.txt | $BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail_in_helper "line-continuation shell name cannot consume executable stdin" "$fixture"
+
+fixture="$(make_fixture double-quoted-continued-shell "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'printf "nested-stdin-executed\n"'
+write_shell_source "$fixture" scripts/outer.sh '"ba\' 'sh"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"cat scripts/payload.txt | $BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail_in_helper "double-quoted continued shell name cannot consume executable stdin" "$fixture"
+
+fixture="$(make_fixture ansi-quoted-shell-data "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh "printf '%s\\n' \$'bash'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_pass "ANSI-C quoted shell name as an argument remains data" "$fixture"
+
+fixture="$(make_fixture continued-shell-data "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh 'printf "%s\n" ba\' 'sh'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_pass "line-continued shell name as an argument remains data" "$fixture"
+
+fixture="$(make_fixture single-quoted-continued-shell-data "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh "printf '%s\\n' 'ba\\" "sh'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_pass "single-quoted backslash and newline remain inert data" "$fixture"
+
+fixture="$(make_fixture pipeline-inert-shell-argument "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh \
+	'printf ordinary | printf "%s\n" bash'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_pass "pipeline receiver treats printf shell-name argument as data" "$fixture"
+
+fixture="$(make_fixture pipeline-inert-echo-argument "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh \
+	'printf ordinary | echo bash'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_pass "pipeline receiver treats echo shell-name argument as data" "$fixture"
+
+fixture="$(make_fixture pipeline-inert-grep-pattern "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh \
+	'printf ordinary | grep bash'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_pass "pipeline receiver treats grep shell-name pattern as data" "$fixture"
+
+fixture="$(make_fixture shadowed-data-command "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/outer.sh \
+	'printf() { bash; }' \
+	'printf bash'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail_in_helper "shadowed data command cannot hide executable shell body" "$fixture"
+
+fixture="$(make_fixture nested-targetless-helper-redirection "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'printf "nested-stdin-executed\n"'
+write_shell_source "$fixture" scripts/outer.sh \
+	'exec < scripts/payload.txt' \
+	"$BASH_COMMAND_NAME"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail_in_helper "helper-level redirection cannot feed targetless shell" "$fixture"
+
+fixture="$(make_fixture nested-targetless-unknown-extension "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'printf "nested-stdin-executed\n"'
+write_shell_source "$fixture" scripts/outer.sh 'bash scripts/middle.inc'
+write_repository_file "$fixture" scripts/middle.inc "$BASH_COMMAND_NAME"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"cat scripts/payload.txt | $BASH_COMMAND_NAME scripts/outer.sh"
+tests_run=$((tests_run + 1))
+if output="$("$BASH" "$CHECKER" "$fixture" 2>&1)"; then
+	printf 'not ok %d - recursively scanned unknown-extension shell target unexpectedly passed\n%s\n' \
+		"$tests_run" "$output" >&2
+	exit 1
+fi
+if [[ "$output" != *'scripts/middle.inc:'* ||
+	"$output" != *'execution without a bounded script target'* ]]; then
+	printf 'not ok %d - unknown-extension shell target failed outside its nested boundary\n%s\n' \
+		"$tests_run" "$output" >&2
+	exit 1
+fi
+printf 'ok %d - recursively scanned unknown-extension shell target\n' "$tests_run"
+
+fixture="$(make_fixture bounded-shell-with-stdin-data "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'ordinary fixture data'
+write_shell_source "$fixture" scripts/reader.sh 'cat'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/reader.sh < scripts/payload.txt"
+expect_pass "explicit shell script target may receive ordinary stdin data" "$fixture"
+
+fixture="$(make_fixture inert-targetless-shell-data "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/payload.txt 'ordinary fixture data'
+write_shell_source "$fixture" scripts/outer.sh \
+	"printf '%s\\n' '$BASH_COMMAND_NAME'" \
+	"cat <<'EOF'" \
+	"$BASH_COMMAND_NAME" \
+	"$CURL_COMMAND_NAME" \
+	'EOF' \
+	'cat < scripts/payload.txt'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_pass "quoted names, quoted heredocs, and benign stdin readers remain data" "$fixture"
+
+fixture="$(make_fixture malformed-repository-shell "$FULL_ACTION_REF")"
+write_shell_source "$fixture" scripts/invalid.sh 'if then'
+expect_fail "malformed tracked shell source blocks parser coverage" "$fixture"
+
+fixture="$(make_fixture malformed-workflow-shell "$FULL_ACTION_REF")"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'if then'
+expect_fail "malformed executable run body blocks parser coverage" "$fixture"
+
 fixture="$(make_fixture inert-opaque-text "$FULL_ACTION_REF")"
 add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	"echo '$BASH_COMMAND_NAME $SHELL_CODE_OPTION \"bash scripts/bootstrap.inc\"'"
@@ -1463,6 +1653,110 @@ add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
 	"$PWSH_COMMAND_NAME -fIlE tools/example.ps1"
 expect_pass "supported interpreter file and introspection modes remain accepted" "$fixture"
+
+for option in --rcfile --init-file; do
+	fixture="$(make_fixture "bash-option-arity-$option" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" scripts/benign.sh 'printf "benign\n"'
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"$BASH_COMMAND_NAME $option scripts/benign.sh $SHELL_CODE_OPTION 'printf ok'"
+	expect_fail "$option cannot hide later command-string execution" "$fixture"
+done
+
+fixture="$(make_fixture wrapped-bash-option-arity "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/benign.sh 'printf "benign\n"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"env $BASH_COMMAND_NAME --rcfile scripts/benign.sh $SHELL_CODE_OPTION 'printf ok'"
+expect_fail "env wrapper cannot hide Bash command-string execution" "$fixture"
+
+fixture="$(make_fixture nested-bash-option-arity "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/benign.sh 'printf "benign\n"'
+write_shell_source "$fixture" scripts/outer.sh \
+	"$BASH_COMMAND_NAME --init-file scripts/benign.sh $SHELL_CODE_OPTION 'printf ok'"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME scripts/outer.sh"
+expect_fail "nested shell helper cannot hide Bash command-string execution" "$fixture"
+
+for option in -i -l --login --debugger -eil; do
+	fixture="$(make_fixture "bash-startup-mode-$option" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" scripts/example.sh 'printf "benign\n"'
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"$BASH_COMMAND_NAME $option scripts/example.sh"
+	expect_fail "unsupported Bash startup mode $option" "$fixture"
+done
+
+fixture="$(make_fixture unknown-bash-long-option "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/example.sh 'printf "benign\n"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME --something-unknown scripts/example.sh $SHELL_CODE_OPTION 'printf ok'"
+expect_fail "unknown Bash long option cannot hide later execution" "$fixture"
+
+for option in \
+	'--rcfile=scripts/benign.sh' \
+	'--init-file=scripts/benign.sh' \
+	'-O extglob'; do
+	fixture="$(make_fixture "bash-option-variant-$tests_run" "$FULL_ACTION_REF")"
+	write_repository_file "$fixture" scripts/benign.sh 'printf "benign\n"'
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"$BASH_COMMAND_NAME $option $SHELL_CODE_OPTION 'printf ok'"
+	expect_fail "unsupported Bash option variant $option" "$fixture"
+done
+
+fixture="$(make_fixture sh-rejects-bash-long-option "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/example.sh 'printf "benign\n"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$SH_COMMAND_NAME --noprofile scripts/example.sh"
+expect_fail "sh does not accept Bash-only long options" "$fixture"
+
+for interpreter in "$BASH_COMMAND_NAME" "$SH_COMMAND_NAME"; do
+	fixture="$(make_fixture "bare-interpreter-$interpreter" "$FULL_ACTION_REF")"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		"$interpreter"
+	expect_fail "$interpreter without a bounded target is rejected" "$fixture"
+done
+
+fixture="$(make_fixture supported-shell-option-forms "$FULL_ACTION_REF")"
+write_repository_file "$fixture" scripts/example.sh 'printf "benign\n"'
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME -eu scripts/example.sh"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$BASH_COMMAND_NAME -- scripts/example.sh"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	"$SH_COMMAND_NAME -e scripts/example.sh"
+expect_pass "bounded Bash and sh target options remain accepted" "$fixture"
+
+for shebang in \
+	'#!/usr/bin/env sh' \
+	'#!/usr/bin/env -S sh -e' \
+	'#!/bin/sh' \
+	'#!/usr/bin/sh' \
+	'#!/bin/bash' \
+	'#!/usr/bin/bash' \
+	'#!/usr/bin/env bash' \
+	'#!/usr/bin/env -S bash -e'; do
+	fixture="$(make_fixture "extensionless-shell-$tests_run" "$FULL_ACTION_REF")"
+	write_extensionless_downloader_helper "$fixture" "$shebang"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		'./scripts/helper'
+	expect_fail "extensionless shell helper with $shebang is inspected" "$fixture"
+done
+
+fixture="$(make_fixture extensionless-env-sh-wrapped "$FULL_ACTION_REF")"
+write_extensionless_downloader_helper "$fixture" '#!/usr/bin/env sh' "$WGET_COMMAND_NAME"
+add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+	'env ./scripts/helper'
+expect_fail "env-wrapped extensionless sh helper is inspected" "$fixture"
+
+for shebang in \
+	'#!/usr/bin/nobash' \
+	'#!/usr/bin/env nobash' \
+	'#!/usr/bin/env bashful' \
+	'#!/usr/bin/env sh-wrapper'; do
+	fixture="$(make_fixture "extensionless-non-shell-$tests_run" "$FULL_ACTION_REF")"
+	write_extensionless_downloader_helper "$fixture" "$shebang"
+	add_workflow_script_invocation "$fixture/.github/workflows/ci-core.yml" \
+		'./scripts/helper'
+	expect_pass "near-match interpreter $shebang remains non-shell" "$fixture"
+done
 
 for primitive in python python3 node pwsh powershell; do
 	fixture="$(make_fixture "interpreted-helper-$primitive" "$FULL_ACTION_REF")"

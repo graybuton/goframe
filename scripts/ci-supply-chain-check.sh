@@ -48,6 +48,15 @@ fail() {
 	failures=1
 }
 
+shell_context_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.github/tools/shell-context" && pwd)"
+shell_context_tmp="$(mktemp -d)"
+trap 'rm -rf "$shell_context_tmp"' EXIT
+if ! (cd "$shell_context_dir" && GOTOOLCHAIN=local go mod verify &&
+	GOTOOLCHAIN=local go build -mod=readonly -o "$shell_context_tmp/shell-context" .); then
+	fail "could not verify and build the pinned shell execution-context parser"
+	exit 1
+fi
+
 trim_whitespace() {
 	local value="$1"
 	value="${value#"${value%%[![:space:]]*}"}"
@@ -224,6 +233,14 @@ inspect_shell_logical_command() {
 	inspect_referenced_ci_helpers \
 		"$relative" "$line_number" "$command" "$working_directory" \
 		"$strict_helpers"
+	inspect_shell_downloader "$relative" "$line_number" "$command"
+}
+
+inspect_shell_downloader() {
+	local relative="$1"
+	local line_number="$2"
+	local command="$3"
+
 	if [[ -z "$command" ]] || ! shell_command_has_downloader_token "$command"; then
 		return
 	fi
@@ -344,23 +361,15 @@ scan_shell_downloaders() {
 	local relative="$2"
 	local working_directory="${3:-}"
 	local strict_helpers="${4:-false}"
-	local line line_number=0
-
-	reset_shell_logical_command
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		line_number=$((line_number + 1))
-		consume_shell_physical_line \
-			"$relative" "$line_number" "$line" "$working_directory" \
-			"$strict_helpers"
-	done < "$file"
-	flush_shell_logical_command \
-		"$relative" "$working_directory" "$strict_helpers"
+	inspect_syntax_aware_shell_source "$relative" 1 \
+		"$working_directory" "$strict_helpers" < "$file"
 }
 
 repository_file_is_shell_source() {
 	local relative="$1"
 	local file="$2"
-	local first_line
+	local first_line name
+	local -a words=()
 
 	case "$relative" in
 		*.sh|*.bash) return 0 ;;
@@ -369,8 +378,22 @@ repository_file_is_shell_source() {
 		return 1
 	fi
 	IFS= read -r first_line < "$file" || true
-	[[ "$first_line" =~ ^\#!.*bash([[:space:]]|$) ||
-		"$first_line" =~ ^\#!.*/sh([[:space:]]|$) ]]
+	[[ "$first_line" == '#!'* ]] || return 1
+	IFS=$' \t' read -r -a words <<< "${first_line#\#!}"
+	case "${words[0]:-}" in
+		/bin/sh) return 0 ;;
+		/usr/bin/sh) return 0 ;;
+		/bin/bash) return 0 ;;
+		/usr/bin/bash) return 0 ;;
+		/usr/bin/env) ;;
+		*) return 1 ;;
+	esac
+	if [[ "${words[1]:-}" == -S ]]; then
+		name="${words[2]:-}"
+	else
+		name="${words[1]:-}"
+	fi
+	[[ "$name" == sh || "$name" == bash ]]
 }
 
 repository_file_is_helper_source() {
@@ -677,6 +700,7 @@ inspect_interpreter_target() {
 	local end="$7"
 	local mode="${8:-scan}"
 	local stdin_from_pipe="${9:-false}"
+	local known_wrapper="${10:-false}"
 	local index=$start token target="" language=non-shell option_flags
 
 	if [[ "$interpreter" == bash || "$interpreter" == sh ]]; then
@@ -703,34 +727,73 @@ inspect_interpreter_target() {
 					fail "$source_relative:$line_number $interpreter command-string execution is outside the bounded authored-CI contract"
 					return
 					;;
-				-o|-O)
-					if (( index + 1 >= end )); then
-						if [[ "$strict" == true ]]; then
-							fail "$source_relative:$line_number $interpreter option is missing its argument: $token"
-						fi
+				--rcfile|--rcfile=*|--init-file|--init-file=*|--debugger|--login)
+					fail "$source_relative:$line_number $interpreter startup mode is outside the bounded authored-CI contract: $token"
+					return
+					;;
+				--noprofile|--norc)
+					if [[ "$interpreter" != bash ]]; then
+						fail "$source_relative:$line_number unsupported $interpreter option prevents bounded execution-target resolution: $token"
+						return
+					fi
+					index=$((index + 1))
+					continue
+					;;
+				--version|--help)
+					if [[ "$interpreter" != bash ]] || (( index + 1 < end )); then
+						fail "$source_relative:$line_number unsupported $interpreter introspection form: $token"
+					fi
+					return
+					;;
+				-o)
+					if [[ "$interpreter" != bash ]] || (( index + 1 >= end )) ||
+						[[ "${shell_tokens[index+1]}" != pipefail ]]; then
+						fail "$source_relative:$line_number unsupported $interpreter option or missing pipefail argument: $token"
 						return
 					fi
 					index=$((index + 2))
 					continue
 					;;
+				-O)
+					fail "$source_relative:$line_number unsupported $interpreter startup option: $token"
+					return
+					;;
 				-?*)
-					if [[ "$token" != --* ]]; then
-						option_flags="${token#-}"
-						if [[ "$option_flags" == *c* ]]; then
-							fail "$source_relative:$line_number $interpreter command-string execution is outside the bounded authored-CI contract: $token"
-							return
-						fi
-						if [[ "$option_flags" == *s* ]]; then
-							fail "$source_relative:$line_number $interpreter stdin execution is outside the bounded authored-CI contract: $token"
-							return
-						fi
+					option_flags="${token#-}"
+					if [[ "$option_flags" == *c* ]]; then
+						fail "$source_relative:$line_number $interpreter command-string execution is outside the bounded authored-CI contract: $token"
+						return
 					fi
-					index=$((index + 1))
-					continue
+					if [[ "$option_flags" == *s* ]]; then
+						fail "$source_relative:$line_number $interpreter stdin execution is outside the bounded authored-CI contract: $token"
+						return
+					fi
+					if [[ "$option_flags" == *i* || "$option_flags" == *l* ]]; then
+						fail "$source_relative:$line_number $interpreter startup mode is outside the bounded authored-CI contract: $token"
+						return
+					fi
+					if [[ "$interpreter" == bash && "$option_flags" =~ ^[eunpxv]+$ ]] ||
+						[[ "$interpreter" == sh && "$option_flags" =~ ^[eunxv]+$ ]]; then
+						index=$((index + 1))
+						continue
+					fi
+					fail "$source_relative:$line_number unsupported $interpreter option prevents bounded execution-target resolution: $token"
+					return
 					;;
 				*) target="$token"; break ;;
 			esac
 		done
+		if [[ -z "$target" ]]; then
+			if [[ "$mode" == scan || "$known_wrapper" == true ||
+				"$stdin_from_pipe" == true ]]; then
+				fail "$source_relative:$line_number $interpreter execution without a bounded script target is unsupported"
+			fi
+			return
+		fi
+		if [[ "$target" == - ]]; then
+			fail "$source_relative:$line_number $interpreter stdin execution is outside the bounded authored-CI contract"
+			return
+		fi
 	elif [[ "$interpreter" == python || "$interpreter" == python3 ]]; then
 		while (( index < end )); do
 			token="${shell_tokens[index]}"
@@ -894,7 +957,17 @@ inspect_unsupported_execution_indirection() {
 	local start="$5"
 	local end="$6"
 	local stdin_from_pipe="${7:-false}"
-	local index=$((start + 1)) token command_name
+	local index=$((start + 1)) token command_name known_wrapper=false
+
+	case "${shell_tokens[start]##*/}" in
+		printf|echo|grep)
+			# These data consumers do not execute their arguments as shell targets.
+			return
+			;;
+		sudo|timeout|nice|nohup|stdbuf|xargs)
+			known_wrapper=true
+			;;
+	esac
 
 	# The command head is unsupported, so inspect later tokens only for the
 	# repository execution shapes that the canonical grammar already owns.
@@ -904,7 +977,8 @@ inspect_unsupported_execution_indirection() {
 		if supported_interpreter_name "$command_name"; then
 			inspect_interpreter_target "$source_relative" "$line_number" \
 				"$working_directory" "$strict" "$command_name" \
-				"$((index + 1))" "$end" reject-indirect "$stdin_from_pipe"
+				"$((index + 1))" "$end" reject-indirect "$stdin_from_pipe" \
+				"$known_wrapper"
 			return
 		fi
 		case "$command_name" in
@@ -1268,6 +1342,114 @@ inspect_referenced_ci_helpers() {
 	done
 }
 
+inspect_syntax_aware_shell_source() {
+	local relative="$1"
+	local base_line="$2"
+	local working_directory="$3"
+	local strict="$4"
+	local events record line pipe_input redirect_input assign_count word_count word command
+	local expected count=0 completed=false index
+	local -a raw_words=() parsed_words=() shell_tokens=()
+
+	events="$(mktemp "$shell_context_tmp/events.XXXXXX")"
+	if ! "$shell_context_tmp/shell-context" "$relative" > "$events"; then
+		fail "$relative:$base_line shell execution-context parsing failed"
+		rm -f "$events"
+		return
+	fi
+	while IFS= read -r -d '' record; do
+		case "$record" in
+			C)
+				if ! IFS= read -r -d '' line ||
+					! IFS= read -r -d '' pipe_input ||
+					! IFS= read -r -d '' redirect_input ||
+					! IFS= read -r -d '' assign_count ||
+					! IFS= read -r -d '' word_count ||
+					[[ ! "$line" =~ ^[1-9][0-9]*$ ||
+					! "$word_count" =~ ^[1-9][0-9]*$ ||
+					! "$assign_count" =~ ^[0-9]+$ ||
+					( "$pipe_input" != true && "$pipe_input" != false ) ||
+					( "$redirect_input" != true && "$redirect_input" != false ) ]] ||
+					(( assign_count > word_count )); then
+					fail "$relative:$base_line malformed shell parser event"
+					break
+				fi
+				raw_words=()
+				for ((index = 0; index < word_count; index++)); do
+					if ! IFS= read -r -d '' word; then
+						fail "$relative:$base_line incomplete shell parser word record"
+						break
+					fi
+					raw_words[${#raw_words[@]}]="$word"
+				done
+				if (( ${#raw_words[@]} != word_count )) ||
+					! IFS= read -r -d '' command; then
+					fail "$relative:$base_line incomplete shell parser command record"
+					break
+				fi
+				parsed_words=()
+				for word in "${raw_words[@]}"; do
+					if (( ${#parsed_words[@]} < assign_count )); then
+						parsed_words[${#parsed_words[@]}]="$word"
+						continue
+					fi
+					if ! tokenize_shell_command "$word"; then
+						fail "$relative:$base_line cannot decode shell parser word"
+						break
+					fi
+					if (( ${#shell_tokens[@]} == 1 )); then
+						parsed_words[${#parsed_words[@]}]="${shell_tokens[0]}"
+					elif (( ${#shell_tokens[@]} == 0 )) &&
+						[[ "$word" == "''" || "$word" == '""' ]]; then
+						parsed_words[${#parsed_words[@]}]=""
+					elif [[ "$word" == *'$('* || "$word" == *'`'* ||
+						"$word" == *'<('* || "$word" == *'>('* ]]; then
+						# Nested executable calls are emitted separately by the AST walk.
+						parsed_words[${#parsed_words[@]}]="$word"
+					else
+						fail "$relative:$base_line cannot decode shell parser word boundary"
+						break
+					fi
+				done
+				if (( ${#parsed_words[@]} != word_count )); then
+					break
+				fi
+				shell_tokens=("${parsed_words[@]}")
+				if [[ "$redirect_input" == true ]]; then
+					shell_tokens[${#shell_tokens[@]}]='<stdin'
+				fi
+				line=$((base_line + line - 1))
+				inspect_shell_command_segment "$relative" "$line" \
+					"$working_directory" "$strict" 0 "${#shell_tokens[@]}" "$pipe_input"
+				inspect_shell_downloader "$relative" "$line" "$command"
+				count=$((count + 1))
+				;;
+			E)
+				if ! IFS= read -r -d '' expected ||
+					[[ "$expected" != "$count" ]]; then
+					fail "$relative:$base_line incomplete shell parser coverage"
+				else
+					completed=true
+				fi
+				local trailing=""
+				if IFS= read -r -d '' trailing || [[ -n "$trailing" ]]; then
+					fail "$relative:$base_line trailing shell parser output"
+					completed=false
+				fi
+				break
+				;;
+			*)
+				fail "$relative:$base_line unknown shell parser record"
+				break
+				;;
+		esac
+	done < "$events"
+	if [[ "$completed" != true ]]; then
+		fail "$relative:$base_line shell parser output has no completion record"
+	fi
+	rm -f "$events"
+}
+
 enumerate_repository_files() {
 	if [[ "$repository_uses_git_inventory" == true ]]; then
 		git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard || return
@@ -1382,6 +1564,7 @@ ci_step_shell_line=()
 ci_step_run_count=()
 ci_step_run_value=()
 ci_step_run_line=()
+ci_step_run_indent=()
 ci_step_directory_count=()
 ci_step_directory_value=()
 ci_step_directory_line=()
@@ -1393,6 +1576,7 @@ ci_step_uses_comment_is_yaml=()
 ci_run_step=()
 ci_run_line=()
 ci_run_text=()
+ci_run_raw=()
 
 register_ci_file() {
 	local relative="$1"
@@ -1476,6 +1660,7 @@ register_ci_step() {
 	ci_step_run_count[ci_current_step]=0
 	ci_step_run_value[ci_current_step]=""
 	ci_step_run_line[ci_current_step]=0
+	ci_step_run_indent[ci_current_step]=0
 	ci_step_directory_count[ci_current_step]=0
 	ci_step_directory_value[ci_current_step]=""
 	ci_step_directory_line[ci_current_step]=0
@@ -1595,6 +1780,7 @@ parse_authored_ci_file() {
 				ci_run_step[${#ci_run_step[@]}]="$scalar_step"
 				ci_run_line[${#ci_run_line[@]}]="$line_number"
 				ci_run_text[${#ci_run_text[@]}]="$syntax"
+				ci_run_raw[${#ci_run_raw[@]}]="$line"
 			fi
 			continue
 		fi
@@ -1753,6 +1939,9 @@ parse_authored_ci_file() {
 		if (( active_step >= 0 && key_indent == active_step_indent )); then
 			record_ci_step_property "$active_step" "$key" "$value" \
 				"$line_number" "$comment" "$comment_is_yaml"
+			if [[ "$key" == run ]]; then
+				ci_step_run_indent[active_step]=$key_indent
+			fi
 		fi
 
 		if [[ "$value" =~ $yaml_block_scalar_re ]]; then
@@ -1899,28 +2088,138 @@ scan_ci_step_run() {
 	local step_index="$1"
 	local relative="${ci_files[${ci_step_file[step_index]}]}"
 	local directory="$2"
-	local value index
+	local value index line raw indent body_indent=-1 base_line=0 script="" shell=""
+	local previous="" blanks=0 have_previous=false
+	local indent_indicator_re='^[|>][+-]?([1-9])'
+	local -a body_lines=()
+	local file_index=${ci_step_file[step_index]}
+	local job_index=${ci_step_job[step_index]}
 
 	if (( ci_step_run_count[step_index] != 1 )); then
 		return
 	fi
 	value=${ci_step_run_value[step_index]}
+	if (( ci_file_default_shell_count[file_index] == 1 )); then
+		shell=${ci_file_default_shell_value[file_index]}
+	fi
+	if (( job_index >= 0 )) &&
+		(( ci_job_default_shell_count[job_index] == 1 )); then
+		shell=${ci_job_default_shell_value[job_index]}
+	fi
+	if (( ci_step_shell_count[step_index] == 1 )); then
+		shell=${ci_step_shell_value[step_index]}
+	fi
+	shell="$(unquote_yaml_scalar "$shell")"
+	if [[ "$shell" == pwsh || "$shell" == powershell ||
+		"$shell" == pwsh\ * || "$shell" == powershell\ * ]]; then
+		# PowerShell policy remains on its existing, separate path.
+		if [[ "$value" =~ $yaml_block_scalar_re ]]; then
+			for ((index = 0; index < ${#ci_run_step[@]}; index++)); do
+				if [[ "${ci_run_step[index]}" == "$step_index" ]]; then
+					consume_shell_physical_line "$relative" "${ci_run_line[index]}" \
+						"${ci_run_text[index]}" "$directory" true
+				fi
+			done
+		else
+			consume_shell_physical_line "$relative" "${ci_step_run_line[step_index]}" \
+					"$(unquote_yaml_scalar "$value")" "$directory" true
+		fi
+		flush_shell_logical_command "$relative" "$directory" true
+		return
+	fi
 	reset_shell_logical_command
 	if [[ "$value" =~ $yaml_block_scalar_re ]]; then
+		if [[ "$value" =~ $indent_indicator_re ]]; then
+			body_indent=$((ci_step_run_indent[step_index] + BASH_REMATCH[1]))
+		fi
 		for ((index = 0; index < ${#ci_run_step[@]}; index++)); do
 			if [[ "${ci_run_step[index]}" != "$step_index" ]]; then
 				continue
 			fi
-			consume_shell_physical_line "$relative" "${ci_run_line[index]}" \
-				"${ci_run_text[index]}" "$directory" true
+			raw=${ci_run_raw[index]}
+			if (( base_line == 0 )); then
+				base_line=${ci_run_line[index]}
+			fi
+			if [[ -n "$(trim_whitespace "$raw")" && body_indent -lt 0 ]]; then
+				indent=${raw%%[![:space:]]*}
+				body_indent=${#indent}
+			fi
+			if (( body_indent >= 0 )); then
+				if [[ -n "$(trim_whitespace "$raw")" ]]; then
+					indent=${raw%%[![:space:]]*}
+					if (( ${#indent} < body_indent )); then
+						fail "$relative:${ci_run_line[index]} malformed run block indentation"
+						return
+					fi
+				fi
+				if [[ -n "$(trim_whitespace "$raw")" ]]; then
+					line=${raw:body_indent}
+				else
+					line=""
+				fi
+			else
+				line=""
+			fi
+			body_lines[${#body_lines[@]}]="$line"
 		done
-		flush_shell_logical_command "$relative" "$directory" true
+		if [[ "$value" == '>'* ]]; then
+			for line in "${body_lines[@]}"; do
+				if [[ -z "$line" ]]; then
+					blanks=$((blanks + 1))
+					continue
+				fi
+				if [[ "$have_previous" == true ]]; then
+					if (( blanks > 0 )); then
+						while (( blanks > 0 )); do
+							script+=$'\n'
+							blanks=$((blanks - 1))
+						done
+					elif [[ "$previous" == [[:space:]]* ||
+						"$line" == [[:space:]]* ]]; then
+						script+=$'\n'
+					else
+						script+=" "
+					fi
+				else
+					while (( blanks > 0 )); do
+						script+=$'\n'
+						blanks=$((blanks - 1))
+					done
+				fi
+				script+="$line"
+				previous="$line"
+				have_previous=true
+			done
+			script+=$'\n'
+		else
+			for line in "${body_lines[@]}"; do
+				script+="$line"$'\n'
+			done
+		fi
 	else
-		value="$(unquote_yaml_scalar "$value")"
-		consume_shell_physical_line "$relative" "${ci_step_run_line[step_index]}" \
-			"$value" "$directory" true
-		flush_shell_logical_command "$relative" "$directory" true
+		base_line=${ci_step_run_line[step_index]}
+		script="$(unquote_yaml_scalar "$value")"$'\n'
 	fi
+	if (( base_line == 0 )); then
+		base_line=${ci_step_run_line[step_index]}
+	fi
+	inspect_syntax_aware_shell_source "$relative" "$base_line" \
+		"$directory" true <<< "$script"
+}
+
+inspect_ci_shell_template() {
+	local relative="$1"
+	local line_number="$2"
+	local shell_value="$3"
+	local directory="$4"
+	local selector
+
+	selector="$(unquote_yaml_scalar "$shell_value")"
+	if [[ "$selector" == bash || "$selector" == sh ]]; then
+		shell_value="$selector {0}"
+	fi
+	inspect_shell_logical_command "$relative" "$line_number" \
+		"$shell_value" "$directory" true
 }
 
 apply_authored_execution_policy() {
@@ -1940,7 +2239,7 @@ apply_authored_execution_policy() {
 			elif [[ "$shell" == *'${{'* ]]; then
 				fail "${ci_files[file_index]}:${ci_file_default_shell_line[file_index]} dynamic workflow defaults.run.shell is outside the bounded execution contract"
 			else
-				inspect_shell_logical_command "${ci_files[file_index]}" \
+				inspect_ci_shell_template "${ci_files[file_index]}" \
 					"${ci_file_default_shell_line[file_index]}" "$shell" "$directory" true
 			fi
 		fi
@@ -1963,7 +2262,7 @@ apply_authored_execution_policy() {
 			elif [[ "$shell" == *'${{'* ]]; then
 				fail "${ci_files[file_index]}:${ci_job_default_shell_line[job_index]} dynamic job defaults.run.shell is outside the bounded execution contract"
 			else
-				inspect_shell_logical_command "${ci_files[file_index]}" \
+				inspect_ci_shell_template "${ci_files[file_index]}" \
 					"${ci_job_default_shell_line[job_index]}" "$shell" "$directory" true
 			fi
 		fi
@@ -1982,7 +2281,7 @@ apply_authored_execution_policy() {
 			elif [[ "$shell" == *'${{'* ]]; then
 				fail "$relative:${ci_step_shell_line[index]} dynamic step shell is outside the bounded execution contract"
 			else
-				inspect_shell_logical_command "$relative" \
+				inspect_ci_shell_template "$relative" \
 					"${ci_step_shell_line[index]}" "$shell" "$directory" true
 			fi
 		fi
