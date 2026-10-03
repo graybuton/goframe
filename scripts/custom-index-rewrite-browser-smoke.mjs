@@ -25,6 +25,15 @@ if (compiler !== "go" && compiler !== "tinygo") {
     throw new Error(`HARNESS FAILURE: unsupported compiler ${JSON.stringify(compiler)}`);
 }
 
+// Upper bounds, not expectations: a stuck operation must fail with its stage
+// name instead of staying silent until the CI job limit.
+const commandTimeoutMS = 5 * 60 * 1000;
+const commandKillGraceMS = 5 * 1000;
+const cdpCallTimeoutMS = 30 * 1000;
+const fetchTimeoutMS = 10 * 1000;
+const startedAt = Date.now();
+let currentStage = "startup";
+
 const authoredSentinels = [
     "<!-- authored sentinel: bundle.wasm wasm_exec.js styles.css -->",
     '<script type="application/json" id="fixture-json">{"asset":"bundle.wasm","runtime":"wasm_exec.js"}</script>',
@@ -109,16 +118,23 @@ try {
     profile = await mkdtemp(join(tmpdir(), "goframe-custom-index-chrome-"));
     const scenarios = [];
     for (const mode of ["marker", "legacy"]) {
+        stage(`prepare scenario ${mode}`);
         scenarios.push(await prepareScenario(mode));
     }
+    stage("prepare scenario generated-url");
     const generatedURLScenario = await prepareGeneratedURLScenario();
+    stage("prepare scenario base-target");
     const targetOnlyFixture = await prepareVariantFixture("base-target", "base-target.html");
     const targetOnlyScenario = await prepareScenario("base-target", targetOnlyFixture, "marker");
+    stage("negative active-base managed package");
     const negativeManaged = await verifyActiveBaseManagedFailure(targetOnlyScenario);
+    stage("negative managed-structure packages");
     const negativeManagedStructure = await verifyManagedStructureFailures(targetOnlyScenario);
     scenarios.push(targetOnlyScenario);
+    stage("prepare scenario base-authored");
     const authoredBase = await prepareAuthoredBaseScenario();
 
+    stage("start Chrome");
     browser = await startBrowser(chrome, [
         "--headless",
         "--no-sandbox",
@@ -149,17 +165,26 @@ try {
     await client.call("Runtime.enable");
     await client.call("Page.enable");
     await client.call("Network.enable");
+    stage("oracle attribute");
     const attributeOracle = await runAttributeOracle();
+    stage("oracle managed span tree");
     const managedSpanOracle = await runManagedSpanTreeOracle();
+    stage("oracle managed-first semantic");
     const semanticOracle = await runManagedFirstSemanticOracle();
+    stage("oracle base resolution");
     const baseOracle = await runBaseResolutionOracle();
+    stage("oracle generated JavaScript source");
     const javascriptSourceOracle = runGeneratedJavaScriptSourceOracle(generatedURLScenario);
 
     for (const scenario of scenarios) {
+        stage(`browser scenario ${scenario.mode}`);
         scenario.browser = await runBrowserScenario(scenario);
     }
+    stage("browser scenario generated-url");
     generatedURLScenario.browser = await runGeneratedURLBrowserScenario(generatedURLScenario);
+    stage("browser scenario base-authored");
     authoredBase.browser = await runAuthoredBaseBrowserScenario(authoredBase);
+    stage("report");
 
     const stableScenarios = scenarios.map((scenario) => ({
         mode: scenario.mode,
@@ -1978,6 +2003,7 @@ async function runManagedFirstSemanticOracle() {
         const schedulesBeforeUnknown = orderedRuntimeSchedules.length;
         const unknownResponse = await fetch(
             `${origin}/ordered-runtime/unknown.js?delay=999999`,
+            { signal: AbortSignal.timeout(fetchTimeoutMS) },
         );
         assert(unknownResponse.status === 404, "unknown ordered runtime resource was not rejected");
         await unknownResponse.text();
@@ -2177,7 +2203,10 @@ async function waitForServer(port, child) {
             throw new Error(`HARNESS FAILURE: goxc serve exited before readiness\n${serverError}`);
         }
         try {
-            const response = await fetch(`http://127.0.0.1:${port}/`, { cache: "no-store" });
+            const response = await fetch(`http://127.0.0.1:${port}/`, {
+                cache: "no-store",
+                signal: AbortSignal.timeout(fetchTimeoutMS),
+            });
             if (response.ok) return;
         } catch (error) {
             lastError = error;
@@ -2205,7 +2234,9 @@ async function waitForPage(port) {
             throw new Error(`HARNESS FAILURE: Chrome exited before CDP was ready\n${browserError}`);
         }
         try {
-            const response = await fetch(`http://127.0.0.1:${port}/json`);
+            const response = await fetch(`http://127.0.0.1:${port}/json`, {
+                signal: AbortSignal.timeout(fetchTimeoutMS),
+            });
             const targets = await response.json();
             const page = targets.find((entry) => entry.type === "page" && entry.webSocketDebuggerUrl);
             if (page) return page;
@@ -2220,8 +2251,18 @@ async function waitForPage(port) {
 async function connect(url) {
     const socket = new WebSocket(url);
     await new Promise((resolveOpen, reject) => {
-        socket.addEventListener("open", resolveOpen, { once: true });
-        socket.addEventListener("error", reject, { once: true });
+        const timer = setTimeout(() => {
+            reject(new Error(`HARNESS FAILURE: CDP socket did not open within ${cdpCallTimeoutMS}ms`));
+            socket.close();
+        }, cdpCallTimeoutMS);
+        socket.addEventListener("open", () => {
+            clearTimeout(timer);
+            resolveOpen();
+        }, { once: true });
+        socket.addEventListener("error", (event) => {
+            clearTimeout(timer);
+            reject(event);
+        }, { once: true });
     });
     let nextID = 1;
     let closedError = null;
@@ -2252,12 +2293,28 @@ async function connect(url) {
             if (closedError) return Promise.reject(closedError);
             return new Promise((resolveCall, reject) => {
                 const id = nextID++;
-                pending.set(id, { resolve: resolveCall, reject });
+                const stageName = currentStage;
+                const timer = setTimeout(() => {
+                    pending.delete(id);
+                    reject(new Error(
+                        `HARNESS FAILURE: CDP ${method} timed out after ${cdpCallTimeoutMS}ms during stage ${JSON.stringify(stageName)}`,
+                    ));
+                }, cdpCallTimeoutMS);
+                pending.set(id, {
+                    resolve(result) {
+                        clearTimeout(timer);
+                        resolveCall(result);
+                    },
+                    reject(error) {
+                        clearTimeout(timer);
+                        reject(error);
+                    },
+                });
                 try {
                     socket.send(JSON.stringify({ id, method, params }));
                 } catch (error) {
+                    pending.get(id)?.reject(error);
                     pending.delete(id);
-                    reject(error);
                     terminate({ type: "send" });
                 }
             });
@@ -2294,23 +2351,65 @@ async function runCommand(command, args, environment) {
 
 function runCommandResult(command, args, environment) {
     return new Promise((resolveCommand, reject) => {
+        // The child leads its own process group so a timeout also stops the
+        // compiler processes it started.
         const child = spawn(command, args, {
             cwd: rootDir,
             stdio: ["ignore", "pipe", "pipe"],
             env: environment,
+            detached: true,
         });
+        const stageName = currentStage;
         let output = "";
+        let timedOut = false;
+        let killTimer = null;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            signalProcessGroup(child, "SIGTERM");
+            killTimer = setTimeout(() => signalProcessGroup(child, "SIGKILL"), commandKillGraceMS);
+        }, commandTimeoutMS);
         child.stdout.on("data", (chunk) => {
             output += chunk;
         });
         child.stderr.on("data", (chunk) => {
             output += chunk;
         });
-        child.once("error", reject);
+        child.once("error", (error) => {
+            clearTimeout(timer);
+            clearTimeout(killTimer);
+            reject(error);
+        });
         child.once("exit", (code, signal) => {
+            clearTimeout(timer);
+            clearTimeout(killTimer);
+            if (timedOut) {
+                // The leader is gone; make sure no group member outlives it.
+                signalProcessGroup(child, "SIGKILL");
+                reject(new Error(
+                    `HARNESS FAILURE: ${command} ${args.join(" ")} timed out after ${commandTimeoutMS}ms during stage ${JSON.stringify(stageName)} (${signal ?? code})\n${output}`,
+                ));
+                return;
+            }
             resolveCommand({ code, signal, output });
         });
     });
+}
+
+function signalProcessGroup(child, signal) {
+    if (child.pid === undefined) return;
+    try {
+        process.kill(-child.pid, signal);
+    } catch (error) {
+        // ESRCH: every member of the group has already exited.
+        if (error.code === "ESRCH") return;
+        child.kill(signal);
+    }
+}
+
+function stage(name) {
+    currentStage = name;
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+    console.error(`custom index rewrite (${compiler}) [+${elapsed}s] stage: ${name}`);
 }
 
 async function stopProcess(child) {
