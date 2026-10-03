@@ -210,6 +210,8 @@ older `main.wasm` packages.
 
 `.github/workflows/ci-browser-smoke.yml` runs on pull requests, pushes to
 `main`, and manually through `workflow_dispatch` on `ubuntu-latest` only.
+The job has a 30-minute limit; passing runs on this baseline take roughly 8
+to 11 minutes.
 
 It installs Go `1.26.6`, TinyGo `0.42.0`, Node.js `24.18.1`, Chrome, and
 compression tools, then runs:
@@ -666,6 +668,13 @@ Error Boundary smoke failures include missing render-failure reports, fallback
 or reset regressions, fallback component self-capture/report-loop regressions,
 nested-boundary bubbling regressions, protected-subtree cleanup regressions, or
 shell identity loss.
+
+The custom-index rewrite smoke prints one stage line per phase on stderr and
+bounds its `goxc` subprocesses, CDP calls, and HTTP fetches. Exceeding a bound
+is a harness failure that names the stage. Its in-process oracle servers drop
+connections that Chrome still holds when they close, because Chrome can keep
+speculative connections that never carry a request. The other smoke scripts are
+not individually bounded yet and rely on the job limit.
 
 The smoke script must not continue against an unknown server or `about:blank`.
 
