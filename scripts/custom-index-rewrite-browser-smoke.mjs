@@ -1401,7 +1401,7 @@ async function runBaseResolutionOracle() {
             });
         }
     } finally {
-        await new Promise((resolveClose) => oracleServer.close(resolveClose));
+        await closeOracleServer(oracleServer);
     }
     return results;
 
@@ -2034,7 +2034,7 @@ async function runManagedFirstSemanticOracle() {
             },
         });
     } finally {
-        await new Promise((resolveClose) => oracleServer.close(resolveClose));
+        await closeOracleServer(oracleServer);
     }
     return results;
 
@@ -2067,6 +2067,15 @@ async function waitForOracleDocument(expectedURL) {
         await wait(25);
     }
     throw new Error(`HARNESS FAILURE: semantic oracle did not load ${expectedURL}`);
+}
+
+// Chrome can hold speculative connections that never carry a request.
+// server.close() alone waits for Chrome to drop them, which may never happen.
+function closeOracleServer(oracleServer) {
+    return new Promise((resolveClose) => {
+        oracleServer.close(resolveClose);
+        oracleServer.closeAllConnections();
+    });
 }
 
 function encodeDoubleQuotedAttribute(value) {
