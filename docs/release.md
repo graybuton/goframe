@@ -47,6 +47,8 @@ Before creating a tag:
   pass under the documented Node.js baseline (`npm test --prefix
   extensions/vscode-gox` covers compile and tests);
 - `actionlint` passes at the workflow baseline;
+- `scripts/ci-supply-chain-check.sh` passes, with authored remote Actions pinned
+  to full commits and direct TinyGo downloads verified before installation;
 - `scripts/artifact-check.sh` passes;
 - `scripts/module-path-check.sh` passes;
 - the `Security Analysis` workflow passes on the exact release HEAD, including
@@ -255,8 +257,9 @@ announcement.
 - experimental surfaces named rather than hidden;
 - compatibility/deprecation notes included;
 - security-analysis and supply-chain evidence stated explicitly, including the
-  blocking/advisory analyzer split and root Go module dependency check, with no
-  SBOM, signing, attestation, or complete supply-chain claim;
+  blocking/advisory analyzer split, root Go module dependency check, immutable
+  authored Action refs, and verified repository-authored toolchain downloads,
+  with no SBOM, signing, attestation, or complete supply-chain claim;
 - migration notes linked;
 - rollback/revert plan noted for preview users.
 

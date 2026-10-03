@@ -38,17 +38,7 @@ require_command() {
 }
 
 pick_free_port() {
-	node -e 'const net = require("node:net");
-const server = net.createServer();
-server.on("error", (error) => {
-  console.error(error.message);
-  process.exit(1);
-});
-server.listen(0, "127.0.0.1", () => {
-  const address = server.address();
-  console.log(address.port);
-  server.close();
-});'
+	node scripts/ci-node-tools.mjs pick-free-port
 }
 
 resolve_port() {
@@ -77,14 +67,7 @@ wait_for_server() {
 
 manifest_wasm_path() {
 	local app="$1"
-	node -e 'const fs = require("node:fs");
-const manifestPath = process.argv[1] + "/.goframe/package/standalone/asset-manifest.json";
-const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-if (!manifest.entrypoints || !manifest.entrypoints.wasm) {
-  console.error(`missing entrypoints.wasm in ${manifestPath}`);
-  process.exit(1);
-}
-console.log(manifest.entrypoints.wasm);' "$app"
+	node scripts/ci-node-tools.mjs manifest-wasm-path "$app"
 }
 
 build_smoke_url() {

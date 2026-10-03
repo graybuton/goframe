@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Release-critical authored GitHub Actions are pinned to immutable commits, and
+  repository-authored TinyGo `0.42.0` package downloads verify the accepted
+  SHA-256 before installation. A fail-closed repository gate preserves those
+  boundaries without changing workflow topology or toolchain versions.
+- The Browser Smoke job now has a 30-minute limit. The custom-index rewrite
+  smoke reports its stages, bounds its subprocesses, CDP calls, and fetches,
+  and no longer waits on request-less connections that Chrome 154 and later
+  keep open to its in-process oracle servers.
 - Adopted TinyGo `0.42.0` for the release compiler baseline, with a measured,
   deterministic WASM size rebaseline limited to failing absolute ceilings;
   compression ratios and production compiler flags are unchanged.
