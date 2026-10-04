@@ -55,6 +55,7 @@ jobs:
     name: Go and GOX checks (${{ matrix.os }}, Go ${{ matrix.go }})
     needs: preflight
     runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
@@ -63,18 +64,22 @@ jobs:
             go: '1.26.6'
             tier: supported
             full: true
+            timeout: 20
           - os: ubuntu-latest
             go: '1.27.0'
             tier: supported
             full: true
+            timeout: 20
           - os: macos-15-intel
             go: '1.26.6'
             tier: host
             full: false
+            timeout: 45
           - os: windows-latest
             go: '1.26.6'
             tier: host
             full: false
+            timeout: 20
 
     steps:
       - name: Checkout
@@ -139,6 +144,7 @@ jobs:
   tinygo-parity:
     name: TinyGo source selection (Go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:

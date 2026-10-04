@@ -17,6 +17,7 @@ jobs:
   extension:
     name: Compile GOX extension
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     defaults:
       run:

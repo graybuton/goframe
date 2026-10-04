@@ -18,6 +18,7 @@ jobs:
   security-analysis:
     name: Security analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout

@@ -18,6 +18,7 @@ jobs:
   tinygo-size:
     name: TinyGo packages and size budgets
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
