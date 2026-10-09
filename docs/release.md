@@ -46,7 +46,8 @@ Before creating a tag:
 - VS Code extension JSON validation, TypeScript compile, and pure Node tests
   pass under the documented Node.js baseline (`npm test --prefix
   extensions/vscode-gox` covers compile and tests);
-- `actionlint` passes at the workflow baseline;
+- `actionlint` passes at the workflow baseline; the Core `Preflight` job runs
+  `actionlint` `v1.7.12` on every pull request and push to `main`;
 - `scripts/ci-supply-chain-check.sh` passes, with authored remote Actions pinned
   to full commits and direct TinyGo downloads verified before installation;
 - `scripts/artifact-check.sh` passes;

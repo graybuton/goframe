@@ -6,25 +6,75 @@ visible before merge.
 
 All workflows request read-only repository contents permissions by default.
 
+Every workflow sets the same concurrency rule. Pull request runs share one
+group per workflow and pull request number, and a new push to a pull request
+cancels that pull request's runs still in progress. Every other run, for a
+push to `main` or a manual dispatch, uses its run id as the group, so it is
+never cancelled or queued and every commit on `main` keeps its own complete
+run.
+
+Every authored job has a `timeout-minutes` limit of at least about twice its
+measured maximum duration:
+
+| job | limit |
+| --- | --- |
+| `Preflight` | 5 min |
+| `Go and GOX checks`, Linux and Windows entries | 20 min |
+| `Go and GOX checks`, macOS entry | 45 min |
+| `TinyGo source selection` | 10 min |
+| `Browser smoke` | 30 min |
+| `TinyGo packages and size budgets` | 15 min |
+| `Security analysis` | 15 min |
+| `Compile GOX extension` | 10 min |
+
 ## Workflows
 
 ### Core
 
 `.github/workflows/ci-core.yml` runs on pull requests and pushes to `main`.
 
+#### Preflight
+
+A `Preflight` job runs first on `ubuntu-latest` with Go `1.26.6` and Node.js
+`24.18.1`, under a 5-minute limit. It runs the checks that do not depend on
+the host or the Go version, once:
+
+- `go fmt ./...` plus a clean diff check;
+- `scripts/ci-supply-chain-check.sh`;
+- `actionlint` `v1.7.12`, run as
+  `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` so the module is
+  verified against the Go checksum database;
+- `scripts/artifact-check.sh`;
+- `scripts/module-path-check.sh`;
+- `node scripts/docs-check.mjs`.
+
+The Go matrix needs `Preflight` and does not start when it fails. GitHub
+reports a job skipped this way as successful, so `Preflight` must itself be a
+required status check; otherwise a failed `Preflight` leaves every required
+matrix check passing.
+
+Fast-fail covers the Go matrix only. The TinyGo source-selection job and the
+jobs of the other workflows start in parallel with `Preflight`: the
+supply-chain gate forbids `needs` on protected TinyGo jobs for the same
+skipped-job reason, and a job cannot need a job in another workflow.
+
+#### Go matrix
+
 It uses an explicit Go and host matrix:
 
-| host | Go | tier | full-only gates |
-| --- | --- | --- | --- |
-| `ubuntu-latest` | `1.26.6` | supported minimum | supply-chain/artifact/module/docs/race |
-| `ubuntu-latest` | `1.27.0` | supported stable | supply-chain/artifact/module/docs/race |
-| `macos-15-intel` | `1.26.6` | host evidence | none |
-| `windows-latest` | `1.26.6` | host evidence | none |
+| host | Go | tier | full-only gates | limit |
+| --- | --- | --- | --- | --- |
+| `ubuntu-latest` | `1.26.6` | supported minimum | supply-chain regression suite/race | 20 min |
+| `ubuntu-latest` | `1.27.0` | supported stable | supply-chain regression suite/race | 20 min |
+| `macos-15-intel` | `1.26.6` | host evidence | none | 45 min |
+| `windows-latest` | `1.26.6` | host evidence | none | 20 min |
 
-Every matrix entry runs formatting, ordinary tests, vet, debug-tag tests, and
-selected GOX golden tests. The two supported Linux entries additionally run
-the supply-chain, artifact, module-path, docs, and race gates. Every entry is
-required; no matrix lane is advisory.
+Every matrix entry runs ordinary tests, vet, debug-tag tests, and selected GOX
+golden tests. The two supported Linux entries additionally run the
+supply-chain gate regression suite and the race tests. The macOS entry also
+runs the supply-chain gate, its regression suite, and the security runner
+tests under the system Bash. Every entry is required; no matrix lane is
+advisory.
 
 Before those commands, the Windows entry verifies that the exact selected Go
 version exposes its executable, compiler tools, standard-library source tree,
@@ -34,13 +84,15 @@ installation is incomplete, the job installs the same pinned Go release under
 `RUNNER_TEMP`, verifies its published SHA-256 before extraction, and repeats the
 full integrity probe before continuing.
 
-It checks:
+Across `Preflight` and the matrix, Core checks:
 
-- authored CI Action and direct-download integrity;
-- tracked artifact gate;
-- canonical module path gate;
-- docs/example consistency check;
-- `go fmt ./...` plus a clean diff check;
+- authored CI Action and direct-download integrity (`Preflight`), and the
+  gate's regression suite (full Linux lanes);
+- workflow lint with `actionlint` (`Preflight`);
+- tracked artifact gate (`Preflight`);
+- canonical module path gate (`Preflight`);
+- docs/example consistency check (`Preflight`);
+- `go fmt ./...` plus a clean diff check (`Preflight`);
 - `go test ./...`;
 - `go test -race ./pkg/... ./cmd/...`;
 - `go vet ./...`;
@@ -48,12 +100,13 @@ It checks:
 - GOX golden tests, including source-oriented error diagnostics.
 - GOX fuzz seed targets through the normal `go test ./...` seed pass.
 
-A separate focused Linux job installs TinyGo `0.42.0` under Go `1.26.6`. It
-checks browser source-selection parity and feature-tagged TinyGo builds without
-duplicating the full package, browser, or size workflows. TinyGo `0.42.0`
-supports Go through `1.27`; local source-selection and build characterization
-also passes with Go `1.27.0`. The stable Go `1.27.0` Core row remains standard-Go
-evidence, without a second TinyGo matrix.
+A separate focused Linux job installs TinyGo `0.42.0` under Go `1.26.6`, with
+a 10-minute limit. It checks browser source-selection parity and
+feature-tagged TinyGo builds without duplicating the full package, browser,
+or size workflows. TinyGo `0.42.0` supports Go through `1.27`; local
+source-selection and build characterization also passes with Go `1.27.0`. The
+stable Go `1.27.0` Core row remains standard-Go evidence, without a second
+TinyGo matrix.
 
 The repository-authored TinyGo install downloads the accepted `0.42.0` amd64
 Debian package and verifies its pinned SHA-256 before installation. The Browser
@@ -164,7 +217,7 @@ pass.
 ### WASM Size
 
 `.github/workflows/ci-wasm-size.yml` runs on pull requests, pushes to `main`,
-and manually through `workflow_dispatch`.
+and manually through `workflow_dispatch`. The job has a 15-minute limit.
 
 It installs Go `1.26.6`, TinyGo `0.42.0`, brotli, and zstd. Then it packages
 the counter, components, todo, dashboard, context, virtualized, multipackage,
@@ -368,7 +421,7 @@ surface remains experimental.
 `.github/workflows/ci-security.yml` runs on pull requests, pushes to `main`,
 and manual dispatch. One focused Linux job sequentially selects and verifies
 Go `1.26.6` and `1.27.0`, invoking the same canonical local policy runner under
-each toolchain:
+each toolchain, under a 15-minute limit:
 
 ```bash
 scripts/security-analysis.sh
@@ -453,6 +506,7 @@ separate repository control, and Core continues to own vet and race coverage.
 ### VS Code Extension
 
 `.github/workflows/ci-vscode.yml` runs on pull requests and pushes to `main`.
+The job has a 10-minute limit.
 
 It validates extension JSON files, installs dependencies with `npm ci`,
 compiles the TypeScript extension, and runs pure Node tests under Node.js
@@ -491,9 +545,10 @@ Current authored CI supply-chain controls are bounded:
   accepted SHA-256 before installation;
 - the Windows Go fallback verifies its versioned archive SHA-256 before
   extraction;
-- `scripts/ci-supply-chain-check.sh`, run by the full Linux Core lanes and
-  `scripts/check.sh`, rejects mutable remote Action refs and missing, changed,
-  or misplaced TinyGo verification;
+- `scripts/ci-supply-chain-check.sh`, run by the Core `Preflight` job, the
+  macOS Core lane under the system Bash, and `scripts/check.sh`, rejects
+  mutable remote Action refs and missing, changed, or misplaced TinyGo
+  verification;
 - Dependabot checks GitHub Actions, Go modules, and VS Code extension npm
   dependencies;
 - the VS Code extension workflow installs from `package-lock.json` with
@@ -671,10 +726,13 @@ shell identity loss.
 
 The custom-index rewrite smoke prints one stage line per phase on stderr and
 bounds its `goxc` subprocesses, CDP calls, and HTTP fetches. Exceeding a bound
-is a harness failure that names the stage. Its in-process oracle servers drop
-connections that Chrome still holds when they close, because Chrome can keep
-speculative connections that never carry a request. The other smoke scripts are
-not individually bounded yet and rely on the job limit.
+fails the run. The subprocess and CDP call limits name the stage in the
+failure message. The CDP socket-open and Node-side fetch limits do not; for
+those, the last stage line printed before the failure identifies the stage.
+Its in-process oracle servers drop connections that Chrome still holds when
+they close, because Chrome can keep speculative connections that never carry a
+request. The other smoke scripts are not individually bounded yet and rely on
+the job limit.
 
 The smoke script must not continue against an unknown server or `about:blank`.
 

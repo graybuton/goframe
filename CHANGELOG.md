@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Core CI now runs a `Preflight` job with a 5-minute limit ahead of the Go
+  matrix. It runs the format, supply-chain, artifact, module-path, and docs
+  checks once, plus `actionlint` `v1.7.12`, and the matrix does not start when
+  it fails. Every workflow cancels superseded pull request runs, and every
+  authored job has a time limit. Existing check names are unchanged;
+  `Preflight` must be added to the required status checks.
 - Release-critical authored GitHub Actions are pinned to immutable commits, and
   repository-authored TinyGo `0.42.0` package downloads verify the accepted
   SHA-256 before installation. A fail-closed repository gate preserves those

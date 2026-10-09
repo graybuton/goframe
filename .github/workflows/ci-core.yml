@@ -9,10 +9,56 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.26.6'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.18.1'
+
+      - name: Format
+        run: |
+          go fmt ./...
+          git diff --exit-code
+
+      - name: CI supply-chain gate
+        run: scripts/ci-supply-chain-check.sh
+
+      - name: Workflow lint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Artifact gate
+        run: scripts/artifact-check.sh
+
+      - name: Module path gate
+        run: scripts/module-path-check.sh
+
+      - name: Docs consistency
+        run: node scripts/docs-check.mjs
+
   go:
     name: Go and GOX checks (${{ matrix.os }}, Go ${{ matrix.go }})
+    needs: preflight
     runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
@@ -21,18 +67,22 @@ jobs:
             go: '1.26.6'
             tier: supported
             full: true
+            timeout: 20
           - os: ubuntu-latest
             go: '1.27.0'
             tier: supported
             full: true
+            timeout: 20
           - os: macos-15-intel
             go: '1.26.6'
             tier: host
             full: false
+            timeout: 45
           - os: windows-latest
             go: '1.26.6'
             tier: host
             full: false
+            timeout: 20
 
     steps:
       - name: Checkout
@@ -65,12 +115,6 @@ jobs:
           /bin/bash -n .github/scripts/security-analysis-runner.tests.sh
           /bin/bash .github/scripts/security-analysis-runner.tests.sh
 
-      - name: Setup Node.js
-        if: matrix.full
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: '24.18.1'
-
       - name: Test supply-chain gate with system Bash
         if: runner.os == 'macOS'
         run: |
@@ -80,28 +124,9 @@ jobs:
           /bin/bash scripts/ci-supply-chain-check.sh
           /bin/bash .github/scripts/ci-supply-chain-check.tests.sh
 
-      - name: CI supply-chain gate
+      - name: CI supply-chain gate regression suite
         if: matrix.full
-        run: |
-          scripts/ci-supply-chain-check.sh
-          .github/scripts/ci-supply-chain-check.tests.sh
-
-      - name: Artifact gate
-        if: matrix.full
-        run: scripts/artifact-check.sh
-
-      - name: Module path gate
-        if: matrix.full
-        run: scripts/module-path-check.sh
-
-      - name: Docs consistency
-        if: matrix.full
-        run: node scripts/docs-check.mjs
-
-      - name: Format
-        run: |
-          go fmt ./...
-          git diff --exit-code
+        run: .github/scripts/ci-supply-chain-check.tests.sh
 
       - name: Test
         run: go test ./...
@@ -122,6 +147,7 @@ jobs:
   tinygo-parity:
     name: TinyGo source selection (Go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
